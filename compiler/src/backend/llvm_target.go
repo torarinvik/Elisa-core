@@ -379,6 +379,9 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 	}
 	if optLevel == OptimizationLevel3 && !g.emitDebugInfo {
 		C.elisacoreExpandSmallZeroFills(g.module)
+		if packPrivateBoolArrays(g) == 2 {
+			return fmt.Errorf("private Boolean array packing cleanup failed")
+		}
 	}
 	if err := g.verify(); err != nil {
 		return fmt.Errorf("optimized LLVM module failed verification: %w", err)

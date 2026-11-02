@@ -20,6 +20,7 @@
 // unaffected. Not thread-safe; the Go side serialises calls with sync.Once.
 void elisacoreEnsureO3UnrollThreshold(int threshold);
 unsigned elisacoreExpandSmallZeroFills(LLVMModuleRef module);
+unsigned elisacorePackPrivateBoolArrays(LLVMModuleRef, LLVMTargetMachineRef);
 
 // Clone and restrict a verified module to one post-optimization partition. The
 // caller owns the returned module, in the original context. No original IR is
