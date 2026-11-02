@@ -385,6 +385,11 @@ static int part_optimize(LLVMModuleRef m, LLVMTargetMachineRef tm, const char *p
 	if (err == NULL && strstr(pipeline, "O3") != NULL && ELISACORE_LATE_O3_PIPELINE[0] != 0) {
 		err = LLVMRunPasses(m, ELISACORE_LATE_O3_PIPELINE, tm, options);
 	}
+	if (err == NULL && strstr(pipeline, "O3") != NULL && elisacoreFastCheckedMul(m, tm) == 2) {
+		LLVMDisposePassBuilderOptions(options);
+		*error = strdup("checked multiplication versioning cleanup failed");
+		return 0;
+	}
 	if (err == NULL && strstr(pipeline, "O3") != NULL && elisacoreSpecializeShortTrips(m, tm) == 2) {
 		LLVMDisposePassBuilderOptions(options);
 		*error = strdup("short-trip specialization cleanup failed");

@@ -378,6 +378,9 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 		}
 	}
 	if optLevel == OptimizationLevel3 && !g.emitDebugInfo {
+		if fastCheckedMul(g) == 2 {
+			return fmt.Errorf("checked multiplication versioning cleanup failed")
+		}
 		if specializeShortTrips(g) == 2 {
 			return fmt.Errorf("short-trip specialization cleanup failed")
 		}
