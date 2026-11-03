@@ -8,6 +8,7 @@
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Analysis/AssumptionCache.h>
 #include <llvm/Analysis/CaptureTracking.h>
+#include <llvm/Analysis/ValueTracking.h>
 #include <llvm/Analysis/CFG.h>
 #include <llvm/IR/ConstantRange.h>
 #include <llvm/IR/IRBuilder.h>
@@ -237,6 +238,73 @@ extern "C" unsigned elisacorePredicatePrivateBitUpdates(LLVMModuleRef ref) {
   return changed;
 }
 
+// Return paths with no reads cannot observe a private stack initialization.
+static bool privateInitReturnBlock(BasicBlock *B) {
+  if (!isa<ReturnInst>(B->getTerminator())) return false;
+  for (Instruction &I : *B) {
+    if (isa<PHINode>(I) || isa<ReturnInst>(I)) continue;
+    auto *II = dyn_cast<IntrinsicInst>(&I);
+    if (II && II->getIntrinsicID() == Intrinsic::lifetime_end) continue;
+    return false;
+  }
+  return true;
+}
+extern "C" unsigned elisacoreSinkPrivateInitializations(LLVMModuleRef ref) {
+  if (!ref) return 0;
+  Module &M = *unwrap(ref);
+  const DataLayout &DL = M.getDataLayout();
+  if (M.getTargetTriple().getArch() != Triple::aarch64 ||
+      (!M.getTargetTriple().isMacOSX() && !M.getTargetTriple().isOSLinux()) ||
+      DL.getPointerSizeInBits(0) != 64 || M.getNamedMetadata("llvm.dbg.cu")) return 0;
+  unsigned changed = 0;
+  for (Function &F : M) {
+    if (F.isDeclaration() || F.hasOptNone() || F.hasOptSize() || F.hasMinSize() ||
+        F.getSubprogram() || F.hasFnAttribute(Attribute::SanitizeAddress) ||
+        F.hasFnAttribute(Attribute::SanitizeMemory) || F.hasFnAttribute(Attribute::SanitizeThread) ||
+        F.hasFnAttribute(Attribute::SanitizeHWAddress) || F.hasFnAttribute(Attribute::SanitizeMemTag)) continue;
+    SmallVector<MemSetInst *, 8> work;
+    for (BasicBlock &B : F) for (Instruction &I : B)
+      if (auto *S = dyn_cast<MemSetInst>(&I)) work.push_back(S);
+    for (MemSetInst *S : work) {
+      auto *length = dyn_cast<ConstantInt>(S->getLength());
+      auto *value = dyn_cast<ConstantInt>(S->getValue());
+      if (!length || !value || !value->isZero() || length->getValue().ult(256) ||
+          length->getValue().ugt(1 << 20) || S->isVolatile() || S->hasOperandBundles() ||
+          S->hasMetadataOtherThanDebugLoc() || S->getDestAddressSpace() != 0) continue;
+      BasicBlock *B = S->getParent();
+      auto *branch = dyn_cast<CondBrInst>(B->getTerminator());
+      if (!branch) continue;
+      // Do not cross a read of the initialized data, another memory operation,
+      // a call, or a potentially observable side effect.
+      bool pure = true;
+      for (Instruction *I = S->getNextNode(); I && I != branch; I = I->getNextNode())
+        if (I->mayReadOrWriteMemory() || I->mayHaveSideEffects() || isa<CallBase>(I)) pure = false;
+      if (!pure) continue;
+      bool first = privateInitReturnBlock(branch->getSuccessor(0));
+      bool second = privateInitReturnBlock(branch->getSuccessor(1));
+      if (first == second) continue;
+      int64_t offset = 0;
+      auto *array = dyn_cast<AllocaInst>(GetPointerBaseWithConstantOffset(S->getRawDest(), offset, DL));
+      if (!array || !array->isStaticAlloca() || array->getAddressSpace() != 0 ||
+          array->isUsedByMetadata() || offset < 0 ||
+          !cast<ConstantInt>(array->getArraySize())->isOne() || PointerMayBeCaptured(array, true, 256)) continue;
+      TypeSize size = DL.getTypeAllocSize(array->getAllocatedType());
+      if (size.isScalable() || uint64_t(offset) > size.getFixedValue() ||
+          length->getZExtValue() > size.getFixedValue() - uint64_t(offset)) continue;
+      unsigned continuing = first ? 1 : 0;
+      BasicBlock *destination = branch->getSuccessor(continuing);
+      auto *edge = BasicBlock::Create(M.getContext(), "stack.init.nonempty", &F, destination);
+      IRBuilder<> builder(edge);
+      builder.CreateBr(destination)->setDebugLoc(S->getDebugLoc());
+      branch->setSuccessor(continuing, edge);
+      destination->replacePhiUsesWith(B, edge);
+      S->moveBefore(*edge, edge->begin());
+      ++changed;
+    }
+  }
+  return changed;
+}
+
 // Unroll short nested scans with conditional stores. LLVM retains all exits and
 // bounds checks and builds a runtime remainder where necessary.
 extern "C" unsigned elisacoreUnrollNestedScans(LLVMModuleRef ref) {
@@ -313,6 +381,7 @@ extern "C" unsigned elisacoreUnrollNestedScans(LLVMModuleRef ref) {
 
 #else
 extern "C" unsigned elisacorePredicatePrivateBitUpdates(LLVMModuleRef) { return 0; }
+extern "C" unsigned elisacoreSinkPrivateInitializations(LLVMModuleRef) { return 0; }
 extern "C" unsigned elisacoreInlineSmallRecursion(LLVMModuleRef) { return 0; }
 extern "C" unsigned elisacoreUnrollNestedScans(LLVMModuleRef) { return 0; }
 extern "C" unsigned elisacorePeelSmallValidationLoops(LLVMModuleRef) { return 0; }

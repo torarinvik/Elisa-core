@@ -79,6 +79,7 @@ unsigned elisacorePeelSmallValidationLoops(LLVMModuleRef Module);
 unsigned elisacoreUnrollNestedScans(LLVMModuleRef Module);
 unsigned elisacoreInlineSmallRecursion(LLVMModuleRef Module);
 unsigned elisacorePredicatePrivateBitUpdates(LLVMModuleRef Module);
+unsigned elisacoreSinkPrivateInitializations(LLVMModuleRef Module);
 int elisacoreUnrollConstantTableLoops(LLVMModuleRef Module, LLVMTargetMachineRef Target);
 
 static void elisacoreDisposeLLVMErrorMessage(char *ErrMsg) {
@@ -401,6 +402,7 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 			return fmt.Errorf("private Boolean array packing cleanup failed")
 		}
 		boundedLoopUnswitch(g)
+		C.elisacoreSinkPrivateInitializations(g.module)
 	}
 	if err := g.verify(); err != nil {
 		return fmt.Errorf("optimized LLVM module failed verification: %w", err)
@@ -753,3 +755,7 @@ func predicatePrivateBitUpdates(module C.LLVMModuleRef) int {
 }
 
 func upperBoundUnrollLimit() int { return int(C.elisacoreUpperBoundUnrollLimit()) }
+
+func sinkPrivateInitializations(module C.LLVMModuleRef) int {
+	return int(C.elisacoreSinkPrivateInitializations(module))
+}
