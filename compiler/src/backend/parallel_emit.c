@@ -236,8 +236,13 @@ void elisacoreEnsureO3UnrollThreshold(int threshold) {
 	LLVMParseCommandLineOptions(3, argv, NULL);
 #endif
 #else
+#if defined(__aarch64__)
+	const char *argv[3] = {"elisac", flag, "-aarch64-enable-early-ifcvt=false"};
+	LLVMParseCommandLineOptions(3, argv, NULL);
+#else
 	const char *argv[2] = {"elisac", flag};
 	LLVMParseCommandLineOptions(2, argv, NULL);
+#endif
 #endif
 }
 
