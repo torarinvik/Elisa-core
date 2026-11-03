@@ -117,7 +117,8 @@ extern "C" unsigned elisacoreInlineSmallRecursion(LLVMModuleRef ref) {
   return changed;
 }
 
-// Predicate a checked 0/1 update of a private stack array. Extra accesses are
+// Predicate a conditional OR update of a private stack array. A 0/1 switch
+// retains its invalid-input edge. Extra accesses are
 // permitted only when SCEV proves their full byte range and the array cannot
 // escape. Selects and freezes preserve defined results without introducing
 // poison through a value that the zero case originally did not evaluate.
@@ -139,15 +140,22 @@ extern "C" unsigned elisacorePredicatePrivateBitUpdates(LLVMModuleRef ref) {
     if (F.isDeclaration() || F.hasOptNone() || F.hasOptSize() || F.hasMinSize() ||
         F.getSubprogram() || F.getInstructionCount() > 1000) continue;
     for (BasicBlock &B : F) {
-      auto *SW = dyn_cast<SwitchInst>(B.getTerminator());
-      if (!SW || SW->getNumCases() != 2 || !SW->getCondition()->getType()->isIntegerTy()) continue;
+      Instruction *decision = B.getTerminator();
+      auto *SW = dyn_cast<SwitchInst>(decision);
+      auto *CB = dyn_cast<CondBrInst>(decision);
       BasicBlock *zero = nullptr, *one = nullptr;
-      for (auto C : SW->cases()) {
-        if (C.getCaseValue()->isZero()) zero = C.getCaseSuccessor();
-        if (C.getCaseValue()->isOne()) one = C.getCaseSuccessor();
-      }
-      if (!zero || !one || zero == one || zero == SW->getDefaultDest() ||
-          one == SW->getDefaultDest() || one->getSinglePredecessor() != &B ||
+      Value *set = nullptr;
+      if (SW) {
+        if (SW->getNumCases() != 2 || !SW->getCondition()->getType()->isIntegerTy()) continue;
+        for (auto C : SW->cases()) {
+          if (C.getCaseValue()->isZero()) zero = C.getCaseSuccessor();
+          if (C.getCaseValue()->isOne()) one = C.getCaseSuccessor();
+        }
+        if (zero == SW->getDefaultDest() || one == SW->getDefaultDest()) continue;
+      } else if (CB) {
+        one = CB->getSuccessor(0); zero = CB->getSuccessor(1); set = CB->getCondition();
+      } else continue;
+      if (!zero || !one || zero == one || one->getSinglePredecessor() != &B ||
           !zero->phis().empty()) continue;
       auto *end = dyn_cast<UncondBrInst>(one->getTerminator());
       if (!end || end->getSuccessor(0) != zero) continue;
@@ -173,14 +181,14 @@ extern "C" unsigned elisacorePredicatePrivateBitUpdates(LLVMModuleRef ref) {
       auto &SE = FAM.getResult<ScalarEvolutionAnalysis>(F);
       auto &DT = FAM.getResult<DominatorTreeAnalysis>(F);
       auto dominates = [&](Value *V) {
-        auto *I = dyn_cast<Instruction>(V); return !I || DT.dominates(I, SW);
+        auto *I = dyn_cast<Instruction>(V); return !I || DT.dominates(I, decision);
       };
       Value *index = pointer->getOperand(1);
       if (!index->getType()->isIntegerTy() || index->getType()->getIntegerBitWidth() > 64 ||
           !dominates(index) || !dominates(mask)) continue;
       auto *array = dyn_cast<AllocaInst>(pointer->getPointerOperand());
       if (!array || !array->isStaticAlloca() || array->getAddressSpace() != 0 ||
-          !cast<ConstantInt>(array->getArraySize())->isOne() || !DT.dominates(array, SW) ||
+          !cast<ConstantInt>(array->getArraySize())->isOne() || !DT.dominates(array, decision) ||
           PointerMayBeCaptured(array, true)) continue;
       TypeSize allocation = DL.getTypeAllocSize(array->getAllocatedType());
       TypeSize stride = DL.getTypeAllocSize(pointer->getSourceElementType());
@@ -194,17 +202,20 @@ extern "C" unsigned elisacorePredicatePrivateBitUpdates(LLVMModuleRef ref) {
       if (range.getUnsignedMax().ugt((bytes - width) / step)) continue;
       // Lifetime markers must not make the newly accessed zero path dead.
       for (BasicBlock &BB : F) for (Instruction &I : BB) if (auto *II = dyn_cast<IntrinsicInst>(&I)) {
-        if (II->getIntrinsicID() == Intrinsic::lifetime_end && isPotentiallyReachable(II, SW)) simple = false;
-        if (II->getIntrinsicID() == Intrinsic::lifetime_start && !DT.dominates(II, SW)) simple = false;
+        if (II->getIntrinsicID() == Intrinsic::lifetime_end && isPotentiallyReachable(II, decision)) simple = false;
+        if (II->getIntrinsicID() == Intrinsic::lifetime_start && !DT.dominates(II, decision)) simple = false;
       }
       if (!simple) continue;
-      IRBuilder<> head(SW);
-      Value *valid = head.CreateICmpULE(SW->getCondition(), ConstantInt::get(SW->getCondition()->getType(), 1));
-      Value *set = head.CreateICmpEQ(SW->getCondition(), ConstantInt::get(SW->getCondition()->getType(), 1));
-      auto *branch = head.CreateCondBr(valid, one, SW->getDefaultDest());
-      branch->setDebugLoc(SW->getDebugLoc());
+      IRBuilder<> head(decision);
+      Instruction *branch;
+      if (SW) {
+        Value *valid = head.CreateICmpULE(SW->getCondition(), ConstantInt::get(SW->getCondition()->getType(), 1));
+        set = head.CreateICmpEQ(SW->getCondition(), ConstantInt::get(SW->getCondition()->getType(), 1));
+        branch = head.CreateCondBr(valid, one, SW->getDefaultDest());
+      } else branch = head.CreateBr(one);
+      branch->setDebugLoc(decision->getDebugLoc());
       zero->removePredecessor(&B);
-      SW->eraseFromParent();
+      decision->eraseFromParent();
       IRBuilder<> body(update);
       Value *selected = body.CreateSelect(set, mask, ConstantInt::get(load->getType(), 0));
       Value *result = body.CreateOr(body.CreateFreeze(load), selected);

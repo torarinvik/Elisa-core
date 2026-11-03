@@ -14,8 +14,13 @@ int main(void){
    for(unsigned i=0;i<4;++i)input[i]=(pattern>>i)&1;
    if(invalid>=0)input[invalid]=pattern&1?INT64_MAX:-1;
    int64_t result=update(input,output+1);
+#ifdef UNVALIDATED
+   for(unsigned i=0;i<4;++i){expected[1+2*i]=(uint8_t)(input[i]==1);expected[2+2*i]=0;}
+   if(result!=8)return 1;
+#else
    if(invalid<0){for(unsigned i=0;i<4;++i){expected[1+2*i]=(uint8_t)input[i];expected[2+2*i]=0;}if(result!=8)return 1;}
    else if(result!=-1)return 1;
+#endif
    if(memcmp(output,expected,24))return 1;
   }
  }
