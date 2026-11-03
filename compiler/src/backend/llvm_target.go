@@ -360,8 +360,8 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 	if !g.emitDebugInfo {
 		if optLevel == OptimizationLevel3 {
 			C.elisacorePeelSmallValidationLoops(g.module)
-			C.elisacoreInlineSmallRecursion(g.module)
-			if C.elisacoreUnrollNestedScans(g.module) > 0 && C.ELISACORE_LATE_O3_PIPELINE == "" {
+			inlined := C.elisacoreInlineSmallRecursion(g.module)
+			if C.elisacoreUnrollNestedScans(g.module)+inlined > 0 && C.ELISACORE_LATE_O3_PIPELINE == "" {
 				cleanup := cString(C.ELISACORE_SCAN_CLEANUP)
 				defer C.free(unsafe.Pointer(cleanup))
 				if message := C.elisacoreRunOptimizationPipeline(g.module, g.targetMachine, cleanup, aaPipeline, C.int(optimizationInlinerThreshold(optLevel)), debugLogging); message != nil {

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -48,9 +49,10 @@ func TestSmallRecursiveInlineExclusions(t *testing.T) {
 		"noinline":           {strings.Replace(recursiveInlineIR, "nounwind {", "nounwind noinline {", 1), 0},
 		"optsize":            {strings.Replace(recursiveInlineIR, "nounwind {", "nounwind optsize {", 1), 0},
 		"optnone":            {strings.Replace(recursiveInlineIR, "nounwind {", "nounwind noinline optnone {", 1), 0},
+		"other target":       {strings.Replace(recursiveInlineIR, "arm64-apple-darwin", "x86_64-unknown-linux-gnu", 1), 0},
 		"external":           {strings.Replace(recursiveInlineIR, "define private void", "define void", 1), 0},
 		"volatile":           {strings.Replace(recursiveInlineIR, "load i64", "load volatile i64", 1), 0},
-		"linux":              {strings.Replace(recursiveInlineIR, "arm64-apple-darwin", "aarch64-unknown-linux-gnu", 1), 0},
+		"linux":              {strings.Replace(recursiveInlineIR, "arm64-apple-darwin", "aarch64-unknown-linux-gnu", 1), 1},
 		"address taken":      {recursiveInlineIR + "\n@address = global ptr @walk\n", 0},
 		"multiple recursion": {strings.Replace(recursiveInlineIR, " br label %exit\nexit:", " call void @walk(ptr %p, i64 %next, i64 %stop)\n br label %exit\nexit:", 1), 0},
 	} {
@@ -79,14 +81,18 @@ func TestSmallRecursiveInlineExclusions(t *testing.T) {
 }
 
 func TestSmallRecursiveInlineRuntime(t *testing.T) {
-	if runtime.GOOS != "darwin" || runtime.GOARCH != "arm64" {
-		t.Skip("Apple AArch64")
+	if (runtime.GOOS != "darwin" && runtime.GOOS != "linux") || runtime.GOARCH != "arm64" {
+		t.Skip("AArch64")
 	}
 	cc, err := exec.LookPath("clang")
 	if err != nil {
 		t.Skip("clang unavailable")
 	}
-	g, err := parseLLVMIRForSplitHalfTest(recursiveInlineIR)
+	irText := recursiveInlineIR
+	if runtime.GOOS == "linux" {
+		irText = strings.Replace(irText, "arm64-apple-darwin", "aarch64-unknown-linux-gnu", 1)
+	}
+	g, err := parseLLVMIRForSplitHalfTest(irText)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +123,14 @@ for(int n=0;n<=128;++n){x=0;run(&x,n,-1);if(x!=(int64_t)n*(n+1)/2)return 2;}retu
 	}
 	for _, stop := range []string{"1", "2", "3", "8", "15", "16"} {
 		err := exec.Command(bin, stop).Run()
-		if err == nil || !strings.Contains(err.Error(), "trace/BPT trap") {
+		exit, ok := err.(*exec.ExitError)
+		var trapped bool
+		if ok {
+			if status, valid := exit.Sys().(syscall.WaitStatus); valid {
+				trapped = status.Signaled() && (status.Signal() == syscall.SIGTRAP || status.Signal() == syscall.SIGILL)
+			}
+		}
+		if !trapped {
 			t.Fatalf("stop=%s lost trap: %v", stop, err)
 		}
 	}

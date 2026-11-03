@@ -71,7 +71,8 @@ extern "C" unsigned elisacorePeelSmallValidationLoops(LLVMModuleRef moduleRef) {
 extern "C" unsigned elisacoreInlineSmallRecursion(LLVMModuleRef ref) {
   if (!ref) return 0;
   Module &M = *unwrap(ref);
-  if (!M.getTargetTriple().isMacOSX() || M.getTargetTriple().getArch() != Triple::aarch64 ||
+  if ((!M.getTargetTriple().isMacOSX() && !M.getTargetTriple().isOSLinux()) ||
+      M.getTargetTriple().getArch() != Triple::aarch64 ||
       M.getNamedMetadata("llvm.dbg.cu")) return 0;
   unsigned changed = 0;
   for (Function &F : M) {
