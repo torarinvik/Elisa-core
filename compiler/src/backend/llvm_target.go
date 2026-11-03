@@ -388,6 +388,7 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 		if packPrivateBoolArrays(g) == 2 {
 			return fmt.Errorf("private Boolean array packing cleanup failed")
 		}
+		boundedLoopUnswitch(g)
 	}
 	if err := g.verify(); err != nil {
 		return fmt.Errorf("optimized LLVM module failed verification: %w", err)

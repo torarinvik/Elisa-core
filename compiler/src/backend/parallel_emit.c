@@ -401,6 +401,7 @@ static int part_optimize(LLVMModuleRef m, LLVMTargetMachineRef tm, const char *p
 		*error = strdup("private Boolean array packing cleanup failed");
 		return 0;
 	}
+	if (err == NULL && strstr(pipeline, "O3") != NULL) elisacoreBoundedLoopUnswitch(m);
 	LLVMDisposePassBuilderOptions(options);
 	if (err == NULL) {
 		return 1;
