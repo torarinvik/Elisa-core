@@ -14,6 +14,38 @@ extern "C" unsigned elisacoreExpandSmallZeroFills(LLVMModuleRef ref) {
   if (!ref) return 0;
   Module &M = *unwrap(ref);
   if (M.getTargetTriple().getArch() != Triple::aarch64 || !M.getDataLayout().isLittleEndian() || M.getNamedValue("__elisacore_smallzero_fill")) return 0;
+  // Inline medium, aligned fixed-size fills on Apple AArch64. LLVM otherwise
+  // lowers these to a library call. Keep the size bounded to control code growth.
+  unsigned fixedChanged = 0;
+  if (M.getTargetTriple().isMacOSX()) {
+    SmallVector<MemSetInst *, 8> fixed;
+    for (Function &F : M) {
+      if (F.hasOptNone() || F.hasOptSize() || F.hasMinSize()) continue;
+      SmallVector<MemSetInst *, 2> candidates;
+      for (BasicBlock &B : F) for (Instruction &I : B) {
+        auto *S = dyn_cast<MemSetInst>(&I);
+        if (!S || S->getIntrinsicID() != Intrinsic::memset || S->isVolatile() ||
+            S->hasOperandBundles() || S->getDestAddressSpace() != 0 ||
+            S->getDestAlign().valueOrOne().value() < 8) continue;
+        auto *size = dyn_cast<ConstantInt>(S->getLength());
+        auto *value = dyn_cast<ConstantInt>(S->getValue());
+        if (!size || !value || !value->isZero() || size->getBitWidth() != 64) continue;
+        uint64_t bytes = size->getZExtValue();
+        if (bytes < 1024 || bytes > 2048 || bytes % 128 != 0) continue;
+        candidates.push_back(S);
+      }
+      if (candidates.size() == 1) fixed.push_back(candidates.front());
+    }
+    for (MemSetInst *S : fixed) {
+      IRBuilder<> builder(S);
+      auto *replacement = builder.CreateMemSetInline(S->getDest(), S->getDestAlign(),
+                                                       S->getValue(), S->getLength());
+      replacement->setDebugLoc(S->getDebugLoc());
+      replacement->copyMetadata(*S);
+      S->eraseFromParent();
+      ++fixedChanged;
+    }
+  }
   SmallVector<MemSetInst *, 16> work;
   for (Function &F : M) {
     if (F.hasOptNone() || F.hasOptSize() || F.hasMinSize()) continue;
@@ -26,7 +58,7 @@ extern "C" unsigned elisacoreExpandSmallZeroFills(LLVMModuleRef ref) {
       }
     }
   }
-  if (work.empty()) return 0;
+  if (work.empty()) return fixedChanged;
   SMDiagnostic error;
   // The assembly parser needs local names to resolve the helper's operands.
   // Native object contexts discard names; restore that policy immediately.
@@ -103,12 +135,12 @@ declare void @llvm.memset.p0.i64(ptr, i8, i64, i1 immarg)
 !0 = !{}
 )ELISA", error, M.getContext());
   M.getContext().setDiscardValueNames(discardNames);
-  if (!helper) return 0;
+  if (!helper) return fixedChanged;
   helper->setDataLayout(M.getDataLayout());
   helper->setTargetTriple(M.getTargetTriple());
-  if (Linker::linkModules(M, std::move(helper))) return 0;
+  if (Linker::linkModules(M, std::move(helper))) return fixedChanged;
   Function *F = M.getFunction("__elisacore_smallzero_fill");
-  if (!F) return 0;
+  if (!F) return fixedChanged;
   F->setLinkage(GlobalValue::InternalLinkage);
   unsigned changed = 0;
   for (MemSetInst *S : work) {
@@ -122,5 +154,5 @@ declare void @llvm.memset.p0.i64(ptr, i8, i64, i1 immarg)
     } else call->eraseFromParent();
   }
   if (F->use_empty()) F->eraseFromParent();
-  return changed;
+  return changed + fixedChanged;
 }
