@@ -77,6 +77,7 @@ unsigned elisacoreInferConstantTableRanges(LLVMModuleRef Module);
 int elisacoreTableUnrollSupported(void);
 unsigned elisacorePeelSmallValidationLoops(LLVMModuleRef Module);
 unsigned elisacoreUnrollNestedScans(LLVMModuleRef Module);
+unsigned elisacoreInlineSmallRecursion(LLVMModuleRef Module);
 int elisacoreUnrollConstantTableLoops(LLVMModuleRef Module, LLVMTargetMachineRef Target);
 
 static void elisacoreDisposeLLVMErrorMessage(char *ErrMsg) {
@@ -359,6 +360,7 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 	if !g.emitDebugInfo {
 		if optLevel == OptimizationLevel3 {
 			C.elisacorePeelSmallValidationLoops(g.module)
+			C.elisacoreInlineSmallRecursion(g.module)
 			if C.elisacoreUnrollNestedScans(g.module) > 0 && C.ELISACORE_LATE_O3_PIPELINE == "" {
 				cleanup := cString(C.ELISACORE_SCAN_CLEANUP)
 				defer C.free(unsafe.Pointer(cleanup))
@@ -738,4 +740,8 @@ func machineCodegenMode(level OptimizationLevel) int {
 
 func expandSmallZeroFills(module C.LLVMModuleRef) int {
 	return int(C.elisacoreExpandSmallZeroFills(module))
+}
+
+func inlineSmallRecursion(module C.LLVMModuleRef) int {
+	return int(C.elisacoreInlineSmallRecursion(module))
 }

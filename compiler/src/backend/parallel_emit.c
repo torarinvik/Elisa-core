@@ -43,6 +43,7 @@
 #include <llvm-c/Transforms/PassBuilder.h>
 
 #include "parallel_emit.h"
+extern unsigned elisacoreInlineSmallRecursion(LLVMModuleRef);
 
 static int part_linkage_is_local(LLVMLinkage l) {
 	return l == LLVMInternalLinkage || l == LLVMPrivateLinkage;
@@ -393,6 +394,7 @@ static int part_optimize(LLVMModuleRef m, LLVMTargetMachineRef tm, const char *p
 	}
 	LLVMErrorRef err = LLVMRunPasses(m, pipeline, tm, options);
 	unsigned scans = 0;
+	if (err == NULL && strstr(pipeline, "O3") != NULL) elisacoreInlineSmallRecursion(m);
 	if (err == NULL && strstr(pipeline, "O3") != NULL) scans = elisacoreUnrollNestedScans(m);
 	if (err == NULL && scans && ELISACORE_LATE_O3_PIPELINE[0] == 0) err = LLVMRunPasses(m, ELISACORE_SCAN_CLEANUP, tm, options);
 	if (err == NULL && strstr(pipeline, "O3") != NULL && ELISACORE_LATE_O3_PIPELINE[0] != 0) {

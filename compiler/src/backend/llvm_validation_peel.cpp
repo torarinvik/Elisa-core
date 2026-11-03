@@ -12,6 +12,7 @@
 #include <llvm/Analysis/TargetTransformInfo.h>
 #include <llvm/Analysis/ScalarEvolution.h>
 #include <llvm/Support/CBindingWrapping.h>
+#include <llvm/Transforms/Utils/Cloning.h>
 #include <llvm/Transforms/Utils/LoopPeel.h>
 #include <llvm/Transforms/Utils/LoopSimplify.h>
 #include <llvm/Transforms/Utils/LoopUtils.h>
@@ -62,6 +63,52 @@ extern "C" unsigned elisacorePeelSmallValidationLoops(LLVMModuleRef moduleRef) {
     }
   }
   return count;
+}
+
+
+// Expand one level of a small, directly recursive local traversal. LLVM's
+// inliner preserves checks and memory effects; the budget bounds code growth.
+extern "C" unsigned elisacoreInlineSmallRecursion(LLVMModuleRef ref) {
+  if (!ref) return 0;
+  Module &M = *unwrap(ref);
+  if (!M.getTargetTriple().isMacOSX() || M.getTargetTriple().getArch() != Triple::aarch64 ||
+      M.getNamedMetadata("llvm.dbg.cu")) return 0;
+  unsigned changed = 0;
+  for (Function &F : M) {
+    if (!F.hasLocalLinkage() || F.isDeclaration() || F.isVarArg() || F.size() > 20 ||
+        F.hasOptNone() || F.hasOptSize() || F.hasMinSize() || F.hasPersonalityFn() ||
+        F.hasGC() || F.getSubprogram() || F.hasFnAttribute(Attribute::NoInline) ||
+        F.hasFnAttribute(Attribute::Naked) || F.hasFnAttribute(Attribute::Convergent) ||
+        F.hasFnAttribute(Attribute::NoDuplicate) || F.hasFnAttribute("elisa.recursion.expanded") ||
+        !F.getReturnType()->isVoidTy()) continue;
+    bool safe = true, hasCaller = false;
+    for (User *U : F.users()) {
+      auto *CB = dyn_cast<CallBase>(U);
+      if (!CB || CB->getCalledOperand() != &F) { safe = false; break; }
+      if (CB->getFunction() != &F) hasCaller = true;
+    }
+    unsigned instructions = 0, loads = 0, stores = 0, recursive = 0;
+    CallBase *site = nullptr;
+    for (BasicBlock &B : F) for (Instruction &I : B) {
+      ++instructions;
+      if (isa<AllocaInst>(I) || isa<InvokeInst>(I) || isa<CallBrInst>(I)) safe = false;
+      if (auto *L = dyn_cast<LoadInst>(&I)) { ++loads; if (!L->isSimple()) safe = false; }
+      if (auto *S = dyn_cast<StoreInst>(&I)) { ++stores; if (!S->isSimple()) safe = false; }
+      if (auto *CB = dyn_cast<CallBase>(&I)) {
+        if (CB->hasOperandBundles() || CB->isConvergent() || CB->cannotDuplicate() ||
+            CB->isNoInline()) safe = false;
+        if (CB->getCalledFunction() == &F) { ++recursive; site = CB; }
+        else if (CB->getIntrinsicID() != Intrinsic::trap) safe = false;
+      }
+    }
+    if (!safe || !hasCaller || instructions > 80 || recursive != 1 || !loads || !stores) continue;
+    InlineFunctionInfo IFI;
+    if (InlineFunction(*site, IFI).isSuccess()) {
+      F.addFnAttr("elisa.recursion.expanded");
+      ++changed;
+    }
+  }
+  return changed;
 }
 
 // Unroll short nested scans with conditional stores. LLVM retains all exits and
@@ -139,6 +186,7 @@ extern "C" unsigned elisacoreUnrollNestedScans(LLVMModuleRef ref) {
 }
 
 #else
+extern "C" unsigned elisacoreInlineSmallRecursion(LLVMModuleRef) { return 0; }
 extern "C" unsigned elisacoreUnrollNestedScans(LLVMModuleRef) { return 0; }
 extern "C" unsigned elisacorePeelSmallValidationLoops(LLVMModuleRef) { return 0; }
 #endif
