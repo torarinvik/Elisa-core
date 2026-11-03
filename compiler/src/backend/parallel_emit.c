@@ -218,12 +218,33 @@ static int part_restrict_module(LLVMModuleRef m, const long long *owners, size_t
 	return 1;
 }
 
+// Exact constant-trip unrolling keeps the normal aggressive budget. AArch64
+// benefits from limiting full expansion of loops whose trip count is only bounded.
+int elisacoreUpperBoundUnrollLimit(void) {
+#if defined(__aarch64__)
+ return 4;
+#else
+ return 0; // Keep LLVM's default on unqualified hosts.
+#endif
+}
+void elisacoreConfigureBoundedUnroll(void) {
+ static int installed = 0;
+ int limit = elisacoreUpperBoundUnrollLimit();
+ if (installed || !limit) return;
+ installed = 1;
+ char flag[64];
+ snprintf(flag, sizeof flag, "-unroll-max-upperbound=%d", limit);
+ const char *argv[] = {"elisac", flag};
+ LLVMParseCommandLineOptions(2, argv, NULL);
+}
+
 void elisacoreEnsureO3UnrollThreshold(int threshold) {
 	static int done = 0;
 	if (done || threshold <= 0) {
 		return;
 	}
 	done = 1;
+	elisacoreConfigureBoundedUnroll();
 	char flag[64];
 	snprintf(flag, sizeof flag, "-unroll-threshold-aggressive=%d", threshold);
 #if defined(__APPLE__)

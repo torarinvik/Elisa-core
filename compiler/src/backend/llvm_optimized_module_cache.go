@@ -122,9 +122,10 @@ func (s *IncrementalObjectSession) optimizeObjectModule(g *llvmGenerator, level 
 
 func optimizedModuleCacheKey(g *llvmGenerator, level OptimizationLevel, triple, cpu, features string) string {
 	values := []any{
-		"optimized-module-v8-intrinsic-progress",
+		"optimized-module-v9-bounded-unroll-policy",
 		int(level), triple, cpu, features,
 		optimizationBasePipeline(level),
+		map[string]int{"upper-bound-unroll": upperBoundUnrollLimit()},
 		optimizationAAPipeline, optimizationInlinerThreshold(level), optimizationUnrollThresholdO3,
 		C.ELISACORE_LATE_O3_PIPELINE,
 		"constant-table-range-v2-late", "constant-table-unroll-v1", "zero-forward-v1", "split-half-u64-add-v1", "little-endian-byte-pack-load-v1",

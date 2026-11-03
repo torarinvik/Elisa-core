@@ -128,6 +128,7 @@ func ensureLLVMTargetRegistry() error {
 			return
 		}
 		C.elisacoreInitializeAllTargetsForCrossEmission()
+		C.elisacoreConfigureBoundedUnroll()
 	})
 	return llvmTargetInitErr
 }
@@ -750,3 +751,5 @@ func inlineSmallRecursion(module C.LLVMModuleRef) int {
 func predicatePrivateBitUpdates(module C.LLVMModuleRef) int {
 	return int(C.elisacorePredicatePrivateBitUpdates(module))
 }
+
+func upperBoundUnrollLimit() int { return int(C.elisacoreUpperBoundUnrollLimit()) }
