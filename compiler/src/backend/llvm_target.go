@@ -76,6 +76,7 @@ unsigned elisacoreForwardZeroedLoads(LLVMModuleRef Module);
 unsigned elisacoreInferConstantTableRanges(LLVMModuleRef Module);
 int elisacoreTableUnrollSupported(void);
 unsigned elisacorePeelSmallValidationLoops(LLVMModuleRef Module);
+unsigned elisacoreUnrollNestedScans(LLVMModuleRef Module);
 int elisacoreUnrollConstantTableLoops(LLVMModuleRef Module, LLVMTargetMachineRef Target);
 
 static void elisacoreDisposeLLVMErrorMessage(char *ErrMsg) {
@@ -358,6 +359,13 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 	if !g.emitDebugInfo {
 		if optLevel == OptimizationLevel3 {
 			C.elisacorePeelSmallValidationLoops(g.module)
+			if C.elisacoreUnrollNestedScans(g.module) > 0 && C.ELISACORE_LATE_O3_PIPELINE == "" {
+				cleanup := cString(C.ELISACORE_SCAN_CLEANUP)
+				defer C.free(unsafe.Pointer(cleanup))
+				if message := C.elisacoreRunOptimizationPipeline(g.module, g.targetMachine, cleanup, aaPipeline, C.int(optimizationInlinerThreshold(optLevel)), debugLogging); message != nil {
+					return fmt.Errorf("nested scan cleanup failed: %s", disposeLLVMErrorMessage(message, "unknown LLVM pass pipeline error"))
+				}
+			}
 		}
 		forwardZeroedLoads(g.module)
 		inferConstantTableRanges(g.module)
@@ -707,6 +715,10 @@ func ResolveTargetIdentity(requestedTriple string) (TargetIdentity, error) {
 		return TargetIdentity{Triple: triple, CPU: C.GoString(name), Features: C.GoString(features)}, nil
 	}
 	return TargetIdentity{Triple: triple, CPU: cpu}, nil
+}
+
+func unrollNestedScans(module C.LLVMModuleRef) int {
+	return int(C.elisacoreUnrollNestedScans(module))
 }
 
 func peelSmallValidationLoops(module C.LLVMModuleRef) int {

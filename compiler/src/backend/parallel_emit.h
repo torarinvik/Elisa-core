@@ -5,6 +5,8 @@
 #include <llvm-c/TargetMachine.h>
 #include <stddef.h>
 
+#define ELISACORE_SCAN_CLEANUP "function(early-cse,instcombine<max-iterations=8>,loop-simplify,lcssa,loop(indvars),gvn,instcombine<max-iterations=8>,simplifycfg)"
+
 #if defined(__APPLE__) && defined(__aarch64__)
 #define ELISACORE_LATE_O3_PIPELINE "function(early-cse,instcombine<max-iterations=8>,loop-simplify,lcssa,loop(indvars),gvn,instcombine<max-iterations=8>,simplifycfg)"
 #else
@@ -19,6 +21,7 @@
 // LoopUnroll reads it only when OptLevel > 2, so -O1/-O2 pipelines in the same process are
 // unaffected. Not thread-safe; the Go side serialises calls with sync.Once.
 void elisacoreEnsureO3UnrollThreshold(int threshold);
+unsigned elisacoreUnrollNestedScans(LLVMModuleRef);
 unsigned elisacoreBoundedLoopUnswitch(LLVMModuleRef);
 unsigned elisacoreFastCheckedMul(LLVMModuleRef, LLVMTargetMachineRef);
 unsigned elisacoreSpecializeShortTrips(LLVMModuleRef, LLVMTargetMachineRef);

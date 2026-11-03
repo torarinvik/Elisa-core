@@ -392,6 +392,9 @@ static int part_optimize(LLVMModuleRef m, LLVMTargetMachineRef tm, const char *p
 		elisacoreEnsureO3UnrollThreshold(600);
 	}
 	LLVMErrorRef err = LLVMRunPasses(m, pipeline, tm, options);
+	unsigned scans = 0;
+	if (err == NULL && strstr(pipeline, "O3") != NULL) scans = elisacoreUnrollNestedScans(m);
+	if (err == NULL && scans && ELISACORE_LATE_O3_PIPELINE[0] == 0) err = LLVMRunPasses(m, ELISACORE_SCAN_CLEANUP, tm, options);
 	if (err == NULL && strstr(pipeline, "O3") != NULL && ELISACORE_LATE_O3_PIPELINE[0] != 0) {
 		err = LLVMRunPasses(m, ELISACORE_LATE_O3_PIPELINE, tm, options);
 	}

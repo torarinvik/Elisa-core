@@ -63,6 +63,82 @@ extern "C" unsigned elisacorePeelSmallValidationLoops(LLVMModuleRef moduleRef) {
   }
   return count;
 }
+
+// Unroll short nested scans with conditional stores. LLVM retains all exits and
+// bounds checks and builds a runtime remainder where necessary.
+extern "C" unsigned elisacoreUnrollNestedScans(LLVMModuleRef ref) {
+  if (!ref) return 0;
+  Module &M = *unwrap(ref);
+  if (!M.getTargetTriple().isOSLinux() || M.getTargetTriple().getArch() != Triple::aarch64 ||
+      M.getNamedMetadata("llvm.dbg.cu")) return 0;
+  PassBuilder PB;
+  LoopAnalysisManager LAM; FunctionAnalysisManager FAM;
+  CGSCCAnalysisManager CGAM; ModuleAnalysisManager MAM;
+  PB.registerModuleAnalyses(MAM); PB.registerCGSCCAnalyses(CGAM);
+  PB.registerFunctionAnalyses(FAM); PB.registerLoopAnalyses(LAM);
+  PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
+  unsigned changed = 0;
+  for (Function &F : M) {
+    if (F.isDeclaration() || F.hasOptNone() || F.hasOptSize() || F.hasMinSize() ||
+        F.hasPersonalityFn() || F.hasGC() || F.getSubprogram() ||
+        F.hasFnAttribute(Attribute::Naked) || F.hasFnAttribute(Attribute::Convergent) ||
+        F.hasFnAttribute(Attribute::NoDuplicate) || F.getEntryCount().has_value()) continue;
+    auto &LI = FAM.getResult<LoopAnalysis>(F);
+    auto &SE = FAM.getResult<ScalarEvolutionAnalysis>(F);
+    auto &DT = FAM.getResult<DominatorTreeAnalysis>(F);
+    auto &AC = FAM.getResult<AssumptionAnalysis>(F);
+    auto &TTI = FAM.getResult<TargetIRAnalysis>(F);
+    auto &ORE = FAM.getResult<OptimizationRemarkEmitterAnalysis>(F);
+    bool done = false;
+    for (Loop *root : LI) {
+      if (done) break;
+      for (Loop *L : root->getLoopsInPreorder()) {
+        if (!L->getParentLoop() || !L->getSubLoops().empty() || L->getLoopID() ||
+            L->getNumBlocks() < 5 || L->getNumBlocks() > 8) continue;
+        BasicBlock *latch = L->getLoopLatch();
+        if (!latch) continue;
+        auto *branch = dyn_cast<CondBrInst>(latch->getTerminator());
+        auto *cmp = branch ? dyn_cast<ICmpInst>(branch->getCondition()) : nullptr;
+        if (!cmp || !cmp->isEquality()) continue;
+        bool induction = false;
+        for (Value *v : cmp->operands())
+          if (auto *add = dyn_cast<BinaryOperator>(v))
+            if (add->getOpcode() == Instruction::Add)
+              for (unsigned i = 0; i < 2; ++i)
+                if (auto *phi = dyn_cast<PHINode>(add->getOperand(i)))
+                  if (phi->getParent() == L->getHeader())
+                    if (auto *one = dyn_cast<ConstantInt>(add->getOperand(1 - i)))
+                      if (one->isOne()) induction = true;
+        if (!induction) continue;
+        unsigned loads = 0, stores = 0, instructions = 0, conditions = 0;
+        bool safe = true;
+        for (BasicBlock *BB : L->blocks()) {
+          if (BB->hasAddressTaken() || BB->isEHPad()) safe = false;
+          for (Instruction &I : *BB) {
+            ++instructions;
+            if (auto *load = dyn_cast<LoadInst>(&I)) { ++loads; safe &= load->isSimple(); }
+            else if (auto *store = dyn_cast<StoreInst>(&I)) { ++stores; safe &= store->isSimple(); }
+            else if (isa<CondBrInst>(I)) ++conditions;
+            else if (isa<CallBase>(I) || isa<AllocaInst>(I) || isa<IndirectBrInst>(I) ||
+                     I.getType()->isTokenTy()) safe = false;
+          }
+        }
+        if (!safe || loads < 2 || stores < 1 || conditions < 3 || instructions > 65) continue;
+        simplifyLoop(L, &DT, &LI, &SE, &AC, nullptr, false);
+        if (!L->isLoopSimplifyForm()) continue;
+        formLCSSA(*L, DT, &LI, &SE);
+        UnrollLoopOptions options{2, true, true, false, true, false, nullptr, 1000, true, false};
+        if (UnrollLoop(L, options, &LI, &SE, &DT, &AC, &TTI, &ORE, true) != LoopUnrollResult::Unmodified)
+          ++changed;
+        done = true; // Recompute analyses before considering another loop in this function.
+        break;
+      }
+    }
+  }
+  return changed;
+}
+
 #else
+extern "C" unsigned elisacoreUnrollNestedScans(LLVMModuleRef) { return 0; }
 extern "C" unsigned elisacorePeelSmallValidationLoops(LLVMModuleRef) { return 0; }
 #endif
