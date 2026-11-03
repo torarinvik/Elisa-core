@@ -78,6 +78,7 @@ int elisacoreTableUnrollSupported(void);
 unsigned elisacorePeelSmallValidationLoops(LLVMModuleRef Module);
 unsigned elisacoreUnrollNestedScans(LLVMModuleRef Module);
 unsigned elisacoreInlineSmallRecursion(LLVMModuleRef Module);
+unsigned elisacorePredicatePrivateBitUpdates(LLVMModuleRef Module);
 int elisacoreUnrollConstantTableLoops(LLVMModuleRef Module, LLVMTargetMachineRef Target);
 
 static void elisacoreDisposeLLVMErrorMessage(char *ErrMsg) {
@@ -360,7 +361,7 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 	if !g.emitDebugInfo {
 		if optLevel == OptimizationLevel3 {
 			C.elisacorePeelSmallValidationLoops(g.module)
-			inlined := C.elisacoreInlineSmallRecursion(g.module)
+			inlined := C.elisacoreInlineSmallRecursion(g.module) + C.elisacorePredicatePrivateBitUpdates(g.module)
 			if C.elisacoreUnrollNestedScans(g.module)+inlined > 0 && C.ELISACORE_LATE_O3_PIPELINE == "" {
 				cleanup := cString(C.ELISACORE_SCAN_CLEANUP)
 				defer C.free(unsafe.Pointer(cleanup))
@@ -744,4 +745,8 @@ func expandSmallZeroFills(module C.LLVMModuleRef) int {
 
 func inlineSmallRecursion(module C.LLVMModuleRef) int {
 	return int(C.elisacoreInlineSmallRecursion(module))
+}
+
+func predicatePrivateBitUpdates(module C.LLVMModuleRef) int {
+	return int(C.elisacorePredicatePrivateBitUpdates(module))
 }

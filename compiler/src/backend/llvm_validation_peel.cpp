@@ -7,6 +7,11 @@
 #include <llvm/IR/Module.h>
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Analysis/AssumptionCache.h>
+#include <llvm/Analysis/CaptureTracking.h>
+#include <llvm/Analysis/CFG.h>
+#include <llvm/IR/ConstantRange.h>
+#include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/IntrinsicInst.h>
 #include <llvm/Analysis/LoopInfo.h>
 #include <llvm/Analysis/OptimizationRemarkEmitter.h>
 #include <llvm/Analysis/TargetTransformInfo.h>
@@ -112,6 +117,112 @@ extern "C" unsigned elisacoreInlineSmallRecursion(LLVMModuleRef ref) {
   return changed;
 }
 
+// Predicate a checked 0/1 update of a private stack array. Extra accesses are
+// permitted only when SCEV proves their full byte range and the array cannot
+// escape. Selects and freezes preserve defined results without introducing
+// poison through a value that the zero case originally did not evaluate.
+extern "C" unsigned elisacorePredicatePrivateBitUpdates(LLVMModuleRef ref) {
+  if (!ref) return 0;
+  Module &M = *unwrap(ref);
+  if (M.getTargetTriple().getArch() != Triple::aarch64 || !M.getDataLayout().isLittleEndian() ||
+      (!M.getTargetTriple().isMacOSX() && !M.getTargetTriple().isOSLinux()) ||
+      M.getNamedMetadata("llvm.dbg.cu")) return 0;
+  PassBuilder PB;
+  LoopAnalysisManager LAM; FunctionAnalysisManager FAM;
+  CGSCCAnalysisManager CGAM; ModuleAnalysisManager MAM;
+  PB.registerModuleAnalyses(MAM); PB.registerCGSCCAnalyses(CGAM);
+  PB.registerFunctionAnalyses(FAM); PB.registerLoopAnalyses(LAM);
+  PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
+  const DataLayout &DL = M.getDataLayout();
+  unsigned changed = 0;
+  for (Function &F : M) {
+    if (F.isDeclaration() || F.hasOptNone() || F.hasOptSize() || F.hasMinSize() ||
+        F.getSubprogram() || F.getInstructionCount() > 1000) continue;
+    for (BasicBlock &B : F) {
+      auto *SW = dyn_cast<SwitchInst>(B.getTerminator());
+      if (!SW || SW->getNumCases() != 2 || !SW->getCondition()->getType()->isIntegerTy()) continue;
+      BasicBlock *zero = nullptr, *one = nullptr;
+      for (auto C : SW->cases()) {
+        if (C.getCaseValue()->isZero()) zero = C.getCaseSuccessor();
+        if (C.getCaseValue()->isOne()) one = C.getCaseSuccessor();
+      }
+      if (!zero || !one || zero == one || zero == SW->getDefaultDest() ||
+          one == SW->getDefaultDest() || one->getSinglePredecessor() != &B ||
+          !zero->phis().empty()) continue;
+      auto *end = dyn_cast<UncondBrInst>(one->getTerminator());
+      if (!end || end->getSuccessor(0) != zero) continue;
+      StoreInst *store = nullptr;
+      unsigned stores = 0;
+      for (Instruction &I : *one) if (auto *S = dyn_cast<StoreInst>(&I)) { store = S; ++stores; }
+      if (stores != 1 || !store->isSimple()) continue;
+      auto *update = dyn_cast<BinaryOperator>(store->getValueOperand());
+      auto *pointer = dyn_cast<GetElementPtrInst>(store->getPointerOperand());
+      if (!update || update->getParent() != one || update->getOpcode() != Instruction::Or || !update->hasOneUse() ||
+          !pointer || pointer->getParent() != one || pointer->getNumIndices() != 1) continue;
+      auto *load = dyn_cast<LoadInst>(update->getOperand(0));
+      Value *mask = update->getOperand(1);
+      if (!load) { load = dyn_cast<LoadInst>(mask); mask = update->getOperand(0); }
+      if (!load || !load->isSimple() || load->getParent() != one || !load->hasOneUse() ||
+          load->getPointerOperand() != pointer || !load->getType()->isIntegerTy()) continue;
+      unsigned bits = load->getType()->getIntegerBitWidth();
+      if (bits != 8 && bits != 16 && bits != 32 && bits != 64) continue;
+      bool simple = true;
+      for (Instruction &I : *one)
+        if (&I != pointer && &I != load && &I != update && &I != store && &I != end) simple = false;
+      if (!simple) continue;
+      auto &SE = FAM.getResult<ScalarEvolutionAnalysis>(F);
+      auto &DT = FAM.getResult<DominatorTreeAnalysis>(F);
+      auto dominates = [&](Value *V) {
+        auto *I = dyn_cast<Instruction>(V); return !I || DT.dominates(I, SW);
+      };
+      Value *index = pointer->getOperand(1);
+      if (!index->getType()->isIntegerTy() || index->getType()->getIntegerBitWidth() > 64 ||
+          !dominates(index) || !dominates(mask)) continue;
+      auto *array = dyn_cast<AllocaInst>(pointer->getPointerOperand());
+      if (!array || !array->isStaticAlloca() || array->getAddressSpace() != 0 ||
+          !cast<ConstantInt>(array->getArraySize())->isOne() || !DT.dominates(array, SW) ||
+          PointerMayBeCaptured(array, true)) continue;
+      TypeSize allocation = DL.getTypeAllocSize(array->getAllocatedType());
+      TypeSize stride = DL.getTypeAllocSize(pointer->getSourceElementType());
+      TypeSize access = DL.getTypeStoreSize(load->getType());
+      if (allocation.isScalable() || stride.isScalable() || access.isScalable()) continue;
+      uint64_t bytes = allocation.getFixedValue(), step = stride.getFixedValue(), width = access.getFixedValue();
+      if (!width || !step || bytes > 256 || bytes < width ||
+          array->getAlign() < load->getAlign() || array->getAlign() < store->getAlign() ||
+          step % load->getAlign().value() || step % store->getAlign().value()) continue;
+      const ConstantRange &range = SE.getUnsignedRange(SE.getSCEV(index));
+      if (range.getUnsignedMax().ugt((bytes - width) / step)) continue;
+      // Lifetime markers must not make the newly accessed zero path dead.
+      for (BasicBlock &BB : F) for (Instruction &I : BB) if (auto *II = dyn_cast<IntrinsicInst>(&I)) {
+        if (II->getIntrinsicID() == Intrinsic::lifetime_end && isPotentiallyReachable(II, SW)) simple = false;
+        if (II->getIntrinsicID() == Intrinsic::lifetime_start && !DT.dominates(II, SW)) simple = false;
+      }
+      if (!simple) continue;
+      IRBuilder<> head(SW);
+      Value *valid = head.CreateICmpULE(SW->getCondition(), ConstantInt::get(SW->getCondition()->getType(), 1));
+      Value *set = head.CreateICmpEQ(SW->getCondition(), ConstantInt::get(SW->getCondition()->getType(), 1));
+      auto *branch = head.CreateCondBr(valid, one, SW->getDefaultDest());
+      branch->setDebugLoc(SW->getDebugLoc());
+      zero->removePredecessor(&B);
+      SW->eraseFromParent();
+      IRBuilder<> body(update);
+      Value *selected = body.CreateSelect(set, mask, ConstantInt::get(load->getType(), 0));
+      Value *result = body.CreateOr(body.CreateFreeze(load), selected);
+      store->setOperand(0, result);
+      update->eraseFromParent();
+      // Metadata valid only on the original one path must not constrain zero.
+      for (Instruction *I : {static_cast<Instruction *>(load), static_cast<Instruction *>(store)}) {
+        SmallVector<std::pair<unsigned, MDNode *>, 8> metadata;
+        I->getAllMetadataOtherThanDebugLoc(metadata);
+        for (auto item : metadata) I->setMetadata(item.first, nullptr);
+      }
+      ++changed;
+      break; // Analyses describe the original CFG; one update per function.
+    }
+  }
+  return changed;
+}
+
 // Unroll short nested scans with conditional stores. LLVM retains all exits and
 // bounds checks and builds a runtime remainder where necessary.
 extern "C" unsigned elisacoreUnrollNestedScans(LLVMModuleRef ref) {
@@ -187,6 +298,7 @@ extern "C" unsigned elisacoreUnrollNestedScans(LLVMModuleRef ref) {
 }
 
 #else
+extern "C" unsigned elisacorePredicatePrivateBitUpdates(LLVMModuleRef) { return 0; }
 extern "C" unsigned elisacoreInlineSmallRecursion(LLVMModuleRef) { return 0; }
 extern "C" unsigned elisacoreUnrollNestedScans(LLVMModuleRef) { return 0; }
 extern "C" unsigned elisacorePeelSmallValidationLoops(LLVMModuleRef) { return 0; }
