@@ -56,6 +56,9 @@ func TestPrivateBitUpdateExclusions(t *testing.T) {
 	}{
 		"conditional branch":         {privateBitBranchIR(), 1},
 		"conditional branch escaped": {strings.Replace(privateBitBranchIR(), " br label %head", " store ptr %array, ptr @escaped\n br label %head", 1) + "@escaped = global ptr null\n", 0},
+		"memory sanitizer":           {strings.Replace(privateBitUpdateIR, "nounwind {", "nounwind sanitize_memory {", 1), 0},
+		"address sanitizer":          {strings.Replace(privateBitUpdateIR, "nounwind {", "nounwind sanitize_address {", 1), 0},
+		"thread sanitizer":           {strings.Replace(privateBitUpdateIR, "nounwind {", "nounwind sanitize_thread {", 1), 0},
 		"eligible":                   {privateBitUpdateIR, 1},
 		"macOS":                      {strings.Replace(privateBitUpdateIR, "aarch64-unknown-linux-gnu", "arm64-apple-darwin", 1), 1},
 		"external array":             {strings.Replace(privateBitUpdateIR, "ptr %array, i64 %i", "ptr %output, i64 %i", 1), 0},

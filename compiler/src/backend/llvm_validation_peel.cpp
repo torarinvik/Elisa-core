@@ -138,7 +138,10 @@ extern "C" unsigned elisacorePredicatePrivateBitUpdates(LLVMModuleRef ref) {
   unsigned changed = 0;
   for (Function &F : M) {
     if (F.isDeclaration() || F.hasOptNone() || F.hasOptSize() || F.hasMinSize() ||
-        F.getSubprogram() || F.getInstructionCount() > 1000) continue;
+        F.getSubprogram() || F.hasFnAttribute(Attribute::SanitizeMemory) ||
+        F.hasFnAttribute(Attribute::SanitizeAddress) || F.hasFnAttribute(Attribute::SanitizeThread) ||
+        F.hasFnAttribute(Attribute::SanitizeHWAddress) || F.hasFnAttribute(Attribute::SanitizeMemTag) ||
+        F.getInstructionCount() > 1000) continue;
     for (BasicBlock &B : F) {
       Instruction *decision = B.getTerminator();
       auto *SW = dyn_cast<SwitchInst>(decision);
