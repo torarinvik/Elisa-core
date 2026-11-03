@@ -1629,6 +1629,16 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 			if err := s.bindPackedStoreOriginsForExprPath(n.Name, n.Value, declType); err != nil {
 				return err
 			}
+		} else {
+			// Omitted initializers have the same zero value as the interpreter and Stage1.
+			// Store at the declaration, so loop-local declarations reset on every iteration.
+			initValue, err = s.zeroValue(declType)
+			if err != nil {
+				return err
+			}
+			if err := s.storeValue(alloca, initValue, declType, n.Name); err != nil {
+				return fmt.Errorf("while zero-initializing local %q: %w", n.Name, err)
+			}
 		}
 		s.defineBinding(n.Name, valueBinding{ptr: alloca, typ: declType, mutable: n.Mutable})
 		// docs/126 D1: a drop-typed local arms its destructor here, after the binding is
