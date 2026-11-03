@@ -228,8 +228,13 @@ void elisacoreEnsureO3UnrollThreshold(int threshold) {
 	// ExtTSP improves the measured aggregate Dijkstra workload on Apple ARM.
 	// Configure it in the shared O3 initializer so serial and partition workers
 	// use the same machine-code layout. Linux retains LLVM's default layout.
+#if defined(__aarch64__)
+	const char *argv[4] = {"elisac", flag, "-enable-ext-tsp-block-placement=true", "-aarch64-enable-early-ifcvt=false"};
+	LLVMParseCommandLineOptions(4, argv, NULL);
+#else
 	const char *argv[3] = {"elisac", flag, "-enable-ext-tsp-block-placement=true"};
 	LLVMParseCommandLineOptions(3, argv, NULL);
+#endif
 #else
 	const char *argv[2] = {"elisac", flag};
 	LLVMParseCommandLineOptions(2, argv, NULL);
