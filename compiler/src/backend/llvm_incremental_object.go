@@ -158,7 +158,7 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 	triple := C.LLVMGetTargetMachineTriple(g.targetMachine)
 	cpu := C.LLVMGetTargetMachineCPU(g.targetMachine)
 	features := C.LLVMGetTargetMachineFeatureString(g.targetMachine)
-	config, _ := json.Marshal([]string{"incremental-object-v1", C.GoString(triple), C.GoString(cpu), C.GoString(features), codegenLevel, "default-reloc", "default-code-model", partitionPipeline})
+	config, _ := json.Marshal([]string{"incremental-object-v2-scratch-prefix-zero", C.GoString(triple), C.GoString(cpu), C.GoString(features), codegenLevel, "default-reloc", "default-code-model", partitionPipeline})
 	C.LLVMDisposeMessage(triple)
 	C.LLVMDisposeMessage(cpu)
 	C.LLVMDisposeMessage(features)
