@@ -30,6 +30,8 @@ unsigned elisacoreBoundedLoopUnswitch(LLVMModuleRef);
 unsigned elisacoreFastCheckedMul(LLVMModuleRef, LLVMTargetMachineRef);
 unsigned elisacoreSpecializeShortTrips(LLVMModuleRef, LLVMTargetMachineRef);
 unsigned elisacoreExpandSmallZeroFills(LLVMModuleRef module);
+unsigned elisacoreElideScratchPrefixInitializers(LLVMModuleRef module);
+unsigned elisacoreScratchPrefixSupported(void);
 unsigned elisacorePackPrivateBoolArrays(LLVMModuleRef, LLVMTargetMachineRef);
 
 // Clone and restrict a verified module to one post-optimization partition. The

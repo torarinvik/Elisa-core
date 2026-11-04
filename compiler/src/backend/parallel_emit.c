@@ -414,7 +414,15 @@ static int part_optimize(LLVMModuleRef m, LLVMTargetMachineRef tm, const char *p
 		// Same -O3 full-unroll budget as optimizationUnrollThresholdO3 in llvm_target.go.
 		elisacoreEnsureO3UnrollThreshold(600);
 	}
-	LLVMErrorRef err = LLVMRunPasses(m, pipeline, tm, options);
+	const char *prefix = "function(mem2reg,div-rem-pairs),";
+	LLVMErrorRef err = NULL;
+	if (strncmp(pipeline, prefix, strlen(prefix)) == 0 && strstr(pipeline, "default<O3>") != NULL) {
+		err = LLVMRunPasses(m, "function(mem2reg,div-rem-pairs)", tm, options);
+		if (err == NULL) elisacoreElideScratchPrefixInitializers(m);
+		if (err == NULL) err = LLVMRunPasses(m, pipeline + strlen(prefix), tm, options);
+	} else {
+		err = LLVMRunPasses(m, pipeline, tm, options);
+	}
 	unsigned scans = 0;
 	if (err == NULL && strstr(pipeline, "O3") != NULL) scans = elisacoreInlineSmallRecursion(m) + elisacorePredicatePrivateBitUpdates(m);
 	if (err == NULL && strstr(pipeline, "O3") != NULL) scans += elisacoreUnrollNestedScans(m);

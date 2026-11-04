@@ -431,7 +431,7 @@ func (s *IncrementalObjectSession) tryPartitionedObject(result *semantic.Result,
 	if options.OptLevel != OptimizationLevel0 {
 		pipeline = optimizationPipeline(options.OptLevel)
 	}
-	settings := []string{"partitioned-ir-object-v2", C.GoString(triple), C.GoString(cpu), C.GoString(features), codegenLevel, "default-reloc", "default-code-model", pipeline}
+	settings := []string{"partitioned-ir-object-v3-scratch-prefix-zero", C.GoString(triple), C.GoString(cpu), C.GoString(features), codegenLevel, "default-reloc", "default-code-model", pipeline}
 	if s.diskCodegenFlag("ELISACORE_NATIVE_FRAGMENTS") && s.disk != nil && options.OptLevel != OptimizationLevel0 {
 		merger, err := s.nativeFragmentMergeKey()
 		if err != nil {

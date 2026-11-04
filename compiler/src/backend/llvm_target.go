@@ -12,6 +12,7 @@ package backend
 #include <llvm-c/TargetMachine.h>
 #include <llvm-c/Transforms/PassBuilder.h>
 #include "parallel_emit.h"
+#include <string.h>
 
 static LLVMBool elisacoreInitializeNativeTarget(void) {
 	return LLVMInitializeNativeTarget();
@@ -63,7 +64,17 @@ static char *elisacoreRunOptimizationPipeline(
 	LLVMPassBuilderOptionsSetLoopUnrolling(Options, 1);
 	LLVMPassBuilderOptionsSetAAPipeline(Options, AAPipeline);
 	if (InlinerThreshold > 0) LLVMPassBuilderOptionsSetInlinerThreshold(Options, InlinerThreshold);
-	LLVMErrorRef Err = LLVMRunPasses(Module, PassPipeline, TargetMachine, Options);
+	const char *prefix = "function(mem2reg,div-rem-pairs),";
+	LLVMErrorRef Err = NULL;
+	if (strncmp(PassPipeline, prefix, strlen(prefix)) == 0 &&
+	    strstr(PassPipeline, "default<O3>") != NULL) {
+		const char *mem2regPipeline = "function(mem2reg,div-rem-pairs)";
+		Err = LLVMRunPasses(Module, mem2regPipeline, TargetMachine, Options);
+		if (Err == NULL) elisacoreElideScratchPrefixInitializers(Module);
+		if (Err == NULL) Err = LLVMRunPasses(Module, PassPipeline + strlen(prefix), TargetMachine, Options);
+	} else {
+		Err = LLVMRunPasses(Module, PassPipeline, TargetMachine, Options);
+	}
 	LLVMDisposePassBuilderOptions(Options);
 	if (Err == NULL) {
 		return NULL;
@@ -744,6 +755,14 @@ func machineCodegenMode(level OptimizationLevel) int {
 
 func expandSmallZeroFills(module C.LLVMModuleRef) int {
 	return int(C.elisacoreExpandSmallZeroFills(module))
+}
+
+func elideScratchPrefixInitializers(module C.LLVMModuleRef) int {
+	return int(C.elisacoreElideScratchPrefixInitializers(module))
+}
+
+func scratchPrefixSupported() bool {
+	return C.elisacoreScratchPrefixSupported() != 0
 }
 
 func inlineSmallRecursion(module C.LLVMModuleRef) int {
