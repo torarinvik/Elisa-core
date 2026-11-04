@@ -405,6 +405,9 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 		if fastCheckedMul(g) == 2 {
 			return fmt.Errorf("checked multiplication versioning cleanup failed")
 		}
+		if unrollBoundedDivisionLoops(g) == 2 {
+			return fmt.Errorf("bounded division loop cleanup failed")
+		}
 		if specializeShortTrips(g) == 2 {
 			return fmt.Errorf("short-trip specialization cleanup failed")
 		}
