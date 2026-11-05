@@ -27,7 +27,7 @@ static bool planArray(AllocaInst &A, const DataLayout &DL, BoolArrayPlan &P) {
   auto *count = dyn_cast<ConstantInt>(A.getArraySize());
   if (!A.isStaticAlloca() || A.getAddressSpace() != 0 || !count || !count->isOne() ||
       !T || !T->getElementType()->isIntegerTy(1) || T->getNumElements() < 2 ||
-      T->getNumElements() > 64 || A.isUsedByMetadata()) return false;
+      T->getNumElements() > 128 || A.isUsedByMetadata()) return false;
   if (DL.getTypeAllocSize(T).getFixedValue() != T->getNumElements()) return false;
   P.array = &A;
   P.length = T->getNumElements();
@@ -84,14 +84,17 @@ static bool planArray(AllocaInst &A, const DataLayout &DL, BoolArrayPlan &P) {
 static void packArray(BoolArrayPlan &P, const DataLayout &DL) {
   AllocaInst *A = P.array;
   IRBuilder<> entry(A);
-  auto *word = Type::getInt64Ty(A->getContext());
+  auto *word = IntegerType::get(A->getContext(), P.length > 64 ? 128 : 64);
+  auto *indexType = Type::getInt64Ty(A->getContext());
   auto *slot = entry.CreateAlloca(word, nullptr, A->getName() + ".bits");
   slot->setAlignment(Align(8));
   // Choosing zero for initially undefined bits is a refinement. It also keeps
   // a partial initialization from propagating undef into unrelated elements.
   entry.CreateStore(ConstantInt::get(word, 0), slot);
+  // Pointer offsets wrap at the target index width, including for chained
+  // GEPs. Widen only the final offset used by the packed-word shift.
   DenseMap<Value *, Value *> offsets;
-  offsets[A] = ConstantInt::get(word, 0);
+  offsets[A] = ConstantInt::get(indexType, 0);
   std::function<Value *(Value *)> offsetOf = [&](Value *pointer) -> Value * {
     auto found = offsets.find(pointer);
     if (found != offsets.end()) return found->second;
@@ -106,13 +109,13 @@ static void packArray(BoolArrayPlan &P, const DataLayout &DL) {
     B.SetCurrentDebugLocation(I->getDebugLoc());
     if (auto *L = dyn_cast<LoadInst>(I)) {
       Value *bits = B.CreateLoad(word, slot);
-      Value *bit = B.CreateLShr(bits, offsetOf(L->getPointerOperand()));
+      Value *bit = B.CreateLShr(bits, B.CreateZExt(offsetOf(L->getPointerOperand()), word));
       L->replaceAllUsesWith(B.CreateTrunc(bit, L->getType()));
     } else if (auto *S = dyn_cast<StoreInst>(I)) {
       if (!S->getValueOperand()->getType()->isIntegerTy(1)) {
         B.CreateStore(ConstantInt::get(word, 0), slot);
       } else {
-        Value *index = offsetOf(S->getPointerOperand());
+        Value *index = B.CreateZExt(offsetOf(S->getPointerOperand()), word);
         Value *bits = B.CreateLoad(word, slot);
         Value *mask = B.CreateShl(ConstantInt::get(word, 1), index);
         Value *cleared = B.CreateAnd(bits, B.CreateNot(mask));
@@ -126,7 +129,7 @@ static void packArray(BoolArrayPlan &P, const DataLayout &DL) {
       int64_t start = 0;
       GetPointerBaseWithConstantOffset(S->getRawDest(), start, DL);
       unsigned count = cast<ConstantInt>(S->getLength())->getZExtValue();
-      APInt mask = APInt::getBitsSet(64, start, start + count);
+      APInt mask = APInt::getBitsSet(word->getBitWidth(), start, start + count);
       Value *bits = B.CreateLoad(word, slot);
       B.CreateStore(B.CreateAnd(bits, ConstantInt::get(word, ~mask)), slot);
     }
