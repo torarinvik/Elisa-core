@@ -65,6 +65,7 @@ extern "C" unsigned elisacorePeelSmallValidationLoops(LLVMModuleRef moduleRef) {
       // Keep short and unbounded scans compact; widen bounded long scans.
       unsigned MaxTrips = SE.getSmallConstantMaxTripCount(L);
       unsigned UnrollCount = MaxTrips >= 64 && MaxTrips <= 4096 ? 8 : 4;
+      if (module.getTargetTriple().isAArch64() && module.getTargetTriple().isOSDarwin() && MaxTrips >= 64 && MaxTrips <= 4096) UnrollCount = 16;
 #if defined(__linux__) && defined(__aarch64__)
       if (module.getTargetTriple().isOSLinux() && MaxTrips >= 64 && MaxTrips <= 4096)
         UnrollCount = 16;
