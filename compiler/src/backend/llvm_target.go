@@ -417,6 +417,9 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 		}
 		boundedLoopUnswitch(g)
 		C.elisacoreSinkPrivateInitializations(g.module)
+		if optimizeSqrtNonNaN(g) == 2 {
+			return fmt.Errorf("proven sqrt cleanup failed")
+		}
 	}
 	if err := g.verify(); err != nil {
 		return fmt.Errorf("optimized LLVM module failed verification: %w", err)
