@@ -162,6 +162,7 @@ static bool canonicalizeTrustedMemset(CallInst *CI, AllocaInst *A,
 }
 
 #include "llvm_covered_prefix.cpp"
+#include "llvm_stack_prefix.h"
 
 extern "C" unsigned elisacoreElideScratchPrefixInitializers(LLVMModuleRef Ref) {
   if (!Ref) return 0;
@@ -178,6 +179,9 @@ extern "C" unsigned elisacoreElideScratchPrefixInitializers(LLVMModuleRef Ref) {
   PB.registerLoopAnalyses(LAM);
   PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
   unsigned Removed = prepareCoveredPrefixZeros(M, FAM, PB), Analyses = 0;
+  if ((M.getTargetTriple().isMacOSX() || M.getTargetTriple().isOSLinux()) &&
+      M.getTargetTriple().getArch() == Triple::aarch64)
+    Removed += removeStackPrefixZeros(M);
   for (Function &F : M) {
     if (F.isDeclaration() || F.hasOptNone() ||
         F.hasFnAttribute(Attribute::SanitizeAddress) ||
