@@ -34,6 +34,7 @@ unsigned elisacoreElideScratchPrefixInitializers(LLVMModuleRef module);
 unsigned elisacoreScratchPrefixSupported(void);
 unsigned elisacorePackPrivateBoolArrays(LLVMModuleRef, LLVMTargetMachineRef);
 unsigned elisacoreCsscAbsoluteRangeChecks(LLVMModuleRef, LLVMTargetMachineRef);
+unsigned elisacoreInlineSmallRecursiveFunctions(LLVMModuleRef, LLVMTargetMachineRef);
 
 // Clone and restrict a verified module to one post-optimization partition. The
 // caller owns the returned module, in the original context. No original IR is
