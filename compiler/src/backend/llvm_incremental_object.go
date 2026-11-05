@@ -158,7 +158,7 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 	triple := C.LLVMGetTargetMachineTriple(g.targetMachine)
 	cpu := C.LLVMGetTargetMachineCPU(g.targetMachine)
 	features := C.LLVMGetTargetMachineFeatureString(g.targetMachine)
-	config, _ := json.Marshal([]string{"incremental-object-v4-index-bounds-v1", C.GoString(triple), C.GoString(cpu), C.GoString(features), codegenLevel, "default-reloc", "default-code-model", partitionPipeline})
+	config, _ := json.Marshal([]string{"incremental-object-v4-validation-layout-v1", C.GoString(triple), C.GoString(cpu), C.GoString(features), codegenLevel, "default-reloc", "default-code-model", partitionPipeline})
 	C.LLVMDisposeMessage(triple)
 	C.LLVMDisposeMessage(cpu)
 	C.LLVMDisposeMessage(features)
@@ -431,7 +431,7 @@ func (s *IncrementalObjectSession) tryPartitionedObject(result *semantic.Result,
 	if options.OptLevel != OptimizationLevel0 {
 		pipeline = optimizationPipeline(options.OptLevel)
 	}
-	settings := []string{"partitioned-ir-object-v5-index-bounds-v1", C.GoString(triple), C.GoString(cpu), C.GoString(features), codegenLevel, "default-reloc", "default-code-model", pipeline}
+	settings := []string{"partitioned-ir-object-v5-validation-layout-v1", C.GoString(triple), C.GoString(cpu), C.GoString(features), codegenLevel, "default-reloc", "default-code-model", pipeline}
 	if s.diskCodegenFlag("ELISACORE_NATIVE_FRAGMENTS") && s.disk != nil && options.OptLevel != OptimizationLevel0 {
 		merger, err := s.nativeFragmentMergeKey()
 		if err != nil {

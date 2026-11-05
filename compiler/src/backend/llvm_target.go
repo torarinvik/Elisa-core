@@ -423,6 +423,7 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 		if optimizeSqrtNonNaN(g) == 2 {
 			return fmt.Errorf("proven sqrt cleanup failed")
 		}
+		biasValidationReturns(g)
 	}
 	if err := g.verify(); err != nil {
 		return fmt.Errorf("optimized LLVM module failed verification: %w", err)
