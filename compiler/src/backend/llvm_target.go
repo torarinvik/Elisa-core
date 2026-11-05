@@ -87,6 +87,7 @@ unsigned elisacoreForwardZeroedLoads(LLVMModuleRef Module);
 unsigned elisacoreInferConstantTableRanges(LLVMModuleRef Module);
 int elisacoreTableUnrollSupported(void);
 unsigned elisacorePeelSmallValidationLoops(LLVMModuleRef Module);
+unsigned elisacoreCsscAbsoluteRangeChecks(LLVMModuleRef Module, LLVMTargetMachineRef Target);
 unsigned elisacoreUnrollNestedScans(LLVMModuleRef Module);
 unsigned elisacoreInlineSmallRecursion(LLVMModuleRef Module);
 unsigned elisacorePredicatePrivateBitUpdates(LLVMModuleRef Module);
@@ -424,6 +425,7 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 			return fmt.Errorf("proven sqrt cleanup failed")
 		}
 		biasValidationReturns(g)
+		C.elisacoreCsscAbsoluteRangeChecks(g.module, g.targetMachine)
 	}
 	if err := g.verify(); err != nil {
 		return fmt.Errorf("optimized LLVM module failed verification: %w", err)

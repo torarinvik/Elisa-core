@@ -1,9 +1,13 @@
 //go:build cgo
 #include <llvm/Config/llvm-config.h>
 #include <llvm-c/Core.h>
+#include <llvm-c/TargetMachine.h>
 #if LLVM_VERSION_MAJOR == 23
+#include <llvm/ADT/APInt.h>
 #include <llvm/IR/Dominators.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/IR/Intrinsics.h>
+#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Analysis/AssumptionCache.h>
@@ -18,6 +22,10 @@
 #include <llvm/Analysis/TargetTransformInfo.h>
 #include <llvm/Analysis/ScalarEvolution.h>
 #include <llvm/Support/CBindingWrapping.h>
+#include <llvm/MC/MCSubtargetInfo.h>
+#include <llvm/MC/TargetRegistry.h>
+#include <llvm/Target/TargetMachine.h>
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/Transforms/Utils/Cloning.h>
 #include <llvm/Transforms/Utils/LoopPeel.h>
 #include <llvm/Transforms/Utils/LoopSimplify.h>
@@ -69,6 +77,82 @@ extern "C" unsigned elisacorePeelSmallValidationLoops(LLVMModuleRef moduleRef) {
     }
   }
   return count;
+}
+
+static bool hasCSSC(const TargetMachine &TM) {
+  if (!TM.getTargetTriple().isAArch64()) return false;
+  auto *STI = TM.getTarget().createMCSubtargetInfo(
+      TM.getTargetTriple(), TM.getTargetCPU(), TM.getTargetFeatureString());
+  if (!STI) return false;
+  const bool enabled = STI->checkFeatures("+cssc");
+  delete STI;
+  return enabled;
+}
+
+static bool matchSymmetricRangeCheck(ICmpInst &Cmp, BinaryOperator *&Add,
+                                     Value *&Input, APInt &Bound) {
+  if (Cmp.getPredicate() != ICmpInst::ICMP_ULT ||
+      Cmp.hasMetadataOtherThanDebugLoc()) return false;
+  Add = dyn_cast<BinaryOperator>(Cmp.getOperand(0));
+  auto *Limit = dyn_cast<ConstantInt>(Cmp.getOperand(1));
+  if (!Add || Add->getOpcode() != Instruction::Add ||
+      Add->hasNoSignedWrap() || Add->hasNoUnsignedWrap() ||
+      Add->hasMetadataOtherThanDebugLoc() || !Limit) return false;
+  auto *Ty = dyn_cast<IntegerType>(Add->getType());
+  if (!Ty || Ty->getBitWidth() != 64 || Limit->getType() != Ty) return false;
+
+  auto *Offset0 = dyn_cast<ConstantInt>(Add->getOperand(0));
+  auto *Offset1 = dyn_cast<ConstantInt>(Add->getOperand(1));
+  const ConstantInt *Offset = Offset0 ? Offset0 : Offset1;
+  if (!Offset || !Offset->getValue().isNegative()) return false;
+  Input = Offset0 ? Add->getOperand(1) : Add->getOperand(0);
+  if (Input->getType() != Ty) return false;
+
+  const unsigned Width = Ty->getBitWidth();
+  Bound = -Offset->getValue() - APInt(Width, 1);
+  const APInt MaxBound = APInt::getSignedMaxValue(Width).lshr(1);
+  if (Bound.isNegative() || Bound.ugt(MaxBound)) return false;
+  const APInt ExpectedLimit = -(Bound.shl(1) + APInt(Width, 1));
+  return Limit->getValue() == ExpectedLimit;
+}
+
+// Map the exact unsigned range-check idiom for [-B, B] to llvm.abs plus an
+// unsigned comparison when the selected AArch64 CPU has CSSC. INT_MIN remains
+// the same wrapped bit pattern and is still rejected by the unsigned compare.
+extern "C" unsigned elisacoreCsscAbsoluteRangeChecks(
+    LLVMModuleRef moduleRef, LLVMTargetMachineRef targetRef) {
+  if (!moduleRef || !targetRef) return 0;
+  auto &TM = *reinterpret_cast<TargetMachine *>(targetRef);
+  if (!hasCSSC(TM)) return 0;
+  Module &M = *unwrap(moduleRef);
+  unsigned Changed = 0;
+  for (Function &F : M) {
+    if (F.isDeclaration() || F.hasOptNone() || F.hasOptSize() || F.hasMinSize() ||
+        F.hasFnAttribute("target-cpu") || F.hasFnAttribute("target-features")) continue;
+    SmallVector<ICmpInst *, 8> Candidates;
+    for (BasicBlock &BB : F)
+      for (Instruction &I : BB)
+        if (auto *Cmp = dyn_cast<ICmpInst>(&I)) Candidates.push_back(Cmp);
+    for (ICmpInst *Cmp : Candidates) {
+      BinaryOperator *Add = nullptr;
+      Value *Input = nullptr;
+      APInt Bound(64, 0);
+      if (!matchSymmetricRangeCheck(*Cmp, Add, Input, Bound)) continue;
+      IRBuilder<> Builder(Cmp);
+      Builder.SetCurrentDebugLocation(Cmp->getDebugLoc());
+      auto *AbsFn = Intrinsic::getOrInsertDeclaration(&M, Intrinsic::abs,
+                                                      {Input->getType()});
+      Value *Abs = Builder.CreateCall(AbsFn,
+          {Input, ConstantInt::getFalse(M.getContext())}, "range.abs");
+      Value *Invalid = Builder.CreateICmpUGT(Abs,
+          ConstantInt::get(cast<IntegerType>(Input->getType()), Bound), "range.invalid");
+      Cmp->replaceAllUsesWith(Invalid);
+      Cmp->eraseFromParent();
+      if (Add->use_empty()) Add->eraseFromParent();
+      ++Changed;
+    }
+  }
+  return Changed;
 }
 
 
@@ -385,4 +469,5 @@ extern "C" unsigned elisacoreSinkPrivateInitializations(LLVMModuleRef) { return 
 extern "C" unsigned elisacoreInlineSmallRecursion(LLVMModuleRef) { return 0; }
 extern "C" unsigned elisacoreUnrollNestedScans(LLVMModuleRef) { return 0; }
 extern "C" unsigned elisacorePeelSmallValidationLoops(LLVMModuleRef) { return 0; }
+extern "C" unsigned elisacoreCsscAbsoluteRangeChecks(LLVMModuleRef, LLVMTargetMachineRef) { return 0; }
 #endif
