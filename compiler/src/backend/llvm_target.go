@@ -417,6 +417,9 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 		}
 		boundedLoopUnswitch(g)
 		C.elisacoreSinkPrivateInitializations(g.module)
+		if optimizeIndexBounds(g) == 2 {
+			return fmt.Errorf("index bounds cleanup failed")
+		}
 		if optimizeSqrtNonNaN(g) == 2 {
 			return fmt.Errorf("proven sqrt cleanup failed")
 		}

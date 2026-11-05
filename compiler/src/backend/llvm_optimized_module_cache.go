@@ -122,7 +122,7 @@ func (s *IncrementalObjectSession) optimizeObjectModule(g *llvmGenerator, level 
 
 func optimizedModuleCacheKey(g *llvmGenerator, level OptimizationLevel, triple, cpu, features string) string {
 	values := []any{
-		"optimized-module-v12-sqrt-proof-v2",
+		"optimized-module-v12-index-bounds-v1",
 		int(level), triple, cpu, features,
 		optimizationBasePipeline(level),
 		map[string]int{"upper-bound-unroll": upperBoundUnrollLimit()},
