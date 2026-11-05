@@ -447,6 +447,7 @@ static int part_optimize(LLVMModuleRef m, LLVMTargetMachineRef tm, const char *p
 		return 0;
 	}
 	if (err == NULL && strstr(pipeline, "O3") != NULL) elisacoreBoundedLoopUnswitch(m);
+	if (err == NULL && strstr(pipeline, "O3") != NULL && elisacoreShouldRevisitNestedVectors(m)) err = LLVMRunPasses(m, "default<O3>", tm, options);
 	if (err == NULL && strstr(pipeline, "O3") != NULL) elisacoreCsscAbsoluteRangeChecks(m, tm);
 	if (err == NULL && strstr(pipeline, "O3") != NULL) elisacoreInlineSmallRecursiveFunctions(m, tm);
 	LLVMDisposePassBuilderOptions(options);

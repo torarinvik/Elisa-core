@@ -26,6 +26,7 @@ int elisacoreUpperBoundUnrollLimit(void);
 // unaffected. Not thread-safe; the Go side serialises calls with sync.Once.
 void elisacoreEnsureO3UnrollThreshold(int threshold);
 unsigned elisacoreUnrollNestedScans(LLVMModuleRef);
+unsigned elisacoreShouldRevisitNestedVectors(LLVMModuleRef);
 unsigned elisacoreBoundedLoopUnswitch(LLVMModuleRef);
 unsigned elisacoreFastCheckedMul(LLVMModuleRef, LLVMTargetMachineRef);
 unsigned elisacoreSpecializeShortTrips(LLVMModuleRef, LLVMTargetMachineRef);

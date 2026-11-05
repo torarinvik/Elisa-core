@@ -483,7 +483,37 @@ extern "C" unsigned elisacoreUnrollNestedScans(LLVMModuleRef ref) {
   return changed;
 }
 
+static bool shouldRevisitNestedVectorLoops(Module &M) {
+  if (M.getNamedMetadata("llvm.dbg.cu") || !M.getTargetTriple().isAArch64())
+    return false;
+  unsigned Functions = 0, Instructions = 0;
+  for (Function &F : M) {
+    if (F.isDeclaration()) continue;
+    if (++Functions > 4 || (Instructions += F.getInstructionCount()) > 2000 ||
+        F.hasOptNone() || F.hasOptSize() || F.hasMinSize() ||
+        F.hasFnAttribute(Attribute::SanitizeAddress) ||
+        F.hasFnAttribute(Attribute::SanitizeMemory) ||
+        F.hasFnAttribute(Attribute::SanitizeThread) ||
+        F.hasFnAttribute(Attribute::SanitizeHWAddress)) return false;
+  }
+  for (Function &F : M) {
+    if (F.isDeclaration()) continue;
+    DominatorTree DT(F); LoopInfo LI(DT);
+    for (Loop *L : LI.getLoopsInPreorder()) {
+      if (!L->getParentLoop()) continue;
+      for (BasicBlock *B : L->blocks())
+        for (Instruction &I : *B)
+          if (auto *Load = dyn_cast<LoadInst>(&I))
+            if (Load->getType()->isVectorTy()) return true;
+    }
+  }
+  return false;
+}
+
+extern "C" unsigned elisacoreShouldRevisitNestedVectors(LLVMModuleRef R) { return R && shouldRevisitNestedVectorLoops(*unwrap(R)); }
+
 #else
+extern "C" unsigned elisacoreShouldRevisitNestedVectors(LLVMModuleRef) { return 0; }
 extern "C" unsigned elisacorePredicatePrivateBitUpdates(LLVMModuleRef) { return 0; }
 extern "C" unsigned elisacoreSinkPrivateInitializations(LLVMModuleRef) { return 0; }
 extern "C" unsigned elisacoreInlineSmallRecursion(LLVMModuleRef) { return 0; }
