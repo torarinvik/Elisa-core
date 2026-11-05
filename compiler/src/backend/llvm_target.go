@@ -438,6 +438,13 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 		if C.elisacoreOptimizeOrderedConversions(g.module, g.targetMachine) == 2 {
 			return fmt.Errorf("ordered conversion cleanup failed")
 		}
+		if C.elisacoreSpecializeValidationEpilogues(g.module) != 0 {
+			cleanup := cString("function(instcombine,simplifycfg)")
+			defer C.free(unsafe.Pointer(cleanup))
+			if message := C.elisacoreRunOptimizationPipeline(g.module, g.targetMachine, cleanup, aaPipeline, C.int(optimizationInlinerThreshold(optLevel)), debugLogging); message != nil {
+				return fmt.Errorf("validation epilogue cleanup failed: %s", disposeLLVMErrorMessage(message, "unknown LLVM pass pipeline error"))
+			}
+		}
 		biasValidationReturns(g)
 		C.elisacoreCsscAbsoluteRangeChecks(g.module, g.targetMachine)
 		C.elisacoreInlineSmallRecursiveFunctions(g.module, g.targetMachine)
