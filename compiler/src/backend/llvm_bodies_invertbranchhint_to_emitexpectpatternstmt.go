@@ -29,6 +29,44 @@ func invertBranchHint(hint ast.BranchHint) ast.BranchHint {
 		return hint
 	}
 }
+
+// Value-form lowering retains short-circuit evaluation while giving LLVM a
+// simpler boolean expression to optimize. Keep pattern tests, overloaded
+// operators and expressions with effects on the binding-aware branch path.
+func simpleConditionValue(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case *ast.Ident, *ast.IntLit, *ast.BoolLit, *ast.NullLit:
+		return true
+	case *ast.ParenExpr:
+		return simpleConditionValue(n.Inner)
+	case *ast.UnaryExpr:
+		return n.LoweredCall == nil && (n.Op == lexer.TOKEN_NOT || n.Op == lexer.TOKEN_MINUS) && simpleConditionValue(n.Operand)
+	case *ast.BinaryExpr:
+		if n.LoweredCall != nil {
+			return false
+		}
+		switch n.Op {
+		case lexer.TOKEN_AND, lexer.TOKEN_OR, lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ,
+			lexer.TOKEN_LT, lexer.TOKEN_LTEQ, lexer.TOKEN_GT, lexer.TOKEN_GTEQ,
+			lexer.TOKEN_PLUS, lexer.TOKEN_MINUS, lexer.TOKEN_STAR, lexer.TOKEN_SLASH, lexer.TOKEN_PERCENT:
+			return simpleConditionValue(n.Left) && simpleConditionValue(n.Right)
+		}
+	}
+	return false
+}
+
+func (s *functionState) emitSimpleConditionBranch(expr ast.Expr, trueBB, falseBB C.LLVMBasicBlockRef, hint ast.BranchHint) error {
+	if n, ok := expr.(*ast.BinaryExpr); ok && (n.Op == lexer.TOKEN_AND || n.Op == lexer.TOKEN_OR) && simpleConditionValue(expr) {
+		cond, _, err := s.emitExpr(expr, s.g.namedType("bool"))
+		if err != nil {
+			return err
+		}
+		s.buildCondBrWithHint(cond, trueBB, falseBB, hint)
+		return nil
+	}
+	return s.emitConditionBranchWithBindings(expr, trueBB, falseBB, hint)
+}
+
 func (s *functionState) emitConditionBranchWithBindings(expr ast.Expr, trueBB C.LLVMBasicBlockRef, falseBB C.LLVMBasicBlockRef, hint ast.BranchHint) error {
 	switch n := expr.(type) {
 	case *ast.ParenExpr:
@@ -144,11 +182,11 @@ func (s *functionState) emitIf(stmt *ast.IfStmt) error {
 		elseName := cString("if.else")
 		defer C.free(unsafe.Pointer(elseName))
 		elseBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, elseName)
-		if err := s.emitConditionBranchWithBindings(stmt.Cond, thenBB, elseBB, stmt.Hint); err != nil {
+		if err := s.emitSimpleConditionBranch(stmt.Cond, thenBB, elseBB, stmt.Hint); err != nil {
 			return err
 		}
 	} else {
-		if err := s.emitConditionBranchWithBindings(stmt.Cond, thenBB, mergeBB, stmt.Hint); err != nil {
+		if err := s.emitSimpleConditionBranch(stmt.Cond, thenBB, mergeBB, stmt.Hint); err != nil {
 			return err
 		}
 	}
