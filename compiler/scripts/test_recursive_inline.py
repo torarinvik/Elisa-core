@@ -39,6 +39,7 @@ step:
 }
 '''
 BASE+='\ndefine i64 @entry(i64 %n) { %r = call fastcc i64 @tree(i64 %n) ret i64 %r }\n'
+BASE=BASE.replace("arm64-apple-darwin",os.environ.get("ELISA_TEST_TRIPLE","arm64-apple-darwin"))
 cases={
  'small_binary':(BASE,1),
  'noinline':(BASE.replace('nounwind {','nounwind noinline {'),0),

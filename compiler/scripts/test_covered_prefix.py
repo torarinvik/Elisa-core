@@ -30,6 +30,7 @@ exit:
 }
 '''
 COVER=' call void @llvm.memset.p0.i64(ptr %a, i8 1, i64 %bytes, i1 false)'
+BASE=BASE.replace("arm64-apple-darwin",os.environ.get("ELISA_TEST_TRIPLE","arm64-apple-darwin"))
 cases={
  'covered':(BASE,1),
  'escape':(BASE.replace(COVER,COVER+'\n call void @unknown(ptr %a)'),0),

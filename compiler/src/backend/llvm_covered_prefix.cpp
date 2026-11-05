@@ -90,7 +90,7 @@ static unsigned removeCoveredPrefixZeros(Module &M,FunctionAnalysisManager &FAM)
 }
 
 static unsigned prepareCoveredPrefixZeros(Module &M, FunctionAnalysisManager &FAM, PassBuilder &PB) {
- if (M.getNamedMetadata("llvm.dbg.cu") || !M.getTargetTriple().isMacOSX() || M.getTargetTriple().getArch()!=Triple::aarch64) return 0;
+ if (M.getNamedMetadata("llvm.dbg.cu") || !(M.getTargetTriple().isMacOSX() || M.getTargetTriple().isOSLinux()) || M.getTargetTriple().getArch()!=Triple::aarch64) return 0;
  SmallVector<Function *,8> Candidates;
  for(Function &F:M){
   if(F.isDeclaration()||F.hasOptNone()||F.hasOptSize()||F.hasMinSize()||F.hasFnAttribute(Attribute::SanitizeAddress)||F.hasFnAttribute(Attribute::SanitizeMemory)||F.hasFnAttribute(Attribute::SanitizeThread)||F.hasFnAttribute(Attribute::SanitizeHWAddress))continue;

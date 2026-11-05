@@ -57,7 +57,7 @@ elisacoreInlineSmallRecursiveFunctions(LLVMModuleRef Ref,
     return 0;
   Module &M = *unwrap(Ref);
   auto *TM = reinterpret_cast<TargetMachine *>(TMRef);
-  if (!M.getTargetTriple().isMacOSX() ||
+  if (!(M.getTargetTriple().isMacOSX() || M.getTargetTriple().isOSLinux()) ||
       M.getTargetTriple().getArch() != Triple::aarch64 ||
       M.getNamedMetadata("llvm.dbg.cu"))
     return 0;
