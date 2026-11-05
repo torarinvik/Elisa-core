@@ -171,6 +171,7 @@ func RunPartitionWorkerIfRequested() {
 		os.Exit(1)
 	}
 	C.elisacorePartInitAllTargets()
+	C.elisacoreConfigureSelectiveScheduler()
 	strs := []string{partWorkerBitcodeEnv, partWorkerPipelineEnv, partWorkerTripleEnv, partWorkerCPUEnv, partWorkerFeaturesEnv, partWorkerOutputEnv}
 	cs := make([]*C.char, len(strs))
 	for i, name := range strs {

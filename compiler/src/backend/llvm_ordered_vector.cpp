@@ -367,8 +367,13 @@ elisacoreOptimizeOrderedConversions(LLVMModuleRef ref,
   for (Function &F : M)
     if (!F.isDeclaration()) {
       auto result = ElisaOrderedCasts().run(F, FAM);
-      if (!result.areAllPreserved())
+      if (!result.areAllPreserved()) {
         selected.insert(&F);
+#if defined(__linux__) && defined(__aarch64__)
+        if (M.getTargetTriple().isOSLinux())
+          F.addFnAttr("elisa.ordered.ilp");
+#endif
+      }
     }
   if (selected.empty())
     return 0;

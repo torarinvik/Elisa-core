@@ -144,6 +144,7 @@ func ensureLLVMTargetRegistry() error {
 			return
 		}
 		C.elisacoreInitializeAllTargetsForCrossEmission()
+		C.elisacoreConfigureSelectiveScheduler()
 		C.elisacoreConfigureBoundedUnroll()
 	})
 	return llvmTargetInitErr

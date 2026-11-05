@@ -19,6 +19,7 @@
 // bitcode to `bitcode_path`, -1 when that write failed.
 // Install the bounded-loop policy before any optimized module, including cache replay.
 void elisacoreConfigureBoundedUnroll(void);
+void elisacoreConfigureSelectiveScheduler(void);
 int elisacoreUpperBoundUnrollLimit(void);
 
 // Sets LLVM's -O3-only full-unroll budget (-unroll-threshold-aggressive) once per process.
