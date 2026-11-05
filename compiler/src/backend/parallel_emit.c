@@ -455,6 +455,7 @@ static int part_optimize(LLVMModuleRef m, LLVMTargetMachineRef tm, const char *p
 	}
 	if (err == NULL && strstr(pipeline, "O3") != NULL && elisacoreSpecializeValidationEpilogues(m))
 		err = LLVMRunPasses(m, "function(instcombine,simplifycfg)", tm, options);
+	if (err == NULL && strstr(pipeline, "O3") != NULL) elisacoreCompactEvenRanges(m);
 	if (err == NULL && strstr(pipeline, "O3") != NULL) elisacoreCsscAbsoluteRangeChecks(m, tm);
 	if (err == NULL && strstr(pipeline, "O3") != NULL) elisacoreInlineSmallRecursiveFunctions(m, tm);
 	LLVMDisposePassBuilderOptions(options);

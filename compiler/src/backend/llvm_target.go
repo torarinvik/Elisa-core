@@ -445,6 +445,7 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 				return fmt.Errorf("validation epilogue cleanup failed: %s", disposeLLVMErrorMessage(message, "unknown LLVM pass pipeline error"))
 			}
 		}
+		C.elisacoreCompactEvenRanges(g.module)
 		biasValidationReturns(g)
 		C.elisacoreCsscAbsoluteRangeChecks(g.module, g.targetMachine)
 		C.elisacoreInlineSmallRecursiveFunctions(g.module, g.targetMachine)
