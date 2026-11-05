@@ -91,7 +91,13 @@ func (r *Registry) encode(root any, framed bool, capacity int) ([]byte, error) {
 	}
 	framing := e.data.Len()
 	if framed {
-		e.data.Write(make([]byte, 8*(e.nodes.count+2)))
+		// Reserve the frame table in the output buffer rather than allocating
+		// and copying a second, potentially large, zero-filled byte slice.
+		size := 8 * (e.nodes.count + 2)
+		e.data.Grow(size)
+		padding := e.data.AvailableBuffer()[:size]
+		clear(padding)
+		e.data.Write(padding)
 	}
 	if framed && r.parallelDecode && e.nodes.count >= parallelFramedEncodeMin {
 		if err := e.writeFramedBodies(framing); err != nil {
