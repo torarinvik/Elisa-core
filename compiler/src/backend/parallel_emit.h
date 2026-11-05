@@ -27,6 +27,7 @@ int elisacoreUpperBoundUnrollLimit(void);
 void elisacoreEnsureO3UnrollThreshold(int threshold);
 unsigned elisacoreUnrollNestedScans(LLVMModuleRef);
 unsigned elisacoreShouldRevisitNestedVectors(LLVMModuleRef);
+unsigned elisacoreOptimizeOrderedConversions(LLVMModuleRef, LLVMTargetMachineRef);
 unsigned elisacoreBoundedLoopUnswitch(LLVMModuleRef);
 unsigned elisacoreFastCheckedMul(LLVMModuleRef, LLVMTargetMachineRef);
 unsigned elisacoreSpecializeShortTrips(LLVMModuleRef, LLVMTargetMachineRef);

@@ -89,6 +89,7 @@ int elisacoreTableUnrollSupported(void);
 unsigned elisacorePeelSmallValidationLoops(LLVMModuleRef Module);
 unsigned elisacoreCsscAbsoluteRangeChecks(LLVMModuleRef Module, LLVMTargetMachineRef Target);
 unsigned elisacoreShouldRevisitNestedVectors(LLVMModuleRef Module);
+unsigned elisacoreOptimizeOrderedConversions(LLVMModuleRef Module, LLVMTargetMachineRef Target);
 unsigned elisacoreInlineSmallRecursiveFunctions(LLVMModuleRef Module, LLVMTargetMachineRef Target);
 unsigned elisacoreUnrollNestedScans(LLVMModuleRef Module);
 unsigned elisacoreInlineSmallRecursion(LLVMModuleRef Module);
@@ -432,6 +433,9 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 			if message := C.elisacoreRunOptimizationPipeline(g.module, g.targetMachine, revisit, aaPipeline, C.int(optimizationInlinerThreshold(optLevel)), debugLogging); message != nil {
 				return fmt.Errorf("nested vector revisit failed: %s", disposeLLVMErrorMessage(message, "unknown LLVM pass pipeline error"))
 			}
+		}
+		if C.elisacoreOptimizeOrderedConversions(g.module, g.targetMachine) == 2 {
+			return fmt.Errorf("ordered conversion cleanup failed")
 		}
 		biasValidationReturns(g)
 		C.elisacoreCsscAbsoluteRangeChecks(g.module, g.targetMachine)
