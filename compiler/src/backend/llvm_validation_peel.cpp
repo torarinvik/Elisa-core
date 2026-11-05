@@ -4,6 +4,7 @@
 #include <llvm-c/TargetMachine.h>
 #if LLVM_VERSION_MAJOR == 23
 #include <llvm/ADT/APInt.h>
+#include <llvm/ADT/DenseMap.h>
 #include <llvm/IR/Dominators.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Intrinsics.h>
@@ -132,11 +133,27 @@ extern "C" unsigned elisacoreCsscAbsoluteRangeChecks(
   for (Function &F : M) {
     if (F.isDeclaration() || F.hasOptNone() || F.hasOptSize() || F.hasMinSize() ||
         F.hasFnAttribute("target-cpu") || F.hasFnAttribute("target-features")) continue;
+    DominatorTree DT(F); LoopInfo LI(DT); DenseMap<Loop *, unsigned> ScanCounts;
     SmallVector<ICmpInst *, 8> Candidates;
     for (BasicBlock &BB : F)
       for (Instruction &I : BB)
         if (auto *Cmp = dyn_cast<ICmpInst>(&I)) Candidates.push_back(Cmp);
     for (ICmpInst *Cmp : Candidates) {
+      // Wide unrolled validation scans favor the original range arithmetic on
+      // measured AArch64 targets. Keep the absolute-value fold for other loops.
+      if (Loop *L = LI.getLoopFor(Cmp->getParent())) {
+        auto It = ScanCounts.find(L);
+        if (It == ScanCounts.end()) {
+          unsigned RangeChecks = 0;
+          for (BasicBlock *B : L->blocks()) for (Instruction &I : *B)
+            if (auto *C = dyn_cast<ICmpInst>(&I)) {
+              BinaryOperator *Add = nullptr; Value *Input = nullptr; APInt Bound(64, 0);
+              if (matchSymmetricRangeCheck(*C, Add, Input, Bound)) ++RangeChecks;
+            }
+          It = ScanCounts.try_emplace(L, RangeChecks).first;
+        }
+        if (It->second >= 4) continue;
+      }
       BinaryOperator *Add = nullptr;
       Value *Input = nullptr;
       APInt Bound(64, 0);
