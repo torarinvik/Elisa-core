@@ -78,7 +78,10 @@ extern "C" unsigned elisacorePeelSmallValidationLoops(LLVMModuleRef moduleRef) {
 #if defined(__linux__) && defined(__aarch64__)
       if (!(module.getTargetTriple().isOSLinux() && MaxTrips >= 64 && MaxTrips <= 4096))
 #endif
-        peelLoop(L, 1, false, &LI, &SE, DT, &AC, true, values);
+        // Darwin benefits from the same ordered unrolling without the extra
+        // peeled iteration; smaller and unbounded scans keep their old path.
+        if (!(module.getTargetTriple().isAArch64() && module.getTargetTriple().isOSDarwin() && MaxTrips >= 64 && MaxTrips <= 4096))
+          peelLoop(L, 1, false, &LI, &SE, DT, &AC, true, values);
       // Preserve every load and early exit in order. LLVM's unroller handles
       // the runtime remainder without speculating accesses past an invalid item.
       auto &TTI = FAM.getResult<TargetIRAnalysis>(F);
