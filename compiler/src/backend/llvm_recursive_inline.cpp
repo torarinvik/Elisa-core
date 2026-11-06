@@ -10,6 +10,7 @@
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/MDBuilder.h>
 #include <llvm/IR/Dominators.h>
 #include <llvm/Analysis/LoopInfo.h>
 #include <llvm/IR/Instructions.h>
@@ -227,6 +228,47 @@ static unsigned versionRecursiveZeroCall(Module &M) {
   }
   return 0;
 }
+
+// A guarded recursive call inside a search loop is expensive to enter. On
+// Apple Silicon, favor keeping the non-call path in caller-saved registers;
+// retain any existing profile metadata instead of overriding real data.
+static unsigned biasGuardedRecursiveCalls(Module &M) {
+  if (!M.getTargetTriple().isOSDarwin()) return 0;
+  unsigned Changed = 0;
+  for (Function &Caller : M) {
+    if (Caller.isDeclaration() || Caller.hasFnAttribute("elisa.zero-versioned") ||
+        Caller.hasOptNone() || Caller.hasOptSize() ||
+        Caller.hasMinSize() || Caller.hasFnAttribute(Attribute::SanitizeAddress) ||
+        Caller.hasFnAttribute(Attribute::SanitizeMemory) ||
+        Caller.hasFnAttribute(Attribute::SanitizeThread) ||
+        Caller.hasFnAttribute(Attribute::SanitizeHWAddress)) continue;
+    DominatorTree DT(Caller);
+    LoopInfo LI(DT);
+    for (BasicBlock &BB : Caller) {
+      auto *Branch = dyn_cast<CondBrInst>(BB.getTerminator());
+      auto *Cmp = Branch ? dyn_cast<ICmpInst>(Branch->getCondition()) : nullptr;
+      Loop *L = LI.getLoopFor(&BB);
+      if (!L || !Cmp || Cmp->getPredicate() != ICmpInst::ICMP_EQ ||
+          Branch->getMetadata(LLVMContext::MD_prof)) continue;
+      BasicBlock *Matched = Branch->getSuccessor(0);
+      BasicBlock *Other = Branch->getSuccessor(1);
+      if (Matched == Other || LI.getLoopFor(Matched) != L ||
+          LI.getLoopFor(Other) != L || Matched->getSinglePredecessor() != &BB) continue;
+      unsigned Calls = 0;
+      for (Instruction &I : *Matched)
+        if (auto *Call = dyn_cast<CallInst>(&I)) {
+          Function *F = Call->getCalledFunction();
+          if (F && F->hasLocalLinkage() && F->hasFnAttribute("elisa.zero-versioned") &&
+              !Call->isConvergent() && !Call->hasOperandBundles()) ++Calls;
+        }
+      if (Calls != 1) continue;
+      MDBuilder MDB(M.getContext());
+      Branch->setMetadata(LLVMContext::MD_prof, MDB.createBranchWeights(1, 1024));
+      ++Changed;
+    }
+  }
+  return Changed;
+}
 extern "C" unsigned
 elisacoreInlineSmallRecursiveFunctions(LLVMModuleRef Ref,
                                        LLVMTargetMachineRef TMRef) {
@@ -298,6 +340,7 @@ elisacoreInlineSmallRecursiveFunctions(LLVMModuleRef Ref,
     ModulePassManager SecondCleanup = PB.buildPerModuleDefaultPipeline(OptimizationLevel::O3);
     SecondCleanup.run(M, MAM);
   }
+  (void)biasGuardedRecursiveCalls(M);
   return 1;
 }
 #else
