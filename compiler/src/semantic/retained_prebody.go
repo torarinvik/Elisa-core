@@ -37,6 +37,8 @@ type preBodyState struct {
 	diags                        []Diagnostic                                 // diagnostics the phase emitted
 	keyOf                        map[*ast.FuncDecl]string                     // each prepared function's fingerprint key
 	prepared                     map[string]*ast.FuncDecl                     // position key -> function as prepared for body analysis
+	addedPrepared                map[string]*ast.FuncDecl                     // isolated added functions when no whole-program prepared set exists
+	addedVisibility              map[ast.Decl]string                          // their `public:`/`private:` sections, normally read from the scratch parse
 	// Per prepared function, the declaration-phase tables an added function
 	// carries into the live analysis (plain values, no analyzer-owned types).
 	targets     map[*ast.FuncDecl][]map[int]bool
@@ -48,7 +50,7 @@ type preBodyState struct {
 // runs; keeping its prepared functions afterwards roots an unused scratch AST.
 // Return a separate state so a caller-owned RetainedScratch is not modified.
 func (p *preBodyState) comparisonState() *preBodyState {
-	if p == nil || p.keyOf == nil && p.prepared == nil && p.targets == nil && p.regionIndex == nil && p.resolvedTypeNameSourceOwners == nil && p.resolvedTypeNameRows == nil && !p.plainAdmission {
+	if p == nil || p.keyOf == nil && p.prepared == nil && p.addedPrepared == nil && p.addedVisibility == nil && p.targets == nil && p.regionIndex == nil && p.resolvedTypeNameSourceOwners == nil && p.resolvedTypeNameRows == nil && !p.plainAdmission {
 		return p
 	}
 	return &preBodyState{classification: p.classification, fingerprint: p.fingerprint, global: p.global, resolvedTypeNames: p.resolvedTypeNames, diags: p.diags, plainHeaders: p.plainHeaders, plainGlobal: p.plainGlobal, plainInputs: p.plainInputs, plainIdentities: p.plainIdentities, hasProofReport: p.hasProofReport}

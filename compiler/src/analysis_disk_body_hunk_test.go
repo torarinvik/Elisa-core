@@ -25,6 +25,10 @@ func TestAnalysisDiskBodyEditHunkScheduling(t *testing.T) {
 		{"delete-body-line", "def calculate(value: i64) -> i64:\n\ndef other() -> i64:\n    return 2\n", true},
 		{"blank-body-line", "def calculate(value: i64) -> i64:\n\n    return value + 1\n\ndef other() -> i64:\n    return 2\n", true},
 		{"signature", "def calculate(value: u64) -> i64:\n    return value + 1\n\ndef other() -> i64:\n    return 2\n", false},
+		{"inserted-helper", "def helper(a: i64) -> i64:\n    return a\n\n" + before, true},
+		{"inserted-helper-with-call", "def helper(a: i64) -> i64:\n    return calculate(a)\n\n" + before, false},
+		{"inserted-struct", "struct S:\n    a: i64\n\n" + before, false},
+		{"inserted-two-functions", "def helper(a: i64) -> i64:\n    return a\n\ndef second(a: i64) -> i64:\n    return a\n\n" + before, false},
 		{"include", "include \"other.elisa\"\n" + before, false},
 	}
 	for _, c := range cases {
@@ -124,10 +128,29 @@ func analysisDiskLikelyBodyEditSourcesSplitReference(before, after []byte) bool 
 	for len(beforeLines) != 0 && len(afterLines) != 0 && bytes.Equal(beforeLines[len(beforeLines)-1], afterLines[len(afterLines)-1]) {
 		beforeLines, afterLines = beforeLines[:len(beforeLines)-1], afterLines[:len(afterLines)-1]
 	}
-	for _, lines := range [][][]byte{beforeLines, afterLines} {
-		for _, line := range lines {
-			trimmed := bytes.TrimSpace(line)
-			if !analysisDiskTriviaLine(trimmed) && (!analysisDiskIndented(line) || analysisDiskContractClause(trimmed)) {
+	for _, line := range beforeLines {
+		trimmed := bytes.TrimSpace(line)
+		if !analysisDiskTriviaLine(trimmed) && (!analysisDiskIndented(line) || analysisDiskContractClause(trimmed)) {
+			return false
+		}
+	}
+	insertion, helperIndent := len(beforeLines) == 0, -1
+	for _, line := range afterLines {
+		trimmed := bytes.TrimSpace(line)
+		if analysisDiskTriviaLine(trimmed) {
+			continue
+		}
+		indent := len(line) - len(bytes.TrimLeft(line, " \t"))
+		switch {
+		case helperIndent >= 0:
+			if indent <= helperIndent || bytes.ContainsAny(trimmed, "([{@") || analysisDiskContractClause(trimmed) {
+				return false
+			}
+		case insertion && bytes.HasPrefix(trimmed, []byte("def ")):
+			helperIndent = indent
+		default:
+			insertion = false
+			if !analysisDiskIndented(line) || analysisDiskContractClause(trimmed) {
 				return false
 			}
 		}

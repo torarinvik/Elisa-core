@@ -239,13 +239,31 @@ func analysisDiskLikelyBodyEditSources(before, after []byte) bool {
 			return false
 		}
 	}
+	// A lone inserted helper with no calls may be admitted without the scratch.
+	insertion := beforeCount-prefix-suffix == 0
+	helperIndent := -1
 	for remaining := afterCount - prefix - suffix; remaining > 0; remaining-- {
 		line, ok := afterForward.next()
 		if !ok {
 			return false
 		}
 		trimmed := bytes.TrimSpace(line)
-		if !analysisDiskTriviaLine(trimmed) && (!analysisDiskIndented(line) || analysisDiskContractClause(trimmed)) {
+		if analysisDiskTriviaLine(trimmed) {
+			continue
+		}
+		indent := len(line) - len(bytes.TrimLeft(line, " \t"))
+		if helperIndent >= 0 {
+			if indent <= helperIndent || bytes.ContainsAny(trimmed, "([{@") || analysisDiskContractClause(trimmed) {
+				return false
+			}
+			continue
+		}
+		if insertion && bytes.HasPrefix(trimmed, []byte("def ")) {
+			helperIndent = indent
+			continue
+		}
+		insertion = false
+		if !analysisDiskIndented(line) || analysisDiskContractClause(trimmed) {
 			return false
 		}
 	}

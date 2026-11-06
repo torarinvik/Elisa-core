@@ -138,6 +138,21 @@ func (r *RetainedAnalysis) replaceFuncNameUsageOwner(decl ast.Decl) bool {
 	return true
 }
 
+// addFuncNameUsageOwner enters a new declaration with no names yet; replacing it
+// after its body analysis records them. An index that is not ready, or that
+// already knows the owner, is left for the owner check to rebuild.
+func (r *RetainedAnalysis) addFuncNameUsageOwner(decl ast.Decl) {
+	fn, isFunction := decl.(*ast.FuncDecl)
+	if !r.funcNameUsageReady || !isFunction || fn == nil || r.funcNameUsageOwnerCounts[decl] != 0 {
+		return
+	}
+	r.funcNameUsageOwnerCounts[decl] = 1
+	r.funcNameUsageContributions[decl] = map[string]bool{}
+	r.funcNameUsageFunctionOwners[decl] = fn.Name
+	r.funcNameUsageFunctionCounts[fn.Name]++
+	r.funcNameUsageOwnerTotal++
+}
+
 // funcNameUsageForPost consumes the precise retained update plan installed by
 // UpdatePrepared. Unknown or structurally changed owner sets rebuild from the
 // current declarations. Without an update plan, use the original whole-program

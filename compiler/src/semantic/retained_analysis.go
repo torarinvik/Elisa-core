@@ -110,6 +110,7 @@ type RetainedUpdateStats struct {
 	ScratchPrepared           bool   // the scratch phase ran ahead, overlapped with the driver's parse
 	FastPrepared              bool   // edited bodies were prepared without waiting for the scratch
 	FastDeclined              string // why a body-only edit still needed the scratch
+	FastAdded                 bool   // added functions were declared without the whole-program scratch
 	Total                     time.Duration
 	Fallback                  string
 	Added                     int
@@ -891,19 +892,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			r.LastStats.FastDeclined = why
 		}
 	}
-	if fastBodies != nil {
-		// The edit leaves every declaration-level result as the retained baseline holds it.
-		// The new prefix is independently relocated; mutating/aliasing the old
-		// baseline would invalidate preBodyDifference and later disk revisions.
-		resolvedTypeNames := r.pre.resolvedTypeNames
-		if len(fastResolvedTypeNameContributions) != 0 {
-			resolvedTypeNames = cloneResolvedTypeNameContributions(resolvedTypeNames)
-			for key, body := range fastResolvedTypeNameContributions {
-				contribution := resolvedTypeNames.functions[key]
-				contribution.body = body
-				resolvedTypeNames.functions[key] = contribution
-			}
-		}
+	shiftedPreBodyDiagnostics := func() []Diagnostic {
 		diags := append([]Diagnostic(nil), r.pre.diags...)
 		owners := retainedDiagnosticOwners(r.decls, nil, func(decl ast.Decl) ast.Decl {
 			if fn, ok := decl.(*ast.FuncDecl); ok {
@@ -919,6 +908,51 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			}
 			diags[i].Pos = retainedShiftPos(diags[i].Pos, marks)
 		}
+		return diags
+	}
+	// A pure addition of fresh closed functions: see retained_fresh_function.go.
+	if retainedFastPrepareMode == "on" && len(added) != 0 && len(splices)+len(shadowEdits)+len(removed)+len(addedConsts)+len(removedConsts)+len(addedStructs)+len(removedStructs) == 0 &&
+		len(structPairs)+len(constPairs)+len(constEnumPairs)+len(enumPairs)+len(hierarchyPairs)+len(replaced)+len(overloadNames)+usingsAdded+usingsRemoved == 0 &&
+		r.fastPrepareInvalidated == "" && (prepared == nil || prepared.lazy != nil) {
+		why := r.fastLineShiftAuthority(a, marks)
+		if why == "" {
+			namespaceInfo := func(d ast.Decl) (string, []string, string) {
+				if topLevel[d] {
+					return "", nil, ""
+				}
+				block := memberOf[d]
+				if block == nil || block.Private {
+					return "", nil, "added function is not in a plain block"
+				}
+				return namespaceOf[block], nil, ""
+			}
+			pre, why = r.freshFunctionPreBody(a, added, file, src, namespaceInfo, shiftedPreBodyDiagnostics(), retainedGrowth{addedFuncs: len(added)})
+		}
+		if why != "" {
+			pre = nil
+			r.LastStats.FastDeclined = why
+		} else {
+			reportDeclarationImport = false
+			r.LastStats.FastPrepared, r.LastStats.FastAdded = true, true
+			funcNameUsageIncremental = true // the added owners are entered below
+		}
+	}
+	if pre != nil {
+		// Prepared above: nothing to wait for.
+	} else if fastBodies != nil {
+		// The edit leaves every declaration-level result as the retained baseline holds it.
+		// The new prefix is independently relocated; mutating/aliasing the old
+		// baseline would invalidate preBodyDifference and later disk revisions.
+		resolvedTypeNames := r.pre.resolvedTypeNames
+		if len(fastResolvedTypeNameContributions) != 0 {
+			resolvedTypeNames = cloneResolvedTypeNameContributions(resolvedTypeNames)
+			for key, body := range fastResolvedTypeNameContributions {
+				contribution := resolvedTypeNames.functions[key]
+				contribution.body = body
+				resolvedTypeNames.functions[key] = contribution
+			}
+		}
+		diags := shiftedPreBodyDiagnostics()
 		pre = &preBodyState{classification: r.pre.classification, fingerprint: r.pre.fingerprint, global: r.pre.global, resolvedTypeNames: resolvedTypeNames, resolvedTypeNameSourceOwners: fastResolvedTypeNameSourceOwners, resolvedTypeNameRows: fastResolvedTypeNameRows, diags: diags, plainHeaders: r.pre.plainHeaders, plainGlobal: r.pre.plainGlobal, plainInputs: r.pre.plainInputs, plainIdentities: r.pre.plainIdentities, hasProofReport: r.pre.hasProofReport}
 		r.LastStats.FastPrepared = true
 	} else if prepared.AcceptsScratch(scratch) {
@@ -1840,7 +1874,11 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			if into, _ = liveBlocks[block].(*ast.NamespaceDecl); into == nil {
 				return sd, nil, fmt.Sprintf("block of added %s not found in the analysis", name)
 			}
-			switch scratch.DeclVisibility[prepared] {
+			visibility := pre.addedVisibility[prepared]
+			if scratch != nil && pre.addedPrepared == nil {
+				visibility = scratch.DeclVisibility[prepared]
+			}
+			switch visibility {
 			case "private":
 				sd.Private = true
 			case "":
@@ -1848,11 +1886,11 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 					return sd, nil, fmt.Sprintf("visibility of added %s not found", name)
 				}
 			}
-			if v := scratch.DeclVisibility[prepared]; v != "" {
+			if visibility != "" {
 				if a.declVisibility == nil {
 					a.declVisibility = map[ast.Decl]string{}
 				}
-				a.declVisibility[prepared] = v
+				a.declVisibility[prepared] = visibility
 			}
 		}
 		return sd, into, ""
@@ -1862,7 +1900,11 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		// an overloaded name owns its bare symbol.
 		sort.SliceStable(added, func(x, y int) bool { return newDeclIndex[added[x]] < newDeclIndex[added[y]] })
 		for _, nf := range added {
-			prepared := pre.prepared[retainedLineKey(nf.Pos())+"|"+nf.Name]
+			key := retainedLineKey(nf.Pos()) + "|" + nf.Name
+			prepared := pre.prepared[key]
+			if prepared == nil {
+				prepared = pre.addedPrepared[key]
+			}
 			if prepared == nil {
 				return fail("prepared form of added %s not found", nf.Name)
 			}
@@ -2259,6 +2301,11 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	bodiesStart := time.Now()
 	a.retainedProofsScoped = true
 	r.clearFuncNameUsageUpdateTracking()
+	if r.LastStats.FastAdded {
+		for _, sd := range addedScoped {
+			r.addFuncNameUsageOwner(sd.Decl)
+		}
+	}
 	if funcNameUsageIncremental {
 		// Track every body actually analyzed, including recursive-summary and
 		// return-borrow replay. Args/ResolvedArgs aliases stay inside one call
