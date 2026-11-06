@@ -866,7 +866,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	// The function-name usage index holds identifier names only. Line movement
 	// cannot change them, so a location-only update replaces just the owners it
 	// touched instead of rescanning the whole program.
-	funcNameUsageIncremental := fastBodyEnvironmentUnchanged && len(movedSplices) == 0
+	funcNameUsageIncremental := usingsAdded+usingsRemoved == 0 && len(removed)+len(replaced) == 0 // owners added or replaced are reconciled below
 	// Zero edits is a comment or blank-line change: the same certificate holds,
 	// with only the line movement left to authorize.
 	if retainedFastPrepareMode == "on" && len(shadowEdits) == len(splices) && fastBodyEnvironmentUnchanged {
@@ -934,7 +934,6 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		} else {
 			reportDeclarationImport = false
 			r.LastStats.FastPrepared, r.LastStats.FastAdded = true, true
-			funcNameUsageIncremental = true // the added owners are entered below
 		}
 	}
 	// Fresh consts and structs, and const value edits: see scopedDeclarationPreBody.
@@ -973,7 +972,6 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 				scratch = subset
 				reportDeclarationImport = false
 				r.LastStats.FastPrepared, r.LastStats.FastAdded = true, true
-				funcNameUsageIncremental = true // the changed owners are entered below
 			}
 		}
 		if why != "" {
@@ -2358,17 +2356,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		r.funcNameUsageTracking = true
 		r.funcNameUsageOwnerLookup = retainedFuncNameUsageFunctionOwnerMap(r.decls)
 		r.funcNameUsageTouchedOwners = map[ast.Decl]bool{}
-		if r.LastStats.FastAdded {
-			for _, group := range [][]scopedDecl{addedScoped, addedConstScoped, addedStructScoped} {
-				for _, sd := range group {
-					r.addFuncNameUsageOwner(sd.Decl)
-				}
-			}
-			for _, pair := range constLive {
-				r.removeFuncNameUsageOwner(pair[0])
-				r.addFuncNameUsageOwner(pair[1])
-			}
-		}
+		r.reconcileFuncNameUsageOwners(r.decls)
 	}
 	returnSummariesBefore := r.snapshotReturnBorrowInvalidationSummaries(a)
 	// A re-analyzed body is the same declaration node with a new body: the first analysis's

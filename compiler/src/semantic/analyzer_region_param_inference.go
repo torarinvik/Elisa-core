@@ -54,7 +54,13 @@ var containerGrowthMethods = map[string]bool{
 // the grown param" lifetime obligation stays guarded by the existing escape checker
 // (checkNestedRegionStoreEscape et al.); inference only decides where the param's own backing
 // arena comes from.
+// regionBackingMemo keeps paramStructHasExplicitBackingIn's answer per resolved type.
+type regionBackingMemo struct{ results map[Type]bool }
+
 func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) {
+	// Struct field tables are complete and stay fixed for this pass.
+	a.explicitBackingMemo = &regionBackingMemo{results: map[Type]bool{}}
+	defer func() { a.explicitBackingMemo = nil }()
 	cands, namespaceOf := collectRegionPolyCandidateFuncsScoped(decls)
 	// This pass runs before collectValueSymbols, so funcDeclUsings has not been
 	// populated yet. Keep the lexical resolution context alongside the function
@@ -1691,6 +1697,13 @@ func (a *Analyzer) paramStructHasExplicitBackingIn(scoped scopedDecl, fn *ast.Fu
 	a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
 		a.withRegionParams(fn.RegionParams, func() {
 			resolved := stripRefForBounds(a.resolveType(typ))
+			if memo := a.explicitBackingMemo; memo != nil {
+				if known, seen := memo.results[resolved]; seen {
+					result = known
+					return
+				}
+				defer func() { memo.results[resolved] = result }()
+			}
 			fields, ok := a.resolvedStructFields(resolved)
 			if !ok || len(fields) == 0 {
 				return

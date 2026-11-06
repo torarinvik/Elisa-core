@@ -185,10 +185,41 @@ func analysisDiskLikelyBodyEdit(artifact analysisDiskArtifact, source []byte) bo
 	}
 	likely := false
 	err := artifact.withBaselineSource(func(baseline []byte) error {
-		likely = analysisDiskLikelyBodyEditSources(baseline, source)
+		likely = analysisDiskLikelyBodyEditSources(baseline, source) && !analysisDiskEditInsideTypeBlock(baseline, source)
 		return nil
 	})
 	return err == nil && likely
+}
+
+// analysisDiskEditInsideTypeBlock is a scheduling guess: the first changed line sits
+// directly in a struct or enum block, so the edit is declaration-level. Starting
+// the scratch alongside the restore recovers that overlap.
+func analysisDiskEditInsideTypeBlock(before, after []byte) bool {
+	limit := min(len(before), len(after))
+	at := 0
+	for at < limit && before[at] == after[at] {
+		at++
+	}
+	lineStart := bytes.LastIndexByte(after[:at], '\n') + 1
+	end := len(after)
+	if next := bytes.IndexByte(after[at:], '\n'); next >= 0 {
+		end = at + next
+	}
+	line := after[lineStart:end]
+	indent := len(line) - len(bytes.TrimLeft(line, " \t"))
+	for cursor := lineStart - 1; cursor > 0 && indent > 0; {
+		start := bytes.LastIndexByte(after[:cursor], '\n') + 1
+		previous := after[start:cursor]
+		cursor = start - 1
+		trimmed := bytes.TrimSpace(previous)
+		if len(trimmed) == 0 || trimmed[0] == '#' {
+			continue
+		}
+		if len(previous)-len(bytes.TrimLeft(previous, " \t")) < indent {
+			return bytes.HasPrefix(trimmed, []byte("struct ")) || bytes.HasPrefix(trimmed, []byte("enum ")) || bytes.HasPrefix(trimmed, []byte("packed "))
+		}
+	}
+	return false
 }
 
 // analysisDiskLikelyBodyEditSources preserves bytes.Split's line semantics

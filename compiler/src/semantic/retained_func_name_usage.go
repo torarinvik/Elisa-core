@@ -166,9 +166,34 @@ func (r *RetainedAnalysis) removeFuncNameUsageOwner(decl ast.Decl) {
 	for name := range r.funcNameUsageContributions[decl] {
 		adjustUsageCount(r.funcNameUsageValueCounts, name, -weight)
 	}
+	if name, isFunction := r.funcNameUsageFunctionOwners[decl]; isFunction {
+		adjustUsageCount(r.funcNameUsageFunctionCounts, name, -weight)
+		delete(r.funcNameUsageFunctionOwners, decl)
+	}
 	delete(r.funcNameUsageContributions, decl)
 	delete(r.funcNameUsageOwnerCounts, decl)
 	r.funcNameUsageOwnerTotal--
+}
+
+// reconcileFuncNameUsageOwners enters declarations this update added or replaced
+// and drops those it retired. Any shape it cannot follow fails the owner check in
+// funcNameUsageForPost, which rebuilds the index.
+func (r *RetainedAnalysis) reconcileFuncNameUsageOwners(decls []scopedDecl) {
+	if !r.funcNameUsageReady {
+		return
+	}
+	current := make(map[ast.Decl]bool, len(decls))
+	for _, scoped := range decls {
+		current[scoped.Decl] = true
+	}
+	for decl := range r.funcNameUsageOwnerCounts {
+		if !current[decl] {
+			r.removeFuncNameUsageOwner(decl)
+		}
+	}
+	for _, scoped := range decls {
+		r.addFuncNameUsageOwner(scoped.Decl)
+	}
 }
 
 // funcNameUsageForPost consumes the precise retained update plan installed by

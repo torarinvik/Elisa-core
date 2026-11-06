@@ -987,6 +987,7 @@ type Analyzer struct {
 	affineHandleMemo map[Type]bool
 	// retained is non-nil when this analysis is kept for in-place updates (retained_analysis.go).
 	retained *RetainedAnalysis
+	explicitBackingMemo *regionBackingMemo // live only during inferRegionParamsForGrownContainerParams
 	// preBody stops a scratch analysis after the declaration phase (retained_prebody.go).
 	preBody *preBodyState
 	// Current declaration-phase classification, including local maps that are
