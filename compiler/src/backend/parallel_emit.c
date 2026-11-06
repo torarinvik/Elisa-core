@@ -419,6 +419,7 @@ static int part_optimize(LLVMModuleRef m, LLVMTargetMachineRef tm, const char *p
 	if (strncmp(pipeline, prefix, strlen(prefix)) == 0 && strstr(pipeline, "default<O3>") != NULL) {
 		err = LLVMRunPasses(m, "function(mem2reg,div-rem-pairs)", tm, options);
 		if (err == NULL) elisacoreAggregateCopiesToMemcpy(m);
+		if (err == NULL) elisacoreElideArrayRoundTrips(m);
 		if (err == NULL) elisacoreElideScratchPrefixInitializers(m);
 		if (err == NULL) err = LLVMRunPasses(m, pipeline + strlen(prefix), tm, options);
 	} else {

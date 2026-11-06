@@ -71,6 +71,7 @@ static char *elisacoreRunOptimizationPipeline(
 		const char *mem2regPipeline = "function(mem2reg,div-rem-pairs)";
 		Err = LLVMRunPasses(Module, mem2regPipeline, TargetMachine, Options);
 		if (Err == NULL) elisacoreAggregateCopiesToMemcpy(Module);
+		if (Err == NULL) elisacoreElideArrayRoundTrips(Module);
 		if (Err == NULL) elisacoreElideScratchPrefixInitializers(Module);
 		if (Err == NULL) Err = LLVMRunPasses(Module, PassPipeline + strlen(prefix), TargetMachine, Options);
 	} else {

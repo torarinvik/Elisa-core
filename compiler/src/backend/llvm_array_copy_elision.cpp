@@ -12,6 +12,7 @@
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/Dominators.h>
+#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/IntrinsicInst.h>
 #include <llvm/IR/Module.h>
@@ -174,6 +175,84 @@ static bool ACE_Try(Instruction *U, const DataLayout &DL, DominatorTree &DT) {
   U->eraseFromParent();
   return true;
 }
+// U = copy of T where T is never used again: U can simply take over T's storage.
+// Every path from the copy must avoid T's other uses and must not re-run the copy.
+// If T's life ends on a path (lifetime end or free), U must not be used after it.
+static bool ACE_TryForward(Instruction *U, const DataLayout &DL, DominatorTree &DT) {
+  auto Size = ACE_Size(U, DL);
+  if (!Size) return false;
+  SmallVector<Instruction *, 16> UUses, TUses;
+  if (!ACE_Users(U, UUses)) return false;
+  MemCpyInst *Copy = nullptr;
+  for (Instruction *I : UUses)
+    if (auto *M = dyn_cast<MemCpyInst>(I)) {
+      if (M->getRawDest() != U || Copy) return false;
+      Copy = M;
+    } else if (isa<MemTransferInst>(I)) {
+      return false;
+    }
+  if (!Copy || Copy->isVolatile()) return false;
+  auto *T = dyn_cast<Instruction>(Copy->getRawSource());
+  auto *N = dyn_cast<ConstantInt>(Copy->getLength());
+  if (!T || T == U || !N || N->getZExtValue() != *Size || isa<AllocaInst>(T) != isa<AllocaInst>(U)) return false;
+  if (auto *TA = dyn_cast<AllocaInst>(T))
+    if (TA->getAlign() < cast<AllocaInst>(U)->getAlign()) return false;
+  auto TSize = ACE_Size(T, DL);
+  if (!TSize || *TSize != *Size || !DT.dominates(T, Copy) || !ACE_Users(T, TUses)) return false;
+  SmallPtrSet<Instruction *, 32> USet, TSet;
+  for (Instruction *I : UUses)
+    if (I != Copy) USet.insert(I);
+  for (Instruction *I : TUses)
+    if (I != Copy) TSet.insert(I);
+  SmallVector<std::pair<Instruction *, bool>, 16> Work{{Copy->getNextNode(), false}};
+  DenseSet<std::pair<BasicBlock *, unsigned>> Seen;
+  SmallPtrSet<Instruction *, 32> Visited;
+  while (!Work.empty()) {
+    auto [Start, Ended] = Work.pop_back_val();
+    for (Instruction *I = Start; I; I = I->getNextNode()) {
+      if (I == Copy) return false;
+      if (TSet.contains(I)) {
+        if (!ACE_Marker(I)) return false;
+        Ended = true;
+      }
+      if (USet.contains(I) && !ACE_Marker(I)) {
+        if (Ended) return false;
+        Visited.insert(I);
+      }
+      if (!I->isTerminator()) continue;
+      if (isa<UnreachableInst>(I) || isa<ReturnInst>(I)) break;
+      if (!isa<CondBrInst>(I) && !isa<UncondBrInst>(I) && !isa<SwitchInst>(I)) return false;
+      for (BasicBlock *S : successors(I->getParent()))
+        if (Seen.insert({S, (unsigned)Ended}).second) Work.push_back({&S->front(), Ended});
+    }
+  }
+  SmallVector<Instruction *, 4> Markers;
+  for (Instruction *I : USet) {
+    if (ACE_Marker(I)) Markers.push_back(I);
+    else if (!Visited.contains(I) || !DT.dominates(Copy, I)) return false;
+  }
+  for (Instruction *I : Markers) I->eraseFromParent();
+  Copy->eraseFromParent();
+  U->replaceAllUsesWith(T);
+  U->eraseFromParent();
+  return true;
+}
+// Frontends emit small copies as libcalls; only the intrinsic is analyzable here.
+static void ACE_PromoteLibcalls(Function &F) {
+  SmallVector<CallInst *, 8> Calls;
+  for (BasicBlock &BB : F)
+    for (Instruction &I : BB)
+      if (auto *C = dyn_cast<CallInst>(&I))
+        if (Function *Callee = C->getCalledFunction())
+          if (Callee->getName() == "memcpy" && C->arg_size() == 3 && C->use_empty() &&
+              isa<ConstantInt>(C->getArgOperand(2)) && !C->hasOperandBundles())
+            Calls.push_back(C);
+  for (CallInst *C : Calls) {
+    IRBuilder<> B(C);
+    B.CreateMemCpy(C->getArgOperand(0), Align(1), C->getArgOperand(1), Align(1), C->getArgOperand(2));
+    C->eraseFromParent();
+  }
+}
 }
 extern "C" unsigned elisacoreElideArrayRoundTrips(LLVMModuleRef Ref) {
   if (!Ref) return 0;
@@ -181,13 +260,25 @@ extern "C" unsigned elisacoreElideArrayRoundTrips(LLVMModuleRef Ref) {
   unsigned Changed = 0;
   for (Function &F : M) {
     if (F.isDeclaration() || F.hasOptNone()) continue;
+    ACE_PromoteLibcalls(F);
     SmallVector<Instruction *, 8> Blocks;
     for (Instruction &I : F.getEntryBlock())
       if (ACE_Size(&I, M.getDataLayout())) Blocks.push_back(&I);
     if (Blocks.size() < 2) continue;
     DominatorTree DT(F);
-    for (Instruction *B : Blocks)
-      if (ACE_Try(B, M.getDataLayout(), DT)) ++Changed;
+    // Eliding an inner round trip can expose the enclosing one.
+    SmallPtrSet<Instruction *, 8> Erased;
+    for (unsigned Round = 0; Round < 4; ++Round) {
+      bool Any = false;
+      for (Instruction *B : Blocks)
+        if (!Erased.contains(B) &&
+            (ACE_Try(B, M.getDataLayout(), DT) || ACE_TryForward(B, M.getDataLayout(), DT))) {
+          Erased.insert(B);
+          Any = true;
+          ++Changed;
+        }
+      if (!Any) break;
+    }
   }
   return Changed;
 }
