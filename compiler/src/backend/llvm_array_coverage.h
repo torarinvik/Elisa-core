@@ -277,5 +277,8 @@ static unsigned prepareCoveredArrayInitializers(Module &M,
     if (changed)
       FAM.invalidate(*F, PreservedAnalyses::none());
   }
+  if (removed)
+    M.getOrInsertNamedMetadata("elisa.covered-array-revisit")
+        ->addOperand(MDNode::get(M.getContext(), {}));
   return removed;
 }

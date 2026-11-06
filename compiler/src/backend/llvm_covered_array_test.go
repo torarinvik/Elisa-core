@@ -3,6 +3,7 @@
 package backend
 
 import (
+	"fmt"
 	"os"
 	"runtime"
 	"strings"
@@ -63,5 +64,96 @@ func TestCoveredArrayInitialization(t *testing.T) {
 				t.Fatalf("second pass removed %d additional clears", n)
 			}
 		})
+	}
+}
+
+func TestCoveredArrayRevisitMarkerIsConsumed(t *testing.T) {
+	if runtime.GOARCH != "arm64" || !scratchPrefixSupported() {
+		t.Skip("LLVM 23 AArch64 optimization")
+	}
+	data, err := os.ReadFile("testdata/covered_array_nested.ll")
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := parseLLVMIRForSplitHalfTest(string(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.dispose()
+	if n := elideScratchPrefixInitializers(g.module); n != 2 {
+		t.Fatalf("removed %d clears; want 2", n)
+	}
+	if !strings.Contains(g.printModule(), "!elisa.covered-array-revisit") {
+		t.Fatal("missing revisit marker")
+	}
+	unrollGuardedReductionsForTest(g.module)
+	if strings.Contains(g.printModule(), "!elisa.covered-array-revisit") {
+		t.Fatal("revisit marker leaked")
+	}
+	if err := g.verify(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCoveredArrayRevisitAfterReduction(t *testing.T) {
+	if runtime.GOARCH != "arm64" || !scratchPrefixSupported() {
+		t.Skip("LLVM 23 AArch64 optimization")
+	}
+	data, err := os.ReadFile("testdata/covered_array_nested.ll")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ir := string(data) + "\n" + strings.TrimPrefix(guardedReductionIR, "target triple = \"arm64-apple-darwin\"\n")
+	g, err := parseLLVMIRForSplitHalfTest(ir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.dispose()
+	if n := elideScratchPrefixInitializers(g.module); n != 2 {
+		t.Fatalf("removed %d clears; want 2", n)
+	}
+	if n := unrollGuardedReductionsForTest(g.module); n != 1 {
+		t.Fatalf("unrolled %d reductions; want 1", n)
+	}
+	if strings.Contains(g.printModule(), "!elisa.covered-array-revisit") {
+		t.Fatal("revisit marker leaked")
+	}
+	if err := g.verify(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCoveredArrayRevisitSkipsLargeModule(t *testing.T) {
+	if runtime.GOARCH != "arm64" || !scratchPrefixSupported() {
+		t.Skip("LLVM 23 AArch64 optimization")
+	}
+	data, err := os.ReadFile("testdata/covered_array_nested.ll")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ir := string(data) + "\n" + strings.TrimPrefix(guardedReductionIR, "target triple = \"arm64-apple-darwin\"\n")
+	for i := 0; i < 33; i++ {
+		ir += fmt.Sprintf("\ndefine internal void @unused_sentinel_%d() { ret void }\n", i)
+	}
+	g, err := parseLLVMIRForSplitHalfTest(ir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.dispose()
+	if n := elideScratchPrefixInitializers(g.module); n != 2 {
+		t.Fatalf("removed %d clears; want 2", n)
+	}
+	if n := unrollGuardedReductionsForTest(g.module); n != 1 {
+		t.Fatalf("unrolled %d reductions; want 1", n)
+	}
+	got := g.printModule()
+	if strings.Contains(got, "!elisa.covered-array-revisit") {
+		t.Fatal("revisit marker leaked")
+	}
+	if !strings.Contains(got, "@unused_sentinel_0") {
+		t.Fatal("unexpected full optimization of large module")
+	}
+	if err := g.verify(); err != nil {
+		t.Fatal(err)
 	}
 }
