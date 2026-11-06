@@ -9,12 +9,16 @@
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Constants.h>
+#include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/Dominators.h>
+#include <llvm/Analysis/LoopInfo.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/IntrinsicInst.h>
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Support/CBindingWrapping.h>
 #include <llvm/Target/TargetMachine.h>
 #include <llvm/Transforms/Utils/Cloning.h>
+#include <llvm/Transforms/Utils/BasicBlockUtils.h>
 using namespace llvm;
 static bool recursiveInlineCandidate(Function &F) {
   if (!F.hasLocalLinkage() || F.isDeclaration() || F.isVarArg() ||
@@ -131,6 +135,98 @@ static unsigned specializeRecursiveLiteralCalls(Module &M) {
   }
   return Changed;
 }
+
+// Version one loop-invariant call when a recursive helper has a direct
+// zero-argument return. The cloned zero path is inlined, so normal LLVM
+// cleanup can discard work that is unobservable to that caller. Freeze the
+// guarded operand and use the same value in the unspecialized call.
+static unsigned versionRecursiveZeroCall(Module &M) {
+  for (Function &F : M) {
+    if (!F.hasLocalLinkage() || F.isDeclaration() || F.isVarArg() ||
+        F.hasAddressTaken() || F.hasPersonalityFn() || F.hasOptNone() ||
+        F.hasOptSize() || F.hasMinSize() || F.hasFnAttribute(Attribute::NoInline) ||
+        F.hasFnAttribute(Attribute::Convergent) ||
+        F.hasFnAttribute(Attribute::NoDuplicate) ||
+        F.hasFnAttribute(Attribute::ReturnsTwice) ||
+        F.hasFnAttribute(Attribute::SanitizeAddress) ||
+        F.hasFnAttribute(Attribute::SanitizeMemory) ||
+        F.hasFnAttribute(Attribute::SanitizeThread) ||
+        F.hasFnAttribute(Attribute::SanitizeHWAddress) ||
+        !F.hasFnAttribute("elisa.literal-specialized") ||
+        F.hasFnAttribute("elisa.zero-versioned") ||
+        F.getInstructionCount() > 256) continue;
+    for (BasicBlock &BB : F) {
+      auto *Br = dyn_cast<CondBrInst>(BB.getTerminator());
+      auto *Cmp = Br ? dyn_cast<ICmpInst>(Br->getCondition()) : nullptr;
+      if (!Cmp || Cmp->getPredicate() != ICmpInst::ICMP_EQ) continue;
+      auto *Arg = dyn_cast<Argument>(Cmp->getOperand(0));
+      auto *Zero = dyn_cast<ConstantInt>(Cmp->getOperand(1));
+      if (!Arg || Arg->getParent() != &F || !Zero || !Zero->isZero()) continue;
+      BasicBlock *Return = Br->getSuccessor(0);
+      auto *Ret = dyn_cast<ReturnInst>(Return->getTerminator());
+      auto *Phi = Ret ? dyn_cast_or_null<PHINode>(Ret->getReturnValue()) : nullptr;
+      int Incoming = Phi ? Phi->getBasicBlockIndex(&BB) : -1;
+      auto *Result = Incoming >= 0 ? dyn_cast<ConstantInt>(Phi->getIncomingValue(Incoming)) : nullptr;
+      if (!Result || !Result->isZero()) continue;
+      SmallVector<CallInst *, 4> Roots;
+      for (User *U : F.users()) {
+        auto *Call = dyn_cast<CallInst>(U);
+        if (!Call || Call->getCalledFunction() != &F || Call->getFunction() == &F ||
+            Call->isMustTailCall() || Call->isConvergent() || Call->cannotDuplicate() ||
+            Call->hasFnAttr(Attribute::ReturnsTwice) || Call->hasOperandBundles() ||
+            !Call->getType()->isIntegerTy() || isa<Constant>(Call->getArgOperand(Arg->getArgNo()))) continue;
+        Function *Caller = Call->getFunction();
+        if (Caller->hasPersonalityFn() || Caller->hasOptNone() || Caller->hasOptSize() || Caller->hasMinSize() ||
+            Caller->hasFnAttribute(Attribute::SanitizeAddress) ||
+            Caller->hasFnAttribute(Attribute::SanitizeMemory) ||
+            Caller->hasFnAttribute(Attribute::SanitizeThread) ||
+            Caller->hasFnAttribute(Attribute::SanitizeHWAddress)) continue;
+        DominatorTree DT(*Caller);
+        LoopInfo LI(DT);
+        Loop *L = LI.getLoopFor(Call->getParent());
+        if (L && L->isLoopInvariant(Call->getArgOperand(Arg->getArgNo()))) Roots.push_back(Call);
+      }
+      if (Roots.size() != 1) continue;
+      CallInst *Root = Roots.front();
+      ValueToValueMapTy Map;
+      Function *Clone = CloneFunction(&F, Map);
+      Clone->setName(F.getName() + ".zero_version");
+      Clone->getArg(Arg->getArgNo())->replaceAllUsesWith(Zero);
+      for (Instruction &I : instructions(Clone))
+        if (auto *Call = dyn_cast<CallInst>(&I); Call && Call->getCalledFunction() == Clone)
+          Call->setCalledFunction(&F);
+      if (!isInlineViable(*Clone).isSuccess()) {
+        Clone->eraseFromParent();
+        continue;
+      }
+      IRBuilder<> B(Root);
+      Value *Stable = B.CreateFreeze(Root->getArgOperand(Arg->getArgNo()), "zero.version.value");
+      Value *Condition = B.CreateICmpEQ(Stable, Zero);
+      Root->setArgOperand(Arg->getArgNo(), Stable);
+      Instruction *ThenTerm = nullptr, *ElseTerm = nullptr;
+      SplitBlockAndInsertIfThenElse(Condition, Root, &ThenTerm, &ElseTerm);
+      auto *Fast = cast<CallInst>(Root->clone());
+      Fast->setCalledFunction(Clone);
+      Fast->setArgOperand(Arg->getArgNo(), Zero);
+      Fast->setTailCallKind(CallInst::TCK_None);
+      Fast->insertBefore(ThenTerm->getIterator());
+      auto *Slow = cast<CallInst>(Root->clone());
+      Slow->setTailCallKind(CallInst::TCK_None);
+      Slow->insertBefore(ElseTerm->getIterator());
+      auto *ResultPhi = PHINode::Create(Root->getType(), 2, "zero.version.result", Root->getIterator());
+      ResultPhi->addIncoming(Fast, ThenTerm->getParent());
+      ResultPhi->addIncoming(Slow, ElseTerm->getParent());
+      Root->replaceAllUsesWith(ResultPhi);
+      Root->eraseFromParent();
+      InlineFunctionInfo IFI;
+      (void)InlineFunction(*Fast, IFI);
+      if (Clone->use_empty()) Clone->eraseFromParent();
+      F.addFnAttr("elisa.zero-versioned");
+      return 1;
+    }
+  }
+  return 0;
+}
 extern "C" unsigned
 elisacoreInlineSmallRecursiveFunctions(LLVMModuleRef Ref,
                                        LLVMTargetMachineRef TMRef) {
@@ -198,6 +294,10 @@ elisacoreInlineSmallRecursiveFunctions(LLVMModuleRef Ref,
   PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
   auto Cleanup = PB.buildPerModuleDefaultPipeline(OptimizationLevel::O3);
   Cleanup.run(M, MAM);
+  if (versionRecursiveZeroCall(M)) {
+    ModulePassManager SecondCleanup = PB.buildPerModuleDefaultPipeline(OptimizationLevel::O3);
+    SecondCleanup.run(M, MAM);
+  }
   return 1;
 }
 #else
