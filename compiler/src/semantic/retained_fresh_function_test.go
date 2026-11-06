@@ -189,3 +189,19 @@ func TestRetainedFreshFunctionSurvivesDiskAndLaterEdits(t *testing.T) {
 		assertRetainedCanonicalLiveResultParity(t, cold, warm)
 	}
 }
+
+func TestRetainedBodyEditNamingUniqueScalarStruct(t *testing.T) {
+	enableRetainedFastPrepareForTest(t)
+	const base = "struct Id:\n    value: u32\n\nstruct Holder:\n    items: darray[u32] = []\n\ndef first(v: i64) -> i64:\n    return v\n"
+	_, state := AnalyzeRetained(retainedParse(t, base), retainedParse(t, base), []byte(base), AnalyzeOptions{})
+	source := strings.Replace(base, "    return v\n", "    probe: Id = Id{value: 1}\n    return v\n", 1)
+	retainedLineShiftLazyUpdate(t, state, source, 0)
+	next := source + "\nconst LATER_CONST: i64 = 4\n"
+	if _, err := state.Update(retainedParse(t, next), retainedParse(t, next), []byte(next)); err != nil {
+		t.Fatalf("later scratch comparison: %v", err)
+	}
+
+	_, state = AnalyzeRetained(retainedParse(t, base), retainedParse(t, base), []byte(base), AnalyzeOptions{})
+	declined := strings.Replace(base, "    return v\n", "    probe: Holder = Holder{}\n    return v\n", 1)
+	retainedLineShiftLazyUpdate(t, state, declined, 1)
+}

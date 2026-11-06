@@ -445,7 +445,7 @@ func (r *RetainedAnalysis) fastPathBodies(a *Analyzer, edits [][3]*ast.FuncDecl,
 			}
 			uncertified := false
 			err = visitResolvedTypeNameSyntax(edit.Body, func(key string, expr ast.TypeExpr) {
-				if !oldKeys[key] && !a.typeNameIsUnshadowedBuiltin(edit, scoped[live], expr) {
+				if !oldKeys[key] && !a.typeNameIsUnshadowedBuiltin(edit, scoped[live], expr) && !a.typeNameIsUniqueScalarStruct(edit, scoped[live], expr) {
 					uncertified = true
 				}
 			})
@@ -594,4 +594,40 @@ func (a *Analyzer) typeNameIsUnshadowedBuiltin(fn *ast.FuncDecl, scoped scopedDe
 		}
 	}
 	return true
+}
+
+// typeNameIsUniqueScalarStruct admits a bare name that exactly one declared type
+// in the program can mean, whatever the function's namespace and usings: a plain
+// struct of builtin scalars. Such a type has no regions, storage, ownership or
+// generic instantiation, so naming it gives no declaration pass a new input, and
+// the local-fact digest still compares what those passes derive. Body analysis
+// resolves the name itself, including any visibility error.
+func (a *Analyzer) typeNameIsUniqueScalarStruct(fn *ast.FuncDecl, scoped scopedDecl, expr ast.TypeExpr) bool {
+	named, ok := expr.(*ast.NamedType)
+	if !ok || named == nil || named.Region != "" || named.Spelling != "" || strings.ContainsAny(named.Name, ".:") {
+		return false
+	}
+	if _, plain := scoped.Decl.(*ast.FuncDecl); !plain || len(fn.TypeParams)+len(fn.GenericParams) != 0 {
+		return false
+	}
+	var found Type
+	for name, typ := range a.namedTypes {
+		if name == named.Name || strings.HasSuffix(name, "."+named.Name) || strings.HasSuffix(name, "::"+named.Name) {
+			if found != nil {
+				return false
+			}
+			found = typ
+		}
+	}
+	st, ok := found.(*StructType)
+	if !ok || len(st.TypeParams)+len(st.RegionParams)+len(st.GenericParams)+len(st.NamedStateCases)+len(st.DerivedStates) != 0 || st.RegionOwner != "" || st.Affine || st.AppendOnly || st.Resource || st.DropHook != "" || st.ProtocolStates {
+		return false
+	}
+	for _, field := range st.Fields {
+		builtin, isBuiltin := field.Type.(*BuiltinType)
+		if !isBuiltin || !plainDefaultBuiltinName(builtin.Name) {
+			return false
+		}
+	}
+	return len(st.Fields) != 0
 }
