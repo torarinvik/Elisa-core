@@ -91,6 +91,7 @@ unsigned elisacoreUnrollGuardedReductions(LLVMModuleRef Module);
 unsigned elisacoreCsscAbsoluteRangeChecks(LLVMModuleRef Module, LLVMTargetMachineRef Target);
 unsigned elisacoreShouldRevisitNestedVectors(LLVMModuleRef Module);
 unsigned elisacoreOptimizeOrderedConversions(LLVMModuleRef Module, LLVMTargetMachineRef Target);
+unsigned elisacoreElideArrayRoundTrips(LLVMModuleRef Module);
 unsigned elisacoreInlineSmallRecursiveFunctions(LLVMModuleRef Module, LLVMTargetMachineRef Target);
 unsigned elisacoreUnrollNestedScans(LLVMModuleRef Module);
 unsigned elisacoreInlineSmallRecursion(LLVMModuleRef Module);
@@ -417,6 +418,7 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 		if specializeShortTrips(g) == 2 {
 			return fmt.Errorf("short-trip specialization cleanup failed")
 		}
+		C.elisacoreElideArrayRoundTrips(g.module)
 		C.elisacoreExpandSmallZeroFills(g.module)
 		if packPrivateBoolArrays(g) == 2 {
 			return fmt.Errorf("private Boolean array packing cleanup failed")

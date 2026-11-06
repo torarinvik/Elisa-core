@@ -440,6 +440,7 @@ static int part_optimize(LLVMModuleRef m, LLVMTargetMachineRef tm, const char *p
 		*error = strdup("short-trip specialization cleanup failed");
 		return 0;
 	}
+	if (err == NULL && strstr(pipeline, "O3") != NULL) elisacoreElideArrayRoundTrips(m);
 	if (err == NULL && strstr(pipeline, "O3") != NULL) elisacoreExpandSmallZeroFills(m);
 	if (err == NULL && strstr(pipeline, "O3") != NULL && elisacorePackPrivateBoolArrays(m, tm) == 2) {
 		LLVMDisposePassBuilderOptions(options);
