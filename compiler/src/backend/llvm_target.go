@@ -87,6 +87,7 @@ unsigned elisacoreForwardZeroedLoads(LLVMModuleRef Module);
 unsigned elisacoreInferConstantTableRanges(LLVMModuleRef Module);
 int elisacoreTableUnrollSupported(void);
 unsigned elisacorePeelSmallValidationLoops(LLVMModuleRef Module);
+unsigned elisacoreUnrollGuardedReductions(LLVMModuleRef Module);
 unsigned elisacoreCsscAbsoluteRangeChecks(LLVMModuleRef Module, LLVMTargetMachineRef Target);
 unsigned elisacoreShouldRevisitNestedVectors(LLVMModuleRef Module);
 unsigned elisacoreOptimizeOrderedConversions(LLVMModuleRef Module, LLVMTargetMachineRef Target);
@@ -449,6 +450,7 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 		biasValidationReturns(g)
 		C.elisacoreCsscAbsoluteRangeChecks(g.module, g.targetMachine)
 		C.elisacoreInlineSmallRecursiveFunctions(g.module, g.targetMachine)
+		C.elisacoreUnrollGuardedReductions(g.module)
 	}
 	if err := g.verify(); err != nil {
 		return fmt.Errorf("optimized LLVM module failed verification: %w", err)
@@ -771,6 +773,10 @@ func ResolveTargetIdentity(requestedTriple string) (TargetIdentity, error) {
 
 func unrollNestedScans(module C.LLVMModuleRef) int {
 	return int(C.elisacoreUnrollNestedScans(module))
+}
+
+func unrollGuardedReductionsForTest(module C.LLVMModuleRef) int {
+	return int(C.elisacoreUnrollGuardedReductions(module))
 }
 
 func peelSmallValidationLoops(module C.LLVMModuleRef) int {
