@@ -70,6 +70,7 @@ static char *elisacoreRunOptimizationPipeline(
 	    strstr(PassPipeline, "default<O3>") != NULL) {
 		const char *mem2regPipeline = "function(mem2reg,div-rem-pairs)";
 		Err = LLVMRunPasses(Module, mem2regPipeline, TargetMachine, Options);
+		if (Err == NULL) elisacoreAggregateCopiesToMemcpy(Module);
 		if (Err == NULL) elisacoreElideScratchPrefixInitializers(Module);
 		if (Err == NULL) Err = LLVMRunPasses(Module, PassPipeline + strlen(prefix), TargetMachine, Options);
 	} else {
@@ -92,6 +93,7 @@ unsigned elisacoreCsscAbsoluteRangeChecks(LLVMModuleRef Module, LLVMTargetMachin
 unsigned elisacoreShouldRevisitNestedVectors(LLVMModuleRef Module);
 unsigned elisacoreOptimizeOrderedConversions(LLVMModuleRef Module, LLVMTargetMachineRef Target);
 unsigned elisacoreElideArrayRoundTrips(LLVMModuleRef Module);
+unsigned elisacoreAggregateCopiesToMemcpy(LLVMModuleRef Module);
 unsigned elisacoreInlineSmallRecursiveFunctions(LLVMModuleRef Module, LLVMTargetMachineRef Target);
 unsigned elisacoreUnrollNestedScans(LLVMModuleRef Module);
 unsigned elisacoreInlineSmallRecursion(LLVMModuleRef Module);
