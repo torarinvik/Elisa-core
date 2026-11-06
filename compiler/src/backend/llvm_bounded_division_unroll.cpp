@@ -25,7 +25,7 @@
 using namespace llvm;
 
 namespace {
-constexpr unsigned BDU_MaxTrips = 16;
+constexpr unsigned BDU_MaxTrips = 11;
 constexpr unsigned BDU_MaxFunctionInstructions = 800;
 constexpr unsigned BDU_MaxLoopInstructions = 64;
 constexpr unsigned BDU_MaxGrowthInstructions = 256;
