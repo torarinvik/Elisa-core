@@ -11,6 +11,7 @@
 #include <llvm/ADT/DenseSet.h>
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/SmallVector.h>
+#include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/Dominators.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
@@ -251,6 +252,20 @@ static void ACE_PromoteLibcalls(Function &F) {
     IRBuilder<> B(C);
     B.CreateMemCpy(C->getArgOperand(0), Align(1), C->getArgOperand(1), Align(1), C->getArgOperand(2));
     C->eraseFromParent();
+  }
+  // Stage1 copies arrays with memmove; distinct allocas cannot overlap.
+  SmallVector<MemMoveInst *, 8> Moves;
+  for (BasicBlock &BB : F)
+    for (Instruction &I : BB)
+      if (auto *M = dyn_cast<MemMoveInst>(&I)) {
+        auto *D = dyn_cast<AllocaInst>(getUnderlyingObject(M->getRawDest()));
+        auto *S = dyn_cast<AllocaInst>(getUnderlyingObject(M->getRawSource()));
+        if (D && S && D != S && !M->isVolatile()) Moves.push_back(M);
+      }
+  for (MemMoveInst *M : Moves) {
+    IRBuilder<> B(M);
+    B.CreateMemCpy(M->getRawDest(), M->getDestAlign(), M->getRawSource(), M->getSourceAlign(), M->getLength());
+    M->eraseFromParent();
   }
 }
 }
