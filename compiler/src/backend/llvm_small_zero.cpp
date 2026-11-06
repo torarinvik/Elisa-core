@@ -160,14 +160,18 @@ static unsigned unrollGuardedReductions(Module &M) {
 static unsigned unrollGuardedReductions(Module &) { return 0; }
 #endif
 
+#if LLVM_VERSION_MAJOR >= 23
+#include "llvm_guarded_divisor.h"
+#endif
+
 // Revisit only small modules in which both array-coverage and short-reduction
 // rewrites fired. The bounded second O3 run exposes cleanup opportunities
 // created after the original pipeline; large modules keep their compile budget.
-static void revisitCoveredArrays(Module &M, bool unrolled) {
+static bool revisitCoveredArrays(Module &M, bool unrolled) {
   auto *marker = M.getNamedMetadata("elisa.covered-array-revisit");
-  if (!marker) return;
+  if (!marker) return false;
   marker->eraseFromParent();
-  if (!unrolled) return;
+  if (!unrolled) return false;
   unsigned count = 0, functions = 0;
   for (Function &F : M) {
     if (F.isDeclaration()) continue;
@@ -175,9 +179,9 @@ static void revisitCoveredArrays(Module &M, bool unrolled) {
         F.getSubprogram() || F.hasFnAttribute(Attribute::SanitizeAddress) ||
         F.hasFnAttribute(Attribute::SanitizeMemory) ||
         F.hasFnAttribute(Attribute::SanitizeThread) ||
-        F.hasFnAttribute(Attribute::SanitizeHWAddress)) return;
+        F.hasFnAttribute(Attribute::SanitizeHWAddress)) return false;
     count += F.getInstructionCount();
-    if (count > 5000) return;
+    if (count > 5000) return false;
   }
   PassBuilder PB;
   LoopAnalysisManager LAM; FunctionAnalysisManager FAM;
@@ -187,6 +191,21 @@ static void revisitCoveredArrays(Module &M, bool unrolled) {
   PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
   auto MPM = PB.buildPerModuleDefaultPipeline(OptimizationLevel::O3);
   MPM.run(M, MAM);
+#if LLVM_VERSION_MAJOR >= 23
+  bool versioned = false;
+  for (Function &F : M)
+    if (divisorSpecialize(F)) { versioned = true; break; }
+  if (versioned) {
+    LoopAnalysisManager LAM2; FunctionAnalysisManager FAM2;
+    CGSCCAnalysisManager CGAM2; ModuleAnalysisManager MAM2;
+    PB.registerModuleAnalyses(MAM2); PB.registerCGSCCAnalyses(CGAM2);
+    PB.registerFunctionAnalyses(FAM2); PB.registerLoopAnalyses(LAM2);
+    PB.crossRegisterProxies(LAM2, FAM2, CGAM2, MAM2);
+    auto cleanup = PB.buildPerModuleDefaultPipeline(OptimizationLevel::O3);
+    cleanup.run(M, MAM2);
+  }
+#endif
+  return true;
 }
 
 extern "C" unsigned elisacoreUnrollGuardedReductions(LLVMModuleRef ref) {
