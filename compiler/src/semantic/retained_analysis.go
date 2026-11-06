@@ -937,6 +937,50 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			funcNameUsageIncremental = true // the added owners are entered below
 		}
 	}
+	// Fresh consts and structs, and const value edits: see scopedDeclarationPreBody.
+	valueEditsOnly := len(constPairs) != 0 && len(addedConsts)+len(addedStructs) == 0
+	freshDeclsOnly := len(constPairs) == 0 && len(addedConsts)+len(addedStructs) != 0
+	allConstDecls := true
+	for _, d := range addedConsts {
+		if _, isConst := d.(*ast.ConstDecl); !isConst {
+			allConstDecls = false
+		}
+	}
+	if pre == nil && retainedFastPrepareMode == "on" && (valueEditsOnly || freshDeclsOnly) && allConstDecls && len(added)+len(splices)+len(shadowEdits)+len(removed)+len(removedConsts)+len(removedStructs) == 0 &&
+		len(structPairs)+len(constEnumPairs)+len(enumPairs)+len(hierarchyPairs)+len(replaced)+len(overloadNames)+usingsAdded+usingsRemoved == 0 &&
+		r.fastPrepareInvalidated == "" && (prepared == nil || prepared.lazy != nil) {
+		why := r.fastLineShiftAuthority(a, marks)
+		if why == "" {
+			var addedDecls, edits []ast.Decl
+			for _, d := range addedConsts {
+				addedDecls = append(addedDecls, d)
+			}
+			var structNames []string
+			for _, st := range addedStructs {
+				addedDecls = append(addedDecls, st)
+				namespace := ""
+				if block := memberOf[st]; block != nil && !topLevel[st] {
+					namespace = namespaceOf[block]
+				}
+				structNames = append(structNames, joinQualifiedName(namespace, st.Name))
+			}
+			for _, e := range constPairs {
+				edits = append(edits, e[1])
+			}
+			var subset *ast.File
+			pre, subset, why = r.scopedDeclarationPreBody(a, file, src, newDecls, newSpans, addedDecls, edits, shiftedPreBodyDiagnostics(), retainedGrowth{addedConsts: len(addedConsts), addedStructs: structNames})
+			if why == "" {
+				scratch = subset
+				reportDeclarationImport = false
+				r.LastStats.FastPrepared, r.LastStats.FastAdded = true, true
+				funcNameUsageIncremental = true // the changed owners are entered below
+			}
+		}
+		if why != "" {
+			pre = nil
+			r.LastStats.FastDeclined = why
+		}
+	}
 	if pre != nil {
 		// Prepared above: nothing to wait for.
 	} else if fastBodies != nil {
@@ -1475,7 +1519,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			if current == nil {
 				current = fn
 			}
-			if !contractUsers[fn.Name] && !mentionsCurrent(current, names) && (len(addedStructs)+len(removedStructs) == 0 || !pat.MatchString(spanOf[pairedNew[fn]])) &&
+			if !contractUsers[fn.Name] && !mentionsCurrent(current, names) && (len(addedStructs)+len(removedStructs) == 0 || !retainedNameTextMatch(spanOf[pairedNew[fn]], names, pat)) &&
 				(len(removedTargets) == 0 || !a.retainedUsesTypes(fn, removedTargets, names, map[Type]bool{})) {
 				continue
 			}
@@ -2301,11 +2345,6 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	bodiesStart := time.Now()
 	a.retainedProofsScoped = true
 	r.clearFuncNameUsageUpdateTracking()
-	if r.LastStats.FastAdded {
-		for _, sd := range addedScoped {
-			r.addFuncNameUsageOwner(sd.Decl)
-		}
-	}
 	if funcNameUsageIncremental {
 		// Track every body actually analyzed, including recursive-summary and
 		// return-borrow replay. Args/ResolvedArgs aliases stay inside one call
@@ -2319,6 +2358,17 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		r.funcNameUsageTracking = true
 		r.funcNameUsageOwnerLookup = retainedFuncNameUsageFunctionOwnerMap(r.decls)
 		r.funcNameUsageTouchedOwners = map[ast.Decl]bool{}
+		if r.LastStats.FastAdded {
+			for _, group := range [][]scopedDecl{addedScoped, addedConstScoped, addedStructScoped} {
+				for _, sd := range group {
+					r.addFuncNameUsageOwner(sd.Decl)
+				}
+			}
+			for _, pair := range constLive {
+				r.removeFuncNameUsageOwner(pair[0])
+				r.addFuncNameUsageOwner(pair[1])
+			}
+		}
 	}
 	returnSummariesBefore := r.snapshotReturnBorrowInvalidationSummaries(a)
 	// A re-analyzed body is the same declaration node with a new body: the first analysis's

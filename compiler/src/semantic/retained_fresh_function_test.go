@@ -73,9 +73,21 @@ func TestRetainedFreshFunctionSkipsScratch(t *testing.T) {
 		"shifts later lines": retainedFreshInsert(t, retainedFreshBase, "def first", retainedFreshHelper),
 		"in a module":        retainedFreshInsert(t, retainedFreshBase, "    def inner", indented+"\n"),
 		"mid file":           retainedFreshInsert(t, retainedFreshBase, "def last", retainedFreshHelper),
+		"calls":              retainedFreshInsert(t, retainedFreshBase, "def last", "def fresh_helper(a: i64) -> i64:\n    return first(a)\n\n"),
+		"struct param":       retainedFreshInsert(t, retainedFreshBase, "def last", "def fresh_helper(a: P&) -> i64:\n    return a.a\n\n"),
+		"typed local":        retainedFreshInsert(t, retainedFreshBase, "def last", "def fresh_helper(a: i64) -> i64:\n    b: i64 = a\n    return b\n\n"),
+		"darray param":       retainedFreshInsert(t, retainedFreshBase, "def last", "def fresh_helper(a: darray[u32]&) -> usize:\n    return a.count\n\n"),
+		"grown darray":       retainedFreshInsert(t, retainedFreshBase, "def last", "def fresh_helper(a: mutable darray[u32]&) -> void:\n    a.push(1)\n\n"),
+		"allocating":         retainedFreshInsert(t, retainedFreshBase, "def last", "def fresh_helper() -> darray[u32]:\n    out: darray[u32] = [1, 2]\n    return out\n\n"),
+		"shadowed scalar":    retainedFreshInsert(t, "module N:\n    struct u8:\n        a: bool\n\n"+retainedFreshBase, "def last", "def fresh_helper(a: u8) -> i64:\n    return 1\n\n"),
+		"sview param":        retainedFreshInsert(t, retainedFreshBase, "def last", "def fresh_helper(a: sview) -> sview:\n    return a\n\n"),
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, state := AnalyzeRetained(retainedParse(t, retainedFreshBase), retainedParse(t, retainedFreshBase), []byte(retainedFreshBase), AnalyzeOptions{})
+			base := retainedFreshBase
+			if name == "shadowed scalar" {
+				base = "module N:\n    struct u8:\n        a: bool\n\n" + retainedFreshBase
+			}
+			_, state := AnalyzeRetained(retainedParse(t, base), retainedParse(t, base), []byte(base), AnalyzeOptions{})
 			retainedLineShiftLazyUpdate(t, state, source, 0)
 			if !state.LastStats.FastAdded || state.LastStats.Added != 1 {
 				t.Fatalf("stats=%+v", state.LastStats)
@@ -132,16 +144,11 @@ func TestRetainedFreshFunctionDeclines(t *testing.T) {
 	helper := func(text string) string { return retainedFreshInsert(t, retainedFreshBase, "def first", text+"\n\n") }
 	for name, tc := range map[string]struct{ base, source string }{
 		"appended at end": {retainedFreshBase, retainedFreshBase + "\n" + retainedFreshHelper},
-		"calls":           {retainedFreshBase, helper("def fresh_helper(a: i64) -> i64:\n    return first(a)")},
-		"struct param":    {retainedFreshBase, helper("def fresh_helper(a: P) -> i64:\n    return 1")},
-		"typed local":     {retainedFreshBase, helper("def fresh_helper(a: i64) -> i64:\n    b: i64 = a\n    return b")},
 		"default arg":     {retainedFreshBase, helper("def fresh_helper(a: i64 = 1) -> i64:\n    return a")},
 		"contract":        {retainedFreshBase, helper("def fresh_helper(a: i64) -> i64:\n    requires a > 0\n    return a")},
 		"annotated":       {retainedFreshBase, helper("@inline(always)\ndef fresh_helper(a: i64) -> i64:\n    return a")},
-		"global read":     {retainedFreshBase + "\nconst K: i64 = 1\n", strings.Replace(retainedFreshBase+"\nconst K: i64 = 1\n", "def first", "def fresh_helper(a: i64) -> i64:\n    return K\n\ndef first", 1)},
 		"comment mention": {retainedFreshBase + "# fresh_helper\n", strings.Replace(retainedFreshBase+"# fresh_helper\n", "def first", "def fresh_helper(a: i64) -> i64:\n    return a\n\ndef first", 1)},
 		"unresolved call": {strings.Replace(retainedFreshBase, "return value + 3", "return fresh_helper(value)", 1), strings.Replace(strings.Replace(retainedFreshBase, "return value + 3", "return fresh_helper(value)", 1), "def first", "def fresh_helper(a: i64) -> i64:\n    return a\n\ndef first", 1)},
-		"shadowed scalar": {"struct i64x:\n    a: u8\n\nmodule N:\n    struct u8:\n        a: bool\n\n" + retainedFreshBase, strings.Replace("struct i64x:\n    a: u8\n\nmodule N:\n    struct u8:\n        a: bool\n\n"+retainedFreshBase, "def first", "def fresh_helper(a: u8) -> i64:\n    return 1\n\ndef first", 1)},
 		"plain program":   {"def first(value: i64) -> i64:\n    return value\n", "def fresh_helper(a: i64) -> i64:\n    return a\n\ndef first(value: i64) -> i64:\n    return value\n"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -204,4 +211,27 @@ func TestRetainedBodyEditNamingUniqueScalarStruct(t *testing.T) {
 	_, state = AnalyzeRetained(retainedParse(t, base), retainedParse(t, base), []byte(base), AnalyzeOptions{})
 	declined := strings.Replace(base, "    return v\n", "    probe: Holder = Holder{}\n    return v\n", 1)
 	retainedLineShiftLazyUpdate(t, state, declined, 1)
+}
+
+func TestRetainedScopedDeclarationEdits(t *testing.T) {
+	enableRetainedFastPrepareForTest(t)
+	base := retainedFreshBase + "\nconst LIMIT: i64 = 3\n\ndef uses_limit(v: i64) -> i64:\n    return v + LIMIT\n"
+	for name, source := range map[string]string{
+		"new const":   retainedFreshInsert(t, base, "def last", "const FRESH_CONST: i64 = 9\n\n"),
+		"new struct":  retainedFreshInsert(t, base, "def last", "struct FreshStruct:\n    a: i64\n    b: i64\n\n"),
+		"const value": strings.Replace(base, "LIMIT: i64 = 3", "LIMIT: i64 = 4", 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, state := AnalyzeRetained(retainedParse(t, base), retainedParse(t, base), []byte(base), AnalyzeOptions{})
+			retainedLineShiftLazyUpdate(t, state, source, 0)
+			if !state.LastStats.FastAdded {
+				t.Fatalf("stats=%+v", state.LastStats)
+			}
+			assertFreshBaselineMatchesScratch(t, state, source)
+			next := strings.Replace(source, "return value + 1", "return value + 5", 1)
+			if _, err := state.Update(retainedParse(t, next), retainedParse(t, next), []byte(next)); err != nil {
+				t.Fatalf("later edit: %v", err)
+			}
+		})
+	}
 }

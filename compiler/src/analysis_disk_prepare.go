@@ -235,11 +235,11 @@ func analysisDiskLikelyBodyEditSources(before, after []byte) bool {
 			return false
 		}
 		trimmed := bytes.TrimSpace(line)
-		if !analysisDiskTriviaLine(trimmed) && (!analysisDiskIndented(line) || analysisDiskContractClause(trimmed)) {
+		if !analysisDiskTriviaLine(trimmed) && !bytes.HasPrefix(trimmed, []byte("const ")) && (!analysisDiskIndented(line) || analysisDiskContractClause(trimmed)) {
 			return false
 		}
 	}
-	// A lone inserted helper with no calls may be admitted without the scratch.
+	// A lone inserted helper may be admitted without the scratch.
 	insertion := beforeCount-prefix-suffix == 0
 	helperIndent := -1
 	for remaining := afterCount - prefix - suffix; remaining > 0; remaining-- {
@@ -253,17 +253,17 @@ func analysisDiskLikelyBodyEditSources(before, after []byte) bool {
 		}
 		indent := len(line) - len(bytes.TrimLeft(line, " \t"))
 		if helperIndent >= 0 {
-			if indent <= helperIndent || bytes.ContainsAny(trimmed, "([{@") || analysisDiskContractClause(trimmed) {
+			if indent <= helperIndent || analysisDiskContractClause(trimmed) {
 				return false
 			}
 			continue
 		}
-		if insertion && bytes.HasPrefix(trimmed, []byte("def ")) {
+		if insertion && (bytes.HasPrefix(trimmed, []byte("def ")) || bytes.HasPrefix(trimmed, []byte("struct "))) {
 			helperIndent = indent
 			continue
 		}
 		insertion = false
-		if !analysisDiskIndented(line) || analysisDiskContractClause(trimmed) {
+		if !bytes.HasPrefix(trimmed, []byte("const ")) && (!analysisDiskIndented(line) || analysisDiskContractClause(trimmed)) {
 			return false
 		}
 	}

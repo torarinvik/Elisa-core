@@ -138,19 +138,37 @@ func (r *RetainedAnalysis) replaceFuncNameUsageOwner(decl ast.Decl) bool {
 	return true
 }
 
-// addFuncNameUsageOwner enters a new declaration with no names yet; replacing it
-// after its body analysis records them. An index that is not ready, or that
-// already knows the owner, is left for the owner check to rebuild.
+// addFuncNameUsageOwner enters a new declaration with no names yet and marks it
+// touched, so the post phase scans it. An index that is not ready, or that already
+// knows the owner, is left for the owner check to rebuild.
 func (r *RetainedAnalysis) addFuncNameUsageOwner(decl ast.Decl) {
-	fn, isFunction := decl.(*ast.FuncDecl)
-	if !r.funcNameUsageReady || !isFunction || fn == nil || r.funcNameUsageOwnerCounts[decl] != 0 {
+	if !r.funcNameUsageReady || decl == nil || r.funcNameUsageOwnerCounts[decl] != 0 {
 		return
 	}
 	r.funcNameUsageOwnerCounts[decl] = 1
 	r.funcNameUsageContributions[decl] = map[string]bool{}
-	r.funcNameUsageFunctionOwners[decl] = fn.Name
-	r.funcNameUsageFunctionCounts[fn.Name]++
+	if fn, isFunction := decl.(*ast.FuncDecl); isFunction && fn != nil {
+		r.funcNameUsageFunctionOwners[decl] = fn.Name
+		r.funcNameUsageFunctionCounts[fn.Name]++
+	}
 	r.funcNameUsageOwnerTotal++
+	if r.funcNameUsageTouchedOwners != nil {
+		r.funcNameUsageTouchedOwners[decl] = true
+	}
+}
+
+// removeFuncNameUsageOwner drops a replaced non-function declaration's names.
+func (r *RetainedAnalysis) removeFuncNameUsageOwner(decl ast.Decl) {
+	weight := r.funcNameUsageOwnerCounts[decl]
+	if !r.funcNameUsageReady || weight != 1 {
+		return
+	}
+	for name := range r.funcNameUsageContributions[decl] {
+		adjustUsageCount(r.funcNameUsageValueCounts, name, -weight)
+	}
+	delete(r.funcNameUsageContributions, decl)
+	delete(r.funcNameUsageOwnerCounts, decl)
+	r.funcNameUsageOwnerTotal--
 }
 
 // funcNameUsageForPost consumes the precise retained update plan installed by
