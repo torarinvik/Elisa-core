@@ -163,7 +163,7 @@ extern "C" unsigned elisacoreInferConstantTableRanges(LLVMModuleRef moduleRef) {
     PB.registerLoopAnalyses(LAM);
     PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
     FunctionPassManager FPM;
-    if (auto error = PB.parsePassPipeline(FPM, "instcombine,simplifycfg")) {
+    if (auto error = PB.parsePassPipeline(FPM, "instcombine<no-verify-fixpoint>,simplifycfg")) {
       consumeError(std::move(error));
       return changed;
     }

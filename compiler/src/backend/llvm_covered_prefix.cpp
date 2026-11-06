@@ -116,7 +116,7 @@ static unsigned prepareCoveredPrefixZeros(Module &M, FunctionAnalysisManager &FA
  if(Candidates.empty()||Candidates.size()>32)return 0;
  auto Cleanup=PB.buildFunctionSimplificationPipeline(OptimizationLevel::O1,ThinOrFullLTOPhase::None);
  FunctionPassManager Idiom;
- if(auto E=PB.parsePassPipeline(Idiom,"loop(loop-idiom),instcombine,simplifycfg")){consumeError(std::move(E));return 0;}
+ if(auto E=PB.parsePassPipeline(Idiom,"loop(loop-idiom),instcombine<no-verify-fixpoint>,simplifycfg")){consumeError(std::move(E));return 0;}
  for(Function *F:Candidates){Cleanup.run(*F,FAM);Idiom.run(*F,FAM);}
  return removeCoveredPrefixZeros(M,FAM);
 }

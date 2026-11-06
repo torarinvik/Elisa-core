@@ -298,7 +298,7 @@ extern "C" unsigned elisacoreUnrollBoundedDivisionLoops(LLVMModuleRef) { return 
 extern "C" unsigned elisacoreOptimizeBoundedDivisionLoops(LLVMModuleRef M, LLVMTargetMachineRef T) {
   if (!elisacoreUnrollBoundedDivisionLoops(M)) return 0;
   auto Options = LLVMCreatePassBuilderOptions();
-  auto Error = LLVMRunPasses(M, "function(instcombine,simplifycfg)", T, Options);
+  auto Error = LLVMRunPasses(M, "function(instcombine<no-verify-fixpoint>,simplifycfg)", T, Options);
   LLVMDisposePassBuilderOptions(Options);
   if (Error) { LLVMConsumeError(Error); return 2; }
   return 1;

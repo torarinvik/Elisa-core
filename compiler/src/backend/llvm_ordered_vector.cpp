@@ -381,7 +381,7 @@ elisacoreOptimizeOrderedConversions(LLVMModuleRef ref,
   // The single-function and instruction caps bound this work for compiler
   // builds.
   auto options = LLVMCreatePassBuilderOptions();
-  auto error = LLVMRunPasses(ref, "function(instcombine)", target, options);
+  auto error = LLVMRunPasses(ref, "function(instcombine<no-verify-fixpoint>)", target, options);
   LLVMDisposePassBuilderOptions(options);
   if (error) {
     LLVMConsumeError(error);

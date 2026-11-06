@@ -115,7 +115,7 @@ extern "C" unsigned elisacoreSpecializeShortTrips(LLVMModuleRef ref, LLVMTargetM
     One->setComdat(nullptr);
     FunctionPassManager simplify;
     if (auto error = PB.parsePassPipeline(simplify,
-        "sroa,instcombine<max-iterations=8>,simplifycfg,early-cse,loop-simplify,lcssa,loop-unroll,sroa,early-cse,gvn,instcombine<max-iterations=8>,simplifycfg,dse,adce,simplifycfg")) {
+        "sroa,instcombine<max-iterations=8;no-verify-fixpoint>,simplifycfg,early-cse,loop-simplify,lcssa,loop-unroll,sroa,early-cse,gvn,instcombine<max-iterations=8;no-verify-fixpoint>,simplifycfg,dse,adce,simplifycfg")) {
       consumeError(std::move(error)); One->eraseFromParent(); return 2;
     }
     simplify.run(*One, FAM);

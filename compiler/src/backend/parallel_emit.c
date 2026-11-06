@@ -457,7 +457,7 @@ static int part_optimize(LLVMModuleRef m, LLVMTargetMachineRef tm, const char *p
 		return 0;
 	}
 	if (err == NULL && strstr(pipeline, "O3") != NULL && elisacoreSpecializeValidationEpilogues(m))
-		err = LLVMRunPasses(m, "function(instcombine,simplifycfg)", tm, options);
+		err = LLVMRunPasses(m, "function(instcombine<no-verify-fixpoint>,simplifycfg)", tm, options);
 	if (err == NULL && strstr(pipeline, "O3") != NULL) elisacoreCompactEvenRanges(m);
 	if (err == NULL && strstr(pipeline, "O3") != NULL) elisacoreCsscAbsoluteRangeChecks(m, tm);
 	if (err == NULL && strstr(pipeline, "O3") != NULL) elisacoreInlineSmallRecursiveFunctions(m, tm);

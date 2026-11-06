@@ -164,7 +164,7 @@ extern "C" unsigned elisacoreValidatedIndexBounds(LLVMModuleRef) { return 0; }
 extern "C" unsigned elisacoreOptimizeIndexBounds(LLVMModuleRef M, LLVMTargetMachineRef T) {
   if (!elisacoreValidatedIndexBounds(M)) return 0;
   auto Options=LLVMCreatePassBuilderOptions();
-  auto Error=LLVMRunPasses(M,"function(instcombine<max-iterations=8>,simplifycfg)",T,Options);
+  auto Error=LLVMRunPasses(M,"function(instcombine<max-iterations=8;no-verify-fixpoint>,simplifycfg)",T,Options);
   LLVMDisposePassBuilderOptions(Options);
   if(Error){LLVMConsumeError(Error);return 2;}return 1;
 }

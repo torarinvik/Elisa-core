@@ -169,7 +169,7 @@ extern "C" unsigned elisacorePackPrivateBoolArrays(LLVMModuleRef ref, LLVMTarget
   }
   if (!changed) return 0;
   auto options = LLVMCreatePassBuilderOptions();
-  auto error = LLVMRunPasses(ref, "function(sroa,instcombine<max-iterations=8>,simplifycfg)", target, options);
+  auto error = LLVMRunPasses(ref, "function(sroa,instcombine<max-iterations=8;no-verify-fixpoint>,simplifycfg)", target, options);
   LLVMDisposePassBuilderOptions(options);
   if (error) { LLVMConsumeError(error); return 2; }
   return 1;

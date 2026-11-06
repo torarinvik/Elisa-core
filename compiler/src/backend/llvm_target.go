@@ -445,7 +445,7 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 			return fmt.Errorf("ordered conversion cleanup failed")
 		}
 		if C.elisacoreSpecializeValidationEpilogues(g.module) != 0 {
-			cleanup := cString("function(instcombine,simplifycfg)")
+			cleanup := cString("function(instcombine<no-verify-fixpoint>,simplifycfg)")
 			defer C.free(unsafe.Pointer(cleanup))
 			if message := C.elisacoreRunOptimizationPipeline(g.module, g.targetMachine, cleanup, aaPipeline, C.int(optimizationInlinerThreshold(optLevel)), debugLogging); message != nil {
 				return fmt.Errorf("validation epilogue cleanup failed: %s", disposeLLVMErrorMessage(message, "unknown LLVM pass pipeline error"))

@@ -105,7 +105,7 @@ extern "C" unsigned elisacoreFastCheckedMul(LLVMModuleRef ref, LLVMTargetMachine
   }
   if (!changed) return 0;
   auto options = LLVMCreatePassBuilderOptions();
-  auto error = LLVMRunPasses(ref, "function(instcombine,simplifycfg)", target, options);
+  auto error = LLVMRunPasses(ref, "function(instcombine<no-verify-fixpoint>,simplifycfg)", target, options);
   LLVMDisposePassBuilderOptions(options);
   if (error) { LLVMConsumeError(error); return 2; }
   return 1;

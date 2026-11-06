@@ -194,7 +194,7 @@ extern "C" unsigned elisacoreProveSqrtNonNaN(LLVMModuleRef) { return 0; }
 extern "C" unsigned elisacoreOptimizeSqrtNonNaN(LLVMModuleRef M, LLVMTargetMachineRef T) {
   if (!elisacoreProveSqrtNonNaN(M)) return 0;
   auto Options = LLVMCreatePassBuilderOptions();
-  auto Error = LLVMRunPasses(M, "function(aggressive-instcombine,instcombine<max-iterations=8>,simplifycfg)", T, Options);
+  auto Error = LLVMRunPasses(M, "function(aggressive-instcombine,instcombine<max-iterations=8;no-verify-fixpoint>,simplifycfg)", T, Options);
   LLVMDisposePassBuilderOptions(Options);
   if (Error) { LLVMConsumeError(Error); return 2; }
   return 1;

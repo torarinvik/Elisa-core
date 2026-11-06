@@ -443,7 +443,7 @@ bool run(Function &F, TargetMachine *TM) {
   PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
   FunctionPassManager FPM;
   if (auto err = PB.parsePassPipeline(
-          FPM, "simplifycfg,loop-unroll,instcombine,simplifycfg")) {
+          FPM, "simplifycfg,loop-unroll,instcombine<no-verify-fixpoint>,simplifycfg")) {
     consumeError(std::move(err));
     return false;
   }
