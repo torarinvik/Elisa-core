@@ -308,6 +308,13 @@ func (lines *analysisDiskReverseLines) next() ([]byte, bool) {
 // phase, so prepare the independent scratch eagerly when their text changes.
 // Protocol methods also permit changes and preserves clauses in their block.
 func analysisDiskContractClause(line []byte) bool {
+	// Declaration keywords inside a module or impl block are indented too. They
+	// need the scratch phase, so start it alongside the restore.
+	for _, keyword := range []string{"def ", "struct ", "enum ", "const ", "type ", "global ", "impl ", "module ", "extend "} {
+		if bytes.HasPrefix(line, []byte(keyword)) {
+			return true
+		}
+	}
 	for _, keyword := range [...]string{"requires", "ensure", "decreases", "uses", "changes", "preserves", "fulfills"} {
 		if !bytes.HasPrefix(line, []byte(keyword)) {
 			continue
