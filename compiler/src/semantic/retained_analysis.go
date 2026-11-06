@@ -866,7 +866,9 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	// cannot change them, so a location-only update replaces just the owners it
 	// touched instead of rescanning the whole program.
 	funcNameUsageIncremental := fastBodyEnvironmentUnchanged && len(movedSplices) == 0
-	if retainedFastPrepareMode == "on" && len(shadowEdits) != 0 && len(shadowEdits) == len(splices) && fastBodyEnvironmentUnchanged {
+	// Zero edits is a comment or blank-line change: the same certificate holds,
+	// with only the line movement left to authorize.
+	if retainedFastPrepareMode == "on" && len(shadowEdits) == len(splices) && fastBodyEnvironmentUnchanged {
 		var why string
 		if !bodyEnvironmentUnchanged {
 			why = r.fastLineShiftAuthority(a, marks)

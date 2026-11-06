@@ -127,7 +127,7 @@ func analysisDiskLikelyBodyEditSourcesSplitReference(before, after []byte) bool 
 	for _, lines := range [][][]byte{beforeLines, afterLines} {
 		for _, line := range lines {
 			trimmed := bytes.TrimSpace(line)
-			if len(trimmed) != 0 && (!analysisDiskIndented(line) || analysisDiskContractClause(trimmed)) {
+			if !analysisDiskTriviaLine(trimmed) && (!analysisDiskIndented(line) || analysisDiskContractClause(trimmed)) {
 				return false
 			}
 		}

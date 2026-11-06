@@ -235,7 +235,7 @@ func analysisDiskLikelyBodyEditSources(before, after []byte) bool {
 			return false
 		}
 		trimmed := bytes.TrimSpace(line)
-		if len(trimmed) != 0 && (!analysisDiskIndented(line) || analysisDiskContractClause(trimmed)) {
+		if !analysisDiskTriviaLine(trimmed) && (!analysisDiskIndented(line) || analysisDiskContractClause(trimmed)) {
 			return false
 		}
 	}
@@ -245,11 +245,17 @@ func analysisDiskLikelyBodyEditSources(before, after []byte) bool {
 			return false
 		}
 		trimmed := bytes.TrimSpace(line)
-		if len(trimmed) != 0 && (!analysisDiskIndented(line) || analysisDiskContractClause(trimmed)) {
+		if !analysisDiskTriviaLine(trimmed) && (!analysisDiskIndented(line) || analysisDiskContractClause(trimmed)) {
 			return false
 		}
 	}
 	return true
+}
+
+// A blank line or comment changes no declaration, so even at column zero it is
+// worth trying the fast path. Directives such as #include and #line do not qualify.
+func analysisDiskTriviaLine(trimmed []byte) bool {
+	return len(trimmed) == 0 || bytes.Equal(trimmed, []byte("#")) || bytes.HasPrefix(trimmed, []byte("# "))
 }
 
 type analysisDiskForwardLines struct {
