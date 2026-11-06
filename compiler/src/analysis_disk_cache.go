@@ -313,6 +313,10 @@ func analysisDiskRebaselineAfter() time.Duration {
 	return 5 * time.Second
 }
 
+// analysisRelocateMarkerSuffix names the sidecar asking the next replay to keep
+// proof-report coordinates current so its state can be published.
+const analysisRelocateMarkerSuffix = ".relocate"
+
 func debugAnalysisDisk(stderr io.Writer, format string, args ...any) {
 	if os.Getenv("ELISACORE_ANALYSIS_CACHE_DEBUG") == "1" {
 		fmt.Fprintf(stderr, "[analysis-disk] "+format+"\n", args...)
@@ -369,6 +373,11 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 					} else {
 						debugAnalysisDisk(stderr, "prepared scratch in=%v", preparation.elapsed.Round(time.Millisecond))
 					}
+					// Without --explain nothing reads the report's coordinates in a
+					// replay. A slow replay that must rebaseline leaves a marker so
+					// the next process relocates and can publish its state.
+					_, relocateMarked := os.Stat(artifact.path + analysisRelocateMarkerSuffix)
+					state.DeferProofReportCoordinates = !program.proofReportRequested && relocateMarked != nil
 					updateStart := time.Now()
 					result, err = state.UpdatePrepared(file, preparation.file, program.source, preparation.prepared)
 					if err == nil {
@@ -435,6 +444,11 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 	if rebaseline {
 		debugAnalysisDisk(stderr, "replay took %v; rebaseline", replayElapsed.Round(time.Millisecond))
 	}
+	if rebaseline && state != nil && state.ProofCoordinatesDeferred() {
+		debugAnalysisDisk(stderr, "rebaseline deferred to the next build: proof coordinates not relocated")
+		_ = os.WriteFile(artifact.path+analysisRelocateMarkerSuffix, nil, 0o644)
+		rebaseline = false
+	}
 	if state != nil && !unchanged && (!replayed || rebaseline) {
 		saveStart := time.Now()
 		data, err := state.MarshalState()
@@ -455,6 +469,7 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 			_ = os.Remove(building.path)
 			_ = os.Remove(building.path + ".slow")
 			_ = os.Remove(building.path + ".replay-declined")
+			_ = os.Remove(artifact.path + analysisRelocateMarkerSuffix)
 			if err := artifact.publishBaselineSource(program.source); err != nil {
 				debugAnalysisDisk(stderr, "baseline source not stored: %v", err)
 			}

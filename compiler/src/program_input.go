@@ -27,6 +27,7 @@ func isSurfaceSourcePath(path string) bool {
 }
 
 type loadedProgram struct {
+	proofReportRequested  bool // --explain will print the proof report
 	objectCacheIneligible bool
 	tokenCache            *sourceTokenCache
 	filename              string

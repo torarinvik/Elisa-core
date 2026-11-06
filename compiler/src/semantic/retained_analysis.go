@@ -46,9 +46,15 @@ type RetainedAnalysis struct {
 	funcNameUsageTouchedOwners  map[ast.Decl]bool
 	funcNameUsageUnknownTouched bool
 
-	indexProofsUpdating bool                                      // invocation-local: invalidate before ordinary function reanalysis
-	indexProofsByFunc   map[*ast.FuncDecl]map[*ast.IndexExpr]bool // reverse ownership, only during Update
-	indexProofsByDecl   map[ast.Node]map[*ast.IndexExpr]bool
+	// DeferProofReportCoordinates lets one Update skip source relocation of the
+	// proof report when this process will neither print that report nor persist
+	// this state. Facts stay contribution-correct but carry pre-edit coordinates,
+	// so a state that skipped relocation refuses publication and further updates.
+	DeferProofReportCoordinates bool
+	proofCoordinatesDeferred    bool
+	indexProofsUpdating         bool                                      // invocation-local: invalidate before ordinary function reanalysis
+	indexProofsByFunc           map[*ast.FuncDecl]map[*ast.IndexExpr]bool // reverse ownership, only during Update
+	indexProofsByDecl           map[ast.Node]map[*ast.IndexExpr]bool
 	// classify is the full analysis's program-wide classification state (fast preparation).
 	classify   *retainedClassifyState
 	appendOnly *retainedAppendOnlyState
@@ -313,6 +319,10 @@ func PrepareRetainedScratch(scratch *ast.File, options AnalyzeOptions) *Retained
 // UpdatePrepared is Update with an optional prepared scratch phase; it is used
 // only when it was prepared from scratch itself.
 func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, prepared *RetainedScratch) (*Result, error) {
+	if r.proofCoordinatesDeferred {
+		r.LastStats = RetainedUpdateStats{Fallback: "proof report coordinates were deferred; retry with a full analysis"}
+		return nil, fmt.Errorf("%s", r.LastStats.Fallback)
+	}
 	r.indexProofsUpdating = true
 	r.indexProofsByFunc = map[*ast.FuncDecl]map[*ast.IndexExpr]bool{}
 	if r.a != nil {
@@ -818,7 +828,9 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 				reportLocationsChanged = true
 			}
 		}
-		if reportLocationsChanged && len(r.a.proofReport) != 0 {
+		if reportLocationsChanged && len(r.a.proofReport) != 0 && r.DeferProofReportCoordinates {
+			r.proofCoordinatesDeferred = true
+		} else if reportLocationsChanged && len(r.a.proofReport) != 0 {
 			var why string
 			relocateProofReport, why = r.prepareProofReportCoordinates(file, marks)
 			if why != "" {
@@ -850,6 +862,10 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		len(structPairs)+len(constPairs)+len(constEnumPairs)+len(enumPairs)+len(hierarchyPairs) == 0 &&
 		len(replaced)+len(insertedBefore)+len(overloadNames)+len(appendedInto) == 0 &&
 		usingsAdded+usingsRemoved == 0 && !appendedTop
+	// The function-name usage index holds identifier names only. Line movement
+	// cannot change them, so a location-only update replaces just the owners it
+	// touched instead of rescanning the whole program.
+	funcNameUsageIncremental := fastBodyEnvironmentUnchanged && len(movedSplices) == 0
 	if retainedFastPrepareMode == "on" && len(shadowEdits) != 0 && len(shadowEdits) == len(splices) && fastBodyEnvironmentUnchanged {
 		var why string
 		if !bodyEnvironmentUnchanged {
@@ -2241,7 +2257,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	bodiesStart := time.Now()
 	a.retainedProofsScoped = true
 	r.clearFuncNameUsageUpdateTracking()
-	if bodyEnvironmentUnchanged {
+	if funcNameUsageIncremental {
 		// Track every body actually analyzed, including recursive-summary and
 		// return-borrow replay. Args/ResolvedArgs aliases stay inside one call
 		// owner and are deduplicated within that owner's scan. Default argument
@@ -2293,9 +2309,9 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	r.rbUpdating = true
 	postStart := time.Now()
 	r.funcNameUsagePending = true
-	r.funcNameUsageRebuild = !bodyEnvironmentUnchanged
+	r.funcNameUsageRebuild = !funcNameUsageIncremental
 	r.funcNameUsageChangedOwners = nil
-	if bodyEnvironmentUnchanged {
+	if funcNameUsageIncremental {
 		owners := map[ast.Decl]bool{}
 		for owner := range r.funcNameUsageTouchedOwners {
 			owners[owner] = true
@@ -2473,6 +2489,9 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		return fail("proof report authority: %s", a.proofLifecycle.Unknown)
 	}
 	r.result.ProofReport = append([]ProofFact(nil), a.proofReport...)
+	if r.proofCoordinatesDeferred {
+		r.result.ProofReport = nil
+	}
 	r.result.ElisionSummary = a.currentElisionSummary()
 	r.result.Diagnostics = publishedResultDiagnostics(a.diagnostics)
 	r.result.SMTProfile = a.smtStats
@@ -3215,3 +3234,7 @@ func (r *RetainedAnalysis) fastLineShiftAuthority(a *Analyzer, marks map[string]
 	}
 	return ""
 }
+
+// ProofCoordinatesDeferred reports that the last update skipped proof-report
+// source relocation, so this state cannot be persisted.
+func (r *RetainedAnalysis) ProofCoordinatesDeferred() bool { return r.proofCoordinatesDeferred }

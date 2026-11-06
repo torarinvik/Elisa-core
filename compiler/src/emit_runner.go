@@ -247,6 +247,7 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 		return 0
 	}
 
+	program.proofReportRequested = options.explainProofs
 	_, result, ok := analyzeLoadedProgramWithOptions(program, stderr, semanticOptionsForCLI(options))
 	if !ok {
 		return 1

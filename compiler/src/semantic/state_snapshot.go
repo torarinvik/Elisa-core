@@ -35,6 +35,9 @@ func (r *RetainedAnalysis) MarshalState() ([]byte, error) {
 	if r == nil || r.a == nil || r.result == nil || r.rbUpdating || r.indexProofsUpdating || r.indexProofsByFunc != nil || r.indexProofsByDecl != nil || r.depth != 0 || r.hasFuncNameUsageTransientState() {
 		return nil, fmt.Errorf("analysis is not idle")
 	}
+	if r.proofCoordinatesDeferred {
+		return nil, fmt.Errorf("proof report coordinates were deferred")
+	}
 	if r.plainDefaults != nil && (r.plainDefaults.Updating || r.plainDefaults.Poisoned) {
 		return nil, fmt.Errorf("default contribution transaction is active or poisoned")
 	}

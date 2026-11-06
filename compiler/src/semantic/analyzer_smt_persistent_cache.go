@@ -153,14 +153,8 @@ func newSMTProofCache(directory, binary string) *smtProofCache {
 	if err != nil {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	var version smtProofVersionOutput
-	command := exec.CommandContext(ctx, solver, "--version")
-	command.WaitDelay = 500 * time.Millisecond
-	command.Stdout = &version
-	command.Stderr = io.Discard
-	if command.Run() != nil {
+	version, ok := smtProofSolverVersion(solver)
+	if !ok {
 		return nil
 	}
 	proofHash := compilerHash
@@ -170,9 +164,47 @@ func newSMTProofCache(directory, binary string) *smtProofCache {
 		}
 	}
 	settings := fmt.Sprintf("rlimit=%d\x00timeout=120000\x00mbqi=true\x00models=true", smtResourceLimit())
-	identity := fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s", smtProofCacheSchema, compilerHash, solverHash, version.String(), runtime.GOOS, runtime.GOARCH, settings)
-	proofIdentity := fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s", smtProofCacheSchema, proofHash, solverHash, version.String(), runtime.GOOS, runtime.GOARCH, settings)
+	identity := fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s", smtProofCacheSchema, compilerHash, solverHash, version, runtime.GOOS, runtime.GOARCH, settings)
+	proofIdentity := fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s", smtProofCacheSchema, proofHash, solverHash, version, runtime.GOOS, runtime.GOARCH, settings)
 	return &smtProofCache{directory: directory, identity: identity, proofIdentity: proofIdentity}
+}
+
+// Every specialization that reaches the proof cache builds one of these, so the
+// solver's version is remembered per file. A replaced solver has a new file
+// identity or timestamp, which keeps a long-lived server's namespace current.
+var (
+	smtProofSolverVersionMu   sync.Mutex
+	smtProofSolverVersionMemo = map[string]smtProofSolverVersionEntry{}
+)
+
+type smtProofSolverVersionEntry struct {
+	info    os.FileInfo
+	version string
+}
+
+func smtProofSolverVersion(solver string) (string, bool) {
+	info, err := os.Stat(solver)
+	if err != nil {
+		return "", false
+	}
+	smtProofSolverVersionMu.Lock()
+	defer smtProofSolverVersionMu.Unlock()
+	if entry, ok := smtProofSolverVersionMemo[solver]; ok && os.SameFile(entry.info, info) && entry.info.Size() == info.Size() && entry.info.ModTime().Equal(info.ModTime()) {
+		return entry.version, true
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	var version smtProofVersionOutput
+	command := exec.CommandContext(ctx, solver, "--version")
+	command.WaitDelay = 500 * time.Millisecond
+	command.Stdout = &version
+	command.Stderr = io.Discard
+	if command.Run() != nil {
+		return "", false
+	}
+	text := version.String()
+	smtProofSolverVersionMemo[solver] = smtProofSolverVersionEntry{info: info, version: text}
+	return text, true
 }
 
 func (c *smtProofCache) key(query string) string {
