@@ -8,6 +8,7 @@
 #include <llvm/Analysis/InlineCost.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Module.h>
+#include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/IntrinsicInst.h>
 #include <llvm/Passes/PassBuilder.h>
@@ -50,6 +51,86 @@ static bool recursiveInlineCandidate(Function &F) {
   }
   return Calls == 2;
 }
+// Specialize one literal integer argument of a private recursive function.
+// Recursive calls whose argument changes continue to use the original body.
+static unsigned specializeRecursiveLiteralCalls(Module &M) {
+  SmallVector<Function *, 8> Work;
+  for (Function &F : M) {
+    if (!F.hasLocalLinkage() || F.isDeclaration() || F.isVarArg() ||
+        F.hasAddressTaken() || F.hasPersonalityFn() || F.hasOptNone() ||
+        F.hasOptSize() || F.hasMinSize() || F.hasFnAttribute(Attribute::NoInline) ||
+        F.hasFnAttribute(Attribute::Convergent) ||
+        F.hasFnAttribute(Attribute::NoDuplicate) ||
+        F.hasFnAttribute(Attribute::ReturnsTwice) ||
+        F.hasFnAttribute("elisa.literal-specialized") ||
+        F.hasFnAttribute(Attribute::SanitizeAddress) ||
+        F.hasFnAttribute(Attribute::SanitizeMemory) ||
+        F.hasFnAttribute(Attribute::SanitizeThread) ||
+        F.hasFnAttribute(Attribute::SanitizeHWAddress) ||
+        F.getInstructionCount() < 40 || F.getInstructionCount() > 256)
+      continue;
+    unsigned Recursive = 0;
+    bool Safe = true;
+    for (Instruction &I : instructions(F)) {
+      if (isa<InvokeInst>(I) || isa<CallBrInst>(I) || isa<IndirectBrInst>(I)) {
+        Safe = false;
+        break;
+      }
+      if (auto *C = dyn_cast<CallBase>(&I))
+        if (C->isInlineAsm() || C->isConvergent() || C->cannotDuplicate() ||
+            C->hasFnAttr(Attribute::ReturnsTwice) || C->hasOperandBundles()) {
+          Safe = false;
+          break;
+        }
+    }
+    if (!Safe) continue;
+    for (User *U : F.users()) {
+      auto *Call = dyn_cast<CallInst>(U);
+      if (!Call || Call->getCalledFunction() != &F || Call->isMustTailCall() ||
+          Call->isConvergent() || Call->hasOperandBundles()) { Safe = false; break; }
+      if (Call->getFunction() == &F) ++Recursive;
+    }
+    if (Safe && Recursive && Recursive <= 4) Work.push_back(&F);
+  }
+  if (Work.size() > 16) return 0;
+  unsigned Changed = 0, Growth = 0;
+  for (Function *F : Work) {
+    if (Growth + F->getInstructionCount() > 2048) continue;
+    for (unsigned Index = 0; Index < F->arg_size(); ++Index) {
+      Argument *Arg = F->getArg(Index);
+      if (!Arg->getType()->isIntegerTy() || Arg->getNumUses() < 2) continue;
+      SmallVector<CallInst *, 4> Roots;
+      ConstantInt *Literal = nullptr;
+      bool Multiple = false;
+      for (User *U : F->users()) {
+        auto *Call = cast<CallInst>(U);
+        if (Call->getFunction() == F) continue;
+        auto *C = dyn_cast<ConstantInt>(Call->getArgOperand(Index));
+        if (!C) continue;
+        if (Literal && C != Literal) { Multiple = true; break; }
+        Literal = C; Roots.push_back(Call);
+      }
+      if (!Literal || Multiple || Roots.empty() || Roots.size() > 16) continue;
+      ValueToValueMapTy Map;
+      Function *Clone = CloneFunction(F, Map);
+      Clone->setName(F->getName() + ".literal_specialized");
+      Clone->addFnAttr("elisa.literal-specialized");
+      Clone->getArg(Index)->replaceAllUsesWith(Literal);
+      for (Instruction &I : instructions(Clone))
+        if (auto *Call = dyn_cast<CallInst>(&I);
+            Call && (Call->getCalledFunction() == Clone || Call->getCalledFunction() == F)) {
+          auto *C = dyn_cast<ConstantInt>(Call->getArgOperand(Index));
+          Call->setCalledFunction(C == Literal ? Clone : F);
+        }
+      for (CallInst *Call : Roots) Call->setCalledFunction(Clone);
+      F->addFnAttr("elisa.literal-specialized");
+      Growth += F->getInstructionCount();
+      ++Changed;
+      break;
+    }
+  }
+  return Changed;
+}
 extern "C" unsigned
 elisacoreInlineSmallRecursiveFunctions(LLVMModuleRef Ref,
                                        LLVMTargetMachineRef TMRef) {
@@ -65,9 +146,9 @@ elisacoreInlineSmallRecursiveFunctions(LLVMModuleRef Ref,
   for (Function &F : M)
     if (recursiveInlineCandidate(F))
       Candidates.push_back(&F);
-  if (Candidates.empty() || Candidates.size() > 16)
-    return 0;
-  unsigned Changed = 0, Growth = 0;
+  if (Candidates.size() > 16) return 0;
+  unsigned Changed = specializeRecursiveLiteralCalls(M), Growth = 0;
+  if (Candidates.empty() && !Changed) return 0;
   for (Function *F : Candidates) {
     for (unsigned Depth = 0; Depth < 2; ++Depth) {
       SmallVector<CallBase *, 8> Calls;
