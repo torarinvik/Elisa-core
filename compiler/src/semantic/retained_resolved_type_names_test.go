@@ -186,6 +186,7 @@ func TestRetainedFastPrepareMatchesShiftedAndAddedBodyTypeSyntax(t *testing.T) {
 	const baseline = `module Sample:
     public:
         type U8Alias = u8
+        type U8Second = u8
 
         struct Box:
             value: i32
@@ -214,9 +215,9 @@ def main() -> i32:
 	// u8 occurs only in other's header; the body-local annotation replaces a
 	// builtin spelling the body never resolved a canonical name for.
 	aliased := strings.Replace(numeric, "            local: u8 = byte", "            local: U8Alias = byte", 1)
-	// After the alias edit, u8 is no longer anywhere in other's source
-	// inventory, so this edit must decline rather than guess a resolution.
-	unknown := strings.Replace(aliased, "            local: U8Alias = byte", "            local: u8 = byte", 1)
+	// U8Second is nowhere in other's source inventory and is not a builtin, so
+	// this edit must decline rather than guess a resolution.
+	unknown := strings.Replace(aliased, "            local: U8Alias = byte", "            local: U8Second = byte", 1)
 	if shifted == baseline || numeric == shifted || aliased == numeric || unknown == aliased {
 		t.Fatal("fixture edits did not apply")
 	}
@@ -491,4 +492,27 @@ module Second:
 		t.Fatal("unchanged second body lost its declaration-owned refine base")
 	}
 	assertResolvedTypeNameParity(t, updated, AnalyzeWithOptions(retainedParse(t, edited), AnalyzeOptions{}))
+}
+
+func TestUnshadowedBuiltinTypeNameCertificate(t *testing.T) {
+	a := &Analyzer{namedTypes: map[string]Type{"i64": &BuiltinType{Name: "i64"}, "Box": &StructType{}}}
+	plain := &ast.FuncDecl{Name: "f"}
+	scoped := scopedDecl{Decl: plain}
+	builtin := &ast.NamedType{Name: "i64"}
+	if !a.typeNameIsUnshadowedBuiltin(plain, scoped, builtin) {
+		t.Fatal("bare builtin was not certified")
+	}
+	if a.typeNameIsUnshadowedBuiltin(plain, scoped, &ast.NamedType{Name: "Box"}) {
+		t.Fatal("user type was certified")
+	}
+	if a.typeNameIsUnshadowedBuiltin(&ast.FuncDecl{Name: "g", TypeParams: []string{"i64"}}, scoped, builtin) {
+		t.Fatal("generic function was certified")
+	}
+	if a.typeNameIsUnshadowedBuiltin(plain, scopedDecl{Decl: &ast.ImplDecl{}}, builtin) {
+		t.Fatal("impl member was certified")
+	}
+	a.namedTypes["Sample.i64"] = &StructType{}
+	if a.typeNameIsUnshadowedBuiltin(plain, scoped, builtin) {
+		t.Fatal("shadowed builtin was certified")
+	}
 }

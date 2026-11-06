@@ -443,14 +443,17 @@ func (r *RetainedAnalysis) fastPathBodies(a *Analyzer, edits [][3]*ast.FuncDecl,
 			if err != nil {
 				return nil, nil, nil, edit.Name + " changes or cannot certify body type-name syntax"
 			}
-			newKeys, err := resolvedTypeNameSyntaxKeysOf(edit.Body)
+			uncertified := false
+			err = visitResolvedTypeNameSyntax(edit.Body, func(key string, expr ast.TypeExpr) {
+				if !oldKeys[key] && !a.typeNameIsUnshadowedBuiltin(edit, scoped[live], expr) {
+					uncertified = true
+				}
+			})
 			if err != nil {
 				return nil, nil, nil, edit.Name + " cannot inventory prepared body type-name syntax: " + err.Error()
 			}
-			for key := range newKeys {
-				if !oldKeys[key] {
-					return nil, nil, nil, edit.Name + " introduces body type-name syntax outside the function's certified inventory"
-				}
+			if uncertified {
+				return nil, nil, nil, edit.Name + " introduces body type-name syntax outside the function's certified inventory"
 			}
 		}
 		op := old.Pos()
@@ -567,4 +570,28 @@ func (r *RetainedAnalysis) precomputeBaselineDigests() {
 		}
 		r.digestOf[fn] = r.localFactDigest(r.a, cands[0], fn, sd)
 	}
+}
+
+// typeNameIsUnshadowedBuiltin certifies a bare builtin scalar in a plain,
+// non-generic function when no declaration anywhere in the program uses that
+// name. Such a spelling resolves the same way in every scope.
+func (a *Analyzer) typeNameIsUnshadowedBuiltin(fn *ast.FuncDecl, scoped scopedDecl, expr ast.TypeExpr) bool {
+	named, ok := expr.(*ast.NamedType)
+	if !ok || named == nil || named.Region != "" || named.Spelling != "" {
+		return false
+	}
+	if _, plain := scoped.Decl.(*ast.FuncDecl); !plain || len(fn.TypeParams) != 0 {
+		return false
+	}
+	switch a.namedTypes[named.Name].(type) {
+	case *BuiltinType, *BitIntType:
+	default:
+		return false
+	}
+	for name := range a.namedTypes {
+		if strings.HasSuffix(name, "."+named.Name) || strings.HasSuffix(name, "::"+named.Name) {
+			return false
+		}
+	}
+	return true
 }

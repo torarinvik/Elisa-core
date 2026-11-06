@@ -709,6 +709,13 @@ func resolvedTypeNameSyntaxKey(expr ast.TypeExpr) (string, error) {
 // AST value. It is the witness inventory a body edit is matched against.
 func resolvedTypeNameSyntaxKeysOf(value any) (map[string]bool, error) {
 	keys := map[string]bool{}
+	if err := visitResolvedTypeNameSyntax(value, func(key string, _ ast.TypeExpr) { keys[key] = true }); err != nil {
+		return nil, err
+	}
+	return keys, nil
+}
+
+func visitResolvedTypeNameSyntax(value any, visit func(string, ast.TypeExpr)) error {
 	active := map[resolvedTypeNamePointer]bool{}
 	work := 0
 	var walk func(reflect.Value, int) error
@@ -746,7 +753,7 @@ func resolvedTypeNameSyntaxKeysOf(value any) (map[string]bool, error) {
 				if err != nil {
 					return err
 				}
-				keys[key] = true
+				visit(key, expr)
 			}
 			err := walk(value.Elem(), depth+1)
 			delete(active, ptr)
@@ -787,10 +794,7 @@ func resolvedTypeNameSyntaxKeysOf(value any) (map[string]bool, error) {
 		}
 		return nil
 	}
-	if err := walk(reflect.ValueOf(value), 0); err != nil {
-		return nil, err
-	}
-	return keys, nil
+	return walk(reflect.ValueOf(value), 0)
 }
 
 // resolvedTypeNameHeaderSyntaxKeys is the source header half of a function's
