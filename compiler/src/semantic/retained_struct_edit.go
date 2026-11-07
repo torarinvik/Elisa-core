@@ -109,6 +109,9 @@ func (a *Analyzer) clearRetainedTypeMemos() {
 		a.rejectNoStorageOverlayOperation("retained type memo invalidation")
 		return
 	}
+	// This map uses nil to mean "not yet indexed", so clear its header rather
+	// than replacing it with an empty, apparently complete index.
+	a.storeFlowFrozenStructLookup = nil
 	v := reflect.ValueOf(a).Elem()
 	for _, name := range retainedTypeMemos {
 		f := v.FieldByName(name)

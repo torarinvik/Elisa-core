@@ -235,6 +235,7 @@ var specializationOpaqueMapFields = [...]string{
 	"storeFlowBinderIndexes",
 	"storeFlowDarrays",
 	"storeFlowEnv",
+	"storeFlowFrozenStructLookup",
 	"storeFlowInProgress",
 	"storeFlowLocals",
 	"storeFlowNamedTypes",
@@ -978,6 +979,9 @@ func cloneSpecializationOpaqueMap(dst, src *Analyzer, name string, field reflect
 		return true
 	case "storeFlowEnv":
 		dst.storeFlowEnv = maps.Clone(src.storeFlowEnv)
+		return true
+	case "storeFlowFrozenStructLookup":
+		dst.storeFlowFrozenStructLookup = maps.Clone(src.storeFlowFrozenStructLookup)
 		return true
 	case "storeFlowInProgress":
 		dst.storeFlowInProgress = maps.Clone(src.storeFlowInProgress)

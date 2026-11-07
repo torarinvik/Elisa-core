@@ -62,3 +62,28 @@ func TestStoreFlowStructLookupLargeTableIndexesEarly(t *testing.T) {
 		}
 	}
 }
+
+func TestStoreFlowFrozenStructLookupMatchesUncached(t *testing.T) {
+	shared := &StructType{Name: "Shared"}
+	named := map[string]Type{
+		"A.Shared": shared, "B.Shared": shared,
+		"A.Conflict": &StructType{Name: "A"}, "B.Conflict": &StructType{Name: "B"},
+		"A.NonStruct": &BuiltinType{Name: "NonStruct"}, "B.NonStruct": &StructType{Name: "NonStruct"},
+		"A.Nil": (*StructType)(nil), "A.Unique": &StructType{Name: "Unique"},
+	}
+	reference := &Analyzer{namedTypes: named}
+	worker := &Analyzer{namedTypes: named, typeShapesFrozen: true, parallel: &parallelWorkerState{}}
+	for _, name := range []string{"Shared", "Conflict", "NonStruct", "Nil", "Unique", "Missing"} {
+		if got, want := worker.storeFlowStructNamed(name), reference.storeFlowStructNamed(name); got != want {
+			t.Fatalf("%s: got %v want %v", name, got, want)
+		}
+	}
+	if worker.storeFlowFrozenStructLookup == nil {
+		t.Fatal("frozen index was not created")
+	}
+	worker.clearRetainedTypeMemos()
+	delete(named, "A.Unique")
+	if got := worker.storeFlowStructNamed("Unique"); got != nil {
+		t.Fatal("retained edit left stale index")
+	}
+}

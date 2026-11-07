@@ -746,7 +746,7 @@ func cloneSpecializationStoreScanBoolSetCache(dst, src *Analyzer, field string) 
 
 func parallelBodyWorkerRebuildMap(field string) bool {
 	switch field {
-	case "storeScanIndexCache", "storeFlowBinderIndexes", "storeFlowInProgress", "typeParamMemo",
+	case "storeScanIndexCache", "storeFlowBinderIndexes", "storeFlowInProgress", "typeParamMemo", "storeFlowFrozenStructLookup",
 		"storeFlowActive", "regionPointeesMemo":
 		return true
 	default:
@@ -790,7 +790,7 @@ func cloneStoreFlowSummariesForBodyWorker(src map[*ast.FuncDecl]*storeFlowSummar
 // slices, so cloning their outer maps avoids repeating whole-graph walks.
 func parallelBodyWorkerLocalOnlyMap(field string) bool {
 	switch field {
-	case "callEdgeCache", "storeFlowSCC", "storeFlowInProgress", "storeFlowActive", "storageViewCalleeWriteCache", "regionPointeesMemo", "typeParamMemo":
+	case "callEdgeCache", "storeFlowSCC", "storeFlowInProgress", "storeFlowActive", "storageViewCalleeWriteCache", "regionPointeesMemo", "typeParamMemo", "storeFlowFrozenStructLookup":
 		return true
 	// Equation eligibility rests on callees' verified termination, which the exporting
 	// worker may not have known yet. Each worker recomputes it from the termination

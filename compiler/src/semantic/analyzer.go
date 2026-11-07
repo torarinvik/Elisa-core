@@ -522,6 +522,9 @@ type Analyzer struct {
 	// storeFlowStructLookup is scoped to one synchronous summary computation.
 	storeFlowStructLookup         map[string]Type
 	storeFlowStructLookupComplete bool
+	// Parallel body workers use a frozen named-type table, so their complete
+	// unqualified struct index can be reused across summary computations.
+	storeFlowFrozenStructLookup map[string]Type
 	// currentElementBinderLoops are the by-value `for x in xs` loops over an eligible local
 	// container whose binder may take the container's tracked element provenance;
 	// iterBinderElementStates holds that provenance per binder symbol.

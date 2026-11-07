@@ -3022,6 +3022,23 @@ func (a *Analyzer) storeFlowPlaceType(expr ast.Expr) Type {
 // segment matches it is that one struct type; otherwise nil.
 func (a *Analyzer) storeFlowStructNamed(name string) Type {
 	short := fillMayAdoptLastSegment(name)
+	if a.parallel != nil && a.typeShapesFrozen {
+		if a.storeFlowFrozenStructLookup == nil {
+			index := make(map[string]Type, len(a.namedTypes))
+			for qualified, named := range a.namedTypes {
+				key := fillMayAdoptLastSegment(qualified)
+				st, valid := named.(*StructType)
+				prior, seen := index[key]
+				if !valid || st == nil || seen && prior != st {
+					index[key] = nil
+				} else if !seen {
+					index[key] = st
+				}
+			}
+			a.storeFlowFrozenStructLookup = index
+		}
+		return a.storeFlowFrozenStructLookup[short]
+	}
 	if a.storeFlowStructLookup != nil {
 		if cached, ok := a.storeFlowStructLookup[short]; ok {
 			return cached
