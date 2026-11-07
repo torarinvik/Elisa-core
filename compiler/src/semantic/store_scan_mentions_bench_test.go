@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"fmt"
 	"testing"
 )
 
@@ -231,5 +232,42 @@ func BenchmarkStoreScanMatchingNames(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		a, c := idx.mentionsTwo(expr, left, right)
 		storeScanMentionsSink = a && c
+	}
+}
+
+func TestStoreScanCompactMentionTokensMembership(t *testing.T) {
+	tokens := make([]string, 0, 128)
+	for i := 0; i < 64; i++ {
+		tokens = append(tokens, "repeated", fmt.Sprint("name", i%7))
+	}
+	original := append([]string(nil), tokens...)
+	compact := storeScanCompactMentionTokens(tokens)
+	for _, names := range []map[string]bool{nil, {"repeated": true}, {"name3": true}, {"name3": false}, {"absent": true}, {"name1": false, "name6": true}} {
+		if got, want := storeScanTokensHit(compact, names), storeScanTokensHit(original, names); got != want {
+			t.Fatalf("%v: got %v, want %v", names, got, want)
+		}
+	}
+	if len(compact) >= len(original) {
+		t.Fatal("repeated tokens were not compacted")
+	}
+}
+
+func BenchmarkStoreScanRepeatedMentionTokens(b *testing.B) {
+	var tokens []string
+	for i := 0; i < 128; i++ {
+		tokens = append(tokens, "repeated", fmt.Sprint("name", i%7))
+	}
+	compact := storeScanCompactMentionTokens(append([]string(nil), tokens...))
+	names := map[string]bool{"absent": true}
+	for _, tc := range []struct {
+		name   string
+		tokens []string
+	}{{"raw", tokens}, {"compact", compact}} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				storeScanMentionsSink = storeScanTokensHit(tc.tokens, names)
+			}
+		})
 	}
 }

@@ -51,7 +51,7 @@ func (idx *storeScanDeclIndex) mentions(expr ast.Expr, names map[string]bool) bo
 	}
 	tokens, ok := idx.exprTokens[expr]
 	if !ok {
-		tokens = storeScanMentionTokens(expr)
+		tokens = storeScanCompactMentionTokens(storeScanMentionTokens(expr))
 		idx.exprTokens[expr] = tokens
 	}
 	return storeScanTokensHit(tokens, names)
@@ -77,7 +77,7 @@ func (idx *storeScanDeclIndex) mentionsTwo(expr ast.Expr, left, right map[string
 	}
 	tokens, ok := idx.exprTokens[expr]
 	if !ok {
-		tokens = storeScanMentionTokens(expr)
+		tokens = storeScanCompactMentionTokens(storeScanMentionTokens(expr))
 		idx.exprTokens[expr] = tokens
 	}
 	leftHit, rightHit := false, false
@@ -89,6 +89,25 @@ func (idx *storeScanDeclIndex) mentionsTwo(expr ast.Expr, left, right map[string
 		}
 	}
 	return leftHit, rightHit
+}
+
+// Mention queries only test membership. Long expressions often repeat the
+// same identifiers, so keep one copy of each token in their cached index.
+// Avoid an extra map for the overwhelmingly common short expressions.
+func storeScanCompactMentionTokens(tokens []string) []string {
+	if len(tokens) < 32 {
+		return tokens
+	}
+	seen := make(map[string]bool, len(tokens))
+	out := tokens[:0]
+	for _, token := range tokens {
+		if !seen[token] {
+			seen[token] = true
+			out = append(out, token)
+		}
+	}
+	clear(tokens[len(out):])
+	return out
 }
 
 // headerMentions: stmtHeaderMentionsAny(stmt, names), memoized the same way.
