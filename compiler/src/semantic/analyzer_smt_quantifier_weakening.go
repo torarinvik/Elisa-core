@@ -11,6 +11,11 @@ func smtWithoutQuantifiedHypotheses(query, goalAssert string) (string, bool) {
 		return "", false
 	}
 	containsQuantifier := func(command string) bool {
+		// Neither quantifier atom can occur without its spelling. Most commands
+		// are quantifier-free, so avoid tokenizing them at all.
+		if !strings.Contains(command, "forall") && !strings.Contains(command, "exists") {
+			return false
+		}
 		scan := smtAtomScanner{text: command}
 		for atom, present := scan.next(); present; atom, present = scan.next() {
 			if atom == "forall" || atom == "exists" {

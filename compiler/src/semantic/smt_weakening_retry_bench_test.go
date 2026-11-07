@@ -17,3 +17,14 @@ func BenchmarkSMTDefinitiveWeakening(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkSMTWeakeningMixedCommands(b *testing.B) {
+	goal := "(assert (not (>= v_x 0)))"
+	query := "(declare-const v_x Int)\n" + strings.Repeat("(assert (>= v_x 0))\n", 256) + "(assert (forall ((i Int)) (>= i 0)))\n" + goal
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if _, ok := smtWithoutQuantifiedHypotheses(query, goal); !ok {
+			b.Fatal("no weakening")
+		}
+	}
+}
