@@ -31,6 +31,27 @@ func TestStoreFlowBinderLookupPreservesDuplicates(t *testing.T) {
 	wg.Wait()
 }
 
+func TestStoreFlowBinderClassifications(t *testing.T) {
+	idx := &storeFlowBinderIndex{typed: []storeFlowTypedBinder{
+		{name: "xs", t: &ast.BuiltinTypeExpr{Name: "darray"}},
+		{name: "view", t: &ast.BuiltinTypeExpr{Name: "sview"}},
+		{name: "named", t: &ast.NamedType{Name: "Item"}},
+		{name: "shadow", t: &ast.NamedType{Name: "Item"}},
+		{name: "shadow", t: &ast.NamedType{Name: "Other"}},
+	}}
+	wantDarrays := idx.typedNames(storeFlowDarrayTypeExpr)
+	wantViews := idx.typedNames(storeFlowViewTypeExpr)
+	wantValues := idx.typedNames(storeFlowValueNamedTypeExpr)
+	wantNamed := idx.singleNamedTypes()
+	idx.classify()
+	if !reflect.DeepEqual(idx.darrayNames, wantDarrays) || !reflect.DeepEqual(idx.viewNames, wantViews) || !reflect.DeepEqual(idx.valueNamedNames, wantValues) || !reflect.DeepEqual(idx.namedTypes, wantNamed) {
+		t.Fatal("cached classifications differ from the original classifiers")
+	}
+	if _, ok := idx.namedTypes["shadow"]; ok {
+		t.Fatal("conflicting shadowed type was accepted")
+	}
+}
+
 var binderLookupSink int
 
 func BenchmarkStoreFlowBinderLookup(b *testing.B) {
@@ -61,4 +82,29 @@ func BenchmarkStoreFlowBinderLookup(b *testing.B) {
 		}
 		binderLookupSink = count
 	})
+}
+
+func BenchmarkStoreFlowBinderClassifications(b *testing.B) {
+	idx := &storeFlowBinderIndex{}
+	for i := 0; i < 300; i++ {
+		idx.typed = append(idx.typed, storeFlowTypedBinder{name: fmt.Sprintf("var%d", i), t: &ast.NamedType{Name: "Record"}})
+	}
+	idx.classify()
+	for _, cached := range []bool{false, true} {
+		name := "recompute"
+		if cached {
+			name = "reuse"
+		}
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if cached {
+					idx.classify()
+					binderLookupSink = len(idx.namedTypes)
+				} else {
+					binderLookupSink = len(idx.typedNames(storeFlowDarrayTypeExpr)) + len(idx.typedNames(storeFlowViewTypeExpr)) + len(idx.typedNames(storeFlowValueNamedTypeExpr)) + len(idx.singleNamedTypes())
+				}
+			}
+		})
+	}
 }

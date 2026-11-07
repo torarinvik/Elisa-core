@@ -335,16 +335,30 @@ type storeFlowBinderIndex struct {
 	// Callers only read it.
 	allNames map[string]bool
 	// Integer classification is queried per expression; callers only read this set.
-	integerNames     map[string]bool
-	typedByNameOnce  sync.Once
-	typedByName      map[string][]storeFlowTypedBinder
-	rangeNameSetOnce sync.Once
-	rangeNameSet     map[string]bool
+	integerNames                            map[string]bool
+	typedByNameOnce                         sync.Once
+	typedByName                             map[string][]storeFlowTypedBinder
+	rangeNameSetOnce                        sync.Once
+	rangeNameSet                            map[string]bool
+	classificationOnce                      sync.Once
+	darrayNames, viewNames, valueNamedNames map[string]bool
+	namedTypes                              map[string]string
 }
 
 type storeFlowTypedBinder struct {
 	name string
 	t    ast.TypeExpr
+}
+
+// These classifications depend only on the immutable binder index, not on the
+// current convergence pass or callee summaries. Callers treat the maps as read-only.
+func (idx *storeFlowBinderIndex) classify() {
+	idx.classificationOnce.Do(func() {
+		idx.darrayNames = idx.typedNames(storeFlowDarrayTypeExpr)
+		idx.viewNames = idx.typedNames(storeFlowViewTypeExpr)
+		idx.valueNamedNames = idx.typedNames(storeFlowValueNamedTypeExpr)
+		idx.namedTypes = idx.singleNamedTypes()
+	})
 }
 
 // Repeated place queries need only bindings for one name. The index keeps all
@@ -959,16 +973,17 @@ func (a *Analyzer) computeStoreFlow(decl *ast.FuncDecl) *storeFlowSummary {
 		a.storeFlowParams[param.Name] = true
 	}
 	binders := a.storeFlowBinderIndexFor(decl)
+	binders.classify()
 	savedDarrays := a.storeFlowDarrays
-	a.storeFlowDarrays = binders.typedNames(storeFlowDarrayTypeExpr)
+	a.storeFlowDarrays = binders.darrayNames
 	savedLocals := a.storeFlowLocals
 	a.storeFlowLocals = binders.binderNames()
 	defer func() { a.storeFlowLocals = savedLocals }()
 	savedViews := a.storeFlowViews
-	a.storeFlowViews = binders.typedNames(storeFlowViewTypeExpr)
+	a.storeFlowViews = binders.viewNames
 	defer func() { a.storeFlowViews = savedViews }()
 	savedNamed := a.storeFlowNamedTypes
-	a.storeFlowNamedTypes = binders.singleNamedTypes()
+	a.storeFlowNamedTypes = binders.namedTypes
 	defer func() { a.storeFlowNamedTypes = savedNamed }()
 	savedEnv, savedStmtEnv := a.storeFlowEnv, a.storeFlowStmtEnv
 	a.storeFlowEnv, a.storeFlowStmtEnv = nil, map[uintptr]map[string]string{}
@@ -2288,10 +2303,9 @@ func (a *Analyzer) storeFlowWritten(decl *ast.FuncDecl, scalars map[string]bool)
 	}
 	// Rebinding a by-value named local replaces its value; it stores into nothing the local
 	// aliases, so the rebind alone does not make it written.
-	valueLocals := a.storeFlowBinderIndexFor(decl).typedNames(storeFlowValueNamedTypeExpr)
-	for _, param := range decl.Params {
-		delete(valueLocals, param.Name)
-	}
+	binders := a.storeFlowBinderIndexFor(decl)
+	binders.classify()
+	valueLocals := binders.valueNamedNames
 	var groups, elemGroups [][]string
 	grown := map[string]bool{}
 	a.storeFlowNodes2(decl, func(stmt reflect.Value) []reflect.Value {
@@ -2338,7 +2352,7 @@ func (a *Analyzer) storeFlowWritten(decl *ast.FuncDecl, scalars map[string]bool)
 		case *ast.AssignStmt:
 			id, isIdent := returnBorrowStripParens(st.Target).(*ast.Ident)
 			switch {
-			case isIdent && id != nil && !st.WriteThrough && st.AsOverlayCall == nil && valueLocals[id.Name]:
+			case isIdent && id != nil && !st.WriteThrough && st.AsOverlayCall == nil && valueLocals[id.Name] && !a.storeFlowParams[id.Name]:
 			case isIdent && id != nil && !st.WriteThrough && st.AsOverlayCall == nil && storeFlowVariableName(id.Name):
 				// Rebinding a name overwrites its own slot: a header write, like growth. It
 				// reaches the name's aliases but not storage the name's elements point into.
