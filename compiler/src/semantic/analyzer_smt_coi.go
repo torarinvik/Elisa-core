@@ -204,13 +204,37 @@ func smtSliceQueryCommands(exprs []string, goalAssert string, requireQuantifiedD
 	}
 	for i := range cmds {
 		if cmds[i].head == "assert" || cmds[i].head == "define-fun" || cmds[i].head == "define-const" || cmds[i].head == "define-fun-rec" {
-			seen := map[string]bool{}
+			// Most commands mention only a few declared symbols. Scan the
+			// existing small slice and allocate a set only for wider commands.
+			var seen map[string]bool
 			scan := smtAtomScanner{text: cmds[i].text}
 			_, _ = scan.next() // command head is not a referenced symbol
 			for atom, present := scan.next(); present; atom, present = scan.next() {
-				if declared[atom] && !seen[atom] {
+				if !declared[atom] {
+					continue
+				}
+				duplicate := false
+				if seen != nil {
+					duplicate = seen[atom]
+				} else {
+					for _, prior := range cmds[i].syms {
+						if prior == atom {
+							duplicate = true
+							break
+						}
+					}
+				}
+				if duplicate {
+					continue
+				}
+				cmds[i].syms = append(cmds[i].syms, atom)
+				if seen != nil {
 					seen[atom] = true
-					cmds[i].syms = append(cmds[i].syms, atom)
+				} else if len(cmds[i].syms) == 8 {
+					seen = make(map[string]bool, 16)
+					for _, symbol := range cmds[i].syms {
+						seen[symbol] = true
+					}
 				}
 			}
 		}

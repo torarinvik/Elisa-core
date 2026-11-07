@@ -1,11 +1,30 @@
 package semantic
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	"elisacore/src/smt"
 )
+
+func TestSMTConeOfInfluenceWideRepeatedSymbols(t *testing.T) {
+	var query strings.Builder
+	for i := 0; i < 12; i++ {
+		fmt.Fprintf(&query, "(declare-const x%d Int)\n", i)
+	}
+	query.WriteString("(declare-const unrelated Int)\n(assert (= (+")
+	for i := 0; i < 12; i++ {
+		fmt.Fprintf(&query, " x%d", i)
+	}
+	query.WriteString(" x0 x7 x11) 0))\n(assert (> unrelated 0))\n")
+	goal := "(assert (not (> x0 0)))"
+	query.WriteString(goal)
+	sliced, dropped, ok := smtSliceQuery(query.String(), goal)
+	if !ok || !strings.Contains(sliced, "x11") || strings.Contains(sliced, "(assert (> unrelated 0))") || !strings.Contains(dropped, "(assert (> unrelated 0))") {
+		t.Fatalf("wide symbol connectivity lost: ok=%v sliced=%s dropped=%s", ok, sliced, dropped)
+	}
+}
 
 func openCOISolver(t *testing.T, rlimit int64) smt.Solver {
 	t.Helper()
