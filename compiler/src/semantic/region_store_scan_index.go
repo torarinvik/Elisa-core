@@ -199,11 +199,14 @@ func (a *Analyzer) storeScanIndex(decl *ast.FuncDecl) *storeScanDeclIndex {
 	}
 	idx := &storeScanDeclIndex{decls: map[string][]*ast.VarDeclStmt{}, otherBound: map[string]bool{}, nodes: map[string][]any{}, locals: map[string]bool{}, iterBinders: map[string][]*ast.IterForStmt{}, nonIterBinder: map[string]bool{}, exprTokens: map[ast.Expr][]string{}, headerTokens: map[ast.Stmt][]string{}, bound: map[ast.Stmt][]string{}}
 	// Each name's list is in walk order (one append per node), whatever the map order of names.
+	exprNames := make(map[string]bool)
 	addNode := func(node any, names map[string]bool) {
 		for name := range names {
 			idx.nodes[name] = append(idx.nodes[name], node)
 		}
+		clear(names)
 	}
+
 	walkStoreScanNodes(decl.Body, func(node any) {
 		idx.flat = append(idx.flat, node)
 		switch n := node.(type) {
@@ -217,34 +220,27 @@ func (a *Analyzer) storeScanIndex(decl *ast.FuncDecl) *storeScanDeclIndex {
 			}
 			idx.locals[n.Name] = true
 			idx.decls[n.Name] = append(idx.decls[n.Name], n)
-			names := storeScanExprNames(n.Value)
-			names[n.Name] = true
-			addNode(n, names)
+			storeScanAddExprNames(n.Value, exprNames)
+			exprNames[n.Name] = true
+			addNode(n, exprNames)
 		case *ast.AssignStmt:
 			if n == nil {
 				return
 			}
-			names := storeScanExprNames(n.Value)
-			for name := range storeScanExprNames(n.Target) {
-				names[name] = true
-			}
-			addNode(n, names)
+			storeScanAddExprNames(n.Value, exprNames)
+			storeScanAddExprNames(n.Target, exprNames)
+			addNode(n, exprNames)
 		case *ast.CallExpr:
 			if n == nil {
 				return
 			}
-			names := map[string]bool{}
 			if field, isMethod := n.Func.(*ast.FieldExpr); isMethod && field != nil {
-				for name := range storeScanExprNames(field.Object) {
-					names[name] = true
-				}
+				storeScanAddExprNames(field.Object, exprNames)
 			}
 			for _, arg := range n.Args {
-				for name := range storeScanExprNames(arg) {
-					names[name] = true
-				}
+				storeScanAddExprNames(arg, exprNames)
 			}
-			addNode(n, names)
+			addNode(n, exprNames)
 		case ast.Stmt:
 			if n == nil {
 				return
@@ -287,8 +283,18 @@ func (idx *storeScanDeclIndex) bindingWriteCount(body []ast.Stmt, name string) i
 // names; a dotted identifier also mentions its root).
 func storeScanExprNames(expr ast.Expr) map[string]bool {
 	names := map[string]bool{}
+	storeScanAddExprNames(expr, names)
+	return names
+}
+
+func storeScanAddExprNames(expr ast.Expr, names map[string]bool) {
 	if expr == nil {
-		return names
+		return
+	}
+	if name, root, known := storeScanSimpleMentionNames(expr); known {
+		names[name] = true
+		names[root] = true
+		return
 	}
 	seen := map[uintptr]bool{}
 	var rec func(v reflect.Value)
@@ -330,7 +336,6 @@ func storeScanExprNames(expr ast.Expr) map[string]bool {
 		}
 	}
 	rec(reflect.ValueOf(expr))
-	return names
 }
 
 // storeScanHeaderNames: names mentioned by a statement's own expressions, not its nested
@@ -363,9 +368,7 @@ func storeScanHeaderNames(stmt ast.Stmt) map[string]bool {
 				return
 			}
 			if expr, isExpr := v.Interface().(ast.Expr); isExpr {
-				for name := range storeScanExprNames(expr) {
-					names[name] = true
-				}
+				storeScanAddExprNames(expr, names)
 				return
 			}
 			rec(v.Elem())
