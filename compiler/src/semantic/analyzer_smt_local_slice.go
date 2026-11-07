@@ -39,26 +39,23 @@ func sliceImmutableLocalHypotheses(localHyps, context string) string {
 		index[sym] = len(blocks)
 		blocks = append(blocks, block{sym: sym, lines: []string{line}})
 	}
-	reached := map[string]bool{}
-	scan := smtTokenScanner{text: context}
-	for tok, ok := scan.next(); ok; tok, ok = scan.next() {
-		reached[tok] = true
-	}
+	// Only block symbols can make another block reachable. Queue each one
+	// once instead of repeatedly scanning every block and retaining all SMT tokens.
 	keep := make([]bool, len(blocks))
-	for changed := true; changed; {
-		changed = false
-		for i, blk := range blocks {
-			if keep[i] || !reached[blk.sym] {
-				continue
+	queue := make([]int, 0, len(blocks))
+	enqueue := func(text string) {
+		scan := smtTokenScanner{text: text}
+		for tok, ok := scan.next(); ok; tok, ok = scan.next() {
+			if i, found := index[tok]; found && !keep[i] {
+				keep[i] = true
+				queue = append(queue, i)
 			}
-			keep[i] = true
-			changed = true
-			for _, line := range blk.lines {
-				scan := smtTokenScanner{text: line}
-				for tok, ok := scan.next(); ok; tok, ok = scan.next() {
-					reached[tok] = true
-				}
-			}
+		}
+	}
+	enqueue(context)
+	for next := 0; next < len(queue); next++ {
+		for _, line := range blocks[queue[next]].lines {
+			enqueue(line)
 		}
 	}
 	var b strings.Builder
