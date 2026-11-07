@@ -315,9 +315,26 @@ func (a *Analyzer) smtCheckTransformedProof(query string, check func() (smt.Resu
 		a.smtStats.PersistentCacheHits++
 		return smt.Unsat, nil
 	}
+	// Distinct outer queries can produce the same transformed obligation.
+	// Share only definitive proofs; SAT models and Unknown remain local.
+	var flightKey string
+	var flight *smtFlight
+	if a.smtProofCache != nil {
+		flightKey = "\x00transformed-unsat\x00" + a.smtProofCache.identity + "\x00" + query
+		shared, ok, owned := a.awaitSharedSMTQuery(flightKey)
+		if ok && shared.proven {
+			a.smtStats.CacheHits++
+			return smt.Unsat, nil
+		}
+		flight = owned
+		defer a.releaseSMTFlight(flightKey, flight)
+	}
 	result, model := check()
 	if result == smt.Unsat {
 		a.smtProofCache.publishProof(keys)
+		if flight != nil {
+			a.resolveSMTFlight(flightKey, smtQueryResult{proven: true})
+		}
 	}
 	return result, model
 }
