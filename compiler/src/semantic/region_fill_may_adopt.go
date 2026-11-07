@@ -2,7 +2,6 @@ package semantic
 
 import (
 	"reflect"
-	"strings"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -327,8 +326,12 @@ func fillMayAdoptStripParens(expr ast.Expr) ast.Expr {
 }
 
 func fillMayAdoptLastSegment(name string) string {
-	if idx := strings.LastIndexAny(name, ".:"); idx >= 0 {
-		return name[idx+1:]
+	// Both separators are ASCII, so a reverse byte scan is equivalent to the
+	// Unicode-aware LastIndexAny, including for malformed UTF-8.
+	for i := len(name) - 1; i >= 0; i-- {
+		if name[i] == '.' || name[i] == ':' {
+			return name[i+1:]
+		}
 	}
 	return name
 }

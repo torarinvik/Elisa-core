@@ -227,10 +227,7 @@ func storeScanArmVariant(pattern ast.MatchPattern) (enumName, variant string, ar
 }
 
 func lastNameSegment(name string) string {
-	if i := strings.LastIndexAny(name, ".:"); i >= 0 {
-		return name[i+1:]
-	}
-	return name
+	return fillMayAdoptLastSegment(name)
 }
 
 // storeScanBindingWriteCounts counts all places in body where a name is written as a string
