@@ -121,9 +121,9 @@ func (a *Analyzer) finishReturnElementSummary(fn *ast.FuncDecl) {
 	// A summary assumed for a recursive function is dropped unless the body still supports it.
 	delete(a.returnElementSummaries, fn)
 	var returns []*ast.ReturnStmt
-	returnElementWalk(reflect.ValueOf(fn.Body), func(ret *ast.ReturnStmt) {
+	walkFunctionReturns(fn.Body, func(ret *ast.ReturnStmt) {
 		returns = append(returns, ret)
-	}, map[uintptr]bool{})
+	})
 	if len(returns) == 0 {
 		return
 	}
@@ -144,6 +144,14 @@ func (a *Analyzer) finishReturnElementSummary(fn *ast.FuncDecl) {
 		a.returnElementSummaries = map[*ast.FuncDecl]regionRefState{}
 	}
 	a.returnElementSummaries[fn] = summary
+}
+
+func walkFunctionReturns(body []ast.Stmt, visit func(*ast.ReturnStmt)) {
+	state := fillMayAdoptSeenPool.Get().(*fillWalkSeen)
+	returnElementWalk(reflect.ValueOf(body), visit, state.values)
+	if state.reset() {
+		fillMayAdoptSeenPool.Put(state)
+	}
 }
 
 // returnElementWalk visits the return statements of a function body, not those of lambdas or

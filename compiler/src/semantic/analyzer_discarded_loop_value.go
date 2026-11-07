@@ -41,7 +41,8 @@ func (a *Analyzer) checkDiscardedLoopValues(fn *ast.FuncDecl) {
 	}
 	// Resolved call arguments share source AST nodes. Visit each node once,
 	// preserving block-local discard checks without expanding metadata DAGs.
-	seen := make(map[any]struct{})
+	state := fillMayAdoptSeenPool.Get().(*fillWalkSeen)
+	seen := state.values
 	var walk func(v reflect.Value)
 	walk = func(v reflect.Value) {
 		if !v.IsValid() || !v.CanInterface() {
@@ -53,11 +54,11 @@ func (a *Analyzer) checkDiscardedLoopValues(fn *ast.FuncDecl) {
 				return
 			}
 			if v.Kind() == reflect.Pointer {
-				node := v.Interface()
-				if _, visited := seen[node]; visited {
+				node := v.Pointer()
+				if seen[node] {
 					return
 				}
-				seen[node] = struct{}{}
+				seen[node] = true
 			}
 			if block, ok := v.Interface().(*ast.ExprBlock); ok {
 				checkList(block.Stmts, block.Value != nil)
@@ -82,6 +83,9 @@ func (a *Analyzer) checkDiscardedLoopValues(fn *ast.FuncDecl) {
 		}
 	}
 	walk(reflect.ValueOf(fn.Body))
+	if state.reset() {
+		fillMayAdoptSeenPool.Put(state)
+	}
 }
 
 // reportDiscardedLoopValue reports stmt when it is an accumulator loop whose yield reads one of

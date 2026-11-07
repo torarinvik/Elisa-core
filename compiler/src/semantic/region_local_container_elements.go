@@ -1451,10 +1451,10 @@ func (a *Analyzer) analyzeQuietly(decl *ast.FuncDecl) {
 	a.currentNamespace, a.currentUsings = savedNamespace, savedUsings
 	a.suppressDiagnostics, a.suppressOptimizationFacts, a.provisionalSummaryFn = savedSuppress, savedOpt, savedProvisional
 	a.staticContextDepth = savedStatic
-	returnElementWalk(reflect.ValueOf(target.Body), func(ret *ast.ReturnStmt) {
+	walkFunctionReturns(target.Body, func(ret *ast.ReturnStmt) {
 		delete(a.returnElementStmtStates, ret)
 		a.clearReturnElementStmtUnknown(ret)
-	}, map[uintptr]bool{})
+	})
 	publish()
 }
 
