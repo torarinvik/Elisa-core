@@ -185,7 +185,7 @@ type storeScanDeclIndex struct {
 	parameterNames map[string]bool               // immutable names, shared by this declaration's taint queries
 	// nameNodes lists offsets into flat for nodes whose own expressions
 	// (a statement's header only) mention the name.
-	nameNodes map[string][]int
+	nameNodes map[string][]int // lazily built only for filled-local proofs
 	// flat: every node walkStoreScanNodes visits, in walk order (fixpoints iterate this instead
 	// of re-walking the AST reflectively per iteration).
 	flat    []any
@@ -238,21 +238,54 @@ func (idx *storeScanDeclIndex) bindingEffectNodes() []any {
 	return idx.bindingNodes
 }
 
+// Most store scans never ask for filled-local proofs. Avoid walking every
+// expression to build their reverse name index until the first such query.
+func (idx *storeScanDeclIndex) nodesForName(name string) []int {
+	if idx.nameNodes == nil {
+		idx.nameNodes = map[string][]int{}
+		exprNames := make(map[string]bool)
+		for offset, node := range idx.flat {
+			switch n := node.(type) {
+			case *ast.ReturnStmt:
+			case *ast.VarDeclStmt:
+				if n != nil {
+					storeScanAddExprNames(n.Value, exprNames)
+					exprNames[n.Name] = true
+				}
+			case *ast.AssignStmt:
+				if n != nil {
+					storeScanAddExprNames(n.Value, exprNames)
+					storeScanAddExprNames(n.Target, exprNames)
+				}
+			case *ast.CallExpr:
+				if n != nil {
+					if field, ok := n.Func.(*ast.FieldExpr); ok && field != nil {
+						storeScanAddExprNames(field.Object, exprNames)
+					}
+					for _, arg := range n.Args {
+						storeScanAddExprNames(arg, exprNames)
+					}
+				}
+			case ast.Stmt:
+				if n != nil && len(idx.boundNames(n)) > 0 {
+					storeScanAddHeaderNames(n, exprNames)
+				}
+			}
+			for token := range exprNames {
+				idx.nameNodes[token] = append(idx.nameNodes[token], offset)
+			}
+			clear(exprNames)
+		}
+	}
+	return idx.nameNodes[name]
+}
+
 func (a *Analyzer) storeScanIndex(decl *ast.FuncDecl) *storeScanDeclIndex {
 	decl = a.readDecl(decl)
 	if idx, ok := a.storeScanIndexCache[decl]; ok {
 		return idx
 	}
-	idx := &storeScanDeclIndex{decls: map[string][]*ast.VarDeclStmt{}, otherBound: map[string]bool{}, nameNodes: map[string][]int{}, locals: map[string]bool{}, iterBinders: map[string][]*ast.IterForStmt{}, nonIterBinder: map[string]bool{}, exprTokens: map[ast.Expr][]string{}, headerTokens: map[ast.Stmt][]string{}, bound: map[ast.Stmt][]string{}}
-	// Each name's list is in walk order (one append per node), whatever the map order of names.
-	exprNames := make(map[string]bool)
-	addNodeNames := func() {
-		offset := len(idx.flat) - 1
-		for name := range exprNames {
-			idx.nameNodes[name] = append(idx.nameNodes[name], offset)
-		}
-		clear(exprNames)
-	}
+	idx := &storeScanDeclIndex{decls: map[string][]*ast.VarDeclStmt{}, otherBound: map[string]bool{}, locals: map[string]bool{}, iterBinders: map[string][]*ast.IterForStmt{}, nonIterBinder: map[string]bool{}, exprTokens: map[ast.Expr][]string{}, headerTokens: map[ast.Stmt][]string{}, bound: map[ast.Stmt][]string{}}
 
 	walkStoreScanNodes(decl.Body, func(node any) {
 		idx.flat = append(idx.flat, node)
@@ -267,27 +300,7 @@ func (a *Analyzer) storeScanIndex(decl *ast.FuncDecl) *storeScanDeclIndex {
 			}
 			idx.locals[n.Name] = true
 			idx.decls[n.Name] = append(idx.decls[n.Name], n)
-			storeScanAddExprNames(n.Value, exprNames)
-			exprNames[n.Name] = true
-			addNodeNames()
-		case *ast.AssignStmt:
-			if n == nil {
-				return
-			}
-			storeScanAddExprNames(n.Value, exprNames)
-			storeScanAddExprNames(n.Target, exprNames)
-			addNodeNames()
-		case *ast.CallExpr:
-			if n == nil {
-				return
-			}
-			if field, isMethod := n.Func.(*ast.FieldExpr); isMethod && field != nil {
-				storeScanAddExprNames(field.Object, exprNames)
-			}
-			for _, arg := range n.Args {
-				storeScanAddExprNames(arg, exprNames)
-			}
-			addNodeNames()
+		case *ast.AssignStmt, *ast.CallExpr:
 		case ast.Stmt:
 			if n == nil {
 				return
@@ -303,10 +316,6 @@ func (a *Analyzer) storeScanIndex(decl *ast.FuncDecl) *storeScanDeclIndex {
 				} else {
 					idx.nonIterBinder[name] = true
 				}
-			}
-			if len(bound) > 0 {
-				storeScanAddHeaderNames(n, exprNames)
-				addNodeNames()
 			}
 		}
 	})
@@ -561,6 +570,9 @@ func (idx *storeScanDeclIndex) boundNames(stmt ast.Stmt) []string {
 		return names
 	}
 	names := stmtBoundNames(stmt)
+	if idx.bound == nil {
+		idx.bound = map[ast.Stmt][]string{}
+	}
 	idx.bound[stmt] = names
 	return names
 }

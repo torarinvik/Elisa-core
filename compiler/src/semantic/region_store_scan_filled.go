@@ -64,7 +64,7 @@ func (a *Analyzer) storeScanLocalIsFilled(decl *ast.FuncDecl, name string, conte
 	atMost := func(v ast.Expr) bool { return a.storeScanAtMostViews(decl, v, content, views, filled, seen) }
 	ok := true
 	idx := a.storeScanIndex(decl)
-	for _, offset := range idx.nameNodes[name] {
+	for _, offset := range idx.nodesForName(name) {
 		if !ok {
 			break
 		}
