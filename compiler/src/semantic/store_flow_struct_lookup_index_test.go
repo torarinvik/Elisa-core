@@ -36,3 +36,29 @@ func TestStoreFlowStructLookupIndexMatchesUncached(t *testing.T) {
 		}
 	}
 }
+
+func TestStoreFlowStructLookupLargeTableIndexesEarly(t *testing.T) {
+	named := map[string]Type{}
+	locals := map[string]string{}
+	for i := 0; i < 256; i++ {
+		name := fmt.Sprintf("Item%d", i)
+		named["Module."+name] = &StructType{Name: name}
+		locals[name] = name
+	}
+	named["Other.Item3"] = &StructType{Name: "Conflict"}
+	indexed := &Analyzer{namedTypes: named, storeFlowNamedTypes: locals, storeFlowStructLookup: map[string]Type{}}
+	reference := &Analyzer{namedTypes: named}
+	for _, name := range []string{"Item0", "Item1", "Item2"} {
+		if got, want := indexed.storeFlowStructNamed(name), reference.storeFlowStructNamed(name); got != want {
+			t.Fatalf("%s mismatch", name)
+		}
+	}
+	if !indexed.storeFlowStructLookupComplete {
+		t.Fatal("large table was not indexed after the second miss")
+	}
+	for _, name := range []string{"Item3", "Item255", "missing"} {
+		if got, want := indexed.storeFlowStructNamed(name), reference.storeFlowStructNamed(name); got != want {
+			t.Fatalf("%s mismatch", name)
+		}
+	}
+}

@@ -3026,7 +3026,13 @@ func (a *Analyzer) storeFlowStructNamed(name string) Type {
 		if cached, ok := a.storeFlowStructLookup[short]; ok {
 			return cached
 		}
-		if !a.storeFlowStructLookupComplete && len(a.storeFlowStructLookup) >= 8 {
+		// Large named-type tables make even a few full scans costly; smaller
+		// tables retain the old threshold to avoid an unnecessary index.
+		threshold := 8
+		if len(a.namedTypes) >= 128 {
+			threshold = 2
+		}
+		if !a.storeFlowStructLookupComplete && len(a.storeFlowStructLookup) >= threshold {
 			// Index only names used by this summary. Unrecognized names still
 			// take the ordinary scan, so the cache stays bounded and exact.
 			index := make(map[string]Type, len(a.storeFlowNamedTypes)+len(a.storeFlowStructLookup)+1)
