@@ -271,3 +271,14 @@ func BenchmarkStoreScanRepeatedMentionTokens(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkStoreScanRootName(b *testing.B) {
+	for _, name := range []string{"a_long_semantic_name_without_a_separator", "a_long_semantic_name.with_projection"} {
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				_ = rootNameOfDotted(name)
+			}
+		})
+	}
+}

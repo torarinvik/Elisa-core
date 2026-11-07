@@ -1227,10 +1227,8 @@ func storeScanMentions(node any, names map[string]bool) bool {
 }
 
 func rootNameOfDotted(name string) string {
-	for i := 0; i < len(name); i++ {
-		if name[i] == '.' {
-			return name[:i]
-		}
+	if i := strings.IndexByte(name, '.'); i >= 0 {
+		return name[:i]
 	}
 	return name
 }
