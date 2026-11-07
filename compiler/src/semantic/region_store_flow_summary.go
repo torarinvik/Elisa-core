@@ -66,12 +66,17 @@ type storeFlowCtx struct {
 	edges   [][2]string // (source, written name it feeds): a one-way flow
 }
 
+type storeFlowClass struct {
+	name string
+	pure bool
+}
+
 // storeFlowKey names the class of n: its pure-source class, or its written-name class.
-func (c *storeFlowCtx) storeFlowKey(n string) string {
+func (c *storeFlowCtx) storeFlowKey(n string) storeFlowClass {
 	if c.isPure(n) {
-		return "p:" + c.pu.find(n)
+		return storeFlowClass{name: c.pu.find(n), pure: true}
 	}
-	return "u:" + c.u.find(n)
+	return storeFlowClass{name: c.u.find(n)}
 }
 
 // flow records that the contents of the src names may be stored into the dst names, without
@@ -514,22 +519,21 @@ func (c *storeFlowCtx) link(names []string) {
 
 // reaches reports whether the contents of src may reach sink along the one-way flows, through
 // the classes they pass (a class is reached as a whole: its names exchange contents).
-func (c *storeFlowCtx) reaches(anchors map[string][]string, src, sink string) bool {
+func (c *storeFlowCtx) reaches(anchors map[storeFlowClass][]storeFlowClass, src, sink string) bool {
 	target := c.storeFlowKey(sink)
 	start := c.storeFlowKey(src)
-	seen := map[string]bool{start: true}
-	work := []string{start}
+	seen := map[storeFlowClass]bool{start: true}
+	work := []storeFlowClass{start}
 	for len(work) > 0 {
 		k := work[len(work)-1]
 		work = work[:len(work)-1]
 		if k == target {
 			return true
 		}
-		for _, n := range anchors[k] {
-			nk := c.storeFlowKey(n)
-			if !seen[nk] {
-				seen[nk] = true
-				work = append(work, nk)
+		for _, next := range anchors[k] {
+			if !seen[next] {
+				seen[next] = true
+				work = append(work, next)
 			}
 		}
 	}
@@ -940,10 +944,10 @@ func (a *Analyzer) computeStoreFlow(decl *ast.FuncDecl) *storeFlowSummary {
 		c.pu.find(param.Name)
 	}
 	a.storeFlowNodes(reflect.ValueOf(decl.Body), c, map[uintptr]bool{})
-	anchors := map[string][]string{}
+	anchors := map[storeFlowClass][]storeFlowClass{}
 	for _, e := range c.edges {
 		root := c.storeFlowKey(e[0])
-		anchors[root] = append(anchors[root], e[1])
+		anchors[root] = append(anchors[root], c.storeFlowKey(e[1]))
 	}
 	n := len(decl.Params)
 	conn := storeFlowBoolMatrix(n)
@@ -1564,6 +1568,10 @@ var storeFlowReadOnlyMethods = map[string]bool{
 // (returned through nested) and reports its calls. A call in handled contributes only the
 // names its summary lets reach the result, and its subtree is skipped.
 func (a *Analyzer) storeFlowMentions(root reflect.Value, self uintptr, handled map[*ast.CallExpr][]string, nested *[]reflect.Value, calls *[]*ast.CallExpr, callsOnly bool) []string {
+	return a.storeFlowCollectMentions(root, self, handled, nested, calls, callsOnly, true)
+}
+
+func (a *Analyzer) storeFlowCollectMentions(root reflect.Value, self uintptr, handled map[*ast.CallExpr][]string, nested *[]reflect.Value, calls *[]*ast.CallExpr, callsOnly, collectNames bool) []string {
 	var names []string
 	callDepth := 0
 	condDepth := 0 // inside a ternary condition: a bool, so its names reach no value
@@ -1591,7 +1599,7 @@ func (a *Analyzer) storeFlowMentions(root reflect.Value, self uintptr, handled m
 				walk(v.Index(i))
 			}
 		case reflect.String:
-			if condDepth == 0 && storeFlowVariableName(v.String()) && (!callsOnly || callDepth > 0) {
+			if collectNames && condDepth == 0 && storeFlowVariableName(v.String()) && (!callsOnly || callDepth > 0) {
 				name := v.String()
 				if renamed, ok := rename[name]; ok {
 					name = renamed
@@ -1668,13 +1676,15 @@ func (a *Analyzer) storeFlowMentions(root reflect.Value, self uintptr, handled m
 						return
 					}
 				}
-				callDepth++
-				defer func() { callDepth-- }()
+				if callsOnly {
+					callDepth++
+					defer func() { callDepth-- }()
+				}
 				if calls != nil {
 					*calls = append(*calls, call)
 				}
 				if retNames, isHandled := handled[call]; isHandled {
-					if condDepth == 0 {
+					if collectNames && condDepth == 0 {
 						names = append(names, retNames...)
 					}
 					return
@@ -1950,7 +1960,7 @@ func (a *Analyzer) applyCallStoreFlow(call *ast.CallExpr, c *storeFlowCtx, handl
 		// Inner calls are processed first. If one is unresolved, leave this
 		// outer call conservative so handling reserve cannot hide its effects.
 		var capacityCalls []*ast.CallExpr
-		a.storeFlowMentions(reflect.ValueOf(call.Args[0]), 0, nil, nil, &capacityCalls, false)
+		a.storeFlowCollectMentions(reflect.ValueOf(call.Args[0]), 0, nil, nil, &capacityCalls, false, false)
 		for _, inner := range capacityCalls {
 			if _, ok := handled[inner]; !ok {
 				return nil, false
@@ -2096,7 +2106,15 @@ func (a *Analyzer) storeFlowWritten(decl *ast.FuncDecl, scalars map[string]bool)
 	a.storeFlowNodes2(decl, func(stmt reflect.Value) []reflect.Value {
 		var nested []reflect.Value
 		var calls []*ast.CallExpr
-		names := a.storeFlowMentions(stmt.Elem(), stmt.Pointer(), nil, &nested, &calls, false)
+		// These statements only need names for the binding-expression fallback
+		// below. Keep collecting calls and nested statement scopes as usual.
+		collectNames := true
+		switch stmt.Interface().(type) {
+		case *ast.AssignStmt, *ast.AugAssignStmt, *ast.AsRefAssignStmt, *ast.VarDeclStmt,
+			*ast.ExprStmt, *ast.ReturnStmt, *ast.IfStmt, *ast.WhileStmt, *ast.DiscardStmt:
+			collectNames = false
+		}
+		names := a.storeFlowCollectMentions(stmt.Elem(), stmt.Pointer(), nil, &nested, &calls, false, collectNames)
 		binds := a.storeFlowBinds
 		for _, call := range calls {
 			fn, isMethod := call.Func.(*ast.FieldExpr)
@@ -2164,6 +2182,9 @@ func (a *Analyzer) storeFlowWritten(decl *ast.FuncDecl, scalars map[string]bool)
 		groups = append(groups, a.storeFlowQueryBinderPairs(stmt)...)
 		if binds && !a.storeFlowScalarDecl(stmt) {
 			if target, _ := a.storeFlowElementCopy(stmt); target == "" {
+				if !collectNames {
+					names = a.storeFlowMentions(stmt.Elem(), stmt.Pointer(), nil, nil, nil, false)
+				}
 				groups = append(groups, names)
 			}
 		}
