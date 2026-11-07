@@ -228,8 +228,12 @@ func smtAlphaWalk(query string, visit func(smtAlphaToken, int) bool) bool {
 				return false
 			}
 		default:
-			for i < len(query) && strings.IndexByte(" \t\r\n();", query[i]) < 0 {
-				if query[i] == '"' || query[i] == '|' {
+			for i < len(query) {
+				c := query[i]
+				if c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '(' || c == ')' || c == ';' {
+					break
+				}
+				if c == '"' || c == '|' {
 					return false
 				}
 				i++
