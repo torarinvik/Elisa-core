@@ -165,6 +165,10 @@ func smtSliceQueryFiltered(query, goalAssert string, requireQuantifiedDrop bool)
 	if !balanced {
 		return "", "", false
 	}
+	return smtSliceQueryCommands(exprs, goalAssert, requireQuantifiedDrop)
+}
+
+func smtSliceQueryCommands(exprs []string, goalAssert string, requireQuantifiedDrop bool) (sliced, dropped string, ok bool) {
 	goalIndex := -1
 	for i := len(exprs) - 1; i >= 0; i-- {
 		if exprs[i] == goalAssert {
@@ -521,10 +525,17 @@ func (a *Analyzer) smtCheckSlicedOnce(solver smt.Solver, query, goalAssert strin
 	if !strings.Contains(query, "forall") && !strings.Contains(query, "exists") {
 		return check(query)
 	}
+	if !canBudget {
+		return check(query)
+	}
+	commands, balanced := smtSplitTopLevel(query)
+	if !balanced {
+		return check(query)
+	}
 	// Related quantified callee clauses can overwhelm an otherwise simple
 	// arithmetic proof. Try a bounded weakening first, accepting UNSAT only.
 	if canBudget {
-		if weaker, ok := smtWithoutQuantifiedHypotheses(query, goalAssert); ok {
+		if weaker, ok := smtWithoutQuantifiedHypothesesCommands(query, goalAssert, commands); ok {
 			weakening.query = weaker
 			a.smtSetLogLabelForQuery(solver, "quantifier-weakening", goalAssert, weaker)
 			budget := int64(smtDeadPathBudget)
@@ -546,7 +557,7 @@ func (a *Analyzer) smtCheckSlicedOnce(solver smt.Solver, query, goalAssert strin
 			a.smtSetLogLabelForQuery(solver, "query", goalAssert, query)
 		}
 	}
-	sliced, dropped, ok := smtSliceQueryFiltered(query, goalAssert, true)
+	sliced, dropped, ok := smtSliceQueryCommands(commands, goalAssert, true)
 	// Slice only when the dropped part carries quantifiers: quantifier instantiation is what burns
 	// the budget on irrelevant facts. A quantifier-free remainder is cheap inside the full query,
 	// and slicing it would only add a second solver round trip.

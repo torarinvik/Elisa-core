@@ -7,6 +7,11 @@ import "strings"
 // but SAT or UNKNOWN says nothing and must fall back to the full hypotheses.
 // Declarations, definitions, the goal and all subsequent commands stay intact.
 func smtWithoutQuantifiedHypotheses(query, goalAssert string) (string, bool) {
+	return smtWithoutQuantifiedHypothesesCommands(query, goalAssert, nil)
+}
+
+// commands may be supplied by the caller when the same query will also be sliced.
+func smtWithoutQuantifiedHypothesesCommands(query, goalAssert string, commands []string) (string, bool) {
 	if !strings.Contains(query, "forall") && !strings.Contains(query, "exists") {
 		return "", false
 	}
@@ -27,9 +32,12 @@ func smtWithoutQuantifiedHypotheses(query, goalAssert string) (string, bool) {
 	if containsQuantifier(goalAssert) {
 		return "", false
 	}
-	commands, ok := smtSplitTopLevel(query)
-	if !ok {
-		return "", false
+	if commands == nil {
+		var ok bool
+		commands, ok = smtSplitTopLevel(query)
+		if !ok {
+			return "", false
+		}
 	}
 	goalIndex := -1
 	for i := len(commands) - 1; i >= 0; i-- {
