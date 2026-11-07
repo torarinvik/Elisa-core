@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"unicode"
+	"unicode/utf8"
 	"unsafe"
 
 	"elisacore/src/ast"
@@ -559,7 +560,7 @@ func storeFlowVariableName(name string) bool {
 	if name == "" || strings.Contains(name, "::") || strings.Contains(name, ".") {
 		return false
 	}
-	first := []rune(name)[0]
+	first, _ := utf8.DecodeRuneInString(name)
 	return !unicode.IsUpper(first)
 }
 
