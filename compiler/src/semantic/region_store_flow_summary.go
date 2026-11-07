@@ -1203,6 +1203,13 @@ func storeFlowTypeInfoSlow(t reflect.Type) *storeFlowTypeInfo {
 			if storeFlowSkipFields[field.Name] && (field.Type.Kind() == reflect.String || field.Type.Kind() == reflect.Slice && field.Type.Elem().Kind() == reflect.String) {
 				continue
 			}
+			// All consumers of these fields ignore scalar kinds other than strings,
+			// and do not traverse maps. Avoid dispatching the walker for them.
+			switch field.Type.Kind() {
+			case reflect.String, reflect.Pointer, reflect.Interface, reflect.Struct, reflect.Slice, reflect.Array:
+			default:
+				continue
+			}
 			info.fields = append(info.fields, i)
 		}
 	}
