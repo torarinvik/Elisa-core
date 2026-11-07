@@ -56,6 +56,7 @@ func (a *Analyzer) computeFillMayAdopt() map[*ast.FuncDecl]bool {
 			work = append(work, decl)
 		}
 	}
+	var bodyNodes []any
 	for decl := range a.funcDeclSymbols {
 		if decl == nil {
 			continue
@@ -83,9 +84,12 @@ func (a *Analyzer) computeFillMayAdopt() map[*ast.FuncDecl]bool {
 			valueParams[param.Name] = true
 			declare(param.Name, param.Type)
 		}
-		// The four whole-body passes below visit the same nodes in the same order; walk the
-		// body by reflection once and replay the visit sequence (nothing here edits the AST).
-		bodyNodes := fillMayAdoptNodes(reflect.ValueOf(decl.Body))
+		// The passes below read the same body nodes. Collect them once and reuse the
+		// buffer for the next function.
+		bodyNodes = bodyNodes[:0]
+		fillMayAdoptWalk(reflect.ValueOf(decl.Body), func(node any) {
+			bodyNodes = append(bodyNodes, node)
+		})
 		forEachBodyNode := func(visit func(any)) {
 			for _, node := range bodyNodes {
 				visit(node)
@@ -356,7 +360,8 @@ func fillMayAdoptIterBinders(n *ast.IterForStmt) map[string]bool {
 func fillMayAdoptStmtLists(v reflect.Value, visit func([]ast.Stmt)) {
 	stmtList := reflect.TypeOf([]ast.Stmt(nil))
 	var walk func(reflect.Value)
-	seen := map[uintptr]bool{}
+	state := fillMayAdoptSeenPool.Get().(*fillWalkSeen)
+	seen := state.values
 	walk = func(v reflect.Value) {
 		if !v.IsValid() {
 			return
@@ -391,13 +396,9 @@ func fillMayAdoptStmtLists(v reflect.Value, visit func([]ast.Stmt)) {
 		}
 	}
 	walk(v)
-}
-
-// fillMayAdoptNodes returns the nodes fillMayAdoptWalk(v, ...) would visit, in visit order.
-func fillMayAdoptNodes(v reflect.Value) []any {
-	var nodes []any
-	fillMayAdoptWalk(v, func(node any) { nodes = append(nodes, node) })
-	return nodes
+	if state.reset() {
+		fillMayAdoptSeenPool.Put(state)
+	}
 }
 
 func fillMayAdoptWalk(v reflect.Value, visit func(any)) {

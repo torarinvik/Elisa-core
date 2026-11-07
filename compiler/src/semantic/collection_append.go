@@ -22,15 +22,15 @@ func (a *Analyzer) prepareCollectionAppends(fn *ast.FuncDecl) {
 	for _, p := range fn.Params {
 		types[p.Name] = a.resolveType(p.Type)
 	}
-	var exprType func(ast.Expr, map[string]Type) Type
-	exprType = func(e ast.Expr, env map[string]Type) Type {
+	var exprType func(ast.Expr) Type
+	exprType = func(e ast.Expr) Type {
 		switch n := e.(type) {
 		case *ast.Ident:
-			return env[n.Name]
+			return types[n.Name]
 		case *ast.ParenExpr:
-			return exprType(n.Inner, env)
+			return exprType(n.Inner)
 		case *ast.FieldExpr:
-			t := exprType(n.Object, env)
+			t := exprType(n.Object)
 			if ref, ok := t.(*RefType); ok {
 				t = ref.Elem
 			}
@@ -38,7 +38,7 @@ func (a *Analyzer) prepareCollectionAppends(fn *ast.FuncDecl) {
 				return st.Fields[n.Field].Type
 			}
 		case *ast.IndexExpr:
-			t := exprType(n.Object, env)
+			t := exprType(n.Object)
 			if ref, ok := t.(*RefType); ok {
 				t = ref.Elem
 			}
@@ -51,8 +51,19 @@ func (a *Analyzer) prepareCollectionAppends(fn *ast.FuncDecl) {
 		}
 		return nil
 	}
-	var walk func(reflect.Value, map[string]Type)
-	walk = func(v reflect.Value, env map[string]Type) {
+	// Track only the names a block changes. Unchanged outer bindings are
+	// visible without copying the whole type environment for each nested block.
+	type savedBinding struct {
+		name string
+		typ  Type
+	}
+	var shadowed []savedBinding
+	bind := func(name string, typ Type) {
+		shadowed = append(shadowed, savedBinding{name: name, typ: types[name]})
+		types[name] = typ
+	}
+	var walk func(reflect.Value)
+	walk = func(v reflect.Value) {
 		if !v.IsValid() || !v.CanInterface() {
 			return
 		}
@@ -70,69 +81,75 @@ func (a *Analyzer) prepareCollectionAppends(fn *ast.FuncDecl) {
 			switch v.Kind() {
 			case reflect.Interface, reflect.Pointer:
 				if !v.IsNil() {
-					walk(v.Elem(), env)
+					walk(v.Elem())
 				}
 			case reflect.Struct:
 				for _, i := range syntaxWalkFields(v.Type()) {
-					walk(v.Field(i), env)
+					walk(v.Field(i))
 				}
 			case reflect.Slice, reflect.Array:
 				for i := 0; i < v.Len(); i++ {
-					walk(v.Index(i), env)
+					walk(v.Index(i))
 				}
 			}
 			return
 		}
 		if list, ok := v.Interface().([]ast.Stmt); ok {
-			nested := map[string]Type{}
-			for k, t := range env {
-				nested[k] = t
-			}
+			start := len(shadowed)
 			for _, stmt := range list {
-				walk(reflect.ValueOf(stmt), nested)
+				walk(reflect.ValueOf(stmt))
 				switch n := stmt.(type) {
 				case *ast.VarDeclStmt:
 					if n.Type != nil {
-						nested[n.Name] = a.resolveType(n.Type)
+						bind(n.Name, a.resolveType(n.Type))
 					} else {
-						nested[n.Name] = exprType(n.Value, nested)
+						bind(n.Name, exprType(n.Value))
 					}
 				case *ast.TupleBindStmt:
 					if n.Declare {
 						for _, name := range n.Names {
-							delete(nested, name.Name)
+							bind(name.Name, nil)
 						}
 					}
 				}
 			}
+			for i := len(shadowed) - 1; i >= start; i-- {
+				prior := shadowed[i]
+				if prior.typ == nil {
+					delete(types, prior.name)
+				} else {
+					types[prior.name] = prior.typ
+				}
+			}
+			shadowed = shadowed[:start]
 			return
 		}
 		if n, ok := v.Interface().(*ast.AugAssignStmt); ok && n != nil {
 			if n.Op == lexer.TOKEN_PLUSEQ {
-				if _, _, ok := builtinDArrayPushReceiverType(exprType(n.Target, env)); ok {
+				if _, _, ok := builtinDArrayPushReceiverType(exprType(n.Target)); ok {
 					n.CollectionAppend = collectionAppendCall(n)
 				}
 			}
-			walk(reflect.ValueOf(n.Target), env)
-			walk(reflect.ValueOf(n.Value), env)
+			walk(reflect.ValueOf(n.Target))
+			walk(reflect.ValueOf(n.Value))
 			return
 		}
 		switch v.Kind() {
 		case reflect.Interface, reflect.Pointer:
 			if !v.IsNil() {
-				walk(v.Elem(), env)
+				walk(v.Elem())
 			}
 		case reflect.Struct:
 			for _, i := range syntaxWalkFields(v.Type()) {
-				walk(v.Field(i), env)
+				walk(v.Field(i))
 			}
 		case reflect.Slice, reflect.Array:
 			for i := 0; i < v.Len(); i++ {
-				walk(v.Index(i), env)
+				walk(v.Index(i))
 			}
 		}
 	}
-	walk(reflect.ValueOf(fn.Body), types)
+	walk(reflect.ValueOf(fn.Body))
 }
 
 var (
