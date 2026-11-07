@@ -1806,22 +1806,23 @@ func (a *Analyzer) storeFlowCollectMentionsWithQuery(root reflect.Value, self ui
 			if v.IsNil() || !v.CanInterface() {
 				return
 			}
+			node := v.Interface()
 			if storeFlowParenFast {
-				if paren, ok := v.Interface().(*ast.ParenExpr); ok {
+				if paren, ok := node.(*ast.ParenExpr); ok {
 					walk(reflect.ValueOf(&paren.Position).Elem())
 					walk(reflect.ValueOf(paren.Inner))
 					return
 				}
 			}
 			if storeFlowSimpleFieldQueryFast {
-				if field, ok := v.Interface().(*ast.FieldExpr); ok {
+				if field, ok := node.(*ast.FieldExpr); ok {
 					walk(reflect.ValueOf(&field.Position).Elem())
 					walk(reflect.ValueOf(field.Object))
 					return
 				}
 			}
 			if storeFlowBinaryFast {
-				if binary, ok := v.Interface().(*ast.BinaryExpr); ok {
+				if binary, ok := node.(*ast.BinaryExpr); ok {
 					walk(reflect.ValueOf(&binary.Position).Elem())
 					walk(reflect.ValueOf(binary.Left))
 					walk(reflect.ValueOf(binary.Right))
@@ -1832,7 +1833,7 @@ func (a *Analyzer) storeFlowCollectMentionsWithQuery(root reflect.Value, self ui
 				}
 			}
 			if storeFlowIntLiteralFast && storeFlowIdentFast && storeFlowPositionFast {
-				if lit, ok := v.Interface().(*ast.IntLit); ok {
+				if lit, ok := node.(*ast.IntLit); ok {
 					if collectNames && condDepth == 0 && (!callsOnly || callDepth > 0) && storeFlowVariableName(lit.Position.File) {
 						name := lit.Position.File
 						if renamed, ok := rename[name]; ok {
@@ -1844,7 +1845,7 @@ func (a *Analyzer) storeFlowCollectMentionsWithQuery(root reflect.Value, self ui
 				}
 			}
 			if storeFlowIdentFast {
-				if ident, ok := v.Interface().(*ast.Ident); ok {
+				if ident, ok := node.(*ast.Ident); ok {
 					if collectNames && condDepth == 0 && (!callsOnly || callDepth > 0) {
 						for _, name := range [...]string{ident.Position.File, ident.Name} {
 							if storeFlowVariableName(name) {
@@ -1871,7 +1872,7 @@ func (a *Analyzer) storeFlowCollectMentionsWithQuery(root reflect.Value, self ui
 			if info.isTypeExpr {
 				return // type syntax names types, not values
 			}
-			if comp, ok := v.Interface().(*ast.ListComprehensionExpr); ok {
+			if comp, ok := node.(*ast.ListComprehensionExpr); ok {
 				// A comprehension binder is scoped to it: distinct comprehensions reusing a name
 				// must not be unified through it.
 				savedRename := rename
@@ -1893,7 +1894,7 @@ func (a *Analyzer) storeFlowCollectMentionsWithQuery(root reflect.Value, self ui
 				rename = savedRename
 				return
 			}
-			if tern, ok := v.Interface().(*ast.TernaryExpr); ok && tern != nil && !storeFlowHasBindingExpr(reflect.ValueOf(&tern.Cond).Elem()) {
+			if tern, ok := node.(*ast.TernaryExpr); ok && tern != nil && !storeFlowHasBindingExpr(reflect.ValueOf(&tern.Cond).Elem()) {
 				// `value if cond else alt`: only the branches become the value. The condition is
 				// still walked so its calls (and the statements nested in it) are recorded.
 				walk(reflect.ValueOf(&tern.Value).Elem())
@@ -1903,7 +1904,7 @@ func (a *Analyzer) storeFlowCollectMentionsWithQuery(root reflect.Value, self ui
 				walk(reflect.ValueOf(&tern.Alt).Elem())
 				return
 			}
-			if q, ok := v.Interface().(*ast.QueryExpr); ok && q != nil && storeFlowScalarQuery(q) {
+			if q, ok := node.(*ast.QueryExpr); ok && q != nil && storeFlowScalarQuery(q) {
 				if queryScan != nil {
 					roots, _ := storeFlowChainRoots(q.Source)
 					queryScan.pairs = append(queryScan.pairs, append([]string{q.Name}, a.storeFlowRenamedAll(roots)...))
@@ -1919,7 +1920,7 @@ func (a *Analyzer) storeFlowCollectMentionsWithQuery(root reflect.Value, self ui
 			if info.binding {
 				a.storeFlowBinds = true
 			}
-			if call, ok := v.Interface().(*ast.CallExpr); ok {
+			if call, ok := node.(*ast.CallExpr); ok {
 				if callsOnly {
 					if fe, isField := call.Func.(*ast.FieldExpr); isField && fe != nil && storeFlowReadOnlyMethods[fe.Field] && !a.isDeclaredFuncName(fe.Field) {
 						_, plainReceiver := fe.Object.(*ast.Ident)
