@@ -175,3 +175,15 @@ func TestStoreScanHeaderHandlesSharedExpressions(t *testing.T) {
 		t.Fatal("a header after shared expressions must still be found")
 	}
 }
+
+func BenchmarkStoreScanMatchingNames(b *testing.B) {
+	expr := &ast.FieldExpr{Object: &ast.Ident{Name: "a_longer_semantic_binding_name"}, Field: "value"}
+	idx := &storeScanDeclIndex{}
+	left := map[string]bool{"a_longer_semantic_binding_name": true}
+	right := map[string]bool{"a_longer_semantic_binding_name": true}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		a, c := idx.mentionsTwo(expr, left, right)
+		storeScanMentionsSink = a && c
+	}
+}
