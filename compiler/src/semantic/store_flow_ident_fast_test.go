@@ -43,3 +43,42 @@ func TestStoreFlowIdentFastMatchesReflectiveWalk(t *testing.T) {
 		}
 	}
 }
+
+func TestStoreFlowSimpleExprNamesMatchesWalk(t *testing.T) {
+	if !storeFlowIdentFast {
+		t.Skip("identifier schema changed")
+	}
+	old := storeFlowIdentFast
+	defer func() { storeFlowIdentFast = old }()
+	for _, id := range []*ast.Ident{{Position: lexer.Pos{File: "source"}, Name: "value"}, {Position: lexer.Pos{File: "file.elisa"}, Name: "Upper"}, {Name: "source"}} {
+		a := &Analyzer{storeFlowEnv: map[string]string{"source": "renamed"}}
+		storeFlowIdentFast = false
+		want := a.storeFlowArgNames(id, nil)
+		storeFlowIdentFast = true
+		a.storeFlowBinds = true
+		got := a.storeFlowArgNames(id, nil)
+		if !reflect.DeepEqual(got, want) || a.storeFlowBinds {
+			t.Fatalf("got %v binds %v, want %v", got, a.storeFlowBinds, want)
+		}
+	}
+}
+
+func BenchmarkStoreFlowSimpleArgument(b *testing.B) {
+	id := &ast.Ident{Name: "value"}
+	for _, fast := range []bool{false, true} {
+		label := "reflective"
+		if fast {
+			label = "direct"
+		}
+		b.Run(label, func(b *testing.B) {
+			old := storeFlowIdentFast
+			storeFlowIdentFast = fast
+			defer func() { storeFlowIdentFast = old }()
+			a := &Analyzer{}
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				_ = a.storeFlowArgNames(id, nil)
+			}
+		})
+	}
+}

@@ -2032,11 +2032,40 @@ func (a *Analyzer) isDeclaredFuncName(name string) bool {
 // storeFlowArgNames is storeFlowExprNames with the already summarized calls inside the
 // expression standing for what reaches their results.
 func (a *Analyzer) storeFlowArgNames(expr ast.Expr, handled map[*ast.CallExpr][]string) []string {
+	if names, ok := a.storeFlowSimpleExprNames(expr); ok {
+		return names
+	}
 	return a.storeFlowMentions(reflect.ValueOf(&expr).Elem(), 0, handled, nil, nil, false)
 }
 
 func (a *Analyzer) storeFlowExprNames(expr ast.Expr) []string {
+	if names, ok := a.storeFlowSimpleExprNames(expr); ok {
+		return names
+	}
 	return a.storeFlowMentions(reflect.ValueOf(&expr).Elem(), 0, nil, nil, nil, false)
+}
+
+// Identifier arguments are especially common in call summaries. Match the
+// reflective walk's ordering and position-file contribution, including rename.
+func (a *Analyzer) storeFlowSimpleExprNames(expr ast.Expr) ([]string, bool) {
+	if !storeFlowIdentFast {
+		return nil, false
+	}
+	id, ok := expr.(*ast.Ident)
+	if !ok || id == nil {
+		return nil, false
+	}
+	a.storeFlowBinds = false
+	var names []string
+	for _, name := range [...]string{id.Position.File, id.Name} {
+		if storeFlowVariableName(name) {
+			if renamed, ok := a.storeFlowEnv[name]; ok {
+				name = renamed
+			}
+			names = append(names, name)
+		}
+	}
+	return names, true
 }
 
 // storeFlowCallee resolves a call to the single declared function it can only mean, or nil.
