@@ -79,8 +79,7 @@ func computeEnumStoreSets(decls []scopedDecl) (map[string]bool, map[string]bool)
 	// Build the descendant closure (over syntactic `is Parent` links) so a reference to enum X expands
 	// to X and every refinement of X.
 	descendants := map[string][]string{} // X -> all transitive refinements of X (excluding X)
-	for name, ed := range byName {
-		_ = name
+	for _, ed := range byName {
 		// A cyclic `is` chain (`enum Node is Node`, `A is B` + `B is A`) is rejected later by
 		// the hierarchy checker; here it must merely terminate. Without the visited set the walk
 		// appended to descendants forever and the compiler died out of memory.
@@ -162,12 +161,73 @@ func computeEnumStoreSets(decls []scopedDecl) (map[string]bool, map[string]bool)
 		}
 		return out
 	}
-	recursive := map[string]bool{}
-	for start := range byName {
+	// The hierarchy root determines the physical representation of every member.
+	rootOf := func(name string) string {
+		seen := map[string]bool{}
+		for {
+			ed, ok := byName[name]
+			if !ok || ed.Parent == "" || seen[name] {
+				return name // invalid parent chains are diagnosed when resolving types
+			}
+			seen[name] = true
+			name = ed.Parent
+		}
+	}
+	roots := make(map[string]string, len(byName))
+	for name := range byName {
+		roots[name] = rootOf(name)
+	}
+
+	sourceEdges := make(map[string][]string, len(byName))
+	layoutEdges := make(map[string][]string, len(byName))
+	for name, ed := range byName {
+		refs := byValueEnumRefs(ed)
+		sourceEdges[name] = refs
+		root := roots[name]
+		for _, ref := range refs {
+			layoutEdges[root] = append(layoutEdges[root], roots[ref])
+		}
+	}
+	recursive := enumCycleMembers(sourceEdges)
+
+	// A field of a sibling type may be acyclic at source level but still embeds
+	// the same family-wide payload union. Find cycles between layouts separately
+	// so a storage-only cycle never enables structural termination proofs.
+	storeBacked := enumCycleMembers(layoutEdges)
+	for name := range recursive {
+		storeBacked[name] = true
+	}
+	// Common fields live in a store row and do not imply recursive source types.
+	for name, ed := range byName {
+		if !ed.Packed && len(ed.Common) > 0 {
+			storeBacked[name] = true
+		}
+	}
+	propagateHierarchy := func(set map[string]bool) {
+		for name := range byName {
+			if !set[name] {
+				continue
+			}
+			root := roots[name]
+			set[root] = true
+			for _, d := range descendants[root] {
+				set[d] = true
+			}
+		}
+	}
+	propagateHierarchy(recursive)
+	propagateHierarchy(storeBacked)
+	return recursive, storeBacked
+}
+
+// enumCycleMembers finds the names that can reach themselves in the given graph.
+func enumCycleMembers(edges map[string][]string) map[string]bool {
+	cyclic := map[string]bool{}
+	for start := range edges {
 		visited := map[string]bool{}
-		var reachesStart func(cur string) bool
-		reachesStart = func(cur string) bool {
-			for _, next := range byValueEnumRefs(byName[cur]) {
+		var reachesStart func(string) bool
+		reachesStart = func(current string) bool {
+			for _, next := range edges[current] {
 				if next == start {
 					return true
 				}
@@ -181,52 +241,10 @@ func computeEnumStoreSets(decls []scopedDecl) (map[string]bool, map[string]bool)
 			return false
 		}
 		if reachesStart(start) {
-			recursive[start] = true
+			cyclic[start] = true
 		}
 	}
-	// Recursion is a source property, not a storage-layout decision. Keep it separate from common
-	// fields below: both can require a store, but only a cycle participates in structural termination.
-	storeBacked := make(map[string]bool, len(recursive))
-	for name := range recursive {
-		storeBacked[name] = true
-	}
-	// `common(...)` fields are per-node shared metadata, and the store row is where they live: the
-	// value layout has no slot for them. They require the hierarchy store but do not make the enum
-	// recursively-defined.
-	for name, ed := range byName {
-		if !ed.Packed && len(ed.Common) > 0 {
-			storeBacked[name] = true
-		}
-	}
-	// Store representation is family-wide. A recursive member or root common field promotes the
-	// hierarchy root and all refinements, but the recursive set remains precise for termination.
-	rootOf := func(name string) string {
-		seen := map[string]bool{}
-		for {
-			ed, ok := byName[name]
-			if !ok || ed.Parent == "" || seen[name] {
-				// seen: a cyclic `is` chain has no root; stop (the cycle is diagnosed elsewhere).
-				return name
-			}
-			seen[name] = true
-			name = ed.Parent
-		}
-	}
-	propagateHierarchy := func(set map[string]bool) {
-		for name := range byName {
-			if !set[name] {
-				continue
-			}
-			root := rootOf(name)
-			set[root] = true
-			for _, d := range descendants[root] {
-				set[d] = true
-			}
-		}
-	}
-	propagateHierarchy(recursive)
-	propagateHierarchy(storeBacked)
-	return recursive, storeBacked
+	return cyclic
 }
 
 // reference is wrapped in a reference type-expr and a container puts the name behind type args, so a
