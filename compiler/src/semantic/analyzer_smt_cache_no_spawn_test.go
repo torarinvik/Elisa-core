@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,6 +12,23 @@ import (
 type fixedSMTSolver struct {
 	result smt.Result
 	model  map[string]string
+}
+
+func TestSMTSharedOuterProofDoesNotStartSolver(t *testing.T) {
+	flights := &sync.Map{}
+	cache := &smtProofCache{directory: t.TempDir(), identity: "test identity"}
+	a := &Analyzer{smtEnabled: true, smtBinary: filepath.Join(t.TempDir(), "missing-z3"), smtProofCache: cache, smtProofCacheInitialized: true, parallel: &parallelWorkerState{smtFlights: flights}}
+	tr, query := smtQueryForCacheTest(a, "(declare-const v_x Int)\n", "(= v_x v_x)")
+	keys, _ := cache.lookupProof(query)
+	leader := &Analyzer{parallel: &parallelWorkerState{smtFlights: flights}}
+	leader.smtShareOuterProof(keys, func() (smt.Result, map[string]string) { return smt.Unsat, nil })
+	proven, _ := a.smtCheckQuery(tr, "(declare-const v_x Int)\n", "(= v_x v_x)")
+	if !proven || a.smtSolver != nil || a.smtUnavailable {
+		t.Fatal("shared proof unexpectedly started solver or failed")
+	}
+	if a.smtStats.Attempts != 1 || a.smtStats.CacheHits != 1 || a.smtStats.SolverProven != 0 {
+		t.Fatalf("stats: %+v", a.smtStats)
+	}
 }
 
 func (s *fixedSMTSolver) Check(string) (smt.Result, time.Duration) {

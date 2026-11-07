@@ -707,28 +707,39 @@ func (a *Analyzer) smtCheckQueryWithLogLabel(tr *smtTranslator, hyps string, obl
 		return hit.proven, hit.ce
 	}
 	defer a.releaseSMTFlight(key, flight)
-	solver := a.openSMT()
-	if solver == nil {
-		return false, ""
-	}
-	a.recordSMTAttempt(query)
-	a.smtSetLogLabelForQuery(solver, label, logObligation, query)
 	persistentHits := a.smtStats.PersistentCacheHits
-	resourceBefore, transientBefore, canCertify := smtUnknownCacheEpoch(solver)
-	snapshotBefore, snapshotClassified := smtSnapshotUnknownEpoch(solver)
+	var solver smtSolverHandle
+	var resourceBefore, transientBefore, snapshotBefore uint64
+	var canCertify, snapshotClassified bool
 	res, model, sharedProof := a.smtShareOuterProof(proofKeys, func() (smt.Result, map[string]string) {
+		solver = a.openSMT()
+		if solver == nil {
+			return smt.Unknown, nil
+		}
+		a.recordSMTAttempt(query)
+		a.smtSetLogLabelForQuery(solver, label, logObligation, query)
+		resourceBefore, transientBefore, canCertify = smtUnknownCacheEpoch(solver)
+		snapshotBefore, snapshotClassified = smtSnapshotUnknownEpoch(solver)
 		return a.smtCheckSliced(solver, query, "(assert (not "+obligation+"))", tr.declaredSMTVars())
 	})
+	if solver == nil && !sharedProof {
+		return false, ""
+	}
+	if sharedProof {
+		a.recordSMTAttempt(query)
+	}
 	if res == smt.Unsat {
 		a.smtStats.Proven++
 		if !sharedProof && a.smtStats.PersistentCacheHits == persistentHits {
 			a.smtStats.SolverProven++
 		}
 		a.cacheSMTQuery(key, smtQueryResult{proven: true})
-		if key != query {
-			a.smtProofCache.publish(query)
+		if !sharedProof {
+			if key != query {
+				a.smtProofCache.publish(query)
+			}
+			a.smtProofCache.publishProof(proofKeys)
 		}
-		a.smtProofCache.publishProof(proofKeys)
 		return true, ""
 	}
 	a.smtStats.Declined++
