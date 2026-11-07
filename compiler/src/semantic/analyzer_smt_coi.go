@@ -39,7 +39,12 @@ type smtTopLevelCommand struct {
 // smtSplitTopLevel splits SMT-LIB text into top-level s-expressions (comments dropped). It
 // returns false on unbalanced text.
 func smtSplitTopLevel(text string) ([]string, bool) {
+	// Generated SMT commands generally occupy one line. Reserve a bounded
+	// estimate so long preambles do not repeatedly grow the output slice.
 	var out []string
+	if lines := strings.Count(text, "\n"); lines > 1 {
+		out = make([]string, 0, min(lines, 4096))
+	}
 	depth := 0
 	start := -1
 	for i := 0; i < len(text); i++ {
@@ -88,6 +93,9 @@ func smtSplitTopLevel(text string) ([]string, bool) {
 				start = -1
 			}
 		}
+	}
+	if len(out) == 0 {
+		return nil, depth == 0
 	}
 	return out, depth == 0
 }
