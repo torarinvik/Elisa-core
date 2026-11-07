@@ -981,65 +981,79 @@ func storeScanMentionsHeader(node any, names map[string]bool) bool {
 	if node == nil || len(names) == 0 {
 		return false
 	}
-	found := false
-	var rec func(v reflect.Value)
-	rec = func(v reflect.Value) {
-		if found || !v.IsValid() || !v.CanInterface() {
-			return
-		}
-		switch v.Kind() {
-		case reflect.Pointer:
-			if v.IsNil() {
-				return
+	// The common paths are an identifier or a projection of it. Defer
+	// reflection and the visited set until we need to inspect a larger value.
+	for depth := 0; depth < 8; depth++ {
+		switch expr := node.(type) {
+		case *ast.Ident:
+			return expr != nil && (names[expr.Name] || names[rootNameOfDotted(expr.Name)])
+		case *ast.FieldExpr:
+			if expr == nil || storeScanScalarHeaderField(expr.Field) {
+				return false
 			}
-			switch e := v.Interface().(type) {
-			case *ast.Ident:
-				if e != nil && (names[e.Name] || names[rootNameOfDotted(e.Name)]) {
-					found = true
-				}
-				return
-			case *ast.IndexExpr:
-				if e != nil && e.Index2 == nil {
-					if root := rootIdentExpr(e.Object); root != nil && names[root.Name] {
-						rec(reflect.ValueOf(e.Index))
-						return
-					}
-				}
-			case *ast.FieldExpr:
-				if e != nil {
-					switch e.Field {
-					case "count", "len", "capacity", "is_empty":
-						return
-					}
-					rec(reflect.ValueOf(e.Object))
-					return
-				}
-			}
-			rec(v.Elem())
-		case reflect.Interface:
-			if v.IsNil() {
-				return
-			}
-			rec(v.Elem())
-		case reflect.Struct:
-			if v.Type() == storeScanPosType {
-				return
-			}
-			for i := 0; i < v.NumField(); i++ {
-				rec(v.Field(i))
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				rec(v.Index(i))
-			}
-		case reflect.String:
-			if names[v.String()] {
-				found = true
-			}
+			node = expr.Object
+		default:
+			return storeScanMentionsHeaderWalk(reflect.ValueOf(node), names, map[uintptr]bool{})
 		}
 	}
-	rec(reflect.ValueOf(node))
-	return found
+	return storeScanMentionsHeaderWalk(reflect.ValueOf(node), names, map[uintptr]bool{})
+}
+
+func storeScanScalarHeaderField(name string) bool {
+	switch name {
+	case "count", "len", "capacity", "is_empty":
+		return true
+	default:
+		return false
+	}
+}
+
+func storeScanMentionsHeaderWalk(v reflect.Value, names map[string]bool, seen map[uintptr]bool) bool {
+	if !v.IsValid() || !v.CanInterface() {
+		return false
+	}
+	switch v.Kind() {
+	case reflect.Pointer:
+		if v.IsNil() || seen[v.Pointer()] {
+			return false
+		}
+		// Desugared calls and conditions can share their operands. For a
+		// fixed name set, each pointer has the same answer on every path.
+		seen[v.Pointer()] = true
+		switch expr := v.Interface().(type) {
+		case *ast.Ident:
+			return names[expr.Name] || names[rootNameOfDotted(expr.Name)]
+		case *ast.IndexExpr:
+			if expr.Index2 == nil {
+				if root := rootIdentExpr(expr.Object); root != nil && names[root.Name] {
+					return storeScanMentionsHeaderWalk(reflect.ValueOf(expr.Index), names, seen)
+				}
+			}
+		case *ast.FieldExpr:
+			return !storeScanScalarHeaderField(expr.Field) && storeScanMentionsHeaderWalk(reflect.ValueOf(expr.Object), names, seen)
+		}
+		return storeScanMentionsHeaderWalk(v.Elem(), names, seen)
+	case reflect.Interface:
+		return !v.IsNil() && storeScanMentionsHeaderWalk(v.Elem(), names, seen)
+	case reflect.Struct:
+		if v.Type() == storeScanPosType {
+			return false
+		}
+		for i := 0; i < v.NumField(); i++ {
+			if storeScanMentionsHeaderWalk(v.Field(i), names, seen) {
+				return true
+			}
+		}
+	case reflect.Slice, reflect.Array:
+		for i := 0; i < v.Len(); i++ {
+			if storeScanMentionsHeaderWalk(v.Index(i), names, seen) {
+				return true
+			}
+		}
+	case reflect.String:
+		return names[v.String()]
+	}
+	return false
 }
 
 // walkStoreScanNodes visits every AST node pointer reachable from stmts.

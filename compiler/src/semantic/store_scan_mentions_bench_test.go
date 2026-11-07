@@ -160,3 +160,18 @@ func BenchmarkStoreScanLookupStrategies(b *testing.B) {
 		}
 	}
 }
+
+func TestStoreScanHeaderHandlesSharedExpressions(t *testing.T) {
+	var expr ast.Expr = &ast.FieldExpr{Object: &ast.Ident{Name: "values"}, Field: "count"}
+	for range 64 {
+		expr = &ast.BinaryExpr{Left: expr, Right: expr}
+	}
+	headers := map[string]bool{"values": true}
+	if storeScanMentionsHeader(expr, headers) {
+		t.Fatal("a shared count expression mentions no container header")
+	}
+	expr = &ast.BinaryExpr{Left: expr, Right: &ast.Ident{Name: "values"}}
+	if !storeScanMentionsHeader(expr, headers) {
+		t.Fatal("a header after shared expressions must still be found")
+	}
+}
