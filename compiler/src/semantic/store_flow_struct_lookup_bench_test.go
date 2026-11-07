@@ -18,3 +18,29 @@ func BenchmarkStoreFlowStructNamed(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkStoreFlowStructManyNames(b *testing.B) {
+	a := &Analyzer{namedTypes: make(map[string]Type)}
+	names := make([]string, 64)
+	for i := 0; i < 1024; i++ {
+		name := fmt.Sprintf("Module%d.Struct%d", i, i)
+		a.namedTypes[name] = &StructType{Name: name}
+		if i < len(names) {
+			names[i] = fmt.Sprintf("Struct%d", i)
+		}
+	}
+	a.storeFlowNamedTypes = make(map[string]string, len(names))
+	for _, name := range names {
+		a.storeFlowNamedTypes[name] = name
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		a.storeFlowStructLookup = make(map[string]Type)
+		a.storeFlowStructLookupComplete = false
+		for _, name := range names {
+			if a.storeFlowStructNamed(name) == nil {
+				b.Fatal("missing type")
+			}
+		}
+	}
+}

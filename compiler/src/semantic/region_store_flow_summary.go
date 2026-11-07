@@ -911,9 +911,12 @@ func (a *Analyzer) computeStoreFlow(decl *ast.FuncDecl) *storeFlowSummary {
 	defer func() { a.storeFlowCurrentDecl = savedFlowDecl }()
 	// Each summary sees a stable named-type set. Do not retain these results
 	// across analyses, where the named-type table can be edited.
-	savedStructLookup := a.storeFlowStructLookup
+	savedStructLookup, savedStructLookupComplete := a.storeFlowStructLookup, a.storeFlowStructLookupComplete
 	a.storeFlowStructLookup = make(map[string]Type)
-	defer func() { a.storeFlowStructLookup = savedStructLookup }()
+	a.storeFlowStructLookupComplete = false
+	defer func() {
+		a.storeFlowStructLookup, a.storeFlowStructLookupComplete = savedStructLookup, savedStructLookupComplete
+	}()
 	savedNamespace, savedUsings := a.currentNamespace, a.currentUsings
 	if sym := a.funcDeclSymbols[decl]; sym != nil {
 		if index := lastDotIndex(sym.Name); index >= 0 {
@@ -2812,6 +2815,42 @@ func (a *Analyzer) storeFlowStructNamed(name string) Type {
 	if a.storeFlowStructLookup != nil {
 		if cached, ok := a.storeFlowStructLookup[short]; ok {
 			return cached
+		}
+		if !a.storeFlowStructLookupComplete && len(a.storeFlowStructLookup) >= 8 {
+			// Index only names used by this summary. Unrecognized names still
+			// take the ordinary scan, so the cache stays bounded and exact.
+			index := make(map[string]Type, len(a.storeFlowNamedTypes)+len(a.storeFlowStructLookup)+1)
+			for key := range a.storeFlowStructLookup {
+				index[key] = nil
+			}
+			for _, typeName := range a.storeFlowNamedTypes {
+				index[fillMayAdoptLastSegment(typeName)] = nil
+			}
+			index[short] = nil
+			seen := make(map[string]bool, len(index))
+			for typeName, named := range a.namedTypes {
+				key := fillMayAdoptLastSegment(typeName)
+				if _, wanted := index[key]; !wanted {
+					continue
+				}
+				st, valid := named.(*StructType)
+				if !valid || st == nil {
+					index[key] = nil
+					seen[key] = true
+					continue
+				}
+				if seen[key] {
+					if index[key] != st {
+						index[key] = nil
+					}
+				} else {
+					index[key] = st
+					seen[key] = true
+				}
+			}
+			a.storeFlowStructLookup = index
+			a.storeFlowStructLookupComplete = true
+			return index[short]
 		}
 	}
 	var result Type
