@@ -558,42 +558,10 @@ func isLoopStmtNode(n ast.Node) bool {
 // the given statements, including nested ones.
 func collectSynthesizedRegions(root []ast.Stmt) []*ast.RegionStmt {
 	var out []*ast.RegionStmt
-	// Resolved arguments share source AST pointers; process each region once.
-	seen := make(map[any]struct{})
-	var rec func(v reflect.Value)
-	rec = func(v reflect.Value) {
-		if !v.IsValid() || !v.CanInterface() {
-			return
+	walkStoreScanNodes(root, func(node any) {
+		if region, ok := node.(*ast.RegionStmt); ok && isCompilerGeneratedAutoRegionStmt(region) {
+			out = append(out, region)
 		}
-		switch v.Kind() {
-		case reflect.Pointer:
-			if v.IsNil() {
-				return
-			}
-			node := v.Interface()
-			if _, visited := seen[node]; visited {
-				return
-			}
-			seen[node] = struct{}{}
-			if rs, ok := v.Interface().(*ast.RegionStmt); ok && isCompilerGeneratedAutoRegionStmt(rs) {
-				out = append(out, rs)
-			}
-			rec(v.Elem())
-		case reflect.Interface:
-			if v.IsNil() {
-				return
-			}
-			rec(v.Elem())
-		case reflect.Struct:
-			for _, i := range syntaxWalkFields(v.Type()) {
-				rec(v.Field(i))
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				rec(v.Index(i))
-			}
-		}
-	}
-	rec(reflect.ValueOf(root))
+	})
 	return out
 }
