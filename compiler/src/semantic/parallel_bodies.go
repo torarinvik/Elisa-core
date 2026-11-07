@@ -934,7 +934,7 @@ func parallelCloneDirectReflectKind(kind reflect.Kind) bool {
 
 func cloneParallelStructInto(out, source reflect.Value) {
 	out.Set(source)
-	for i := 0; i < source.NumField(); i++ {
+	for _, i := range parallelCloneStructFields(source.Type()) {
 		target := settable(out.Field(i))
 		if target.Kind() == reflect.Struct && typeHoldsMapInline(target.Type()) {
 			cloneParallelStructInto(target, target)
@@ -942,6 +942,24 @@ func cloneParallelStructInto(out, source reflect.Value) {
 			target.Set(deepCloneValue(target))
 		}
 	}
+}
+
+var parallelCloneStructFieldCache sync.Map // reflect.Type -> []int
+
+// The initial struct copy already handles fields with no inline maps or
+// slices. Cache only fields that need a recursive isolation copy.
+func parallelCloneStructFields(t reflect.Type) []int {
+	if fields, ok := parallelCloneStructFieldCache.Load(t); ok {
+		return fields.([]int)
+	}
+	var fields []int
+	for i := 0; i < t.NumField(); i++ {
+		if typeHoldsMapInline(t.Field(i).Type) {
+			fields = append(fields, i)
+		}
+	}
+	actual, _ := parallelCloneStructFieldCache.LoadOrStore(t, fields)
+	return actual.([]int)
 }
 
 var mapInlineCache sync.Map
