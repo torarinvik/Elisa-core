@@ -22,6 +22,32 @@ func BenchmarkStoreFlowStatementScans(b *testing.B) {
 	}
 }
 
+func BenchmarkStoreFlowPositions(b *testing.B) {
+	var expr ast.Expr = &ast.Ident{Name: "source"}
+	for i := 0; i < 64; i++ {
+		expr = &ast.BinaryExpr{Position: lexer.Pos{File: "file.elisa", Line: i}, Left: expr, Right: &ast.IntLit{Position: lexer.Pos{File: "file.elisa", Line: i}, Value: "1"}}
+	}
+	stmt := reflect.ValueOf(&ast.ReturnStmt{Value: expr})
+	for _, fast := range []bool{false, true} {
+		name := "reflective"
+		if fast {
+			name = "direct"
+		}
+		b.Run(name, func(b *testing.B) {
+			saved := storeFlowPositionFast
+			storeFlowPositionFast = fast
+			defer func() { storeFlowPositionFast = saved }()
+			a := &Analyzer{}
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				scan := storeFlowQueryScan{}
+				a.storeFlowCollectMentionsWithQuery(stmt.Elem(), stmt.Pointer(), nil, nil, nil, false, true, &scan)
+				_ = scan.result(a, stmt)
+			}
+		})
+	}
+}
+
 func BenchmarkStoreFlowCallQueryScans(b *testing.B) {
 	args := make([]ast.Expr, 64)
 	for i := range args {

@@ -1122,6 +1122,8 @@ var storeFlowIdentFast = func() bool {
 	return true
 }()
 
+var storeFlowPositionFast = storeFlowIdentFast
+
 // storeFlowTypeInfo caches what storeFlowMentions asks of a reflect.Type on every node it
 // visits: method-set tests (Implements) and the struct field filter were ~4 s of a stage1
 // driver compile when recomputed per node.
@@ -1878,6 +1880,21 @@ func (a *Analyzer) storeFlowCollectMentionsWithQuery(root reflect.Value, self ui
 			}
 			walk(v.Elem())
 		case reflect.Struct:
+			// Positions contain only one string, File; all other fields are ints.
+			// Preserve its name contribution without recursively reflecting over
+			// every coordinate on every syntax node.
+			if storeFlowIdentFast && storeFlowPositionFast && v.Type() == lexerPosType {
+				if collectNames && condDepth == 0 && (!callsOnly || callDepth > 0) {
+					name := v.Field(0).String()
+					if storeFlowVariableName(name) {
+						if renamed, ok := rename[name]; ok {
+							name = renamed
+						}
+						names = append(names, name)
+					}
+				}
+				return
+			}
 			// Test the type before boxing: Interface() on a struct value copies it to the heap.
 			if v.Type() != astMatchArmType || !v.CanAddr() {
 				walkStructFields(v)
@@ -3152,6 +3169,9 @@ func (a *Analyzer) storeFlowQueryBinderPairs(stmt reflect.Value) [][]string {
 			}
 			walk(v.Elem())
 		case reflect.Struct:
+			if storeFlowIdentFast && storeFlowPositionFast && v.Type() == lexerPosType {
+				return // a verified lexer position has no query expressions
+			}
 			for _, i := range storeFlowTypeInfoOf(v.Type()).fields {
 				walk(v.Field(i))
 			}

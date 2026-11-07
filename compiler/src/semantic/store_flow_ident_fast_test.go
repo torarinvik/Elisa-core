@@ -21,6 +21,8 @@ func TestStoreFlowIdentFastMatchesReflectiveWalk(t *testing.T) {
 		&ast.CallExpr{Func: id("", "call"), Args: []ast.Expr{id("source", "name")}},
 		&ast.QueryExpr{Kind: ast.QueryExprAny, Name: "item", Source: id("source", "name"), Filter: id("", "predicate")},
 		&ast.TernaryExpr{Value: id("source", "name"), Cond: id("", "condition"), Alt: id("", "other")},
+		&ast.BinaryExpr{Position: lexer.Pos{File: "source", Line: 12, Col: 8}, Left: id("", "name"), Right: &ast.IntLit{Position: lexer.Pos{File: "literal"}, Value: "1"}},
+		&ast.CallExpr{Position: lexer.Pos{File: "source"}, Func: id("", "call"), Args: []ast.Expr{&ast.IntLit{Position: lexer.Pos{File: "literal"}, Value: "1"}}},
 	}
 	for _, expr := range exprs {
 		for _, callsOnly := range []bool{false, true} {
