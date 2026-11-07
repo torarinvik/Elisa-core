@@ -266,10 +266,7 @@ func storeScanBindingWriteCounts(body []ast.Stmt) map[string]int {
 			if v.Type() == storeScanPosType {
 				return
 			}
-			for i := 0; i < v.NumField(); i++ {
-				if !v.Type().Field(i).IsExported() {
-					continue
-				}
+			for _, i := range reflectMetaOf(v.Type()).exportedFields {
 				rec(v.Field(i), depth+1)
 			}
 		case reflect.Slice, reflect.Array:
