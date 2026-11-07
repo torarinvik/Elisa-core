@@ -38,7 +38,8 @@ import (
 // before native partitions are reused by exact post-optimization bitcode and
 // target-machine inputs. Explicit partitioned-O3 experiments use their own
 // pre-optimization cache inputs. This avoids native code generation, not
-// frontend analysis or LLVM lowering.
+// frontend analysis or LLVM lowering. The caller must exclusively own result
+// during this call.
 func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPath string, options LLVMObjectEmitOptions) error {
 	s.recordStats(func(stats *IncrementalObjectStats) { stats.Builds++ })
 	disposalScope := newLLVMDisposalScope(runtime.GOMAXPROCS(0))
@@ -72,36 +73,24 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 		// default O3. The audit never changes partition/import policy.
 		defer func() { s.irInputAudit(-1, inputReads.snapshot()) }()
 	}
-	sharedResult := s.diskDefaults
-	sharedResultActive := false
-	var sharedLookups []*sharedCodegenLookups
-	if sharedResult {
-		// This standalone disk build exclusively owns the analyzed Result during
-		// codegen and the selected optimization phase. The shared session memoizes
-		// generic products/canonical membership once and routes synthesized facts
-		// into generator-local overlays; EndSharedCodegen restores analyzer maps.
-		// Callers must not use this Result concurrently until this phase ends.
-		result.BeginSharedCodegen()
-		sharedResultActive = true
-		defer func() {
-			if sharedResultActive {
-				result.EndSharedCodegen()
-			}
-		}()
-		sharedLookups = append(sharedLookups, newSharedCodegenLookups(result, inputReads))
-	}
-	// When auditing is enabled, route constructor-time global-index reads
-	// through an explicit view even if shared-result memoization is disabled.
-	if inputReads != nil && len(sharedLookups) == 0 {
-		sharedLookups = append(sharedLookups, newSharedCodegenLookups(result, inputReads))
-	}
+	// Each request exclusively owns its Result through lowering and optimization.
+	// Use the shared semantic view even for serial lowering so specializations
+	// can reuse the canonical syntax index. The generator keeps its writes local.
+	result.BeginSharedCodegen()
+	sharedResultActive := true
+	defer func() {
+		if sharedResultActive {
+			result.EndSharedCodegen()
+		}
+	}()
+	sharedLookups := newSharedCodegenLookups(result, inputReads)
 	g, err := compileLLVMModuleConfigured(result, options.OptLevel, options.PackedProfile, options.TargetTriple, options.DebugInfo, options.Trace, func(g *llvmGenerator) {
 		g.inputReads = inputReads
 		if !options.DebugInfo {
 			discardLLVMValueNames(g.context)
 		}
-		g.sharedResult = sharedResult
-	}, sharedLookups...)
+		g.sharedResult = true
+	}, sharedLookups)
 	if err != nil {
 		return err
 	}
@@ -132,10 +121,8 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 			g = optimized
 		}
 	}
-	if sharedResultActive {
-		result.EndSharedCodegen()
-		sharedResultActive = false
-	}
+	result.EndSharedCodegen()
+	sharedResultActive = false
 	irDuration := time.Since(irStart)
 	s.recordStats(func(stats *IncrementalObjectStats) { stats.IRTime += irDuration })
 	identity := strings.TrimSpace(filename)
