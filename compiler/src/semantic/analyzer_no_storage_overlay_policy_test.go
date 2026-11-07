@@ -62,7 +62,7 @@ func TestNoStorageOverlayClosedAccessPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(policy), "ownedFunctionAnalyses && name == \"storeScanNoStorageCache\"") {
+	if !strings.Contains(string(policy), "ownedFunctionAnalyses && (name == \"storeScanNoStorageCache\" || ") {
 		t.Fatal("specialization-only clone boundary lost")
 	}
 	if !strings.Contains(string(policy), "ownedFunctionAnalyses && name == \"storeScanSharesCache\"") {

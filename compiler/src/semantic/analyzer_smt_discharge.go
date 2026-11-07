@@ -5612,8 +5612,20 @@ func (tr *smtTranslator) abstractMethodCanonKey(call *ast.CallExpr, argEnv map[s
 	b.WriteString("absmethod|")
 	b.WriteString(fieldExpr.Field)
 	b.WriteByte('|')
-	for _, p := range participants {
-		t, ok := tr.callCanonArgKeyEnv(p, argEnv)
+	for index, participant := range participants {
+		t, ok := tr.callCanonArgKeyEnv(participant, argEnv)
+		if !ok && index == 0 {
+			// Protocol clauses may be translated before their receiver nodes have
+			// expression types. Use the substituted projection or the caller's
+			// scoped type-parameter binding to match the typed, lowered call.
+			if receiver, bare := stripOptimizationParens(participant).(*ast.Ident); bare && receiver != nil {
+				if bound, substituted := argEnv[receiver.Name]; substituted {
+					t, ok = bound, strings.HasPrefix(bound, dtTokenPrefix)
+				} else if _, bounded := tr.a.protocolMethodReceiverInterface(receiver, fieldExpr.Field); bounded {
+					t, ok = dtToken(smtProjectionName(receiver)), true
+				}
+			}
+		}
 		if !ok {
 			return "", false
 		}

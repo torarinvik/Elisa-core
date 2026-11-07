@@ -320,6 +320,10 @@ func PrepareRetainedScratch(scratch *ast.File, options AnalyzeOptions) *Retained
 // UpdatePrepared is Update with an optional prepared scratch phase; it is used
 // only when it was prepared from scratch itself.
 func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, prepared *RetainedScratch) (*Result, error) {
+	if r.a != nil && (r.a.smtUnavailable || r.a.smtSnapshotTainted) {
+		r.LastStats = RetainedUpdateStats{Fallback: "previous analysis had transient solver state; retry with a full analysis"}
+		return nil, fmt.Errorf("%s", r.LastStats.Fallback)
+	}
 	if r.proofCoordinatesDeferred {
 		r.LastStats = RetainedUpdateStats{Fallback: "proof report coordinates were deferred; retry with a full analysis"}
 		return nil, fmt.Errorf("%s", r.LastStats.Fallback)
