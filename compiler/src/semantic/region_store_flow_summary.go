@@ -594,6 +594,45 @@ func (c *storeFlowCtx) reaches(anchors map[storeFlowClass][]storeFlowClass, src,
 	return false
 }
 
+// A settled summary asks reachability from the same parameter to many
+// destinations. Compute each source's closure once after all unions are done.
+type storeFlowReachMemo struct {
+	ctx     *storeFlowCtx
+	anchors map[storeFlowClass][]storeFlowClass
+	visited map[storeFlowClass]map[storeFlowClass]bool
+}
+
+func (m *storeFlowReachMemo) reaches(src, sink string) bool {
+	start, target := m.ctx.storeFlowKey(src), m.ctx.storeFlowKey(sink)
+	if start == target {
+		return true
+	}
+	if len(m.anchors[start]) == 0 {
+		return false
+	}
+	seen, ok := m.visited[start]
+	if !ok {
+		seen = map[storeFlowClass]bool{start: true}
+		work := []storeFlowClass{start}
+		for len(work) != 0 {
+			last := len(work) - 1
+			key := work[last]
+			work = work[:last]
+			for _, next := range m.anchors[key] {
+				if !seen[next] {
+					seen[next] = true
+					work = append(work, next)
+				}
+			}
+		}
+		if m.visited == nil {
+			m.visited = map[storeFlowClass]map[storeFlowClass]bool{}
+		}
+		m.visited[start] = seen
+	}
+	return seen[target]
+}
+
 // storeFlowSkipFields are string fields that never name a variable.
 var storeFlowSkipFields = map[string]bool{
 	"Field": true, "Value": true, "Suffix": true, "ArgNames": true, "Keyword": true, "AutovecReason": true,
@@ -1012,6 +1051,7 @@ func (a *Analyzer) computeStoreFlow(decl *ast.FuncDecl) *storeFlowSummary {
 		root := c.storeFlowKey(e[0])
 		anchors[root] = append(anchors[root], c.storeFlowKey(e[1]))
 	}
+	reachMemo := storeFlowReachMemo{ctx: c, anchors: anchors}
 	n := len(decl.Params)
 	conn := storeFlowBoolMatrix(n)
 	reach := storeFlowBoolMatrix(n)
@@ -1042,11 +1082,11 @@ func (a *Analyzer) computeStoreFlow(decl *ast.FuncDecl) *storeFlowSummary {
 			case i == j:
 				reach[i][j] = true
 			case !iPure && !jPure:
-				reach[i][j] = c.u.find(pi.Name) == c.u.find(pj.Name) || c.reaches(anchors, pi.Name, pj.Name)
+				reach[i][j] = c.u.find(pi.Name) == c.u.find(pj.Name) || reachMemo.reaches(pi.Name, pj.Name)
 			case iPure && jPure:
 				reach[i][j] = c.pu.find(pi.Name) == c.pu.find(pj.Name)
 			case iPure:
-				reach[i][j] = c.reaches(anchors, pi.Name, pj.Name)
+				reach[i][j] = reachMemo.reaches(pi.Name, pj.Name)
 			default:
 				reach[i][j] = false // a parameter that is never written receives nothing
 			}
@@ -1058,9 +1098,9 @@ func (a *Analyzer) computeStoreFlow(decl *ast.FuncDecl) *storeFlowSummary {
 		}
 		iPure := c.isPure(pi.Name)
 		if iPure {
-			retConn[i] = implicit || c.reaches(anchors, pi.Name, storeFlowRetName)
+			retConn[i] = implicit || reachMemo.reaches(pi.Name, storeFlowRetName)
 		} else {
-			retConn[i] = implicit || c.u.find(pi.Name) == c.u.find(storeFlowRetName) || c.reaches(anchors, pi.Name, storeFlowRetName)
+			retConn[i] = implicit || c.u.find(pi.Name) == c.u.find(storeFlowRetName) || reachMemo.reaches(pi.Name, storeFlowRetName)
 		}
 		if scalarResult {
 			retConn[i] = false
