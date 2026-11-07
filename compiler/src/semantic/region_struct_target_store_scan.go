@@ -2001,10 +2001,12 @@ func (a *Analyzer) declParamIsViewOrScalar(decl *ast.FuncDecl, index int) bool {
 		return false
 	}
 	t := fnType.Params[index]
-	if t == nil || containsTypeParam(t) {
+	// References are never view-only or scalar, regardless of their pointee.
+	// Check the outer type before walking potentially large recursive payloads.
+	if _, isRef := t.(*RefType); isRef {
 		return false
 	}
-	if _, isRef := t.(*RefType); isRef {
+	if t == nil || containsTypeParam(t) {
 		return false
 	}
 	if _, isOpaque := t.(*OpaqueType); isOpaque {
