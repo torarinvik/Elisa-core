@@ -194,8 +194,8 @@ type storeScanDeclIndex struct {
 	// subset on first use, rather than dispatching every AST node per query.
 	payloadNodes      []any
 	payloadNodesReady bool
-	// Alias closure only processes statements and calls, not other expression
-	// nodes. Its fixpoint and per-parameter queries reuse this ordered subset.
+	// Alias closure only processes declarations, assignments, calls, and
+	// statements with binders. Fixpoints reuse this ordered subset.
 	aliasNodes      []any
 	aliasNodesReady bool
 	// bindingWrites is populated on demand once per function. Pattern binder typing used to
@@ -218,12 +218,19 @@ type storeScanDeclIndex struct {
 
 func (idx *storeScanDeclIndex) aliasClosureNodes() []any {
 	if !idx.aliasNodesReady {
+		if idx.bound == nil {
+			idx.bound = map[ast.Stmt][]string{}
+		}
 		for _, node := range idx.flat {
-			switch node.(type) {
+			switch n := node.(type) {
 			case *ast.ForStmt:
 				// The closure's ForStmt case has no effect.
-			case ast.Stmt, *ast.CallExpr:
+			case *ast.VarDeclStmt, *ast.AssignStmt, *ast.CallExpr:
 				idx.aliasNodes = append(idx.aliasNodes, node)
+			case ast.Stmt:
+				if n != nil && len(idx.boundNames(n)) != 0 {
+					idx.aliasNodes = append(idx.aliasNodes, node)
+				}
 			}
 		}
 		idx.aliasNodesReady = true
@@ -286,6 +293,7 @@ func (a *Analyzer) storeScanIndex(decl *ast.FuncDecl) *storeScanDeclIndex {
 				return
 			}
 			bound := stmtBoundNames(n)
+			idx.bound[n] = bound
 			iter, isIter := n.(*ast.IterForStmt)
 			for _, name := range bound {
 				idx.otherBound[name] = true
