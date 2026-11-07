@@ -1674,6 +1674,20 @@ var storeFlowDeclaredCallQueryFast = func() bool {
 	return true
 }()
 
+// For a read-only call on a plain identifier, the skipped receiver cannot
+// contain queries. Require the known field schema and no other skipped
+// expressions; all explicit arguments are still visited in order.
+var storeFlowSimpleFieldQueryFast = func() bool {
+	t := reflect.TypeOf(ast.FieldExpr{})
+	if t.NumField() != 4 {
+		return false
+	}
+	return t.Field(0).Name == "Position" && t.Field(0).Type == reflect.TypeOf(lexer.Pos{}) &&
+		t.Field(1).Name == "Object" && t.Field(1).Type == reflect.TypeOf((*ast.Expr)(nil)).Elem() &&
+		t.Field(2).Name == "Field" && t.Field(2).Type.Kind() == reflect.String &&
+		t.Field(3).Name == "Safe" && t.Field(3).Type.Kind() == reflect.Bool && storeFlowIdentFast
+}()
+
 func (q *storeFlowQueryScan) result(a *Analyzer, stmt reflect.Value) [][]string {
 	if q.incomplete {
 		return a.storeFlowQueryBinderPairs(stmt)
@@ -1799,7 +1813,8 @@ func (a *Analyzer) storeFlowCollectMentionsWithQuery(root reflect.Value, self ui
 			if call, ok := v.Interface().(*ast.CallExpr); ok {
 				if callsOnly {
 					if fe, isField := call.Func.(*ast.FieldExpr); isField && fe != nil && storeFlowReadOnlyMethods[fe.Field] && !a.isDeclaredFuncName(fe.Field) {
-						if queryScan != nil {
+						_, plainReceiver := fe.Object.(*ast.Ident)
+						if queryScan != nil && (!storeFlowDeclaredCallQueryFast || !storeFlowSimpleFieldQueryFast || !plainReceiver || call.SafeReceiver != nil || len(call.ResolvedArgs) != 0 || len(call.ResolvedImplicitArgs) != 0) {
 							queryScan.incomplete = true
 						}
 						for _, arg := range call.Args {
