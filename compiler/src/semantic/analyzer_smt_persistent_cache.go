@@ -264,7 +264,11 @@ func (c *smtProofCache) lookupProof(query string) (smtProofKeys, bool) {
 	if c == nil {
 		return smtProofKeys{}, false
 	}
-	keys := smtProofKeys{exact: c.key(query)}
+	return c.lookupProofWithExact(query, c.key(query))
+}
+
+func (c *smtProofCache) lookupProofWithExact(query, exact string) (smtProofKeys, bool) {
+	keys := smtProofKeys{exact: exact}
 	if c.containsKey(keys.exact) {
 		return keys, true
 	}

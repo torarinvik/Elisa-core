@@ -316,10 +316,41 @@ func (a *Analyzer) smtCheckTransformedProof(query string, check func() (smt.Resu
 // It can therefore share SAT across alpha-equivalent queries without remapping
 // model names. Other transformed-query callers share only UNSAT.
 func (a *Analyzer) smtCheckTransformedVerdict(query string, shareSat bool, check func() (smt.Result, map[string]string)) (smt.Result, map[string]string) {
-	keys, hit := a.smtProofCache.lookupProof(query)
+	var exactFlight *smtFlight
+	var exactFlightKey string
+	var keys smtProofKeys
+	var hit bool
+	if a.smtProofCache != nil {
+		exact := a.smtProofCache.key(query)
+		if a.parallel != nil && a.parallel.smtFlights != nil {
+			exactFlightKey = "\x00transformed-early-exact\x00" + exact
+			if shareSat {
+				exactFlightKey = "\x00model-free\x00" + exactFlightKey
+			}
+			shared, found, owned := a.awaitSharedSMTQuery(exactFlightKey)
+			if found {
+				a.smtStats.CacheHits++
+				if shared.proven {
+					return smt.Unsat, nil
+				}
+				if shareSat {
+					return smt.Sat, nil
+				}
+			}
+			exactFlight = owned
+			defer a.releaseSMTFlight(exactFlightKey, exactFlight)
+		}
+		keys, hit = a.smtProofCache.lookupProofWithExact(query, exact)
+	}
+	resolveExact := func(result smt.Result) {
+		if exactFlight != nil && (result == smt.Unsat || shareSat && result == smt.Sat) {
+			a.resolveSMTFlight(exactFlightKey, smtQueryResult{proven: result == smt.Unsat})
+		}
+	}
 	if hit {
 		a.smtStats.CacheHits++
 		a.smtStats.PersistentCacheHits++
+		resolveExact(smt.Unsat)
 		return smt.Unsat, nil
 	}
 	// Distinct outer queries can produce the same transformed obligation.
@@ -342,9 +373,11 @@ func (a *Analyzer) smtCheckTransformedVerdict(query string, shareSat bool, check
 		if ok {
 			a.smtStats.CacheHits++
 			if shared.proven {
+				resolveExact(smt.Unsat)
 				return smt.Unsat, nil
 			}
 			if shareSat {
+				resolveExact(smt.Sat)
 				return smt.Sat, nil
 			}
 		}
@@ -352,6 +385,7 @@ func (a *Analyzer) smtCheckTransformedVerdict(query string, shareSat bool, check
 		defer a.releaseSMTFlight(flightKey, flight)
 	}
 	result, model := check()
+	resolveExact(result)
 	if result == smt.Unsat {
 		a.smtProofCache.publishProof(keys)
 		if flight != nil {
