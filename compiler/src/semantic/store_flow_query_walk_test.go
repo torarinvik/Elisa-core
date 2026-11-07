@@ -43,3 +43,33 @@ func TestStoreFlowQueryScanConservative(t *testing.T) {
 		})
 	}
 }
+
+func TestStoreFlowDeclaredCallQueryScan(t *testing.T) {
+	query := func(name string) ast.Expr {
+		return &ast.QueryExpr{Kind: ast.QueryExprAny, Name: name, Source: &ast.Ident{Name: "items"}}
+	}
+	for _, tc := range []struct {
+		name     string
+		call     *ast.CallExpr
+		fallback bool
+	}{
+		{"arguments", &ast.CallExpr{Func: &ast.Ident{Name: "f"}, Args: []ast.Expr{query("arg")}}, false},
+		{"resolved", &ast.CallExpr{Func: &ast.Ident{Name: "f"}, ResolvedArgsValid: true, ResolvedArgs: []ast.Expr{query("resolved")}}, false},
+		{"unresolved", &ast.CallExpr{Func: &ast.Ident{Name: "f"}, ResolvedArgs: []ast.Expr{query("unresolved")}}, true},
+		{"receiver", &ast.CallExpr{Func: &ast.Ident{Name: "f"}, SafeReceiver: query("receiver")}, true},
+		{"implicit", &ast.CallExpr{Func: &ast.Ident{Name: "f"}, ResolvedImplicitArgs: []ast.Expr{query("implicit")}}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := &Analyzer{declaredFuncNames: map[string]bool{"f": true}}
+			stmt := reflect.ValueOf(&ast.ReturnStmt{Value: tc.call})
+			scan := storeFlowQueryScan{}
+			a.storeFlowCollectMentionsWithQuery(stmt.Elem(), stmt.Pointer(), nil, nil, nil, false, true, &scan)
+			if scan.incomplete != tc.fallback {
+				t.Fatalf("fallback = %v, want %v", scan.incomplete, tc.fallback)
+			}
+			if got, want := scan.result(a, stmt), a.storeFlowQueryBinderPairs(stmt); !reflect.DeepEqual(got, want) {
+				t.Fatalf("got %v, want %v", got, want)
+			}
+		})
+	}
+}

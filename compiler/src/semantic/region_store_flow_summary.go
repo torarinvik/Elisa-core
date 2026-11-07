@@ -1636,6 +1636,44 @@ type storeFlowQueryScan struct {
 	pairs      [][]string
 }
 
+// A declared call's identifier cannot contain a query. Its arguments are
+// already walked; avoid a second walk when all other query-bearing fields are
+// empty. Guard the schema so new AST fields retain the conservative fallback.
+var storeFlowDeclaredCallQueryFast = func() bool {
+	var queryFree func(reflect.Type) bool
+	queryFree = func(t reflect.Type) bool {
+		switch t.Kind() {
+		case reflect.Map: // the reference walker does not traverse maps
+			return true
+		case reflect.Array, reflect.Slice:
+			return queryFree(t.Elem())
+		case reflect.Struct:
+			for i := 0; i < t.NumField(); i++ {
+				if t.Field(i).IsExported() && !queryFree(t.Field(i).Type) {
+					return false
+				}
+			}
+			return true
+		case reflect.Interface, reflect.Pointer:
+			return false
+		default:
+			return true
+		}
+	}
+	t := reflect.TypeOf(ast.CallExpr{})
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		switch f.Name {
+		case "Func", "Args", "ResolvedArgs", "SafeReceiver", "ResolvedImplicitArgs":
+			continue
+		}
+		if f.IsExported() && !queryFree(f.Type) {
+			return false
+		}
+	}
+	return true
+}()
+
 func (q *storeFlowQueryScan) result(a *Analyzer, stmt reflect.Value) [][]string {
 	if q.incomplete {
 		return a.storeFlowQueryBinderPairs(stmt)
@@ -1788,7 +1826,7 @@ func (a *Analyzer) storeFlowCollectMentionsWithQuery(root reflect.Value, self ui
 				}
 				// A declared function's own name is not a variable.
 				if ident, ok := call.Func.(*ast.Ident); ok && ident != nil && a.isDeclaredFuncName(ident.Name) && !a.storeFlowParams[ident.Name] {
-					if queryScan != nil {
+					if queryScan != nil && (!storeFlowDeclaredCallQueryFast || call.SafeReceiver != nil || len(call.ResolvedImplicitArgs) != 0 || (!call.ResolvedArgsValid && len(call.ResolvedArgs) != 0)) {
 						queryScan.incomplete = true
 					}
 					for _, arg := range call.Args {
