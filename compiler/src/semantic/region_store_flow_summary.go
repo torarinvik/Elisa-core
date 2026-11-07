@@ -908,6 +908,11 @@ func (a *Analyzer) computeStoreFlow(decl *ast.FuncDecl) *storeFlowSummary {
 	savedFlowDecl := a.storeFlowCurrentDecl
 	a.storeFlowCurrentDecl = decl
 	defer func() { a.storeFlowCurrentDecl = savedFlowDecl }()
+	// Each summary sees a stable named-type set. Do not retain these results
+	// across analyses, where the named-type table can be edited.
+	savedStructLookup := a.storeFlowStructLookup
+	a.storeFlowStructLookup = make(map[string]Type)
+	defer func() { a.storeFlowStructLookup = savedStructLookup }()
 	savedNamespace, savedUsings := a.currentNamespace, a.currentUsings
 	if sym := a.funcDeclSymbols[decl]; sym != nil {
 		if index := lastDotIndex(sym.Name); index >= 0 {
@@ -2769,6 +2774,17 @@ func (a *Analyzer) storeFlowPlaceType(expr ast.Expr) Type {
 // segment matches it is that one struct type; otherwise nil.
 func (a *Analyzer) storeFlowStructNamed(name string) Type {
 	short := fillMayAdoptLastSegment(name)
+	if a.storeFlowStructLookup != nil {
+		if cached, ok := a.storeFlowStructLookup[short]; ok {
+			return cached
+		}
+	}
+	var result Type
+	defer func() {
+		if a.storeFlowStructLookup != nil {
+			a.storeFlowStructLookup[short] = result
+		}
+	}()
 	var found *StructType
 	for typeName, named := range a.namedTypes {
 		if fillMayAdoptLastSegment(typeName) != short {
@@ -2783,7 +2799,8 @@ func (a *Analyzer) storeFlowStructNamed(name string) Type {
 	if found == nil {
 		return nil
 	}
-	return found
+	result = found
+	return result
 }
 
 // storeFlowCalleeForArgCheck returns the declared callee only when its summary

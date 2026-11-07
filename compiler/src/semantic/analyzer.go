@@ -519,6 +519,8 @@ type Analyzer struct {
 	currentElementExtendSources map[ast.Expr]bool
 	// storeFlowBinderIndexes caches each function's binding sites for the store-flow summaries.
 	storeFlowBinderIndexes map[*ast.FuncDecl]*storeFlowBinderIndex
+	// storeFlowStructLookup is scoped to one synchronous summary computation.
+	storeFlowStructLookup map[string]Type
 	// currentElementBinderLoops are the by-value `for x in xs` loops over an eligible local
 	// container whose binder may take the container's tracked element provenance;
 	// iterBinderElementStates holds that provenance per binder symbol.
