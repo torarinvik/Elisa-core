@@ -1153,6 +1153,16 @@ var storeFlowIntLiteralFast = func() bool {
 		t.Field(3).Name == "IsHex" && t.Field(3).Type.Kind() == reflect.Bool
 }()
 
+// The direct binary walk must visit all query-bearing fields in schema order.
+var storeFlowBinaryFast = func() bool {
+	t := reflect.TypeOf(ast.BinaryExpr{})
+	return t.NumField() == 5 && t.Field(0).Name == "Position" && t.Field(0).Type == reflect.TypeOf(lexer.Pos{}) &&
+		t.Field(1).Name == "Op" && t.Field(1).Type.Kind() == reflect.Int16 &&
+		t.Field(2).Name == "Left" && t.Field(2).Type == reflect.TypeOf((*ast.Expr)(nil)).Elem() &&
+		t.Field(3).Name == "Right" && t.Field(3).Type == reflect.TypeOf((*ast.Expr)(nil)).Elem() &&
+		t.Field(4).Name == "LoweredCall" && t.Field(4).Type == reflect.TypeOf((*ast.CallExpr)(nil))
+}()
+
 // storeFlowTypeInfo caches what storeFlowMentions asks of a reflect.Type on every node it
 // visits: method-set tests (Implements) and the struct field filter were ~4 s of a stage1
 // driver compile when recomputed per node.
@@ -1794,6 +1804,17 @@ func (a *Analyzer) storeFlowCollectMentionsWithQuery(root reflect.Value, self ui
 		case reflect.Pointer:
 			if v.IsNil() || !v.CanInterface() {
 				return
+			}
+			if storeFlowBinaryFast {
+				if binary, ok := v.Interface().(*ast.BinaryExpr); ok {
+					walk(reflect.ValueOf(&binary.Position).Elem())
+					walk(reflect.ValueOf(binary.Left))
+					walk(reflect.ValueOf(binary.Right))
+					if binary.LoweredCall != nil {
+						walk(reflect.ValueOf(binary.LoweredCall))
+					}
+					return
+				}
 			}
 			if storeFlowIntLiteralFast && storeFlowIdentFast && storeFlowPositionFast {
 				if lit, ok := v.Interface().(*ast.IntLit); ok {

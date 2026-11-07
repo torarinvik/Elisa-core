@@ -120,3 +120,27 @@ func TestStoreFlowQueryBinderPairsIdentifierFastPath(t *testing.T) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
 }
+
+func TestStoreFlowBinaryFastMatchesReflective(t *testing.T) {
+	if !storeFlowBinaryFast {
+		t.Skip("binary syntax schema changed")
+	}
+	old := storeFlowBinaryFast
+	defer func() { storeFlowBinaryFast = old }()
+	query := &ast.QueryExpr{Kind: ast.QueryExprAny, Name: "item", Source: &ast.Ident{Name: "items"}}
+	binary := &ast.BinaryExpr{Left: query, Right: &ast.Ident{Name: "x"}, LoweredCall: &ast.CallExpr{Func: &ast.Ident{Name: "f"}, Args: []ast.Expr{query}}}
+	stmt := reflect.ValueOf(&ast.ReturnStmt{Value: binary})
+	run := func(fast bool) ([]string, [][]string, []*ast.CallExpr, bool) {
+		storeFlowBinaryFast = fast
+		a := &Analyzer{}
+		var calls []*ast.CallExpr
+		scan := storeFlowQueryScan{}
+		names := a.storeFlowCollectMentionsWithQuery(stmt.Elem(), stmt.Pointer(), nil, nil, &calls, false, true, &scan)
+		return names, scan.pairs, calls, a.storeFlowBinds
+	}
+	want, wp, wc, wb := run(false)
+	got, gp, gc, gb := run(true)
+	if !reflect.DeepEqual(got, want) || !reflect.DeepEqual(gp, wp) || !reflect.DeepEqual(gc, wc) || gb != wb {
+		t.Fatalf("binary walk differs: %v %v %v %v; want %v %v %v %v", got, gp, gc, gb, want, wp, wc, wb)
+	}
+}
