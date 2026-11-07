@@ -479,14 +479,14 @@ func buildStoreFlowBinderIndex(decl *ast.FuncDecl) *storeFlowBinderIndex {
 		if rv.Kind() != reflect.Pointer || rv.IsNil() || rv.Elem().Kind() != reflect.Struct {
 			return
 		}
+		if !storeFlowTypeInfoOf(rv.Type()).binder {
+			return
+		}
 		elem := rv.Elem()
 		out := &idx.other
 		if fs, ok := v.(*ast.ForStmt); ok {
 			idx.rangeNames = append(idx.rangeNames, fs.Name)
 			out = &idx.rangeOther
-		}
-		if !storeFlowBinderNode(elem.Type().Name()) {
-			return
 		}
 		rfs := reflectFields(elem.Type())
 		for i := 0; i < elem.NumField(); i++ {
@@ -1160,6 +1160,7 @@ type storeFlowTypeInfo struct {
 	isStmt     bool  // pointer type implementing ast.Stmt
 	isTypeExpr bool  // pointer type implementing ast.TypeExpr
 	binding    bool  // pointer to a storeFlowBindingExprs node
+	binder     bool  // pointer to a syntax node that can introduce binders
 	fields     []int // struct: exported fields to walk, in declaration order
 }
 
@@ -1195,6 +1196,7 @@ func storeFlowTypeInfoSlow(t reflect.Type) *storeFlowTypeInfo {
 		info.isStmt = t.Implements(astStmtType)
 		info.isTypeExpr = t.Implements(astTypeExprType)
 		info.binding = storeFlowBindingExprs[t.Elem().Name()]
+		info.binder = storeFlowBinderNode(t.Elem().Name())
 	case reflect.Struct:
 		for i := 0; i < t.NumField(); i++ {
 			field := t.Field(i)
