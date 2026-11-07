@@ -3,6 +3,7 @@ package semantic
 import (
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"unicode"
@@ -1623,12 +1624,14 @@ func (a *Analyzer) storeFlowMentions(root reflect.Value, self uintptr, handled m
 					for name, renamed := range rename {
 						scoped[name] = renamed
 					}
-					rename = scoped
-				}
-				for _, binder := range []string{comp.Name, comp.SecondName} {
-					if binder != "" {
-						rename[binder] = fmt.Sprintf("%s#%x", binder, v.Pointer())
+					var buf = [17]byte{'#'}
+					suffix := strconv.AppendUint(buf[:1], uint64(v.Pointer()), 16)
+					for _, binder := range []string{comp.Name, comp.SecondName} {
+						if binder != "" {
+							scoped[binder] = binder + string(suffix)
+						}
 					}
+					rename = scoped
 				}
 				walk(v.Elem())
 				rename = savedRename
@@ -1708,8 +1711,10 @@ func (a *Analyzer) storeFlowMentions(root reflect.Value, self uintptr, handled m
 					for name, renamed := range rename {
 						scoped[name] = renamed
 					}
+					var buf = [17]byte{'#'}
+					suffix := strconv.AppendUint(buf[:1], uint64(v.Addr().Pointer()), 16)
 					for _, binder := range binders {
-						scoped[binder] = fmt.Sprintf("%s#%x", binder, v.Addr().Pointer())
+						scoped[binder] = binder + string(suffix)
 					}
 					rename = scoped
 				}
