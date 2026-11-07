@@ -52,6 +52,38 @@ func TestStoreFlowBinderClassifications(t *testing.T) {
 	}
 }
 
+func TestStoreFlowScalarNamesMatchesOriginalCalculation(t *testing.T) {
+	decl := &ast.FuncDecl{}
+	idx := &storeFlowBinderIndex{
+		typed: []storeFlowTypedBinder{
+			{name: "scalar", t: &ast.BuiltinTypeExpr{Name: "u32"}},
+			{name: "mixed", t: &ast.BuiltinTypeExpr{Name: "u32"}},
+			{name: "mixed", t: &ast.BuiltinTypeExpr{Name: "darray"}},
+			{name: "shadow", t: &ast.BuiltinTypeExpr{Name: "u32"}},
+		},
+		rangeNames: []string{"range"}, other: []string{"shadow"}, untyped: map[string]bool{"shadow": true},
+	}
+	a := &Analyzer{storeFlowBinderIndexes: map[*ast.FuncDecl]*storeFlowBinderIndex{decl: idx}}
+	want := idx.typedNames(storeFlowScalarTypeExpr)
+	total, pointerFree := map[string]int{}, map[string]int{}
+	for _, binder := range idx.typed {
+		total[binder.name]++
+		if storeFlowScalarTypeExpr(binder.t) || a.storeFlowPointerFreeTypeExpr(binder.t, map[Type]bool{}) {
+			pointerFree[binder.name]++
+		}
+	}
+	for name, count := range total {
+		if count > 0 && pointerFree[name] == count && !idx.untyped[name] {
+			want[name] = true
+		}
+	}
+	for i := 0; i < 2; i++ {
+		if got := a.storeFlowScalarNames(decl); !reflect.DeepEqual(got, want) {
+			t.Fatalf("got %v want %v", got, want)
+		}
+	}
+}
+
 var binderLookupSink int
 
 func BenchmarkStoreFlowBinderLookup(b *testing.B) {
@@ -106,5 +138,19 @@ func BenchmarkStoreFlowBinderClassifications(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+func BenchmarkStoreFlowScalarNames(b *testing.B) {
+	decl := &ast.FuncDecl{}
+	for i := 0; i < 300; i++ {
+		decl.Params = append(decl.Params, ast.ParamDecl{Name: fmt.Sprintf("var%d", i), Type: &ast.BuiltinTypeExpr{Name: "u32"}})
+	}
+	a := &Analyzer{}
+	a.storeFlowScalarNames(decl)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		binderLookupSink = len(a.storeFlowScalarNames(decl))
 	}
 }

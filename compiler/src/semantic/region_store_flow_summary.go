@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"fmt"
+	"maps"
 	"reflect"
 	"strconv"
 	"strings"
@@ -144,19 +145,19 @@ func storeFlowBinderNode(typeName string) bool {
 func (a *Analyzer) storeFlowScalarNames(decl *ast.FuncDecl) map[string]bool {
 	decl = a.readDecl(decl)
 	idx := a.storeFlowBinderIndexFor(decl)
-	scalars := idx.typedNames(storeFlowScalarTypeExpr)
+	idx.classify()
+	scalars := maps.Clone(idx.scalarNames)
 	if decl == nil {
 		return scalars
 	}
-	total, pointerFree := map[string]int{}, map[string]int{}
+	pointerFree := make(map[string]bool, len(idx.typed))
 	for _, binder := range idx.typed {
-		total[binder.name]++
-		if storeFlowScalarTypeExpr(binder.t) || a.storeFlowPointerFreeTypeExpr(binder.t, map[Type]bool{}) {
-			pointerFree[binder.name]++
-		}
+		good := storeFlowScalarTypeExpr(binder.t) || a.storeFlowPointerFreeTypeExpr(binder.t, map[Type]bool{})
+		prior, exists := pointerFree[binder.name]
+		pointerFree[binder.name] = good && (!exists || prior)
 	}
-	for name, count := range total {
-		if count > 0 && pointerFree[name] == count && !idx.untyped[name] {
+	for name, good := range pointerFree {
+		if good && !idx.untyped[name] {
 			scalars[name] = true
 		}
 	}
@@ -335,14 +336,14 @@ type storeFlowBinderIndex struct {
 	// Callers only read it.
 	allNames map[string]bool
 	// Integer classification is queried per expression; callers only read this set.
-	integerNames                            map[string]bool
-	typedByNameOnce                         sync.Once
-	typedByName                             map[string][]storeFlowTypedBinder
-	rangeNameSetOnce                        sync.Once
-	rangeNameSet                            map[string]bool
-	classificationOnce                      sync.Once
-	darrayNames, viewNames, valueNamedNames map[string]bool
-	namedTypes                              map[string]string
+	integerNames                                         map[string]bool
+	typedByNameOnce                                      sync.Once
+	typedByName                                          map[string][]storeFlowTypedBinder
+	rangeNameSetOnce                                     sync.Once
+	rangeNameSet                                         map[string]bool
+	classificationOnce                                   sync.Once
+	darrayNames, viewNames, valueNamedNames, scalarNames map[string]bool
+	namedTypes                                           map[string]string
 }
 
 type storeFlowTypedBinder struct {
@@ -357,6 +358,7 @@ func (idx *storeFlowBinderIndex) classify() {
 		idx.darrayNames = idx.typedNames(storeFlowDarrayTypeExpr)
 		idx.viewNames = idx.typedNames(storeFlowViewTypeExpr)
 		idx.valueNamedNames = idx.typedNames(storeFlowValueNamedTypeExpr)
+		idx.scalarNames = idx.typedNames(storeFlowScalarTypeExpr)
 		idx.namedTypes = idx.singleNamedTypes()
 	})
 }
