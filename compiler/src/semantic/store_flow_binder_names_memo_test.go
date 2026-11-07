@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"maps"
+	"sync"
 	"testing"
 
 	"elisacore/src/ast"
@@ -30,4 +31,19 @@ func TestStoreFlowBinderNamesMemoMatchesFreshUnion(t *testing.T) {
 			t.Fatalf("call %d: binderNames = %v, want %v", i, got, want)
 		}
 	}
+}
+
+func TestStoreFlowBinderNamesConcurrentInitialization(t *testing.T) {
+	idx := &storeFlowBinderIndex{typed: []storeFlowTypedBinder{{name: "item", t: &ast.NamedType{Name: "i64"}}}}
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if !idx.binderNames()["item"] || !idx.integerBinderNames()["item"] {
+				t.Error("missing binder")
+			}
+		}()
+	}
+	wg.Wait()
 }

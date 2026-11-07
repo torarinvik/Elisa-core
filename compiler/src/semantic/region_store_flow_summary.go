@@ -334,8 +334,10 @@ type storeFlowBinderIndex struct {
 	// allNames memoizes binderNames: the index is immutable once built, and the store-flow scan
 	// asks for the full binder set per identifier (~2 s of map building in the q7 stage1 profile).
 	// Callers only read it.
-	allNames map[string]bool
+	allNamesOnce sync.Once
+	allNames     map[string]bool
 	// Integer classification is queried per expression; callers only read this set.
+	integerNamesOnce                                     sync.Once
 	integerNames                                         map[string]bool
 	typedByNameOnce                                      sync.Once
 	typedByName                                          map[string][]storeFlowTypedBinder
@@ -443,22 +445,21 @@ func (idx *storeFlowBinderIndex) typedNames(pred func(ast.TypeExpr) bool) map[st
 }
 
 func (idx *storeFlowBinderIndex) integerBinderNames() map[string]bool {
-	if idx.integerNames == nil {
+	idx.integerNamesOnce.Do(func() {
 		idx.integerNames = idx.typedNames(storeFlowIntegerTypeExpr)
-	}
+	})
 	return idx.integerNames
 }
 
 func (idx *storeFlowBinderIndex) binderNames() map[string]bool {
-	if idx.allNames != nil {
-		return idx.allNames
-	}
-	scalar, other := idx.sets(func(ast.TypeExpr) bool { return true })
-	for n := range other {
-		scalar[n] = true
-	}
-	idx.allNames = scalar
-	return scalar
+	idx.allNamesOnce.Do(func() {
+		scalar, other := idx.sets(func(ast.TypeExpr) bool { return true })
+		for n := range other {
+			scalar[n] = true
+		}
+		idx.allNames = scalar
+	})
+	return idx.allNames
 }
 
 // buildStoreFlowBinderIndex walks decl once, collecting its binding sites.
