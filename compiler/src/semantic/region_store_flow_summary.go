@@ -2427,7 +2427,9 @@ func (a *Analyzer) storeFlowWritten(decl *ast.FuncDecl, scalars map[string]bool)
 	for _, param := range decl.Params {
 		params[param.Name] = true
 	}
+	iterations := 0
 	for changed := true; changed; {
+		iterations++
 		changed = spread(written, groups)
 		if spread(grown, groups) {
 			changed = true
@@ -2441,11 +2443,76 @@ func (a *Analyzer) storeFlowWritten(decl *ast.FuncDecl, scalars map[string]bool)
 		if spread(written, elemGroups) {
 			changed = true
 		}
+		// Most summaries settle in one or two passes. For a longer chain,
+		// index memberships so each remaining group is traversed once.
+		if changed && iterations == 2 && len(groups)+len(elemGroups) >= 32 {
+			storeFlowPropagateWritesIndexed(written, grown, params, groups, elemGroups)
+			return written
+		}
 	}
 	for n := range grown {
 		written[n] = true
 	}
 	return written
+}
+
+// storeFlowPropagateWritesIndexed computes the same closures as the iterative
+// spread above: growth follows alias groups; writes follow alias and element
+// groups; a grown parameter in an element group seeds a write.
+func storeFlowPropagateWritesIndexed(written, grown, params map[string]bool, groups, elemGroups [][]string) {
+	index := func(gs [][]string) map[string][]int {
+		out := make(map[string][]int)
+		for i, group := range gs {
+			for _, name := range group {
+				out[name] = append(out[name], i)
+			}
+		}
+		return out
+	}
+	aliases, elements := index(groups), index(elemGroups)
+	spread := func(set map[string]bool, includeElements bool) {
+		queue := make([]string, 0, len(set))
+		for name, yes := range set {
+			if yes {
+				queue = append(queue, name)
+			}
+		}
+		visitedAliases := make([]bool, len(groups))
+		var visitedElements []bool
+		if includeElements {
+			visitedElements = make([]bool, len(elemGroups))
+		}
+		for i := 0; i < len(queue); i++ {
+			visit := func(ids []int, gs [][]string, visited []bool) {
+				for _, id := range ids {
+					if visited[id] {
+						continue
+					}
+					visited[id] = true
+					for _, name := range gs[id] {
+						if !set[name] {
+							set[name] = true
+							queue = append(queue, name)
+						}
+					}
+				}
+			}
+			visit(aliases[queue[i]], groups, visitedAliases)
+			if includeElements {
+				visit(elements[queue[i]], elemGroups, visitedElements)
+			}
+		}
+	}
+	spread(grown, false)
+	for name := range grown {
+		if params[name] && !written[name] && len(elements[name]) != 0 {
+			written[name] = true
+		}
+	}
+	spread(written, true)
+	for name := range grown {
+		written[name] = true
+	}
 }
 
 // Most groups contain no scalar names. Retain those slices rather than
