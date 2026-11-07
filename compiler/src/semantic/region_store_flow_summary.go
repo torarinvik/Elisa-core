@@ -229,10 +229,10 @@ func (a *Analyzer) storeFlowNamedType(name string) Type {
 	return typ
 }
 
-// storeFlowSingleNamedTypes maps each name whose every declaration in decl (parameters and
+// singleNamedTypes maps each name whose every declaration in decl (parameters and
 // locals, never a binder) has one and the same plain named type, looking through mutable and
 // reference wrappers, to that type name.
-func storeFlowSingleNamedTypes(decl *ast.FuncDecl) map[string]string {
+func (idx *storeFlowBinderIndex) singleNamedTypes() map[string]string {
 	named := func(t ast.TypeExpr) string {
 		if mt, ok := t.(*ast.MutableType); ok && mt != nil {
 			t = mt.Elem
@@ -245,7 +245,7 @@ func storeFlowSingleNamedTypes(decl *ast.FuncDecl) map[string]string {
 		}
 		return ""
 	}
-	candidates := storeFlowTypedNames(decl, func(t ast.TypeExpr) bool { return named(t) != "" })
+	candidates := idx.typedNames(func(t ast.TypeExpr) bool { return named(t) != "" })
 	result := map[string]string{}
 	conflict := map[string]bool{}
 	note := func(name string, t ast.TypeExpr) {
@@ -258,14 +258,9 @@ func storeFlowSingleNamedTypes(decl *ast.FuncDecl) map[string]string {
 		}
 		result[name] = n
 	}
-	for _, param := range decl.Params {
-		note(param.Name, param.Type)
+	for _, binder := range idx.typed {
+		note(binder.name, binder.t)
 	}
-	fillMayAdoptWalk(reflect.ValueOf(decl.Body), func(v any) {
-		if vd, ok := v.(*ast.VarDeclStmt); ok && vd != nil {
-			note(vd.Name, vd.Type)
-		}
-	})
 	for name := range conflict {
 		delete(result, name)
 	}
@@ -921,22 +916,24 @@ func (a *Analyzer) computeStoreFlow(decl *ast.FuncDecl) *storeFlowSummary {
 	for _, param := range decl.Params {
 		a.storeFlowParams[param.Name] = true
 	}
+	binders := a.storeFlowBinderIndexFor(decl)
 	savedDarrays := a.storeFlowDarrays
-	a.storeFlowDarrays = a.storeFlowBinderIndexFor(decl).typedNames(storeFlowDarrayTypeExpr)
+	a.storeFlowDarrays = binders.typedNames(storeFlowDarrayTypeExpr)
 	savedLocals := a.storeFlowLocals
-	a.storeFlowLocals = a.storeFlowBinderIndexFor(decl).binderNames()
+	a.storeFlowLocals = binders.binderNames()
 	defer func() { a.storeFlowLocals = savedLocals }()
 	savedViews := a.storeFlowViews
-	a.storeFlowViews = a.storeFlowBinderIndexFor(decl).typedNames(storeFlowViewTypeExpr)
+	a.storeFlowViews = binders.typedNames(storeFlowViewTypeExpr)
 	defer func() { a.storeFlowViews = savedViews }()
 	savedNamed := a.storeFlowNamedTypes
-	a.storeFlowNamedTypes = storeFlowSingleNamedTypes(decl)
+	a.storeFlowNamedTypes = binders.singleNamedTypes()
 	defer func() { a.storeFlowNamedTypes = savedNamed }()
 	savedEnv, savedStmtEnv := a.storeFlowEnv, a.storeFlowStmtEnv
 	a.storeFlowEnv, a.storeFlowStmtEnv = nil, map[uintptr]map[string]string{}
 	defer func() { a.storeFlowEnv, a.storeFlowStmtEnv = savedEnv, savedStmtEnv }()
 	defer func() { a.storeFlowParams, a.storeFlowDarrays = savedParams, savedDarrays }()
-	c := &storeFlowCtx{written: a.storeFlowWritten(decl), scalars: a.storeFlowScalarNames(decl)}
+	scalars := a.storeFlowScalarNames(decl)
+	c := &storeFlowCtx{written: a.storeFlowWritten(decl, scalars), scalars: scalars}
 	for _, param := range decl.Params {
 		c.u.find(param.Name)
 		c.pu.find(param.Name)
@@ -1158,17 +1155,12 @@ func (a *Analyzer) storeFlowNodes(v reflect.Value, c *storeFlowCtx, seen map[uin
 func (a *Analyzer) storeFlowUnit(stmt reflect.Value, c *storeFlowCtx) []reflect.Value {
 	var nested []reflect.Value
 	var calls []*ast.CallExpr
-	callsOnly := a.storeFlowCondOnly(stmt)
+	// A scalar local's initializer carries nothing into it. Collect only
+	// its calls from the start, without first gathering unused name facts.
+	scalarDecl := a.storeFlowScalarDecl(stmt)
+	callsOnly := scalarDecl || a.storeFlowCondOnly(stmt)
 	names := a.storeFlowMentions(stmt.Elem(), stmt.Pointer(), nil, &nested, &calls, callsOnly)
 	binds := a.storeFlowBinds
-	// A scalar local's initializer carries nothing into it: only calls inside can connect
-	// their arguments, and names an expression binds there are scoped to that expression.
-	scalarDecl := a.storeFlowScalarDecl(stmt)
-	if scalarDecl && !callsOnly {
-		callsOnly = true
-		nested, calls = nil, nil
-		names = a.storeFlowMentions(stmt.Elem(), stmt.Pointer(), nil, &nested, &calls, true)
-	}
 	if callsOnly && binds && !scalarDecl {
 		callsOnly = false
 		nested, calls = nil, nil
@@ -2063,7 +2055,7 @@ func storeFlowChainRoots(expr ast.Expr) ([]string, bool) {
 // receivers, arguments to callees whose summaries show a write (or unresolved callees), and
 // everything that aliases one of those. Parameter mutability is only a capability; a settled
 // body summary determines whether the capability is exercised. Every other name is a pure source.
-func (a *Analyzer) storeFlowWritten(decl *ast.FuncDecl) map[string]bool {
+func (a *Analyzer) storeFlowWritten(decl *ast.FuncDecl, scalars map[string]bool) map[string]bool {
 	decl = a.readDecl(decl)
 	written := map[string]bool{}
 	var ft *FuncType
@@ -2172,7 +2164,6 @@ func (a *Analyzer) storeFlowWritten(decl *ast.FuncDecl) map[string]bool {
 		}
 		return nested
 	})
-	scalars := a.storeFlowScalarNames(decl)
 	for gi, g := range groups {
 		var kept []string
 		for _, n := range g {
