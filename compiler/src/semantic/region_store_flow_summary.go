@@ -1169,6 +1169,23 @@ var storeFlowParenFast = func() bool {
 		t.Field(1).Name == "Inner" && t.Field(1).Type == reflect.TypeOf((*ast.Expr)(nil)).Elem()
 }()
 
+var storeFlowIndexFast = func() bool {
+	t := reflect.TypeOf(ast.IndexExpr{})
+	if t.NumField() != 9 || t.Field(0).Name != "Position" || t.Field(0).Type != reflect.TypeOf(lexer.Pos{}) {
+		return false
+	}
+	for i, name := range []string{"Object", "Index", "Index2", "Fallback"} {
+		f := t.Field(i + 1)
+		if f.Name != name || f.Type != reflect.TypeOf((*ast.Expr)(nil)).Elem() {
+			return false
+		}
+	}
+	return t.Field(5).Name == "LegacyElseFallback" && t.Field(5).Type.Kind() == reflect.Bool &&
+		t.Field(6).Name == "AsSpecialize" && t.Field(6).Type == reflect.TypeOf((*ast.SpecializeExpr)(nil)) &&
+		t.Field(7).Name == "AsOverlayCall" && t.Field(7).Type == reflect.TypeOf((*ast.CallExpr)(nil)) &&
+		t.Field(8).Name == "AsBuiltinDictGet" && t.Field(8).Type == reflect.TypeOf((*ast.CallExpr)(nil))
+}()
+
 // storeFlowTypeInfo caches what storeFlowMentions asks of a reflect.Type on every node it
 // visits: method-set tests (Implements) and the struct field filter were ~4 s of a stage1
 // driver compile when recomputed per node.
@@ -1807,6 +1824,25 @@ func (a *Analyzer) storeFlowCollectMentionsWithQuery(root reflect.Value, self ui
 				return
 			}
 			node := v.Interface()
+			if storeFlowIndexFast {
+				if index, ok := node.(*ast.IndexExpr); ok {
+					walk(reflect.ValueOf(&index.Position).Elem())
+					walk(reflect.ValueOf(index.Object))
+					walk(reflect.ValueOf(index.Index))
+					walk(reflect.ValueOf(index.Index2))
+					walk(reflect.ValueOf(index.Fallback))
+					if index.AsSpecialize != nil {
+						walk(reflect.ValueOf(index.AsSpecialize))
+					}
+					if index.AsOverlayCall != nil {
+						walk(reflect.ValueOf(index.AsOverlayCall))
+					}
+					if index.AsBuiltinDictGet != nil {
+						walk(reflect.ValueOf(index.AsBuiltinDictGet))
+					}
+					return
+				}
+			}
 			if storeFlowParenFast {
 				if paren, ok := node.(*ast.ParenExpr); ok {
 					walk(reflect.ValueOf(&paren.Position).Elem())

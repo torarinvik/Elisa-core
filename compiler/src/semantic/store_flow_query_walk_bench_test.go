@@ -223,3 +223,27 @@ func BenchmarkStoreFlowParenWalk(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkStoreFlowIndexWalk(b *testing.B) {
+	var expr ast.Expr = &ast.Ident{Name: "value"}
+	for i := 0; i < 64; i++ {
+		expr = &ast.IndexExpr{Object: expr, Index: &ast.IntLit{Value: "0"}}
+	}
+	stmt := reflect.ValueOf(&ast.ReturnStmt{Value: expr})
+	for _, fast := range []bool{false, true} {
+		label := "reflective"
+		if fast {
+			label = "direct"
+		}
+		b.Run(label, func(b *testing.B) {
+			old := storeFlowIndexFast
+			storeFlowIndexFast = fast
+			defer func() { storeFlowIndexFast = old }()
+			a := &Analyzer{}
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				a.storeFlowCollectMentionsWithQuery(stmt.Elem(), stmt.Pointer(), nil, nil, nil, false, true, nil)
+			}
+		})
+	}
+}

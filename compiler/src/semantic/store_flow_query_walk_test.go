@@ -188,3 +188,27 @@ func TestStoreFlowParenFastMatchesReflective(t *testing.T) {
 		t.Fatalf("got %v %v %v, want %v %v %v", got, gp, gb, want, wp, wb)
 	}
 }
+
+func TestStoreFlowIndexFastMatchesReflective(t *testing.T) {
+	if !storeFlowIndexFast {
+		t.Skip("index syntax schema changed")
+	}
+	saved := storeFlowIndexFast
+	defer func() { storeFlowIndexFast = saved }()
+	q := &ast.QueryExpr{Kind: ast.QueryExprAny, Name: "item", Source: &ast.Ident{Name: "items"}}
+	expr := &ast.IndexExpr{Object: &ast.Ident{Name: "a"}, Index: q, Index2: &ast.Ident{Name: "b"}, Fallback: q, AsOverlayCall: &ast.CallExpr{Func: &ast.Ident{Name: "f"}, Args: []ast.Expr{q}}}
+	stmt := reflect.ValueOf(&ast.ReturnStmt{Value: expr})
+	run := func(fast bool) ([]string, [][]string, []*ast.CallExpr, bool) {
+		storeFlowIndexFast = fast
+		a := &Analyzer{}
+		scan := storeFlowQueryScan{}
+		var calls []*ast.CallExpr
+		names := a.storeFlowCollectMentionsWithQuery(stmt.Elem(), stmt.Pointer(), nil, nil, &calls, false, true, &scan)
+		return names, scan.pairs, calls, a.storeFlowBinds
+	}
+	want, wp, wc, wb := run(false)
+	got, gp, gc, gb := run(true)
+	if !reflect.DeepEqual(got, want) || !reflect.DeepEqual(gp, wp) || !reflect.DeepEqual(gc, wc) || gb != wb {
+		t.Fatalf("index walk differs: %v %v %v %v; want %v %v %v %v", got, gp, gc, gb, want, wp, wc, wb)
+	}
+}
