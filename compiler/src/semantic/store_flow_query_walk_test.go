@@ -144,3 +144,25 @@ func TestStoreFlowBinaryFastMatchesReflective(t *testing.T) {
 		t.Fatalf("binary walk differs: %v %v %v %v; want %v %v %v %v", got, gp, gc, gb, want, wp, wc, wb)
 	}
 }
+
+func TestStoreFlowFieldFastMatchesReflective(t *testing.T) {
+	if !storeFlowSimpleFieldQueryFast {
+		t.Skip("field syntax schema changed")
+	}
+	saved := storeFlowSimpleFieldQueryFast
+	defer func() { storeFlowSimpleFieldQueryFast = saved }()
+	q := &ast.QueryExpr{Kind: ast.QueryExprAny, Name: "item", Source: &ast.Ident{Name: "items"}}
+	stmt := reflect.ValueOf(&ast.ReturnStmt{Value: &ast.FieldExpr{Object: q, Field: "value"}})
+	run := func(fast bool) ([]string, [][]string, bool) {
+		storeFlowSimpleFieldQueryFast = fast
+		a := &Analyzer{}
+		scan := storeFlowQueryScan{}
+		names := a.storeFlowCollectMentionsWithQuery(stmt.Elem(), stmt.Pointer(), nil, nil, nil, false, true, &scan)
+		return names, scan.pairs, a.storeFlowBinds
+	}
+	want, wp, wb := run(false)
+	got, gp, gb := run(true)
+	if !reflect.DeepEqual(got, want) || !reflect.DeepEqual(gp, wp) || gb != wb {
+		t.Fatalf("got %v %v %v, want %v %v %v", got, gp, gb, want, wp, wb)
+	}
+}

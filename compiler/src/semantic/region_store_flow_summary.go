@@ -1805,6 +1805,13 @@ func (a *Analyzer) storeFlowCollectMentionsWithQuery(root reflect.Value, self ui
 			if v.IsNil() || !v.CanInterface() {
 				return
 			}
+			if storeFlowSimpleFieldQueryFast {
+				if field, ok := v.Interface().(*ast.FieldExpr); ok {
+					walk(reflect.ValueOf(&field.Position).Elem())
+					walk(reflect.ValueOf(field.Object))
+					return
+				}
+			}
 			if storeFlowBinaryFast {
 				if binary, ok := v.Interface().(*ast.BinaryExpr); ok {
 					walk(reflect.ValueOf(&binary.Position).Elem())
