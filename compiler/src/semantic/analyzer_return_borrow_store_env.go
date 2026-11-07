@@ -225,13 +225,19 @@ func (a *Analyzer) evaluateReturnBorrowDeferFrame(fn *ast.FuncDecl, frame *retur
 	}
 	a.currentScope, a.currentValueBindings = savedScope, savedBindings
 	savedEnv := a.returnBorrowDeclEnv
-	a.returnBorrowDeclEnv = a.computeReturnBorrowDeclEnv(fn, frame)
+	envReady := false
 	for index, check := range frame.pending {
 		if check.regionDependent && a.errorReportedAt(check.value.Pos()) {
 			continue
 		}
 		if check.summaryGated && !summaryLocal[index] {
 			continue
+		}
+		// No declaration flow is needed if every check was already rejected
+		// by the summary gate or covered by an error at the same site.
+		if !envReady {
+			a.returnBorrowDeclEnv = a.computeReturnBorrowDeclEnv(fn, frame)
+			envReady = true
 		}
 		a.currentScope, a.currentValueBindings = check.scope, check.valueBindings
 		var flow returnBorrowFlow
@@ -1398,15 +1404,19 @@ func (a *Analyzer) returnBorrowCallContentsOnly(call *ast.CallExpr, index int) f
 	if a.storeFlowKindsOff {
 		return nil
 	}
-	decl, ok := a.resolveReadOnlyScanCallee(call)
-	if !ok || decl == nil || !storeFlowCallFitsParams(decl, call) || funcHasArenaParam(decl) {
-		return nil
-	}
-	summary := a.storeFlowKindsFor(decl)
-	if summary == nil {
-		return nil
-	}
+	var summary *storeFlowSummary
+	resolved := false
 	return func(other int) bool {
+		if !resolved {
+			resolved = true
+			decl, ok := a.resolveReadOnlyScanCallee(call)
+			if ok && decl != nil && storeFlowCallFitsParams(decl, call) && !funcHasArenaParam(decl) {
+				summary = a.storeFlowKindsFor(decl)
+			}
+		}
+		if summary == nil {
+			return false
+		}
 		kind := a.storeFlowReachKind(summary, other, index)
 		return kind == storeFlowEdgeElements || kind == storeFlowEdgeNone
 	}
