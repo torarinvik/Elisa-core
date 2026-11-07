@@ -44,3 +44,38 @@ func TestStoreFlowLinkMatchesPartitionedUnions(t *testing.T) {
 		}
 	}
 }
+
+func BenchmarkStoreFlowManyToMany(b *testing.B) {
+	src := []string{"a", "b", "c", "d", "e", "f", "g", "h"}
+	dst := []string{"i", "j", "k", "l", "m", "n", "o", "p"}
+	c := &storeFlowCtx{scalars: map[string]bool{"j": true, "l": true, "n": true, "p": true}}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		c.edges = c.edges[:0]
+		c.flow(src, dst)
+	}
+}
+
+func TestStoreFlowFilteredDestinationsMatchReference(t *testing.T) {
+	for _, src := range [][]string{nil, {"a"}, {"a", "b", "s", "a"}} {
+		for _, dst := range [][]string{nil, {"a"}, {"a", "s", "b", "c", "d", "e", "f", "g", "h", "i"}} {
+			got := &storeFlowCtx{scalars: map[string]bool{"s": true, "c": true}}
+			var want [][2]string
+			for _, s := range src {
+				if got.scalars[storeFlowBaseName(s)] {
+					continue
+				}
+				for _, d := range dst {
+					if got.scalars[storeFlowBaseName(d)] || s == d {
+						continue
+					}
+					want = append(want, [2]string{s, d})
+				}
+			}
+			got.flow(src, dst)
+			if !reflect.DeepEqual(got.edges, want) {
+				t.Fatalf("src %v dst %v: got %v want %v", src, dst, got.edges, want)
+			}
+		}
+	}
+}

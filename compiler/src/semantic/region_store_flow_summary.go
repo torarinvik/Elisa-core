@@ -86,12 +86,25 @@ func (c *storeFlowCtx) storeFlowKey(n string) storeFlowClass {
 // flow records that the contents of the src names may be stored into the dst names, without
 // letting dst's contents reach src: a callee that reads a parameter and writes another.
 func (c *storeFlowCtx) flow(src, dst []string) {
+	// A multi-source flow otherwise repeats the same scalar test for every
+	// source-destination pair. Keep destination order and duplicates intact.
+	var filteredBuffer [8]string
+	filteredDestinations := len(src) > 1 && len(dst) > 1
+	if filteredDestinations {
+		filtered := filteredBuffer[:0]
+		for _, d := range dst {
+			if !c.scalars[storeFlowBaseName(d)] {
+				filtered = append(filtered, d)
+			}
+		}
+		dst = filtered
+	}
 	for _, s := range src {
 		if c.scalars[storeFlowBaseName(s)] {
 			continue
 		}
 		for _, d := range dst {
-			if c.scalars[storeFlowBaseName(d)] || s == d {
+			if s == d || (!filteredDestinations && c.scalars[storeFlowBaseName(d)]) {
 				continue
 			}
 			c.edges = append(c.edges, [2]string{s, d})
