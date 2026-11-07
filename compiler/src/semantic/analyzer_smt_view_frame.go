@@ -116,6 +116,9 @@ type sviewFrameGate struct {
 	// assignments. Keeping immutable names also preserves builtin shadowing.
 	rebindable map[string]bool
 	types      map[string]Type
+	// Loop assertions are read in a fixed lexical scope before body typing.
+	// Resolve only names used as operator operands in that scope.
+	typeScope *Scope
 	// ghostCalls admits calls to ghost functions (see sviewFrameWriteFreeGhostReads).
 	ghostCalls bool
 }

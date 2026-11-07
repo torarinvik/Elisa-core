@@ -1340,7 +1340,7 @@ func (a *Analyzer) loopBodyAssertIsPure(stmt *ast.ExprStmt) bool {
 // ordinary calls stay rejected because they may have observable effects even when their result is
 // used only by an assertion.
 func (a *Analyzer) loopAssertConditionIsSideEffectFree(expr ast.Expr) bool {
-	return a.loopAssertConditionIsSideEffectFreeWithGate(expr, a.loopAssertOperatorGate())
+	return a.loopAssertConditionIsSideEffectFreeWithGate(expr, &sviewFrameGate{a: a, typeScope: a.currentScope})
 }
 
 // The scope stays fixed while walking a condition. Reuse its visible types instead of
@@ -1403,25 +1403,6 @@ func (a *Analyzer) loopAssertConditionIsSideEffectFreeWithGate(expr ast.Expr, op
 	default:
 		return false
 	}
-}
-
-// loopAssertOperatorGate resolves visible name types without analyzing body expressions. The
-// analyzer checks loop invariants before analyzing the body, so unresolved or body-local operand
-// types must make overloadable operators decline rather than treating a nil LoweredCall as proof
-// that the operator is primitive.
-func (a *Analyzer) loopAssertOperatorGate() *sviewFrameGate {
-	types := map[string]Type{}
-	if a != nil {
-		for scope := a.currentScope; scope != nil; scope = scope.Parent {
-			for name, sym := range scope.Symbols {
-				if _, alreadySeen := types[name]; alreadySeen || sym == nil {
-					continue
-				}
-				types[name] = sym.Type
-			}
-		}
-	}
-	return &sviewFrameGate{a: a, types: types}
 }
 
 // loopStoreTargetBaseKey returns the normalized base key of an array-element store target

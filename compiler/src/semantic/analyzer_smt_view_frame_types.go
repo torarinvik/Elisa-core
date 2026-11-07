@@ -25,6 +25,11 @@ func (g *sviewFrameGate) receiverType(expr ast.Expr, depth int) Type {
 		if typ, local := g.types[id.Name]; local {
 			return typ
 		}
+		for scope := g.typeScope; scope != nil; scope = scope.Parent {
+			if sym := scope.Symbols[id.Name]; sym != nil {
+				return sym.Type
+			}
+		}
 	}
 	if typ := g.a.exprType(expr); typ != nil {
 		return typ
