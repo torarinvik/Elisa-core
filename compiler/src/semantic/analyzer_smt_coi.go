@@ -383,7 +383,7 @@ func (a *Analyzer) smtCheckSliced(solver smt.Solver, query, goalAssert string, v
 	stripped := smtStripAbstractionOnly(query)
 	if weakening.query != "" && !weakening.sat {
 		a.smtSetLogLabelForQuery(solver, "quantifier-weakening-full", goalAssert, weakening.query)
-		weak, _ := a.smtCheckTransformedProof(weakening.query+"; full budget\n", func() (smt.Result, map[string]string) {
+		weak, _ := a.smtCheckTransformedVerdict(weakening.query+"; full budget\n", true, func() (smt.Result, map[string]string) {
 			return budgeted.CheckBudgetValues(weakening.query, vars, smtResourceLimit())
 		})
 		if weak == smt.Unsat {
