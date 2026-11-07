@@ -1191,15 +1191,19 @@ func (a *Analyzer) storeFlowUnit(stmt reflect.Value, c *storeFlowCtx) []reflect.
 	// its calls from the start, without first gathering unused name facts.
 	scalarDecl := a.storeFlowScalarDecl(stmt)
 	callsOnly := scalarDecl || a.storeFlowCondOnly(stmt)
-	names := a.storeFlowMentions(stmt.Elem(), stmt.Pointer(), nil, &nested, &calls, callsOnly)
+	mayHaveQuery := false
+	names := a.storeFlowCollectMentionsWithQuery(stmt.Elem(), stmt.Pointer(), nil, &nested, &calls, callsOnly, true, &mayHaveQuery)
 	binds := a.storeFlowBinds
 	if callsOnly && binds && !scalarDecl {
 		callsOnly = false
 		nested, calls = nil, nil
-		names = a.storeFlowMentions(stmt.Elem(), stmt.Pointer(), nil, &nested, &calls, false)
+		mayHaveQuery = false
+		names = a.storeFlowCollectMentionsWithQuery(stmt.Elem(), stmt.Pointer(), nil, &nested, &calls, false, true, &mayHaveQuery)
 	}
-	for _, pair := range a.storeFlowQueryBinderPairs(stmt) {
-		c.link(pair)
+	if mayHaveQuery {
+		for _, pair := range a.storeFlowQueryBinderPairs(stmt) {
+			c.link(pair)
+		}
 	}
 	if target, roots := a.storeFlowElementCopy(stmt); target != "" {
 		// `v: darray[sview] = [x for x in src]`: the copy's elements are views or scalars read
@@ -1602,6 +1606,12 @@ func (a *Analyzer) storeFlowMentions(root reflect.Value, self uintptr, handled m
 }
 
 func (a *Analyzer) storeFlowCollectMentions(root reflect.Value, self uintptr, handled map[*ast.CallExpr][]string, nested *[]reflect.Value, calls *[]*ast.CallExpr, callsOnly, collectNames bool) []string {
+	return a.storeFlowCollectMentionsWithQuery(root, self, handled, nested, calls, callsOnly, collectNames, nil)
+}
+
+// mayHaveQuery is conservative: any skipped call subtree forces the separate
+// query walk. Otherwise this scan proves whether that walk can find a query.
+func (a *Analyzer) storeFlowCollectMentionsWithQuery(root reflect.Value, self uintptr, handled map[*ast.CallExpr][]string, nested *[]reflect.Value, calls *[]*ast.CallExpr, callsOnly, collectNames bool, mayHaveQuery *bool) []string {
 	var names []string
 	callDepth := 0
 	condDepth := 0 // inside a ternary condition: a bool, so its names reach no value
@@ -1685,6 +1695,11 @@ func (a *Analyzer) storeFlowCollectMentions(root reflect.Value, self uintptr, ha
 				walk(reflect.ValueOf(&tern.Alt).Elem())
 				return
 			}
+			if mayHaveQuery != nil {
+				if _, ok := v.Interface().(*ast.QueryExpr); ok {
+					*mayHaveQuery = true
+				}
+			}
 			if q, ok := v.Interface().(*ast.QueryExpr); ok && q != nil && storeFlowScalarQuery(q) {
 				// `any/all/count x in src where p`: a bool or a count. Its binder is scoped to the
 				// query and its value holds nothing, so its names are tested, not moved; calls in
@@ -1698,6 +1713,10 @@ func (a *Analyzer) storeFlowCollectMentions(root reflect.Value, self uintptr, ha
 				a.storeFlowBinds = true
 			}
 			if call, ok := v.Interface().(*ast.CallExpr); ok {
+				// The fast call paths can omit receiver or other metadata subtrees.
+				if mayHaveQuery != nil {
+					*mayHaveQuery = true
+				}
 				if callsOnly {
 					if fe, isField := call.Func.(*ast.FieldExpr); isField && fe != nil && storeFlowReadOnlyMethods[fe.Field] && !a.isDeclaredFuncName(fe.Field) {
 						for _, arg := range call.Args {
@@ -2144,7 +2163,8 @@ func (a *Analyzer) storeFlowWritten(decl *ast.FuncDecl, scalars map[string]bool)
 			*ast.ExprStmt, *ast.ReturnStmt, *ast.IfStmt, *ast.WhileStmt, *ast.DiscardStmt:
 			collectNames = false
 		}
-		names := a.storeFlowCollectMentions(stmt.Elem(), stmt.Pointer(), nil, &nested, &calls, false, collectNames)
+		mayHaveQuery := false
+		names := a.storeFlowCollectMentionsWithQuery(stmt.Elem(), stmt.Pointer(), nil, &nested, &calls, false, collectNames, &mayHaveQuery)
 		binds := a.storeFlowBinds
 		for _, call := range calls {
 			fn, isMethod := call.Func.(*ast.FieldExpr)
@@ -2209,7 +2229,9 @@ func (a *Analyzer) storeFlowWritten(decl *ast.FuncDecl, scalars map[string]bool)
 				written[n] = true
 			}
 		}
-		groups = append(groups, a.storeFlowQueryBinderPairs(stmt)...)
+		if mayHaveQuery {
+			groups = append(groups, a.storeFlowQueryBinderPairs(stmt)...)
+		}
 		if binds && !a.storeFlowScalarDecl(stmt) {
 			if target, _ := a.storeFlowElementCopy(stmt); target == "" {
 				if !collectNames {
