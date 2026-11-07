@@ -114,22 +114,30 @@ func smtPreambleContext(preamble string) string {
 			smtTextPool.Put(b)
 		}
 	}()
-	for _, line := range strings.SplitAfter(preamble, "\n") {
+	for rest := preamble; rest != ""; {
+		line := rest
+		if end := strings.IndexByte(rest, '\n'); end >= 0 {
+			line, rest = rest[:end+1], rest[end+1:]
+		} else {
+			rest = ""
+		}
 		if strings.HasPrefix(line, "(declare-") || strings.HasPrefix(line, "(define-fun ") || strings.HasPrefix(line, ";") {
 			continue
 		}
-		symbols := 0
-		seen := map[string]bool{}
+		first := ""
 		scan := smtTokenScanner{text: line}
 		for tok, ok := scan.next(); ok; tok, ok = scan.next() {
-			if smtOperatorOrNumeral(tok) || seen[tok] {
+			if smtOperatorOrNumeral(tok) {
 				continue
 			}
-			seen[tok] = true
-			symbols++
-		}
-		if symbols >= 2 {
-			b.WriteString(line)
+			if first == "" {
+				first = tok
+				continue
+			}
+			if tok != first {
+				b.WriteString(line)
+				break
+			}
 		}
 	}
 	return b.String()
