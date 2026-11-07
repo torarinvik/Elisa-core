@@ -1702,7 +1702,7 @@ func (a *Analyzer) storeScanTaint(decl *ast.FuncDecl, other int, targetName stri
 	locals := idx.locals
 	for changed := true; changed; {
 		changed = false
-		for _, node := range idx.flat {
+		for _, node := range idx.bindingEffectNodes() {
 			switch n := node.(type) {
 			case *ast.VarDeclStmt:
 				if n != nil && bind(n.Name, n.Value) {

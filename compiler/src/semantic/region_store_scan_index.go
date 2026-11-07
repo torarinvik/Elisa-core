@@ -194,10 +194,10 @@ type storeScanDeclIndex struct {
 	// subset on first use, rather than dispatching every AST node per query.
 	payloadNodes      []any
 	payloadNodesReady bool
-	// Alias closure only processes declarations, assignments, calls, and
-	// statements with binders. Fixpoints reuse this ordered subset.
-	aliasNodes      []any
-	aliasNodesReady bool
+	// Binding fixpoints only process declarations, assignments, calls, and
+	// statements with binders. They reuse this ordered subset.
+	bindingNodes      []any
+	bindingNodesReady bool
 	// bindingWrites is populated on demand once per function. Pattern binder typing used to
 	// reflectively rescan the entire body for every binder name.
 	bindingWrites      map[string]int
@@ -216,8 +216,8 @@ type storeScanDeclIndex struct {
 	kindScopes      *storeFlowKindScopes
 }
 
-func (idx *storeScanDeclIndex) aliasClosureNodes() []any {
-	if !idx.aliasNodesReady {
+func (idx *storeScanDeclIndex) bindingEffectNodes() []any {
+	if !idx.bindingNodesReady {
 		if idx.bound == nil {
 			idx.bound = map[ast.Stmt][]string{}
 		}
@@ -226,16 +226,16 @@ func (idx *storeScanDeclIndex) aliasClosureNodes() []any {
 			case *ast.ForStmt:
 				// The closure's ForStmt case has no effect.
 			case *ast.VarDeclStmt, *ast.AssignStmt, *ast.CallExpr:
-				idx.aliasNodes = append(idx.aliasNodes, node)
+				idx.bindingNodes = append(idx.bindingNodes, node)
 			case ast.Stmt:
 				if n != nil && len(idx.boundNames(n)) != 0 {
-					idx.aliasNodes = append(idx.aliasNodes, node)
+					idx.bindingNodes = append(idx.bindingNodes, node)
 				}
 			}
 		}
-		idx.aliasNodesReady = true
+		idx.bindingNodesReady = true
 	}
-	return idx.aliasNodes
+	return idx.bindingNodes
 }
 
 func (a *Analyzer) storeScanIndex(decl *ast.FuncDecl) *storeScanDeclIndex {
