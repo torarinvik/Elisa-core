@@ -1377,7 +1377,7 @@ func (a *Analyzer) analyzeBlockWithAffineClonePrepared(stmts []ast.Stmt, scope *
 		prepare()
 	}
 	branchRegions := a.analyzeBlockWithRegionCloneCapture(stmts, scope)
-	snapshot := affineFlowSnapshot{Regions: branchRegions, BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings(), SpecializedValueTypes: a.snapshotPrivateSpecializedValueTypes(), RangeFacts: a.visibleRangeFacts(), StorageViewDeps: a.cloneStorageViewDeps(), AliasCarriers: a.cloneAliasCarriers(), AliasCarrierFieldOverrides: a.cloneAliasCarrierFieldOverrides()}
+	snapshot := affineFlowSnapshot{Regions: branchRegions, FunctionValues: a.cloneFunctionValueBindings(), SpecializedValueTypes: a.snapshotPrivateSpecializedValueTypes(), RangeFacts: a.visibleRangeFacts(), AliasCarriers: a.cloneAliasCarriers(), AliasCarrierFieldOverrides: a.cloneAliasCarrierFieldOverrides()}
 	blockEndRangeFacts(snapshot.RangeFacts, scope)
 	if scope != nil {
 		// Facts over branch-local immutable locals are rewritten through their initializers so they
@@ -1387,6 +1387,8 @@ func (a *Analyzer) analyzeBlockWithAffineClonePrepared(stmts []ast.Stmt, scope *
 	// The branch owns these maps from the entry clones. Transfer them to the result
 	// after all branch processing, then restore the parent; no second copy is needed.
 	snapshot.Affine = a.currentAffineValues
+	snapshot.BorrowedOwnerRefs = a.currentBorrowedOwnerRefs
+	snapshot.StorageViewDeps = a.currentStorageViewDeps
 	snapshot.ValueBindings = a.currentValueBindings
 	a.currentAffineValues = savedAffine
 	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs

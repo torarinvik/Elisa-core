@@ -118,3 +118,29 @@ func BenchmarkSpecializedBranchSnapshot(b *testing.B) {
 }
 
 var specializedBranchSink map[*Symbol]Type
+
+func TestBlockBranchSnapshotOwnsBorrowAndStorageViewFacts(t *testing.T) {
+	parent := NewScope(nil)
+	a := newAnalyzerWithScope(parent)
+	sym := &Symbol{Name: "owner"}
+	entry := borrowedOwnerRefState{HasDirect: true, Direct: affineValueKey{Root: sym}}
+	a.currentBorrowedOwnerRefs = map[*Symbol]borrowedOwnerRefState{
+		sym: {Fields: map[string]borrowedOwnerRefState{"field": entry}},
+	}
+	a.currentStorageViewDeps = map[*Symbol]storageViewDependencyState{
+		sym: {Sources: []string{"entry"}},
+	}
+	first := a.analyzeBlockWithAffineClonePrepared(nil, NewScope(parent), nil)
+	second := a.analyzeBlockWithAffineClonePrepared(nil, NewScope(parent), nil)
+	first.BorrowedOwnerRefs[sym].Fields["field"] = borrowedOwnerRefState{}
+	first.StorageViewDeps[sym].Sources[0] = "edited"
+	for _, facts := range []affineFlowSnapshot{
+		second,
+		{BorrowedOwnerRefs: a.currentBorrowedOwnerRefs, StorageViewDeps: a.currentStorageViewDeps},
+	} {
+		if facts.BorrowedOwnerRefs[sym].Fields["field"].Direct != entry.Direct ||
+			facts.StorageViewDeps[sym].Sources[0] != "entry" {
+			t.Fatal("branch snapshot aliases another path")
+		}
+	}
+}
