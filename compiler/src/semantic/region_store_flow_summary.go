@@ -2396,24 +2396,8 @@ func (a *Analyzer) storeFlowWritten(decl *ast.FuncDecl, scalars map[string]bool)
 		}
 		return nested
 	})
-	for gi, g := range groups {
-		var kept []string
-		for _, n := range g {
-			if !scalars[storeFlowBaseName(n)] {
-				kept = append(kept, n)
-			}
-		}
-		groups[gi] = kept
-	}
-	for gi, g := range elemGroups {
-		var kept []string
-		for _, n := range g {
-			if !scalars[storeFlowBaseName(n)] {
-				kept = append(kept, n)
-			}
-		}
-		elemGroups[gi] = kept
-	}
+	storeFlowFilterScalarGroups(groups, scalars)
+	storeFlowFilterScalarGroups(elemGroups, scalars)
 	spread := func(set map[string]bool, gs [][]string) bool {
 		changed := false
 		for _, g := range gs {
@@ -2462,6 +2446,30 @@ func (a *Analyzer) storeFlowWritten(decl *ast.FuncDecl, scalars map[string]bool)
 		written[n] = true
 	}
 	return written
+}
+
+// Most groups contain no scalar names. Retain those slices rather than
+// allocating a copy; groups can share storage, so filtered groups are copied.
+func storeFlowFilterScalarGroups(groups [][]string, scalars map[string]bool) {
+	if len(scalars) == 0 {
+		return
+	}
+	for gi, group := range groups {
+		for i, name := range group {
+			if !scalars[storeFlowBaseName(name)] {
+				continue
+			}
+			var kept []string
+			kept = append(kept, group[:i]...)
+			for _, tail := range group[i+1:] {
+				if !scalars[storeFlowBaseName(tail)] {
+					kept = append(kept, tail)
+				}
+			}
+			groups[gi] = kept
+			break
+		}
+	}
 }
 
 // storeFlowInGroups reports whether name is a member of any of groups.
