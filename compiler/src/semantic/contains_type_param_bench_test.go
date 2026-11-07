@@ -26,3 +26,16 @@ func BenchmarkContainsTypeParam(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkContainsTypeParamSharedEnumGraph(b *testing.B) {
+	var graph Type = &BuiltinType{Name: "i64"}
+	for i := 0; i < 14; i++ {
+		graph = &EnumType{Name: "Level", Variants: []*EnumVariant{{Payload: []Type{graph, graph}}}}
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if containsTypeParam(graph) {
+			b.Fatal("unexpected type parameter")
+		}
+	}
+}

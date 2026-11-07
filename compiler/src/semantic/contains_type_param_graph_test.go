@@ -26,4 +26,19 @@ func TestContainsTypeParamSharedAndRecursiveGraphs(t *testing.T) {
 	if containsTypeParam(recursive) {
 		t.Fatal("concrete recursive enum contains a type parameter")
 	}
+
+	var enumGraph Type = &TypeParamType{Name: "U"}
+	for i := 0; i < 40; i++ {
+		enumGraph = &EnumType{Name: "Nested", Variants: []*EnumVariant{{Payload: []Type{enumGraph, enumGraph}}}}
+	}
+	if !containsTypeParam(enumGraph) {
+		t.Fatal("deep shared enum graph lost its type parameter")
+	}
+	var concrete Type = &BuiltinType{Name: "i64"}
+	for i := 0; i < 40; i++ {
+		concrete = &EnumType{Name: "Nested", Variants: []*EnumVariant{{Payload: []Type{concrete, concrete}}}}
+	}
+	if containsTypeParam(concrete) {
+		t.Fatal("concrete deep enum graph contains a type parameter")
+	}
 }

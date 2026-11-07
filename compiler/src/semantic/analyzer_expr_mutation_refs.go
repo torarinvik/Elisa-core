@@ -22,18 +22,46 @@ func (a *Analyzer) enumConstructorMoveReason(enumName string, variant *EnumVaria
 }
 
 func containsTypeParam(t Type) bool {
-	return containsTypeParamSeen(t, nil, &typeParamTupleSeen{})
+	// Most type queries have only a scalar leaf or a chain of single-child
+	// wrappers. Avoid initializing graph state until a branch is reached.
+	for {
+		switch n := t.(type) {
+		case *TypeParamType:
+			return true
+		case *ErrorUnionType:
+			t = n.Value
+		case *OptionalType:
+			t = n.Value
+		case *RefType:
+			t = n.Elem
+		case *ArrayType:
+			t = n.Elem
+		case *DArrayType:
+			t = n.Elem
+		case *ViewType:
+			t = n.Elem
+		case *AggregateStateType:
+			t = n.Base
+		case *IDType, *TupleType, *GenericInstanceType, *FuncType, *EnumType:
+			return containsTypeParamSeen(t, &typeParamSeen{})
+		default:
+			return false
+		}
+	}
 }
 
 // Shared tuple graphs can contain exponentially many paths to the same node.
 // Keep a small inline set and only allocate a map for larger graphs.
-type typeParamTupleSeen struct {
-	small [16]*TupleType
-	count int
-	large map[*TupleType]bool
+type typeParamSeen struct {
+	enums     [16]*EnumType
+	enumCount int
+	enumLarge map[*EnumType]bool
+	small     [16]*TupleType
+	count     int
+	large     map[*TupleType]bool
 }
 
-func (s *typeParamTupleSeen) add(t *TupleType) bool {
+func (s *typeParamSeen) addTuple(t *TupleType) bool {
 	if s.large != nil {
 		if s.large[t] {
 			return false
@@ -59,67 +87,89 @@ func (s *typeParamTupleSeen) add(t *TupleType) bool {
 	return true
 }
 
+func (s *typeParamSeen) addEnum(t *EnumType) bool {
+	if s.enumLarge != nil {
+		if s.enumLarge[t] {
+			return false
+		}
+		s.enumLarge[t] = true
+		return true
+	}
+	for i := 0; i < s.enumCount; i++ {
+		if s.enums[i] == t {
+			return false
+		}
+	}
+	if s.enumCount < len(s.enums) {
+		s.enums[s.enumCount] = t
+		s.enumCount++
+		return true
+	}
+	s.enumLarge = make(map[*EnumType]bool, 2*len(s.enums))
+	for _, prior := range s.enums {
+		s.enumLarge[prior] = true
+	}
+	s.enumLarge[t] = true
+	return true
+}
+
 // Enum cycles and repeated tuple nodes are visited once per query.
-func containsTypeParamSeen(t Type, seen map[*EnumType]bool, tuples *typeParamTupleSeen) bool {
+func containsTypeParamSeen(t Type, seen *typeParamSeen) bool {
 	switch n := t.(type) {
 	case nil:
 		return false
 	case *TypeParamType:
 		return true
 	case *IDType:
-		return containsTypeParamSeen(n.Tag, seen, tuples) || containsTypeParamSeen(n.Storage, seen, tuples)
+		return containsTypeParamSeen(n.Tag, seen) || containsTypeParamSeen(n.Storage, seen)
 	case *ErrorUnionType:
-		return containsTypeParamSeen(n.Value, seen, tuples)
+		return containsTypeParamSeen(n.Value, seen)
 	case *OptionalType:
-		return containsTypeParamSeen(n.Value, seen, tuples)
+		return containsTypeParamSeen(n.Value, seen)
 	case *RefType:
-		return containsTypeParamSeen(n.Elem, seen, tuples)
+		return containsTypeParamSeen(n.Elem, seen)
 	case *ArrayType:
-		return containsTypeParamSeen(n.Elem, seen, tuples)
+		return containsTypeParamSeen(n.Elem, seen)
 	case *DArrayType:
-		return containsTypeParamSeen(n.Elem, seen, tuples)
+		return containsTypeParamSeen(n.Elem, seen)
 	case *ViewType:
-		return containsTypeParamSeen(n.Elem, seen, tuples)
+		return containsTypeParamSeen(n.Elem, seen)
 	case *TupleType:
-		if !tuples.add(n) {
+		if !seen.addTuple(n) {
 			return false
 		}
 		for _, field := range n.Fields {
-			if containsTypeParamSeen(field.Type, seen, tuples) {
+			if containsTypeParamSeen(field.Type, seen) {
 				return true
 			}
 		}
 		return false
 	case *GenericInstanceType:
 		for _, arg := range n.Args {
-			if containsTypeParamSeen(arg, seen, tuples) {
+			if containsTypeParamSeen(arg, seen) {
 				return true
 			}
 		}
-		return containsTypeParamSeen(n.Base, seen, tuples)
+		return containsTypeParamSeen(n.Base, seen)
 	case *AggregateStateType:
-		return containsTypeParamSeen(n.Base, seen, tuples)
+		return containsTypeParamSeen(n.Base, seen)
 	case *FuncType:
 		if len(n.GenericParams) != 0 {
 			return true
 		}
 		for _, param := range n.Params {
-			if containsTypeParamSeen(param, seen, tuples) {
+			if containsTypeParamSeen(param, seen) {
 				return true
 			}
 		}
-		return containsTypeParamSeen(n.Return, seen, tuples)
+		return containsTypeParamSeen(n.Return, seen)
 	case *EnumType:
-		if seen[n] {
+		if !seen.addEnum(n) {
 			return false
 		}
-		if seen == nil {
-			seen = map[*EnumType]bool{}
-		}
-		seen[n] = true
 		for _, variant := range n.Variants {
 			for _, payload := range variant.Payload {
-				if containsTypeParamSeen(payload, seen, tuples) {
+				if containsTypeParamSeen(payload, seen) {
 					return true
 				}
 			}
