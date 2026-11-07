@@ -103,3 +103,20 @@ func TestStoreFlowReadOnlyCallQueryScan(t *testing.T) {
 		})
 	}
 }
+
+func TestStoreFlowQueryBinderPairsIdentifierFastPath(t *testing.T) {
+	if !storeFlowIdentFast {
+		t.Skip("identifier schema changed")
+	}
+	stmt := reflect.ValueOf(&ast.ReturnStmt{Value: &ast.CallExpr{Func: &ast.Ident{Name: "f"}, Args: []ast.Expr{&ast.Ident{Name: "x"}, &ast.QueryExpr{Kind: ast.QueryExprAny, Name: "item", Source: &ast.Ident{Name: "items"}}}}})
+	a := &Analyzer{}
+	original := storeFlowIdentFast
+	defer func() { storeFlowIdentFast = original }()
+	storeFlowIdentFast = false
+	want := a.storeFlowQueryBinderPairs(stmt)
+	storeFlowIdentFast = true
+	got := a.storeFlowQueryBinderPairs(stmt)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}

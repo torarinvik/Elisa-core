@@ -3273,6 +3273,13 @@ func (a *Analyzer) storeFlowQueryBinderPairs(stmt reflect.Value) [][]string {
 			if v.IsNil() || !v.CanInterface() {
 				return
 			}
+			// The schema-checked identifier contains only a position and a name,
+			// neither of which can contain a query expression.
+			if storeFlowIdentFast {
+				if _, ok := v.Interface().(*ast.Ident); ok {
+					return
+				}
+			}
 			info := storeFlowTypeInfoOf(v.Type())
 			if (info.isStmt && v.Pointer() != self) || info.isTypeExpr {
 				return

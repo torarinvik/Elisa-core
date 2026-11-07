@@ -103,3 +103,27 @@ func BenchmarkStoreFlowScalarQueries(b *testing.B) {
 		_ = queryScan.result(a, stmt)
 	}
 }
+
+func BenchmarkStoreFlowQueryBinderPairsIdentifiers(b *testing.B) {
+	args := make([]ast.Expr, 64)
+	for i := range args {
+		args[i] = &ast.Ident{Name: "value"}
+	}
+	stmt := reflect.ValueOf(&ast.ReturnStmt{Value: &ast.CallExpr{Func: &ast.Ident{Name: "f"}, Args: args}})
+	for _, fast := range []bool{false, true} {
+		name := "reflective"
+		if fast {
+			name = "identifier"
+		}
+		b.Run(name, func(b *testing.B) {
+			old := storeFlowIdentFast
+			storeFlowIdentFast = fast
+			defer func() { storeFlowIdentFast = old }()
+			a := &Analyzer{}
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				_ = a.storeFlowQueryBinderPairs(stmt)
+			}
+		})
+	}
+}
