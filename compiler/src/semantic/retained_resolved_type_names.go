@@ -168,8 +168,9 @@ func captureResolvedTypeNameContributions(rows map[ast.TypeExpr]string, decls []
 			if typ.PkgPath() != resolvedTypeNameASTPackage {
 				return nil
 			}
+			fields := reflectFields(typ)
 			for i := 0; i < value.NumField(); i++ {
-				field := typ.Field(i)
+				field := &fields[i]
 				child := value.Field(i)
 				if !child.CanInterface() {
 					return fmt.Errorf("unpublished AST ownership field %s.%s", typ, field.Name)
@@ -354,8 +355,9 @@ func captureResolvedTypeNameContributions(rows map[ast.TypeExpr]string, decls []
 func collectResolvedTypeNameFunctionPaths(walk func(reflect.Value, string, string, string, bool, int) error, fn *ast.FuncDecl, key string) error {
 	value := reflect.ValueOf(fn).Elem()
 	typ := value.Type()
+	fields := reflectFields(typ)
 	for i := 0; i < value.NumField(); i++ {
-		field := typ.Field(i)
+		field := &fields[i]
 		if field.Name == "Body" || !resolvedTypeNameFieldMayContainAST(field.Type) {
 			continue
 		}
@@ -597,8 +599,9 @@ func resolvedTypeNameBodyTypeExprPaths(body []ast.Stmt) (map[ast.TypeExpr][]stri
 			if typ.PkgPath() != resolvedTypeNameASTPackage {
 				return nil
 			}
+			fields := reflectFields(typ)
 			for i := 0; i < value.NumField(); i++ {
-				field := typ.Field(i)
+				field := &fields[i]
 				if !resolvedTypeNameFieldMayContainAST(field.Type) {
 					continue
 				}
@@ -762,8 +765,9 @@ func visitResolvedTypeNameSyntax(value any, visit func(string, ast.TypeExpr)) er
 			if typ.PkgPath() != resolvedTypeNameASTPackage {
 				return nil
 			}
+			fields := reflectFields(typ)
 			for i := 0; i < value.NumField(); i++ {
-				field := typ.Field(i)
+				field := &fields[i]
 				if !resolvedTypeNameFieldMayContainAST(field.Type) {
 					continue
 				}
@@ -806,8 +810,9 @@ func resolvedTypeNameHeaderSyntaxKeys(fn *ast.FuncDecl) (map[string]bool, error)
 	}
 	value := reflect.ValueOf(fn).Elem()
 	typ := value.Type()
+	fields := reflectFields(typ)
 	for i := 0; i < value.NumField(); i++ {
-		field := typ.Field(i)
+		field := &fields[i]
 		if field.Name == "Body" || !resolvedTypeNameFieldMayContainAST(field.Type) {
 			continue
 		}

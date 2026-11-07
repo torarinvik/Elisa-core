@@ -6,7 +6,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"unicode"
+	"unsafe"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -1079,7 +1081,27 @@ type storeFlowTypeInfo struct {
 
 var storeFlowTypeInfoCache sync.Map // map[reflect.Type]*storeFlowTypeInfo
 
+// The same immutable type metadata is read at every node. Keep a lock-free
+// direct-mapped front cache; collisions fall back to the authoritative map.
+type storeFlowTypeSlot struct {
+	t    reflect.Type
+	info *storeFlowTypeInfo
+}
+
+var storeFlowTypeFront [256]atomic.Pointer[storeFlowTypeSlot]
+
 func storeFlowTypeInfoOf(t reflect.Type) *storeFlowTypeInfo {
+	addr := (*[2]uintptr)(unsafe.Pointer(&t))[1]
+	slot := &storeFlowTypeFront[(addr>>5^addr>>13)&255]
+	if entry := slot.Load(); entry != nil && entry.t == t {
+		return entry.info
+	}
+	info := storeFlowTypeInfoSlow(t)
+	slot.Store(&storeFlowTypeSlot{t: t, info: info})
+	return info
+}
+
+func storeFlowTypeInfoSlow(t reflect.Type) *storeFlowTypeInfo {
 	if cached, ok := storeFlowTypeInfoCache.Load(t); ok {
 		return cached.(*storeFlowTypeInfo)
 	}
