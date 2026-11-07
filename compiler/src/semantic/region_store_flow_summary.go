@@ -543,22 +543,30 @@ func (c *storeFlowCtx) isPure(name string) bool {
 }
 
 func (c *storeFlowCtx) link(names []string) {
-	var sinks, sources []string
+	var sourceBuffer [8]string
+	sources := sourceBuffer[:0]
+	var firstSink string
+	hasSink := false
 	for _, n := range names {
 		if c.scalars[storeFlowBaseName(n)] {
 			continue // a scalar local neither holds nor aliases a region reference
 		}
 		if c.isPure(n) {
+			if len(sources) != 0 {
+				c.pu.union(sources[0], n)
+			}
 			sources = append(sources, n)
 		} else {
-			sinks = append(sinks, n)
+			if hasSink {
+				c.u.union(firstSink, n)
+			} else {
+				firstSink, hasSink = n, true
+			}
 		}
 	}
-	c.u.unionAll(sinks)
-	c.pu.unionAll(sources)
-	if len(sinks) > 0 {
+	if hasSink {
 		for _, src := range sources {
-			c.edges = append(c.edges, [2]string{src, sinks[0]})
+			c.edges = append(c.edges, [2]string{src, firstSink})
 		}
 	}
 }
