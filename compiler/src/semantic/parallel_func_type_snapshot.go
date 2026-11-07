@@ -30,6 +30,23 @@ func snapshotFuncTypeMetadataRoot(value reflect.Value, source, destination *Func
 		seen[pointerKey{root.Type(), root.Pointer()}] = reflect.ValueOf(destination)
 	}
 	var copyValue func(reflect.Value) reflect.Value
+	// Fields and elements already have storage in their destination. Clone
+	// into it without allocating a temporary struct or interface first.
+	var copyInto func(out, v reflect.Value)
+	copyInto = func(out, v reflect.Value) {
+		switch {
+		case v.Kind() == reflect.Interface && !v.IsNil():
+			out.Set(copyValue(v.Elem()))
+		case v.Kind() == reflect.Struct && (len(syntaxCopy) == 0 || v.Type().PkgPath() != astGraphPkgPath):
+			out.Set(v)
+			for i := 0; i < out.NumField(); i++ {
+				field := settable(out.Field(i))
+				copyInto(field, field)
+			}
+		default:
+			out.Set(copyValue(v))
+		}
+	}
 	copyValue = func(v reflect.Value) reflect.Value {
 		if len(syntaxCopy) != 0 && ((v.Kind() == reflect.Pointer && v.Type().Elem().PkgPath() == astGraphPkgPath) || (v.Kind() == reflect.Struct && v.Type().PkgPath() == astGraphPkgPath)) {
 			// Factory/declaration references denote canonical symbols. Expressions
@@ -66,7 +83,7 @@ func snapshotFuncTypeMetadataRoot(value reflect.Value, source, destination *Func
 			}
 			out := reflect.New(v.Type().Elem())
 			seen[key] = out
-			out.Elem().Set(copyValue(v.Elem()))
+			copyInto(out.Elem(), v.Elem())
 			return out
 		case reflect.Interface:
 			if v.IsNil() {
@@ -77,11 +94,7 @@ func snapshotFuncTypeMetadataRoot(value reflect.Value, source, destination *Func
 			return out
 		case reflect.Struct:
 			out := reflect.New(v.Type()).Elem()
-			out.Set(v)
-			for i := 0; i < out.NumField(); i++ {
-				field := settable(out.Field(i))
-				field.Set(copyValue(field))
-			}
+			copyInto(out, v)
 			return out
 		case reflect.Slice:
 			if v.IsNil() {
@@ -89,13 +102,13 @@ func snapshotFuncTypeMetadataRoot(value reflect.Value, source, destination *Func
 			}
 			out := reflect.MakeSlice(v.Type(), v.Len(), v.Len())
 			for i := 0; i < v.Len(); i++ {
-				out.Index(i).Set(copyValue(v.Index(i)))
+				copyInto(out.Index(i), v.Index(i))
 			}
 			return out
 		case reflect.Array:
 			out := reflect.New(v.Type()).Elem()
 			for i := 0; i < v.Len(); i++ {
-				out.Index(i).Set(copyValue(v.Index(i)))
+				copyInto(out.Index(i), v.Index(i))
 			}
 			return out
 		case reflect.Map:
