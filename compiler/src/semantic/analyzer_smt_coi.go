@@ -327,7 +327,8 @@ func (a *Analyzer) smtCheckTransformedProof(query string, check func() (smt.Resu
 // (a dead path), under a small budget. See smtSliceQuery for why both unsat cases prove the full
 // query and why a sat sliced query plus a sat dropped part is the full query's sat.
 func (a *Analyzer) smtCheckSliced(solver smt.Solver, query, goalAssert string, vars []string) (smt.Result, map[string]string) {
-	res, model := a.smtCheckSlicedOnce(solver, query, goalAssert, vars)
+	weakeningSat := false
+	res, model := a.smtCheckSlicedOnce(solver, query, goalAssert, vars, &weakeningSat)
 	if res != smt.Unknown {
 		return res, model
 	}
@@ -339,7 +340,7 @@ func (a *Analyzer) smtCheckSliced(solver smt.Solver, query, goalAssert string, v
 	// quantifier-free weakening ran first under the small dead-path budget; give it the
 	// query budget now. Dropping hypotheses only weakens, so only its unsat is used.
 	stripped := smtStripAbstractionOnly(query)
-	if weaker, ok := smtWithoutQuantifiedHypotheses(stripped, goalAssert); ok {
+	if weaker, ok := smtWithoutQuantifiedHypotheses(stripped, goalAssert); ok && !weakeningSat {
 		a.smtSetLogLabelForQuery(solver, "quantifier-weakening-full", goalAssert, weaker)
 		weak, _ := a.smtCheckTransformedProof(weaker+"; full budget\n", func() (smt.Result, map[string]string) {
 			return budgeted.CheckBudgetValues(weaker, vars, smtResourceLimit())
@@ -411,7 +412,7 @@ func smtHistoryDigest(history []string) string {
 	return hex.EncodeToString(hash.Sum(nil))
 }
 
-func (a *Analyzer) smtCheckSlicedOnce(solver smt.Solver, query, goalAssert string, vars []string) (smt.Result, map[string]string) {
+func (a *Analyzer) smtCheckSlicedOnce(solver smt.Solver, query, goalAssert string, vars []string, weakeningSat *bool) (smt.Result, map[string]string) {
 	// Bit-vector abstraction first (analyzer_smt_bv_abstract.go): an unsat weakening proves.
 	budgeted, canBudget := solver.(smtBudgetedSolver)
 	check := func(q string) (smt.Result, map[string]string) {
@@ -455,6 +456,11 @@ func (a *Analyzer) smtCheckSlicedOnce(solver smt.Solver, query, goalAssert strin
 			})
 			if res == smt.Unsat {
 				return res, model
+			}
+			// A definite SAT answer for these same weakened assertions is
+			// conclusive even if the full query later returns unknown.
+			if res == smt.Sat {
+				*weakeningSat = true
 			}
 			a.smtSetLogLabelForQuery(solver, "query", goalAssert, query)
 		}
