@@ -58,6 +58,11 @@ func sliceImmutableLocalHypotheses(localHyps, context string) string {
 	enqueue := func(text string) {
 		scan := smtTokenScanner{text: text}
 		for tok, ok := scan.next(); ok; tok, ok = scan.next() {
+			// localHypothesisSymbol admits only v_ and b_ names; operators,
+			// literals and other symbols cannot appear in the block index.
+			if len(tok) < 2 || tok[1] != '_' || (tok[0] != 'v' && tok[0] != 'b') {
+				continue
+			}
 			if i, found := index[tok]; found && !keep[i] {
 				keep[i] = true
 				queue = append(queue, i)
