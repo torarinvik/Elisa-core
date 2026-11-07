@@ -23,22 +23,6 @@ func backendMatchPatternIsNull(pattern ast.MatchPattern) bool {
 	return ok
 }
 
-func optionalMatchHasPayloadWildcard(arms []ast.MatchArm) bool {
-	for _, arm := range arms {
-		if arm.Guard != nil {
-			// A guarded arm may fail at runtime; it cannot count toward exhaustiveness.
-			continue
-		}
-		if backendMatchPatternIsNull(arm.Pattern) {
-			continue
-		}
-		if _, ok := arm.Pattern.(*ast.MatchWildcardPattern); ok {
-			return true
-		}
-	}
-	return false
-}
-
 func optionalMatchHasNullArm(arms []ast.MatchArm) bool {
 	for _, arm := range arms {
 		if arm.Guard != nil {
@@ -61,8 +45,16 @@ func optionalMatchHasUnguardedWildcard(arms []ast.MatchArm) bool {
 	return false
 }
 
-func optionalMatchExhaustive(arms []ast.MatchArm) bool {
-	return optionalMatchHasUnguardedWildcard(arms) || (optionalMatchHasNullArm(arms) && optionalMatchHasPayloadWildcard(arms))
+func optionalMatchExhaustive(arms []ast.MatchArm, payloadCovered bool) bool {
+	return optionalMatchHasUnguardedWildcard(arms) || (optionalMatchHasNullArm(arms) && payloadCovered)
+}
+
+// A payload pattern is total when lowering emitted a direct branch to the
+// arm. This distinguishes a plain binder from a predicate or narrowed enum
+// category, even though they can share the same syntax node.
+func optionalPayloadTestAlwaysMatches(testBB, bodyBB C.LLVMBasicBlockRef) bool {
+	term := C.LLVMGetBasicBlockTerminator(testBB)
+	return term != nil && C.LLVMGetNumSuccessors(term) == 1 && C.LLVMGetSuccessor(term, 0) == bodyBB
 }
 
 func (s *functionState) emitOptionalMatch(stmt *ast.MatchStmt, optionalType *semantic.OptionalType) error {
@@ -84,6 +76,7 @@ func (s *functionState) emitOptionalMatch(stmt *ast.MatchStmt, optionalType *sem
 	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.optional.end"))
 	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.optional.fail"))
 	allTerminated := true
+	payloadCovered := false
 	for i, arm := range stmt.Arms {
 		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.optional.arm"))
 		var nextBB C.LLVMBasicBlockRef
@@ -104,6 +97,9 @@ func (s *functionState) emitOptionalMatch(stmt *ast.MatchStmt, optionalType *sem
 			C.LLVMPositionBuilderAtEnd(s.builder, payloadTestBB)
 			if _, _, err := s.emitMatchPatternTest(arm.Pattern, payloadValue, nil, optionalType.Value, nil, nil, nil, bodyBB, nextBB); err != nil {
 				return err
+			}
+			if arm.Guard == nil && optionalPayloadTestAlwaysMatches(payloadTestBB, bodyBB) {
+				payloadCovered = true
 			}
 		}
 
@@ -127,7 +123,7 @@ func (s *functionState) emitOptionalMatch(stmt *ast.MatchStmt, optionalType *sem
 		}
 	}
 
-	exhaustive := optionalMatchExhaustive(stmt.Arms)
+	exhaustive := optionalMatchExhaustive(stmt.Arms, payloadCovered)
 	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
 	if exhaustive {
 		C.LLVMBuildUnreachable(s.builder)
@@ -162,6 +158,7 @@ func (s *functionState) emitOptionalMatchExpr(expr *ast.MatchExpr, resultType se
 	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.optional.expr.fail"))
 	incomingValues := make([]C.LLVMValueRef, 0, len(expr.Arms)+1)
 	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, len(expr.Arms)+1)
+	payloadCovered := false
 	for i, arm := range expr.Arms {
 		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.optional.expr.arm"))
 		var nextBB C.LLVMBasicBlockRef
@@ -182,6 +179,9 @@ func (s *functionState) emitOptionalMatchExpr(expr *ast.MatchExpr, resultType se
 			C.LLVMPositionBuilderAtEnd(s.builder, payloadTestBB)
 			if _, _, err := s.emitMatchPatternTest(arm.Pattern, payloadValue, nil, optionalType.Value, nil, nil, nil, bodyBB, nextBB); err != nil {
 				return nil, nil, err
+			}
+			if arm.Guard == nil && optionalPayloadTestAlwaysMatches(payloadTestBB, bodyBB) {
+				payloadCovered = true
 			}
 		}
 
@@ -208,7 +208,7 @@ func (s *functionState) emitOptionalMatchExpr(expr *ast.MatchExpr, resultType se
 		}
 	}
 
-	exhaustive := optionalMatchExhaustive(expr.Arms)
+	exhaustive := optionalMatchExhaustive(expr.Arms, payloadCovered)
 	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
 	if exhaustive || semantic.IsNeverType(resultType) {
 		C.LLVMBuildUnreachable(s.builder)
