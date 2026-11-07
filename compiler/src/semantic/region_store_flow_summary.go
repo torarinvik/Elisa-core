@@ -1141,6 +1141,17 @@ var storeFlowIdentFast = func() bool {
 
 var storeFlowPositionFast = storeFlowIdentFast
 
+// Integer literal payload and suffix are excluded by storeFlowSkipFields.
+// Keep the shortcut conditional on the exact syntax schema.
+var storeFlowIntLiteralFast = func() bool {
+	t := reflect.TypeOf(ast.IntLit{})
+	return storeFlowIdentFast && t.NumField() == 4 &&
+		t.Field(0).Name == "Position" && t.Field(0).Type == reflect.TypeOf(lexer.Pos{}) &&
+		t.Field(1).Name == "Value" && t.Field(1).Type.Kind() == reflect.String &&
+		t.Field(2).Name == "Suffix" && t.Field(2).Type.Kind() == reflect.String &&
+		t.Field(3).Name == "IsHex" && t.Field(3).Type.Kind() == reflect.Bool
+}()
+
 // storeFlowTypeInfo caches what storeFlowMentions asks of a reflect.Type on every node it
 // visits: method-set tests (Implements) and the struct field filter were ~4 s of a stage1
 // driver compile when recomputed per node.
@@ -1773,6 +1784,18 @@ func (a *Analyzer) storeFlowCollectMentionsWithQuery(root reflect.Value, self ui
 		case reflect.Pointer:
 			if v.IsNil() || !v.CanInterface() {
 				return
+			}
+			if storeFlowIntLiteralFast && storeFlowIdentFast && storeFlowPositionFast {
+				if lit, ok := v.Interface().(*ast.IntLit); ok {
+					if collectNames && condDepth == 0 && (!callsOnly || callDepth > 0) && storeFlowVariableName(lit.Position.File) {
+						name := lit.Position.File
+						if renamed, ok := rename[name]; ok {
+							name = renamed
+						}
+						names = append(names, name)
+					}
+					return
+				}
 			}
 			if storeFlowIdentFast {
 				if ident, ok := v.Interface().(*ast.Ident); ok {

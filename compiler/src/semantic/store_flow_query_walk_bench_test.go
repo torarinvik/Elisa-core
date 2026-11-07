@@ -127,3 +127,27 @@ func BenchmarkStoreFlowQueryBinderPairsIdentifiers(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkStoreFlowIntegerLiterals(b *testing.B) {
+	var expr ast.Expr = &ast.IntLit{Value: "1"}
+	for i := 0; i < 64; i++ {
+		expr = &ast.BinaryExpr{Left: expr, Right: &ast.IntLit{Value: "1"}}
+	}
+	stmt := reflect.ValueOf(&ast.ReturnStmt{Value: expr})
+	for _, fast := range []bool{false, true} {
+		label := "reflective"
+		if fast {
+			label = "direct"
+		}
+		b.Run(label, func(b *testing.B) {
+			saved := storeFlowIntLiteralFast
+			storeFlowIntLiteralFast = fast
+			defer func() { storeFlowIntLiteralFast = saved }()
+			a := &Analyzer{}
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				a.storeFlowCollectMentionsWithQuery(stmt.Elem(), stmt.Pointer(), nil, nil, nil, false, true, nil)
+			}
+		})
+	}
+}
