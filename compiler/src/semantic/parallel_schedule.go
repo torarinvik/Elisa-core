@@ -729,22 +729,35 @@ var nodeKeyedMapPaths = sync.OnceValue(func() []nodeKeyedMap {
 	return out
 })
 
-// Node types and Analyzer map key types are fixed. Share only the compatible
-// path indices; worker maps and their values remain private to each export.
-var nodeKeyedMapDispatch sync.Map // reflect.Type -> []int (immutable)
+// A node can be a key in several maps of the same key type. Group those
+// columns so export boxes each interface key once per node.
+type nodeKeyedMapGroup struct {
+	key     reflect.Type
+	columns []int
+}
 
-func nodeKeyedMapIndices(t reflect.Type) []int {
+var nodeKeyedMapDispatch sync.Map // reflect.Type -> []nodeKeyedMapGroup (immutable)
+
+func nodeKeyedMapGroups(t reflect.Type) []nodeKeyedMapGroup {
 	if cached, ok := nodeKeyedMapDispatch.Load(t); ok {
-		return cached.([]int)
+		return cached.([]nodeKeyedMapGroup)
 	}
-	var indices []int
+	var groups []nodeKeyedMapGroup
+	groupByKey := map[reflect.Type]int{}
 	for i, path := range nodeKeyedMapPaths() {
-		if (path.key.Kind() == reflect.Interface && t.Implements(path.key)) || t == path.key {
-			indices = append(indices, i)
+		if t != path.key && !(path.key.Kind() == reflect.Interface && t.Implements(path.key)) {
+			continue
 		}
+		g, ok := groupByKey[path.key]
+		if !ok {
+			g = len(groups)
+			groupByKey[path.key] = g
+			groups = append(groups, nodeKeyedMapGroup{key: path.key})
+		}
+		groups[g].columns = append(groups[g].columns, i)
 	}
-	actual, _ := nodeKeyedMapDispatch.LoadOrStore(t, indices)
-	return actual.([]int)
+	actual, _ := nodeKeyedMapDispatch.LoadOrStore(t, groups)
+	return actual.([]nodeKeyedMapGroup)
 }
 
 type nodeFact struct {
@@ -769,17 +782,22 @@ func exportNodeEntries(a *Analyzer, stmts []ast.Stmt) [][]nodeFact {
 	}
 	walkStoreScanNodes(stmts, func(node any) {
 		nv := reflect.ValueOf(node)
-		for _, pi := range nodeKeyedMapIndices(nv.Type()) {
-			v := maps[pi]
-			if !v.IsValid() {
-				continue
-			}
-			key := nv
-			if nv.Type() != paths[pi].key {
-				key = nv.Convert(paths[pi].key)
-			}
-			if val := v.MapIndex(key); val.IsValid() {
-				out[pi] = append(out[pi], nodeFact{key, deepCloneValue(val)})
+		for _, group := range nodeKeyedMapGroups(nv.Type()) {
+			var key reflect.Value
+			for _, pi := range group.columns {
+				v := maps[pi]
+				if !v.IsValid() {
+					continue
+				}
+				if !key.IsValid() {
+					key = nv
+					if nv.Type() != group.key {
+						key = nv.Convert(group.key)
+					}
+				}
+				if val := v.MapIndex(key); val.IsValid() {
+					out[pi] = append(out[pi], nodeFact{key, deepCloneValue(val)})
+				}
 			}
 		}
 	})
