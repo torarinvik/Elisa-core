@@ -992,6 +992,16 @@ func storeScanMentionsHeader(node any, names map[string]bool) bool {
 				return false
 			}
 			node = expr.Object
+		case *ast.IndexExpr:
+			if expr != nil && expr.Index2 == nil {
+				if root := rootIdentExpr(expr.Object); root != nil && names[root.Name] {
+					// A read from the tracked header does not itself retain that
+					// header; only its index expression can mention one.
+					node = expr.Index
+					continue
+				}
+			}
+			return storeScanMentionsHeaderWalk(reflect.ValueOf(node), names, map[uintptr]bool{})
 		default:
 			return storeScanMentionsHeaderWalk(reflect.ValueOf(node), names, map[uintptr]bool{})
 		}
