@@ -335,12 +335,38 @@ type storeFlowBinderIndex struct {
 	// Callers only read it.
 	allNames map[string]bool
 	// Integer classification is queried per expression; callers only read this set.
-	integerNames map[string]bool
+	integerNames     map[string]bool
+	typedByNameOnce  sync.Once
+	typedByName      map[string][]storeFlowTypedBinder
+	rangeNameSetOnce sync.Once
+	rangeNameSet     map[string]bool
 }
 
 type storeFlowTypedBinder struct {
 	name string
 	t    ast.TypeExpr
+}
+
+// Repeated place queries need only bindings for one name. The index keeps all
+// same-named declarations, including shadowed ones, so their vetoes remain.
+func (idx *storeFlowBinderIndex) typedBindings(name string) []storeFlowTypedBinder {
+	idx.typedByNameOnce.Do(func() {
+		idx.typedByName = make(map[string][]storeFlowTypedBinder, len(idx.typed))
+		for _, binder := range idx.typed {
+			idx.typedByName[binder.name] = append(idx.typedByName[binder.name], binder)
+		}
+	})
+	return idx.typedByName[name]
+}
+
+func (idx *storeFlowBinderIndex) hasRangeName(name string) bool {
+	idx.rangeNameSetOnce.Do(func() {
+		idx.rangeNameSet = make(map[string]bool, len(idx.rangeNames))
+		for _, n := range idx.rangeNames {
+			idx.rangeNameSet[n] = true
+		}
+	})
+	return idx.rangeNameSet[name]
 }
 
 func (idx *storeFlowBinderIndex) sets(pred func(ast.TypeExpr) bool) (map[string]bool, map[string]bool) {
@@ -1332,16 +1358,11 @@ func (a *Analyzer) storeFlowPointerFreeIndexedElement(base ast.Expr) bool {
 	if idx.untyped[id.Name] {
 		return false
 	}
-	for _, name := range idx.rangeNames {
-		if name == id.Name {
-			return false
-		}
+	if idx.hasRangeName(id.Name) {
+		return false
 	}
 	found := false
-	for _, binder := range idx.typed {
-		if binder.name != id.Name {
-			continue
-		}
+	for _, binder := range idx.typedBindings(id.Name) {
 		elem, isDarray := storeFlowDarrayElementTypeExpr(binder.t)
 		if !isDarray || !a.storeFlowPointerFreeTypeExpr(elem, map[Type]bool{}) {
 			return false
@@ -2819,10 +2840,7 @@ func (a *Analyzer) storeFlowDarrayElementPointerFree(expr ast.Expr) bool {
 		return false
 	}
 	found := false
-	for _, binding := range a.storeFlowBinderIndexFor(a.storeFlowCurrentDecl).typed {
-		if binding.name != id.Name {
-			continue
-		}
+	for _, binding := range a.storeFlowBinderIndexFor(a.storeFlowCurrentDecl).typedBindings(id.Name) {
 		found = true
 		elem, isDarray := storeFlowDarrayElementTypeExpr(binding.t)
 		if !isDarray || !a.storeFlowPointerFreeTypeExpr(elem, map[Type]bool{}) {
@@ -3073,10 +3091,7 @@ func (a *Analyzer) storeFlowDeclaredViewOrScalarElements(receiver ast.Expr) bool
 		return false
 	}
 	found := false
-	for _, binding := range idx.typed {
-		if binding.name != id.Name {
-			continue
-		}
+	for _, binding := range idx.typedBindings(id.Name) {
 		found = true
 		elem, isDarray := storeFlowDarrayElementTypeExpr(binding.t)
 		if !isDarray || !(storeFlowViewTypeExpr(elem) || storeFlowScalarTypeExpr(elem)) {
