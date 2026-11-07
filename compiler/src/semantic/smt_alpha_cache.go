@@ -97,15 +97,20 @@ func smtAlphaWriteQuery(query string, out smtAlphaOutput) bool {
 		}
 		first = false
 		if tok.kind == 'a' {
-			if replacement, present := names[smtAlphaSymbol(tok.text)]; present {
-				if tok.text != lastValidated {
-					if !smtAlphaValidSymbol(tok.text) {
-						return false
+			id := smtAlphaSymbol(tok.text)
+			// The names map contains only compiler-generated identifiers. Most
+			// atoms are operators, keywords, numerals or sorts and cannot match.
+			if smtAlphaPossibleGenerated(id) {
+				if replacement, present := names[id]; present {
+					if tok.text != lastValidated {
+						if !smtAlphaValidSymbol(tok.text) {
+							return false
+						}
+						lastValidated = tok.text
 					}
-					lastValidated = tok.text
+					_, err := out.WriteString(replacement)
+					return err == nil
 				}
-				_, err := out.WriteString(replacement)
-				return err == nil
 			}
 		}
 		_, err := out.WriteString(tok.text)
@@ -141,12 +146,19 @@ func smtAlphaValidSymbol(token string) bool {
 func smtAlphaGeneratedSymbol(name string) bool {
 	// These prefixes belong to compiler-generated constants and uninterpreted
 	// functions, not SMT operators or sort names. Unrecognized names keep exact keys.
+	if !smtAlphaPossibleGenerated(name) {
+		return false
+	}
 	for _, prefix := range []string{"v_", "aux_", "ghost_uf_", "sview_length_", "bpred_", "@scalar_call_", "@record_field_"} {
 		if strings.HasPrefix(name, prefix) {
 			return true
 		}
 	}
 	return false
+}
+
+func smtAlphaPossibleGenerated(name string) bool {
+	return len(name) != 0 && (name[0] == 'v' || name[0] == 'a' || name[0] == 'g' || name[0] == 's' || name[0] == 'b' || name[0] == '@')
 }
 
 func smtAlphaSymbol(token string) string {

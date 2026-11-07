@@ -90,6 +90,19 @@ func TestSMTAlphaStructure(t *testing.T) {
 	}
 }
 
+func TestSMTAlphaGeneratedPrefixesNormalizeUses(t *testing.T) {
+	for _, prefix := range []string{"v_", "aux_", "ghost_uf_", "sview_length_", "bpred_", "@scalar_call_", "@record_field_"} {
+		old, next := prefix+"old", prefix+"new"
+		q := "(declare-const |" + old + "| Int)(assert (= " + old + " |" + old + "|))"
+		r := strings.ReplaceAll(q, old, next)
+		first, ok := smtAlphaQuery(q)
+		second, ok2 := smtAlphaQuery(r)
+		if !ok || !ok2 || first != second {
+			t.Fatalf("prefix %q was not normalized: %q / %q", prefix, first, second)
+		}
+	}
+}
+
 func TestSMTAlphaLexicalBoundaries(t *testing.T) {
 	for _, q := range []string{"(declare-const v_x Int", "(declare-const |v_x Int)", `(declare-const v_x String)(assert (= v_x "unterminated))`, "(declare-const v_x Int)(declare-const |v_x| Int)", "(declare-const |v_\\bad| Int)", ")(declare-const v_x Int)("} {
 		if _, ok := smtAlphaQuery(q); ok {
