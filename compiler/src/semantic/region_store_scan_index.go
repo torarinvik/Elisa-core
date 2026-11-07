@@ -163,9 +163,9 @@ type storeScanDeclIndex struct {
 	decls          map[string][]*ast.VarDeclStmt // every declaration of a name
 	otherBound     map[string]bool               // names bound by a non-VarDecl construct
 	parameterNames map[string]bool               // immutable names, shared by this declaration's taint queries
-	// nodes lists, per name, the VarDecl / Assign / Call / binding-statement nodes whose own
-	// expressions (a statement's header only, not nested statements) mention the name.
-	nodes map[string][]any
+	// nameNodes lists offsets into flat for nodes whose own expressions
+	// (a statement's header only) mention the name.
+	nameNodes map[string][]int
 	// flat: every node walkStoreScanNodes visits, in walk order (fixpoints iterate this instead
 	// of re-walking the AST reflectively per iteration).
 	flat    []any
@@ -197,14 +197,15 @@ func (a *Analyzer) storeScanIndex(decl *ast.FuncDecl) *storeScanDeclIndex {
 	if idx, ok := a.storeScanIndexCache[decl]; ok {
 		return idx
 	}
-	idx := &storeScanDeclIndex{decls: map[string][]*ast.VarDeclStmt{}, otherBound: map[string]bool{}, nodes: map[string][]any{}, locals: map[string]bool{}, iterBinders: map[string][]*ast.IterForStmt{}, nonIterBinder: map[string]bool{}, exprTokens: map[ast.Expr][]string{}, headerTokens: map[ast.Stmt][]string{}, bound: map[ast.Stmt][]string{}}
+	idx := &storeScanDeclIndex{decls: map[string][]*ast.VarDeclStmt{}, otherBound: map[string]bool{}, nameNodes: map[string][]int{}, locals: map[string]bool{}, iterBinders: map[string][]*ast.IterForStmt{}, nonIterBinder: map[string]bool{}, exprTokens: map[ast.Expr][]string{}, headerTokens: map[ast.Stmt][]string{}, bound: map[ast.Stmt][]string{}}
 	// Each name's list is in walk order (one append per node), whatever the map order of names.
 	exprNames := make(map[string]bool)
-	addNode := func(node any, names map[string]bool) {
-		for name := range names {
-			idx.nodes[name] = append(idx.nodes[name], node)
+	addNodeNames := func() {
+		offset := len(idx.flat) - 1
+		for name := range exprNames {
+			idx.nameNodes[name] = append(idx.nameNodes[name], offset)
 		}
-		clear(names)
+		clear(exprNames)
 	}
 
 	walkStoreScanNodes(decl.Body, func(node any) {
@@ -222,14 +223,14 @@ func (a *Analyzer) storeScanIndex(decl *ast.FuncDecl) *storeScanDeclIndex {
 			idx.decls[n.Name] = append(idx.decls[n.Name], n)
 			storeScanAddExprNames(n.Value, exprNames)
 			exprNames[n.Name] = true
-			addNode(n, exprNames)
+			addNodeNames()
 		case *ast.AssignStmt:
 			if n == nil {
 				return
 			}
 			storeScanAddExprNames(n.Value, exprNames)
 			storeScanAddExprNames(n.Target, exprNames)
-			addNode(n, exprNames)
+			addNodeNames()
 		case *ast.CallExpr:
 			if n == nil {
 				return
@@ -240,7 +241,7 @@ func (a *Analyzer) storeScanIndex(decl *ast.FuncDecl) *storeScanDeclIndex {
 			for _, arg := range n.Args {
 				storeScanAddExprNames(arg, exprNames)
 			}
-			addNode(n, exprNames)
+			addNodeNames()
 		case ast.Stmt:
 			if n == nil {
 				return
@@ -257,7 +258,8 @@ func (a *Analyzer) storeScanIndex(decl *ast.FuncDecl) *storeScanDeclIndex {
 				}
 			}
 			if len(bound) > 0 {
-				addNode(n, storeScanHeaderNames(n))
+				storeScanAddHeaderNames(n, exprNames)
+				addNodeNames()
 			}
 		}
 	})
@@ -342,15 +344,20 @@ func storeScanAddExprNames(expr ast.Expr, names map[string]bool) {
 // statements (the header stmtHeaderMentionsAny inspects).
 func storeScanHeaderNames(stmt ast.Stmt) map[string]bool {
 	names := map[string]bool{}
+	storeScanAddHeaderNames(stmt, names)
+	return names
+}
+
+func storeScanAddHeaderNames(stmt ast.Stmt, names map[string]bool) {
 	v := reflect.ValueOf(stmt)
 	if v.Kind() == reflect.Pointer {
 		if v.IsNil() {
-			return names
+			return
 		}
 		v = v.Elem()
 	}
 	if v.Kind() != reflect.Struct {
-		return names
+		return
 	}
 	seen := map[uintptr]bool{}
 	var rec func(v reflect.Value)
@@ -394,7 +401,6 @@ func storeScanHeaderNames(stmt ast.Stmt) map[string]bool {
 	for i := 0; i < v.NumField(); i++ {
 		rec(v.Field(i))
 	}
-	return names
 }
 
 // storeScanHeaderTokens: every string stmtHeaderMentionsAny would test against its name set.
