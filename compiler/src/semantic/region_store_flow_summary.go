@@ -1713,12 +1713,11 @@ func (a *Analyzer) storeFlowCollectMentionsWithQuery(root reflect.Value, self ui
 				a.storeFlowBinds = true
 			}
 			if call, ok := v.Interface().(*ast.CallExpr); ok {
-				// The fast call paths can omit receiver or other metadata subtrees.
-				if mayHaveQuery != nil {
-					*mayHaveQuery = true
-				}
 				if callsOnly {
 					if fe, isField := call.Func.(*ast.FieldExpr); isField && fe != nil && storeFlowReadOnlyMethods[fe.Field] && !a.isDeclaredFuncName(fe.Field) {
+						if mayHaveQuery != nil {
+							*mayHaveQuery = true
+						}
 						for _, arg := range call.Args {
 							walk(reflect.ValueOf(arg))
 						}
@@ -1733,6 +1732,9 @@ func (a *Analyzer) storeFlowCollectMentionsWithQuery(root reflect.Value, self ui
 					*calls = append(*calls, call)
 				}
 				if retNames, isHandled := handled[call]; isHandled {
+					if mayHaveQuery != nil {
+						*mayHaveQuery = true
+					}
 					if collectNames && condDepth == 0 {
 						names = append(names, retNames...)
 					}
@@ -1740,6 +1742,9 @@ func (a *Analyzer) storeFlowCollectMentionsWithQuery(root reflect.Value, self ui
 				}
 				// A declared function's own name is not a variable.
 				if ident, ok := call.Func.(*ast.Ident); ok && ident != nil && a.isDeclaredFuncName(ident.Name) && !a.storeFlowParams[ident.Name] {
+					if mayHaveQuery != nil {
+						*mayHaveQuery = true
+					}
 					for _, arg := range call.Args {
 						walk(reflect.ValueOf(arg))
 					}

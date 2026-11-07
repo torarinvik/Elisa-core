@@ -17,6 +17,7 @@ func TestStoreFlowQueryScanConservative(t *testing.T) {
 		wantScan bool
 	}{
 		{"plain", &ast.ReturnStmt{Value: &ast.Ident{Name: "items"}}, false, false},
+		{"ordinary call", &ast.ReturnStmt{Value: &ast.CallExpr{Func: &ast.Ident{Name: "unknown"}, Args: []ast.Expr{&ast.Ident{Name: "items"}}}}, false, false},
 		{"query", &ast.ReturnStmt{Value: query()}, true, true},
 		{"receiver", &ast.ReturnStmt{Value: &ast.CallExpr{Func: &ast.FieldExpr{Object: query(), Field: "count"}}}, true, true},
 		{"safe receiver", &ast.ReturnStmt{Value: &ast.CallExpr{Func: &ast.Ident{Name: "f"}, SafeReceiver: query()}}, true, true},
