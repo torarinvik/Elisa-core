@@ -320,6 +320,9 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 						}
 						inner := narrowStoreMode(argMode, a.calleeReturnModeOf(callee, i, seen))
 						mode = storeScanRaise(decl, 160, n, mode, inner)
+						if mode == storeHeader {
+							return
+						}
 					}
 					return
 				}
@@ -342,6 +345,9 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 							argMode = a.storeScanExtendArgMode(decl, arg, argMode)
 						}
 						mode = storeScanRaise(decl, 177, n, mode, argMode)
+						if mode == storeHeader {
+							return
+						}
 					}
 				}
 			}
@@ -388,6 +394,9 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 							argMode = a.storeScanExtendArgMode(decl, n.Args[s.index], argMode)
 						}
 						mode = storeScanRaise(decl, 204, n, mode, argMode)
+						if mode == storeHeader {
+							return
+						}
 					}
 				}
 				if recvMode != storeNone && len(targetArgs) > 0 {
@@ -402,6 +411,9 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 			if !ok || callee == nil || !storeFlowCallFitsParams(callee, n) || funcHasArenaParam(callee) {
 				for _, s := range taintedArgs {
 					mode = storeScanRaise(decl, 218, n, mode, s.mode)
+					if mode == storeHeader {
+						return
+					}
 				}
 				return
 			}
@@ -421,6 +433,9 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 						// callee could then split and store.
 						if scanIdx.bundles(args[ti]) && a.storeScanBundleHasWritableTarget(args[ti], targetsOrHolders) && !a.storeScanCallResultDropsTarget(args[ti], targetsOrHolders, seen) {
 							mode = storeScanRaise(decl, 225, n, mode, s.mode)
+							if mode == storeHeader {
+								return
+							}
 						}
 						continue
 					}
@@ -431,6 +446,9 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 						fmt.Fprintf(os.Stderr, "CHAIN %s(%s->%s) -> %s(%s->%s) at %s\n", decl.Name, decl.Params[other].Name, decl.Params[index].Name, callee.Name, callee.Params[s.index].Name, callee.Params[ti].Name, n.Pos())
 					}
 					mode = storeScanRaise(decl, 233, n, mode, inner)
+					if mode == storeHeader {
+						return
+					}
 				}
 			}
 		}
