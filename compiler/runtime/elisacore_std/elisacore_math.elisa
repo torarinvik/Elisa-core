@@ -24,6 +24,7 @@ const MATH_LN10: f64 = 2.30258509299404568402
 # libm externs - f64
 # ------------------------------------------------------------
 
+@intrinsic("llvm.sqrt.f64")
 extern sqrt(x: f64) -> f64
 extern cbrt(x: f64) -> f64
 extern sin(x: f64) -> f64
@@ -57,6 +58,7 @@ extern fmax(x: f64, y: f64) -> f64
 # libm externs - f32
 # ------------------------------------------------------------
 
+@intrinsic("llvm.sqrt.f32")
 extern sqrtf(x: f32) -> f32
 extern sinf(x: f32) -> f32
 extern cosf(x: f32) -> f32

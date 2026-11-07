@@ -1,0 +1,27 @@
+# Shared FNV-1a model used to specify the implementation below.
+include "./elisacore_fnv1a_spec.elisa"
+
+# Hash every byte in order, returning the offset basis for an invalid extent.
+def hash_sview(value: sview) -> u64:
+    ensure result == sview_fnv1a_model(value)
+    ensure (value.len <= 0 or value.len.usize().i64() != value.len) implies result == SVIEW_FNV1A_OFFSET_BASIS
+    can Unsafe.UncheckedIndex:
+        h: mutable u64 = SVIEW_FNV1A_OFFSET_BASIS
+        return h if value.len <= 0
+        view_len: usize = value.len.usize()
+        return h if view_len.i64() != value.len
+        i: mutable usize = 0
+        while i < view_len:
+            decreases view_len - i
+            invariant i <= view_len
+            invariant i.i64().usize() == i
+            invariant view_len == value.len
+            invariant value.len > 0 and value.len.usize().i64() == value.len
+            invariant i <= value.len.usize()
+            invariant 0.usize() <= value.len.usize()
+            invariant sview_fnv1a_fold_from(value, i, view_len - i, h) == sview_fnv1a_fold_from(value, 0.usize(), view_len, SVIEW_FNV1A_OFFSET_BASIS)
+            ch: u8 = value[i].u8()
+            h <- h ^ ch.u64()
+            h <- h * SVIEW_FNV1A_PRIME
+            i <- i + 1.usize()
+        return h

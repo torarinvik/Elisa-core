@@ -67,7 +67,7 @@ def file_size(path: cstr) -> i64 error[FileIoError]:
 def file_exists(path: cstr) -> bool:
     can Blocking.IO, Memory.Allocate, Memory.Release:
         stream: mutable heap void&? = fopen(path.cast[u8&], "rb")
-        false return if stream == null
+        return false if stream == null
         _ = fclose(stream)
         return true
 

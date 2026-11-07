@@ -3,6 +3,7 @@
 # ============================================================
 
 include "./deque.elisa"
+include "./elisacore_fnv1a_spec.elisa"
 
 extern memset(dest: mutable void&, val: i32, n: usize) -> mutable void&
 
@@ -11,6 +12,9 @@ extern memset(dest: mutable void&, val: i32, n: usize) -> mutable void&
 # pressure and the amount of live memory touched by recursive AST construction.
 const ARENA_DA_INIT_CAP: usize = 8
 const DICT_INIT_CAP: usize = 8
+const COLLECTION_BUCKET_EMPTY: u8 = 0
+const COLLECTION_BUCKET_OCCUPIED: u8 = 1
+const COLLECTION_BUCKET_TOMBSTONE: u8 = 2
 
 struct DynArray[T]:
     items: mutable T&?
@@ -24,9 +28,8 @@ struct DynArrayView:
 def view_from_parts[T](data: void&?, len: usize) -> view[T]:
     return DynArrayView{data: data, len: len}
 
-# Open-addressing slot: `state` is 0=empty, 1=occupied, 2=tombstone (deleted, but probing
-# must continue past it). Raw cleared storage has state zero; its key/value
-# payload is inactive until both fields are initialized and state one is published.
+# Open-addressing slot: `state` is empty, occupied, or tombstone (deleted, but probing must
+# continue past it). A zeroed bucket is therefore an empty slot.
 struct DictBucket[K, T]:
     key: mutable K
     value: mutable T
@@ -174,8 +177,8 @@ def collections_mutable_items_from_data[T](data: mutable void&) -> mutable T&:
 # be enormous. The libc memset is used (not the byte-loop cxx_memset) so zeroing
 # stays O(1) syscalls rather than O(size) interpreted iterations.
 def arena_box_zeroed[T](a: mutable Arena&) -> mutable heap T&:
-    can Memory.Allocate, Abort.Panic:
-        raw: mutable heap void& = (arena_alloc(a, size_of(T)) can Global{Read,Write})
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern}:
+        raw: mutable heap void& = (arena_alloc(a, size_of(T)) can Global{Read,Write}, Atomics.Load)
         trusted Unsafe.RawExtern:
             memset(raw, 0, size_of(T))
         return collections_items_from_alloc[T](raw)
@@ -185,46 +188,45 @@ def arena_box_zeroed[T](a: mutable Arena&) -> mutable heap T&:
 # ------------------------------------------------------------
 
 def arena_da_reserve[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, needed: usize) -> mutable darray[T, shape_out]&:
-    can Memory.Allocate, Abort.Panic:
-        da return if needed <= da.capacity
+    return da if needed <= da.capacity
 
-        new_capacity: mutable usize = da.capacity
-        new_capacity <- ARENA_DA_INIT_CAP if new_capacity == 0
+    new_capacity: mutable usize = da.capacity
+    new_capacity <- ARENA_DA_INIT_CAP if new_capacity == 0
 
-        trusted Unsafe.AssumeProgress:
-            while needed > new_capacity:
-                doubled_capacity: usize = new_capacity * 2
-                if doubled_capacity < new_capacity:
-                    # `needed` was checked before growth; use it if geometric growth wraps.
-                    new_capacity <- needed
-                    break
-                new_capacity <- doubled_capacity
+    trusted Unsafe.AssumeProgress:
+        while needed > new_capacity:
+            doubled_capacity: usize = new_capacity * 2
+            if doubled_capacity < new_capacity:
+                # `needed` was checked before growth; use it if geometric growth wraps.
+                new_capacity <- needed
+                break
+            new_capacity <- doubled_capacity
 
-        old_size: usize = arena_checked_mul_usize(da.capacity, size_of(T)) can Abort.Panic
-        new_size: usize = arena_checked_mul_usize(new_capacity, size_of(T)) can Abort.Panic
+    old_size: usize = arena_checked_mul_usize(da.capacity, size_of(T)) can Abort.Panic
+    new_size: usize = arena_checked_mul_usize(new_capacity, size_of(T)) can Abort.Panic
 
-        if da.items == null:
-            da.items as & <- collections_items_from_alloc[T]((arena_alloc(a, new_size) can Global{Read,Write}))
-        else:
-            resized: heap void& = (arena_realloc(
-                a,
-                collections_mutable_void_from_items[T](da.items),
-                old_size,
-                new_size
-            ) can Global{Read,Write})
-            da.items as & <- collections_items_from_alloc[T](resized)
+    if da.items == null:
+        da.items as & <- collections_items_from_alloc[T]((arena_alloc(a, new_size) can Global{Read,Write}, Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern}))
+    else:
+        resized: heap void& = (arena_realloc(
+            a,
+            collections_mutable_void_from_items[T](da.items),
+            old_size,
+            new_size
+        ) can Global{Read,Write}, Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern})
+        da.items as & <- collections_items_from_alloc[T](resized)
 
-        da.capacity <- new_capacity
-        return da
+    da.capacity <- new_capacity
+    return da
 
 def arena_da_view[T](da: darray[T, shape_in]&, start: usize, end: usize) -> view[T]:
-    DynArrayView{data: null, len: 0} return if da.items == null or da.count == 0
+    return DynArrayView{data: null, len: 0} if da.items == null or da.count == 0
 
     lo: mutable usize = start if start < da.count else da.count
     hi: mutable usize = end if end < da.count else da.count
     hi <- lo if hi < lo
 
-    DynArrayView{data: null, len: 0} return if hi == lo
+    return DynArrayView{data: null, len: 0} if hi == lo
 
     return DynArrayView{data: collections_void_from_items_at[T](da.items, lo), len: hi - lo}
 
@@ -233,13 +235,13 @@ def arena_da_view_len[T](view: view[T]) -> usize:
 
 def arena_da_view_slice[T](view: view[T], start: usize, end: usize) -> view[T]:
     elem_size: usize = size_of(T)
-    DynArrayView{data: null, len: 0} return if view.data == null or view.len == 0
+    return DynArrayView{data: null, len: 0} if view.data == null or view.len == 0
 
     lo: mutable usize = start if start < view.len else view.len
     hi: mutable usize = end if end < view.len else view.len
     hi <- lo if hi < lo
 
-    DynArrayView{data: null, len: 0} return if hi == lo
+    return DynArrayView{data: null, len: 0} if hi == lo
 
     offset: usize = lo * elem_size
     return DynArrayView{data: collections_void_from_data_at(view.data, offset), len: hi - lo}
@@ -281,7 +283,7 @@ def arena_da_copy_exact[T](dst: view[T], src: view[T]):
 
 def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
     assert left.len == right.len
-    true return if left.len == 0
+    return true if left.len == 0
 
     assert left.data != null
     assert right.data != null
@@ -290,10 +292,10 @@ def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
     return arena_memeq(left.data, right.data, byte_count)
 
 def arena_da_from_view[T](a: mutable Arena&, view: view[T]) -> darray[T, shape_out]:
-    can Memory.Allocate, Abort.Panic:
-        zeroed return if view.len == 0
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern}:
+        return zeroed if view.len == 0
 
-        items: mutable T& = collections_items_from_alloc[T]((arena_alloc(a, view.len * size_of(T)) can Global{Read,Write}))
+        items: mutable T& = collections_items_from_alloc[T]((arena_alloc(a, view.len * size_of(T)) can Global{Read,Write}, Atomics.Load))
         assert view.data != null
         arena_memcpy(collections_mutable_void_from_items[T](items), view.data, view.len * size_of(T))
 
@@ -305,7 +307,7 @@ def arena_da_from_view[T](a: mutable Arena&, view: view[T]) -> darray[T, shape_o
 
 
 def darray_view[T](da: darray[T]) -> view[T]:
-    DynArrayView{data: null, len: 0} return if da.items == null or da.count == 0
+    return DynArrayView{data: null, len: 0} if da.items == null or da.count == 0
     return DynArrayView{data: collections_void_from_items[T](da.items), len: da.count}
 
 
@@ -319,7 +321,7 @@ def view[T](da: darray[T]) -> view[T]:
 # globals), so a static table can be handed out as a zero-copy slice. Mirrors
 # inline_vec_view's inline-buffer path.
 def array_view[T, N: usize](arr: T[N]&) -> view[T]:
-    DynArrayView{data: null, len: 0} return if N == 0
+    return DynArrayView{data: null, len: 0} if N == 0
     trusted Unsafe.UncheckedIndex:
         return DynArrayView{data: collections_void_from_items[T](&arr[0]), len: N}
 
@@ -366,7 +368,7 @@ def spilled[T, N: usize](vec: InlineVec[T, N]&) -> bool:
 def inline_vec_get[T, N: usize](vec: InlineVec[T, N]&, index: usize) -> T:
     assert index < vec.len
     trusted Unsafe.UncheckedIndex:
-        vec.overflow[index] return if vec.is_spilled
+        return vec.overflow[index] if vec.is_spilled
     trusted Unsafe.UncheckedIndex:
         return vec.inline_items[index]
 
@@ -456,7 +458,7 @@ def last[T, N: usize](vec: InlineVec[T, N]&) -> T:
 
 
 def inline_vec_view[T, N: usize](vec: InlineVec[T, N]&) -> view[T]:
-    DynArrayView{data: null, len: 0} return if vec.len == 0
+    return DynArrayView{data: null, len: 0} if vec.len == 0
     if vec.is_spilled:
         assert vec.overflow.items != null
         return DynArrayView{data: collections_void_from_items[T](vec.overflow.items), len: vec.len}
@@ -542,8 +544,9 @@ def remove[T](items: mutable Flags[T]&, value: T):
 
 
 def flags_set[T](items: mutable Flags[T]&, value: T, enabled: bool):
-    items.add(value) if enabled
-    items.remove(value) if not enabled
+    can Unsafe.Alias:
+        items.add(value) if enabled
+        items.remove(value) if not enabled
 
 
 def flags_clear[T](items: mutable Flags[T]&):
@@ -579,7 +582,7 @@ def arena_da_append[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, item
         return da
 
 def darray_pop[T](da: mutable darray[T]&) -> T:
-    can Abort.Panic:
+    can Abort.Panic, Unsafe.UncheckedIndex:
         assert da.count > 0
         da.count <- da.count - 1
         return da[da.count]
@@ -612,12 +615,12 @@ def remove_at[T](da: mutable darray[T]&, index: usize) -> T:
 # find_if directly (`v.any_of(pred)` reads as `std::any_of(v..., pred)`).
 def any_of[T](da: darray[T], pred: fn(T) -> bool) -> bool:
     for x in da:
-        true return if pred(x)
+        return true if pred(x)
     return false
 
 def all_of[T](da: darray[T], pred: fn(T) -> bool) -> bool:
     for x in da:
-        false return if not pred(x)
+        return false if not pred(x)
     return true
 
 def count_if[T](da: darray[T], pred: fn(T) -> bool) -> usize:
@@ -630,7 +633,7 @@ def count_if[T](da: darray[T], pred: fn(T) -> bool) -> usize:
 # (std::find_if, returning the element rather than an iterator).
 def find_if[T](da: darray[T], pred: fn(T) -> bool) -> T?:
     for x in da:
-        x return if pred(x)
+        return x if pred(x)
     return null
 
 # Comparator-based ordering algorithms (the C++ idiom: a strict-weak-ordering
@@ -639,7 +642,7 @@ def find_if[T](da: darray[T], pred: fn(T) -> bool) -> T?:
 
 # Internal heapsort sift-down used by `sort`.
 def darray_sift_down[T](da: mutable darray[T]&, less: fn(T, T) -> bool, start: usize, end: usize):
-    can Abort.Panic:
+    can Abort.Panic, Unsafe.UncheckedIndex:
         root: mutable usize = start
         trusted Unsafe.AssumeProgress:
             while true:
@@ -656,7 +659,7 @@ def darray_sift_down[T](da: mutable darray[T]&, less: fn(T, T) -> bool, start: u
 
 # Internal: heapsort of da[lo..hi), the introsort fallback when partitioning degenerates.
 def darray_sift_down_at[T](da: mutable darray[T]&, less: fn(T, T) -> bool, base: usize, start: usize, end: usize):
-    can Abort.Panic:
+    can Abort.Panic, Unsafe.UncheckedIndex:
         root: mutable usize = start
         trusted Unsafe.AssumeProgress:
             while true:
@@ -672,7 +675,7 @@ def darray_sift_down_at[T](da: mutable darray[T]&, less: fn(T, T) -> bool, base:
                 root <- largest
 
 def darray_heapsort_range[T](da: mutable darray[T]&, less: fn(T, T) -> bool, lo: usize, hi: usize):
-    can Abort.Panic:
+    can Abort.Panic, Unsafe.UncheckedIndex:
         n: usize = hi - lo
         return if n < 2
         i: mutable usize = n / 2
@@ -694,7 +697,7 @@ def darray_heapsort_range[T](da: mutable darray[T]&, less: fn(T, T) -> bool, lo:
 # recursion on the smaller side only, so the stack is O(log n); heapsort once `depth` runs
 # out, so the worst case stays O(n log n).
 def darray_introsort[T](da: mutable darray[T]&, less: fn(T, T) -> bool, lo0: usize, hi0: usize, depth0: u32):
-    can Abort.Panic:
+    can Abort.Panic, Unsafe.UncheckedIndex:
         lo: mutable usize = lo0
         hi: mutable usize = hi0
         depth: mutable u32 = depth0
@@ -759,7 +762,7 @@ def darray_introsort[T](da: mutable darray[T]&, less: fn(T, T) -> bool, lo0: usi
 # O(n log n) worst case, no allocation, not stable. Measured on LangArena Sort::Self (400k i32):
 # the previous plain heapsort was 6x Rust's slice::sort, cache misses in the sift-down.
 def sort[T](da: mutable darray[T]&, less: fn(T, T) -> bool):
-    can Abort.Panic:
+    can Abort.Panic, Unsafe.UncheckedIndex:
         n: usize = da.count
         return if n < 2
         depth: mutable u32 = 0
@@ -782,71 +785,76 @@ def sort[T](da: mutable darray[T]&, less: fn(T, T) -> bool):
 
 # Reverse the elements in place (std::reverse).
 def reverse[T](da: mutable darray[T]&):
-    n: usize = da.count
-    return if n < 2
-    i: mutable usize = 0
-    j: mutable usize = n - 1
-    trusted Unsafe.AssumeProgress:
-        while i < j:
-            tmp: T = da[i]
-            da[i] <- da[j]
-            da[j] <- tmp
-            i <- i + 1
-            j <- j - 1
+    can Unsafe.UncheckedIndex:
+        n: usize = da.count
+        return if n < 2
+        i: mutable usize = 0
+        j: mutable usize = n - 1
+        trusted Unsafe.AssumeProgress:
+            while i < j:
+                tmp: T = da[i]
+                da[i] <- da[j]
+                da[j] <- tmp
+                i <- i + 1
+                j <- j - 1
 
 # True if no element compares `less` than its predecessor (std::is_sorted).
 def is_sorted[T](da: darray[T], less: fn(T, T) -> bool) -> bool:
-    i: mutable usize = 1
-    trusted Unsafe.AssumeProgress:
-        while i < da.count:
-            false return if less(da[i], da[i - 1])
-            i <- i + 1
-    return true
+    can Unsafe.UncheckedIndex:
+        i: mutable usize = 1
+        trusted Unsafe.AssumeProgress:
+            while i < da.count:
+                return false if less(da[i], da[i - 1])
+                i <- i + 1
+        return true
 
 # Smallest / largest element by `less`, or `null` if empty (std::min_element /
 # std::max_element, returning the element rather than an iterator).
 def min_element[T](da: darray[T], less: fn(T, T) -> bool) -> T?:
-    null return if da.count == 0
-    best: mutable T = da[0]
-    i: mutable usize = 1
-    trusted Unsafe.AssumeProgress:
-        while i < da.count:
-            best <- da[i] if less(da[i], best)
-            i <- i + 1
-    return best
+    can Unsafe.UncheckedIndex:
+        return null if da.count == 0
+        best: mutable T = da[0]
+        i: mutable usize = 1
+        trusted Unsafe.AssumeProgress:
+            while i < da.count:
+                best <- da[i] if less(da[i], best)
+                i <- i + 1
+        return best
 
 def max_element[T](da: darray[T], less: fn(T, T) -> bool) -> T?:
-    null return if da.count == 0
-    best: mutable T = da[0]
-    i: mutable usize = 1
-    trusted Unsafe.AssumeProgress:
-        while i < da.count:
-            best <- da[i] if less(best, da[i])
-            i <- i + 1
-    return best
+    can Unsafe.UncheckedIndex:
+        return null if da.count == 0
+        best: mutable T = da[0]
+        i: mutable usize = 1
+        trusted Unsafe.AssumeProgress:
+            while i < da.count:
+                best <- da[i] if less(best, da[i])
+                i <- i + 1
+        return best
 
 # Binary-search lookups over a range already sorted by the same `less`
 # (std::lower_bound / std::binary_search). O(log n).
 def lower_bound[T](da: darray[T], target: T, less: fn(T, T) -> bool) -> usize:
-    lo: mutable usize = 0
-    hi: mutable usize = da.count
-    trusted Unsafe.AssumeProgress:
-        while lo < hi:
-            mid: usize = lo + (hi - lo) / 2
-            mid_is_less: bool = less(da[mid], target)
-            lo <- mid + 1 if mid_is_less
-            hi <- mid if not mid_is_less
-    return lo
+    can Unsafe.UncheckedIndex:
+        lo: mutable usize = 0
+        hi: mutable usize = da.count
+        trusted Unsafe.AssumeProgress:
+            while lo < hi:
+                mid: usize = lo + (hi - lo) / 2
+                mid_is_less: bool = less(da[mid], target)
+                lo <- mid + 1 if mid_is_less
+                hi <- mid if not mid_is_less
+        return lo
 
 def binary_search[T](da: darray[T], target: T, less: fn(T, T) -> bool) -> bool:
     idx: mutable usize = 0
     trusted Unsafe.UncheckedIndex:
         idx <- da.lower_bound(target, less)
-    false return if idx >= da.count
+    return false if idx >= da.count
     return not less(target, da[idx])
 
 def arena_da_append_many[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, new_items: T&, new_items_count: usize) -> mutable darray[T, shape_out]&:
-    can Memory.Allocate, Abort.Panic:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern}:
         needed: usize = arena_checked_add_usize(da.count, new_items_count) can Abort.Panic
         copy_bytes: usize = arena_checked_mul_usize(new_items_count, size_of(T)) can Abort.Panic
 
@@ -867,14 +875,14 @@ def arena_da_append_many[T](a: mutable Arena&, da: mutable darray[T, shape_in]&,
             new_size: usize = arena_checked_mul_usize(new_capacity, size_of(T)) can Abort.Panic
 
             if da.items == null:
-                da.items as & <- collections_items_from_alloc[T]((arena_alloc(a, new_size) can Global{Read,Write}))
+                da.items as & <- collections_items_from_alloc[T]((arena_alloc(a, new_size) can Global{Read,Write}, Atomics.Load))
             else:
                 resized: heap void& = (arena_realloc(
                     a,
                     collections_mutable_void_from_items[T](da.items),
                     old_size,
                     new_size
-                ) can Global{Read,Write})
+                ) can Global{Read,Write}, Atomics.Load)
                 da.items as & <- collections_items_from_alloc[T](resized)
 
             da.capacity <- new_capacity
@@ -891,11 +899,13 @@ def arena_da_append_many[T](a: mutable Arena&, da: mutable darray[T, shape_in]&,
         return da
 
 def arena_sb_append_buf(a: mutable Arena&, sb: mutable darray[u8, shape_in]&, buf: u8&, n: usize) -> mutable darray[u8, shape_out]&:
-    return (arena_da_append_many(a, sb, buf, n) can Global{Read,Write}) can Memory.Allocate, Abort.Panic
+    can Atomics{Exchange,Load,Store}, Unsafe{Alias,PointerCast,RawExtern}:
+        return (arena_da_append_many(a, sb, buf, n) can Global{Read,Write}, Atomics.Load) can Memory.Allocate, Abort.Panic
 
 def arena_sb_append_cstr(a: mutable Arena&, sb: mutable darray[u8, shape_in]&, cstr: u8&) -> mutable darray[u8, shape_out]&:
-    n: usize = arena_strlen(cstr)
-    return (arena_da_append_many(a, sb, cstr, n) can Global{Read,Write}) can Memory.Allocate, Abort.Panic
+    can Atomics{Exchange,Load,Store}, Unsafe{Alias,PointerCast,RawExtern}:
+        n: usize = arena_strlen(cstr)
+        return (arena_da_append_many(a, sb, cstr, n) can Global{Read,Write}, Atomics.Load) can Memory.Allocate, Abort.Panic
 
 def arena_sb_append_null(a: mutable Arena&, sb: mutable darray[u8, shape_in]&) -> mutable darray[u8, shape_out]&:
     can Memory.Allocate, Abort.Panic:
@@ -908,7 +918,7 @@ def arena_sb_append_null(a: mutable Arena&, sb: mutable darray[u8, shape_in]&) -
 
 def arena_dict_next_capacity(min_capacity: usize) -> usize:
     can Abort.Panic:
-        0 return if min_capacity == 0
+        return 0 if min_capacity == 0
 
         cap: mutable usize = DICT_INIT_CAP
         trusted Unsafe.AssumeProgress:
@@ -931,82 +941,202 @@ def ctx_hash_cstr(s: cstr) -> u64:
     return h
 
 def ctx_hash_sview(view: sview) -> u64:
-    h: mutable u64 = 0xcbf29ce484222325
-    return h if view.len <= 0
-    i: mutable i64 = 0
-    trusted Unsafe.UncheckedIndex:
-        while i < view.len:
-            h <- h ^ view.data[i.usize()].u64()
-            h <- h * 0x100000001b3
-            i <- i + 1
-    return h
+    ensure result == sview_fnv1a_model(view)
+    can Unsafe.UncheckedIndex:
+        h: mutable u64 = SVIEW_FNV1A_OFFSET_BASIS
+        return h if view.len <= 0
+        view_len: usize = view.len.usize()
+        return h if view_len.i64() != view.len
+        i: mutable usize = 0
+        while i < view_len:
+            decreases view_len - i
+            invariant i <= view_len
+            invariant i.i64().usize() == i
+            invariant view_len == view.len.usize()
+            invariant view_len.i64() == view.len
+            invariant view.len > 0 and view.len.usize().i64() == view.len
+            invariant i <= view.len.usize()
+            invariant 0.usize() <= view.len.usize()
+            invariant sview_fnv1a_fold_from(view, i, view_len - i, h) == sview_fnv1a_fold_from(view, 0.usize(), view_len, SVIEW_FNV1A_OFFSET_BASIS)
+            h <- (h ^ view[i].u8().u64()) * SVIEW_FNV1A_PRIME
+            i <- i + 1.usize()
+        return h
 
-def ctx_cstr_eq_sview(text: cstr, view: sview) -> bool:
-    false return if view.len < 0
-    i: mutable usize = 0
-    len: usize = view.len.usize()
-    remaining: mutable usize = len
-    trusted Unsafe.UncheckedIndex:
-        while remaining > 0:
-            decreases remaining
-            false return if text[i] != view.data[i]
-            i <- i + 1
-            remaining <- remaining - 1
-        return text[len] == 0
+def ctx_cstr_eq_sview(text: cstr, expected_length: i64, view: sview) -> bool:
+    ensure (view.len < 0 or view.len.usize().i64() != view.len) implies result == false
+    ensure expected_length != view.len implies result == false
+    ensure result implies (view.len >= 0 and view.len.usize().i64() == view.len and expected_length == view.len)
+    can Unsafe.UncheckedIndex:
+        return false if view.len < 0
+        len: usize = view.len.usize()
+        return false if:
+            len.i64() != view.len
+            expected_length != view.len
+        for i in 0..<len:
+            view_byte: u8 = view[i].u8()
+            text_byte: mutable u8 = 0
+            # A CStr promises readable bytes through its first NUL. Stop there before any later
+            # index, so this loop never reads beyond a shorter C string.
+            trusted Unsafe.UncheckedIndex:
+                text_byte <- text[i].u8()
+            return false if text_byte == 0
+            return false if text_byte != view_byte
+        terminator: mutable u8 = 1
+        # Every payload byte before `len` was checked nonzero above. Therefore index `len` is
+        # either the CStr terminator or another readable payload byte, and a nonzero byte rejects
+        # a string longer than the view.
+        trusted Unsafe.UncheckedIndex:
+            terminator <- text[len].u8()
+        return false if terminator != 0
+        return true
+
+# Inverse for the SplitMix64 finalizer below. Every xor-shift is undone by its
+# finite geometric series; the odd multipliers are units modulo 2^64.
+const CTX_HASH_U64_INV_MUL_1: u64 = 0x96de1b173f119089
+const CTX_HASH_U64_INV_MUL_2: u64 = 0x319642b2d24d8ec3
+
+def ctx_unhash_xor_31(value: u64) -> u64:
+    ensure result == (value ^ (value >> 31) ^ (value >> 62))
+    ensure result ^ (result >> 31) == value
+    first_shift: u64 = value >> 31
+    second_shift: u64 = value >> 62
+    candidate: u64 = value ^ first_shift ^ second_shift
+    shifted_candidate: u64 = first_shift ^ second_shift
+    assert first_shift >> 31 == second_shift
+    assert second_shift >> 31 == 0
+    assert candidate >> 31 == shifted_candidate
+    assert candidate ^ shifted_candidate == value
+    assert candidate ^ (candidate >> 31) == value
+    assert candidate == (value ^ (value >> 31) ^ (value >> 62))
+    return candidate
+
+def ctx_unhash_xor_27(value: u64) -> u64:
+    ensure result == (value ^ (value >> 27) ^ (value >> 54))
+    ensure result ^ (result >> 27) == value
+    first_shift: u64 = value >> 27
+    second_shift: u64 = value >> 54
+    candidate: u64 = value ^ first_shift ^ second_shift
+    shifted_candidate: u64 = first_shift ^ second_shift
+    assert first_shift >> 27 == second_shift
+    assert second_shift >> 27 == 0
+    assert candidate >> 27 == shifted_candidate
+    assert candidate ^ shifted_candidate == value
+    assert candidate ^ (candidate >> 27) == value
+    assert candidate == (value ^ (value >> 27) ^ (value >> 54))
+    return candidate
+
+def ctx_unhash_xor_30(value: u64) -> u64:
+    ensure result == (value ^ (value >> 30) ^ (value >> 60))
+    ensure result ^ (result >> 30) == value
+    first_shift: u64 = value >> 30
+    second_shift: u64 = value >> 60
+    candidate: u64 = value ^ first_shift ^ second_shift
+    shifted_candidate: u64 = first_shift ^ second_shift
+    assert first_shift >> 30 == second_shift
+    assert second_shift >> 30 == 0
+    assert candidate >> 30 == shifted_candidate
+    assert candidate ^ shifted_candidate == value
+    assert candidate ^ (candidate >> 30) == value
+    assert candidate == (value ^ (value >> 30) ^ (value >> 60))
+    return candidate
+
+def ctx_unhash_mul_1(value: u64) -> u64:
+    ensure result == value * CTX_HASH_U64_INV_MUL_1
+    ensure result * 0xbf58476d1ce4e5b9 == value
+    return value * CTX_HASH_U64_INV_MUL_1
+
+def ctx_unhash_mul_2(value: u64) -> u64:
+    ensure result == value * CTX_HASH_U64_INV_MUL_2
+    ensure result * 0x94d049bb133111eb == value
+    return value * CTX_HASH_U64_INV_MUL_2
+
+def ctx_unhash_u64(hash: u64) -> u64:
+    ensure result == ctx_unhash_xor_30(ctx_unhash_mul_1(ctx_unhash_xor_27(ctx_unhash_mul_2(ctx_unhash_xor_31(hash)))))
+    return ctx_unhash_xor_30(ctx_unhash_mul_1(ctx_unhash_xor_27(ctx_unhash_mul_2(ctx_unhash_xor_31(hash)))))
 
 def ctx_hash_u64(value: u64) -> u64:
+    ensure ctx_unhash_u64(result) == value
     h: mutable u64 = value
     h <- (h ^ (h >> 30)) * 0xbf58476d1ce4e5b9
+    ghost after_mul_1: u64 = h
     h <- (h ^ (h >> 27)) * 0x94d049bb133111eb
+    ghost after_mul_2: u64 = h
     h <- h ^ (h >> 31)
+    # Keep proof witnesses erased rather than running inverse helpers per hash.
+    ghost hash_value: u64 = h
+    ghost undo_xor_31: u64 = (hash_value ^ (hash_value >> 31) ^ (hash_value >> 62))
+    assert undo_xor_31 == after_mul_2
+    ghost undo_mul_2: u64 = undo_xor_31 * CTX_HASH_U64_INV_MUL_2
+    assert undo_mul_2 == (after_mul_1 ^ (after_mul_1 >> 27))
+    ghost undo_xor_27: u64 = (undo_mul_2 ^ (undo_mul_2 >> 27) ^ (undo_mul_2 >> 54))
+    assert undo_xor_27 == after_mul_1
+    ghost undo_mul_1: u64 = undo_xor_27 * CTX_HASH_U64_INV_MUL_1
+    assert undo_mul_1 == (value ^ (value >> 30))
+    ghost undo_xor_30: u64 = (undo_mul_1 ^ (undo_mul_1 >> 30) ^ (undo_mul_1 >> 60))
+    assert undo_xor_30 == value
+    assert ctx_unhash_u64(hash_value) == value
     return h
 
 # Open-addressing probe (linear probing over a power-of-2 table). Returns found=true with the
 # slot of the matching occupied entry, or found=false with the slot to insert at: the first
 # tombstone seen (slot reuse), else the terminating empty slot. O(1) expected with load < 1/2.
 def arena_dict_find_index[K, T](m: dict[K, T]&, key: K) -> DictProbeResult:
-    DictProbeResult{index: 0, found: false} return if m.capacity == 0 or m.items == null
+    ensure (m.capacity == 0 or m.items == null) implies (result.index == 0 and not result.found)
+    ensure m.capacity > 0 implies result.index < m.capacity
+    ensure result.found implies (m.capacity > 0 and m.items != null)
+    return DictProbeResult{index: 0, found: false} if m.capacity == 0 or m.items == null
 
     assert m.items != null
     items: DictBucket[K, T]& = m.items
     mask: usize = m.capacity - 1
     slot: mutable usize = ctx_hash_value(key).usize() & mask
     insert_slot: mutable usize = m.capacity   # sentinel: no reusable slot seen yet
-    probed: mutable usize = 0
-    trusted Unsafe.AssumeProgress:
-        while probed < m.capacity:
-            st: u8 = items[slot].state
-            if st == 0:
-                final_slot: usize = slot if insert_slot == m.capacity else insert_slot
-                return DictProbeResult{index: final_slot, found: false}
-            DictProbeResult{index: slot, found: true} return if st == 1 and items[slot].key == key
-            insert_slot <- slot if st == 2 and insert_slot == m.capacity
-            slot <- (slot + 1.usize()) & mask
-            probed <- probed + 1.usize()
-    DictProbeResult{index: insert_slot, found: false} return if insert_slot != m.capacity
+    for _ in 0..<m.capacity:
+        invariant slot < m.capacity
+        invariant insert_slot == m.capacity or insert_slot < m.capacity
+        st: u8 = items[slot].state
+        if st == 0:
+            final_slot: usize = slot if insert_slot == m.capacity else insert_slot
+            return DictProbeResult{index: final_slot, found: false}
+        return DictProbeResult{index: slot, found: true} if st == 1 and items[slot].key == key
+        insert_slot <- slot if st == 2 and insert_slot == m.capacity
+        slot <- (slot + 1.usize()) & mask
+    if insert_slot != m.capacity:
+        assert insert_slot < m.capacity
+        return DictProbeResult{index: insert_slot, found: false}
     return DictProbeResult{index: 0, found: false}
 
 def arena_dict_find_cstr_view_index[T](m: dict[cstr, T]&, key: sview) -> DictProbeResult:
-    DictProbeResult{index: 0, found: false} return if m.capacity == 0 or m.items == null
+    ensure (m.capacity == 0 or m.items == null) implies (result.index == 0 and not result.found)
+    ensure m.capacity > 0 implies result.index < m.capacity
+    ensure result.found implies (m.capacity > 0 and m.items != null)
+    can Unsafe.UncheckedIndex:
+        return DictProbeResult{index: 0, found: false} if m.capacity == 0 or m.items == null
 
-    assert m.items != null
-    items: DictBucket[cstr, T]& = m.items
-    capacity: usize = m.capacity
-    mask: usize = capacity - 1
-    slot: mutable usize = ctx_hash_sview(key).usize() & mask
-    insert_slot: mutable usize = capacity
-    remaining: mutable usize = capacity
-    while remaining > 0:
-        decreases remaining
-        if items[slot].state == 0:
-            final_slot: usize = slot if insert_slot == capacity else insert_slot
-            return DictProbeResult{index: final_slot, found: false}
-        DictProbeResult{index: slot, found: true} return if items[slot].state == 1 and ctx_cstr_eq_sview(items[slot].key, key)
-        insert_slot <- slot if items[slot].state == 2 and insert_slot == capacity else insert_slot
-        slot <- (slot + 1) & mask
-        remaining <- remaining - 1
-    DictProbeResult{index: insert_slot, found: false} return if insert_slot != capacity
-    return DictProbeResult{index: 0, found: false}
+        assert m.items != null
+        assert m.capacity > 0
+        items: DictBucket[cstr, T]& = m.items
+        capacity: usize = m.capacity
+        start_slot: usize = ctx_hash_sview(key).usize() % capacity
+        assert start_slot < capacity
+        wrap_at: usize = capacity - start_slot
+        for probe in 0..<capacity:
+            slot: usize = start_slot + probe if probe < wrap_at else probe - wrap_at
+            assert slot < capacity
+            break if items[slot].state == COLLECTION_BUCKET_EMPTY
+            if items[slot].state == COLLECTION_BUCKET_OCCUPIED:
+                candidate_text: cstr = items[slot].key
+                if ctx_cstr_eq_sview(candidate_text, key.len, key):
+                    assert slot < m.capacity
+                    return DictProbeResult{index: slot, found: true}
+        # No matching key occurs before the first empty bucket, or across a full table.
+        # On a second bounded pass, the first tombstone/empty bucket is a safe insertion slot.
+        for probe in 0..<capacity:
+            slot: usize = start_slot + probe if probe < wrap_at else probe - wrap_at
+            assert slot < capacity
+            if items[slot].state == COLLECTION_BUCKET_TOMBSTONE or items[slot].state == COLLECTION_BUCKET_EMPTY:
+                return DictProbeResult{index: slot, found: false}
+        return DictProbeResult{index: 0, found: false}
 
 # Place (key, value) into a table that is known to have room and to not already contain `key`
 # (used by rehash). The probe terminates at an empty slot since the fresh table has no tombstones.
@@ -1016,7 +1146,7 @@ def arena_dict_place_fresh[K, T](m: mutable dict[K, T]&, key: K, value: T) -> vo
     probe: DictProbeResult = arena_dict_find_index(m, key)
     items[probe.index].key <- key
     items[probe.index].value <- value
-    items[probe.index].state <- 1
+    items[probe.index].state <- COLLECTION_BUCKET_OCCUPIED
     m.count <- m.count + 1.usize()
     m.used <- m.used + 1.usize()
 
@@ -1025,24 +1155,23 @@ def arena_dict_zero_buckets[K, T](items: mutable DictBucket[K, T]&, capacity: us
     can Abort.Panic:
         byte_count: usize = arena_checked_mul_usize(capacity, size_of(DictBucket[K, T]))
         trusted Unsafe.RawExtern:
-            # Clear inactive storage, not a live DictBucket value: zero bits are
-            # not a valid key/value for every K/T (for example sview).
-            # Readers inspect state first; insertion writes both payload fields
-            # before publishing state one.
+            # Clear inactive storage without constructing an invalid live payload.
+            # Readers inspect state first; insertion initializes before publishing occupied.
             memset(collections_mutable_void_from_items[DictBucket[K, T]](items), 0, byte_count)
 
+
 def arena_dict_new[K, T](a: mutable Arena&, initial_capacity: usize) -> dict[K, T]:
-    can Memory.Allocate, Abort.Panic:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
         out: mutable dict[K, T] = zeroed
         out.arena as & <- a
 
         capacity: usize = arena_dict_next_capacity(initial_capacity)
-        out return if capacity == 0
+        return out if capacity == 0
 
         # The table lives on a stack of its own (collection_stack_acquire in arena.elisa),
         # not in the arena's bump chain, so growing it never strands the old table.
         table_bytes: usize = arena_checked_mul_usize(capacity, size_of(DictBucket[K, T])) can Abort.Panic
-        table_stack: mutable heap Region& = (collection_stack_acquire(a, null, collections_table_slots(table_bytes)) can Global{Read,Write})
+        table_stack: mutable heap Region& = (collection_stack_acquire(a, null, collections_table_slots(table_bytes)) can Global{Read,Write}, Atomics.Load)
         items: mutable DictBucket[K, T]& = collections_items_from_alloc[DictBucket[K, T]](collection_stack_table(table_stack))
         arena_dict_zero_buckets(items, capacity)
 
@@ -1051,11 +1180,12 @@ def arena_dict_new[K, T](a: mutable Arena&, initial_capacity: usize) -> dict[K, 
         return out
 
 def arena_dict_reserve[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capacity: usize) -> void error[RuntimeError]:
-    can Memory.Allocate, Abort.Panic:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
         target_capacity: usize = arena_dict_next_capacity(min_capacity)
-        return if target_capacity == 0
+        return if:
+            target_capacity == 0
 
-        return if target_capacity <= m.capacity
+            target_capacity <= m.capacity
 
         # A table this module placed sits at its stack's data base and is handed back so
         # the stack becomes the new table's spare. A const dict's static buckets have no
@@ -1073,7 +1203,7 @@ def arena_dict_reserve[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capa
         # table's stack becomes the spare. Reused storage still holds the dead table, so
         # the buckets are zeroed here as before.
         table_bytes: usize = arena_checked_mul_usize(target_capacity, size_of(DictBucket[K, T])) can Abort.Panic
-        table_stack: mutable heap Region& = (collection_stack_acquire(owner, live_table, collections_table_slots(table_bytes)) can Global{Read,Write})
+        table_stack: mutable heap Region& = (collection_stack_acquire(owner, live_table, collections_table_slots(table_bytes)) can Global{Read,Write}, Atomics.Load)
         new_items: mutable DictBucket[K, T]& = collections_items_from_alloc[DictBucket[K, T]](collection_stack_table(table_stack))
         arena_dict_zero_buckets(new_items, target_capacity)
 
@@ -1087,7 +1217,7 @@ def arena_dict_reserve[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capa
         if old_items_opt != null and old_capacity > 0:
             old_items: mutable DictBucket[K, T]& = old_items_opt
             for i in 0..<old_capacity:
-                arena_dict_place_fresh(rehash, old_items[i].key, old_items[i].value) if old_items[i].state == 1
+                arena_dict_place_fresh(rehash, old_items[i].key, old_items[i].value) if old_items[i].state == COLLECTION_BUCKET_OCCUPIED
 
         m.items as & <- rehash.items
         (collection_stack_profile_release(owner, live_table) can Global{Read,Write})
@@ -1097,31 +1227,32 @@ def arena_dict_reserve[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capa
         return
 
 def arena_dict_get[K, T](m: dict[K, T]&, key: K) -> T&?:
-	null return if m.count == 0 or m.items == null
+	return null if m.count == 0 or m.items == null
 
 	probe: DictProbeResult = arena_dict_find_index(m, key)
-	null return if not probe.found
+	return null if not probe.found
 
 	assert m.items != null
 	items: DictBucket[K, T]& = m.items
 	return &items[probe.index].value
 
 def arena_dict_get_cstr_view[T](m: dict[cstr, T]&, key: sview) -> T&?:
-	null return if m.count == 0 or m.items == null
+ can Unsafe.UncheckedIndex:
+    	return null if m.count == 0 or m.items == null
 
-	probe: DictProbeResult = arena_dict_find_cstr_view_index(m, key)
-	null return if not probe.found
+    	probe: DictProbeResult = arena_dict_find_cstr_view_index(m, key)
+    	return null if not probe.found
 
-	assert m.items != null
-	items: DictBucket[cstr, T]& = m.items
-	return &items[probe.index].value
+    	assert m.items != null
+    	items: DictBucket[cstr, T]& = m.items
+    	return &items[probe.index].value
 
 @internal
 def arena_dict_get_mut[K, T](m: mutable dict[K, T]&, key: K) -> mutable T&?:
-	null return if m.count == 0 or m.items == null
+	return null if m.count == 0 or m.items == null
 
 	probe: DictProbeResult = arena_dict_find_index(m, key)
-	null return if not probe.found
+	return null if not probe.found
 
 	assert m.items != null
 	items: mutable DictBucket[K, T]& = m.items
@@ -1129,20 +1260,21 @@ def arena_dict_get_mut[K, T](m: mutable dict[K, T]&, key: K) -> mutable T&?:
 
 @internal
 def arena_dict_get_cstr_view_mut[T](m: mutable dict[cstr, T]&, key: sview) -> mutable T&?:
-	null return if m.count == 0 or m.items == null
+ can Unsafe.UncheckedIndex:
+    	return null if m.count == 0 or m.items == null
 
-	probe: DictProbeResult = arena_dict_find_cstr_view_index(m, key)
-	null return if not probe.found
+    	probe: DictProbeResult = arena_dict_find_cstr_view_index(m, key)
+    	return null if not probe.found
 
-	assert m.items != null
-	items: mutable DictBucket[cstr, T]& = m.items
-	return &items[probe.index].value
+    	assert m.items != null
+    	items: mutable DictBucket[cstr, T]& = m.items
+    	return &items[probe.index].value
 
 def arena_dict_get[K, T](m: mutable dict[K, T]&, key: K) -> mutable T&?:
 	return arena_dict_get_mut(m, key)
 
 def arena_dict_put[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> mutable T&? error[RuntimeError]:
-    can Memory.Allocate, Abort.Panic:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
         owner: mutable Arena& = m.arena if m.arena != null else a
         m.arena as & <- owner if m.arena == null
 
@@ -1151,7 +1283,7 @@ def arena_dict_put[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, valu
         # missing key. Non-growth inserts pay only for the ordinary probe below.
         if m.capacity == 0:
             target_capacity: usize = DICT_INIT_CAP
-            try (arena_dict_reserve(owner, m, target_capacity) can Global{Read,Write})
+            try (arena_dict_reserve(owner, m, target_capacity) can Global{Read,Write}, Atomics.Load)
         elif m.used >= m.capacity / 2.usize():
             growth_probe: DictProbeResult = arena_dict_find_index(m, key)
             if growth_probe.found:
@@ -1159,8 +1291,19 @@ def arena_dict_put[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, valu
                 growth_items: mutable DictBucket[K, T]& = m.items
                 growth_items[growth_probe.index].value <- value
                 return &growth_items[growth_probe.index].value
+            # Reusing a tombstone does not increase `used`, so the table remains at
+            # its current non-empty load. Avoid a rehash when this key's probe path
+            # already found a reusable deleted slot.
+            if m.items != null and growth_probe.index < m.capacity:
+                tombstone_items: mutable DictBucket[K, T]& = m.items
+                if tombstone_items[growth_probe.index].state == COLLECTION_BUCKET_TOMBSTONE:
+                    tombstone_items[growth_probe.index].key <- key
+                    tombstone_items[growth_probe.index].value <- value
+                    tombstone_items[growth_probe.index].state <- COLLECTION_BUCKET_OCCUPIED
+                    m.count <- m.count + 1.usize()
+                    return &tombstone_items[growth_probe.index].value
             target_capacity: usize = arena_checked_mul_usize(m.capacity, 2) can Abort.Panic
-            try (arena_dict_reserve(owner, m, target_capacity) can Global{Read,Write})
+            try (arena_dict_reserve(owner, m, target_capacity) can Global{Read,Write}, Atomics.Load)
 
         assert m.items != null
         assert m.capacity > 0
@@ -1171,19 +1314,18 @@ def arena_dict_put[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, valu
             items[probe.index].value <- value
             return &items[probe.index].value
 
-        reused_tombstone: bool = items[probe.index].state == 2
+        reused_tombstone: bool = items[probe.index].state == COLLECTION_BUCKET_TOMBSTONE
         items[probe.index].key <- key
         items[probe.index].value <- value
-        items[probe.index].state <- 1
+        items[probe.index].state <- COLLECTION_BUCKET_OCCUPIED
         m.count <- m.count + 1.usize()
         m.used <- m.used + 1.usize() if not reused_tombstone
         return &items[probe.index].value
 
 def arena_dict_get_or_insert[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> mutable T&? error[RuntimeError]:
-    can Memory.Allocate, Abort.Panic:
-		existing: mutable T&? = arena_dict_get_mut(m, key)
-        existing return if existing != null
-        return try (arena_dict_put(a, m, key, value) can Global{Read,Write})
+    existing: mutable T&? = arena_dict_get_mut(m, key) can Abort.Panic, Unsafe.UncheckedIndex
+    return existing if existing != null
+    return try (arena_dict_put(a, m, key, value) can Global{Read,Write}, Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex})
 
 # Non-error wrappers used by the dict-entry codegen ABI (`d.entry(k).insert(v)`
 # / `.get_or_insert(v)`). The entry ops run under `can Abort.Panic`, so a growth
@@ -1191,16 +1333,16 @@ def arena_dict_get_or_insert[K, T](a: mutable Arena&, m: mutable dict[K, T]&, ke
 # have to thread. These keep the codegen call shape simple: a plain nullable
 # value ref (`mutable T&?` -> nullable ptr), no sret/error-tag ABI.
 def arena_dict_put_checked[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> T&?:
-    can Memory.Allocate, Abort.Panic:
-        return try (arena_dict_put(a, m, key, value) can Global{Read,Write}) else null
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        return try (arena_dict_put(a, m, key, value) can Global{Read,Write}, Atomics.Load) else null
 
 def arena_dict_get_or_insert_checked[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> T&?:
-    can Memory.Allocate, Abort.Panic:
-        return try (arena_dict_get_or_insert(a, m, key, value) can Global{Read,Write}) else null
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        return try (arena_dict_get_or_insert(a, m, key, value) can Global{Read,Write}, Atomics.Load) else null
 
 def arena_dict_reserve_checked[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capacity: usize) -> void:
-    can Memory.Allocate, Abort.Panic:
-        catch (arena_dict_reserve(a, m, min_capacity) can Global{Read,Write}):
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        catch (arena_dict_reserve(a, m, min_capacity) can Global{Read,Write}, Atomics.Load):
             ok:
                 return
             error e:
@@ -1215,24 +1357,24 @@ def arena_dict_reserve_checked[K, T](a: mutable Arena&, m: mutable dict[K, T]&, 
 # like darray push — so `d.put(k, v)` needs no `can` grant. Callers who want to RECOVER from
 # OOM use the error-returning arena_dict_put directly.
 def arena_dict_put_or_panic[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> T&?:
-    can Memory.Allocate, Abort.Panic:
-        catch (arena_dict_put(a, m, key, value) can Global{Read,Write}):
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        catch (arena_dict_put(a, m, key, value) can Global{Read,Write}, Atomics.Load):
             slot:
                 return slot
             error e:
                 panic("dict put: allocation failed")
 
 def arena_dict_get_or_insert_or_panic[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> T&?:
-    can Memory.Allocate, Abort.Panic:
-        catch (arena_dict_get_or_insert(a, m, key, value) can Global{Read,Write}):
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        catch (arena_dict_get_or_insert(a, m, key, value) can Global{Read,Write}, Atomics.Load):
             slot:
                 return slot
             error e:
                 panic("dict get_or_insert: allocation failed")
 
 def arena_dict_reserve_or_panic[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capacity: usize) -> void:
-    can Memory.Allocate, Abort.Panic:
-        catch (arena_dict_reserve(a, m, min_capacity) can Global{Read,Write}):
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        catch (arena_dict_reserve(a, m, min_capacity) can Global{Read,Write}, Atomics.Load):
             ok:
                 return
             error e:
@@ -1242,22 +1384,22 @@ def arena_dict_contains[K, T](m: dict[K, T]&, key: K) -> bool:
     return arena_dict_get(m, key) != null
 
 def arena_dict_remove[K, T](m: mutable dict[K, T]&, key: K) -> bool:
-    false return if m.count == 0 or m.items == null
+    can Unsafe.Alias:
+        return false if m.count == 0 or m.items == null
 
-    probe: DictProbeResult = arena_dict_find_index(m, key)
-    false return if not probe.found
+        probe: DictProbeResult = arena_dict_find_index(m, key)
+        return false if not probe.found
 
-    assert m.items != null
-    items: mutable DictBucket[K, T]& = m.items
-    # Tombstone the slot (state 2): it stays non-empty so probes for entries that collided past
-    # it still reach them. `used` is unchanged; the slot is reclaimed on the next rehash.
-    trusted Unsafe.RawExtern:
-        # The tombstone state prevents readers from observing this inactive payload.
-        # Clear its storage without constructing an invalid live key/value.
-        memset(collections_mutable_void_from_items[DictBucket[K, T]](&items[probe.index]), 0, size_of(DictBucket[K, T]))
-    items[probe.index].state <- 2
-    m.count <- m.count - 1.usize()
-    return true
+        assert m.items != null
+        items: mutable DictBucket[K, T]& = m.items
+        # Tombstone the slot (state 2): it stays non-empty so probes for entries that collided past
+        # it still reach them. `used` is unchanged; the slot is reclaimed on the next rehash.
+        trusted Unsafe.RawExtern:
+            # The tombstone state prevents readers from observing this inactive payload.
+            memset(collections_mutable_void_from_items[DictBucket[K, T]](&items[probe.index]), 0, size_of(DictBucket[K, T]))
+        items[probe.index].state <- COLLECTION_BUCKET_TOMBSTONE
+        m.count <- m.count - 1.usize()
+        return true
 
 def arena_dict_clear[K, T](m: mutable dict[K, T]&):
     if m.items == null or m.capacity == 0:
@@ -1272,11 +1414,12 @@ def arena_dict_clear[K, T](m: mutable dict[K, T]&):
     m.used <- 0
 
 def arena_dict_new__i64(a: mutable Arena&, initial_capacity: usize) -> dict[cstr[key_shape], i64]:
-    return (arena_dict_new[cstr[key_shape], i64](a, initial_capacity) can Global{Read,Write}) can Memory.Allocate, Abort.Panic
+    can Atomics{Exchange,Load,Store}, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        return (arena_dict_new[cstr[key_shape], i64](a, initial_capacity) can Global{Read,Write}, Atomics.Load) can Memory.Allocate, Abort.Panic
 
 def arena_dict_reserve__i64(a: mutable Arena&, m: mutable dict[cstr[key_shape], i64]&, min_capacity: usize) -> void error[RuntimeError]:
-    can Memory.Allocate, Abort.Panic:
-        try (arena_dict_reserve[cstr[key_shape], i64](a, m, min_capacity) can Global{Read,Write})
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        try (arena_dict_reserve[cstr[key_shape], i64](a, m, min_capacity) can Global{Read,Write}, Atomics.Load)
 
 def arena_dict_get__i64(m: dict[cstr[key_shape], i64]&, key: cstr[key_shape]) -> i64&?:
 	return arena_dict_get[cstr[key_shape], i64](m, key)
@@ -1285,18 +1428,19 @@ def arena_dict_get_mut__i64(m: mutable dict[cstr[key_shape], i64]&, key: cstr[ke
 	return arena_dict_get_mut[cstr[key_shape], i64](m, key)
 
 def arena_dict_put__i64(a: mutable Arena&, m: mutable dict[cstr[key_shape], i64]&, key: cstr[key_shape], value: i64) -> mutable i64&? error[RuntimeError]:
-    can Memory.Allocate, Abort.Panic:
-        return try (arena_dict_put[cstr[key_shape], i64](a, m, key, value) can Global{Read,Write})
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        return try (arena_dict_put[cstr[key_shape], i64](a, m, key, value) can Global{Read,Write}, Atomics.Load)
 
 def arena_dict_get_or_insert__i64(a: mutable Arena&, m: mutable dict[cstr[key_shape], i64]&, key: cstr[key_shape], value: i64) -> mutable i64&? error[RuntimeError]:
-    can Memory.Allocate, Abort.Panic:
-        return try (arena_dict_get_or_insert[cstr[key_shape], i64](a, m, key, value) can Global{Read,Write})
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        return try (arena_dict_get_or_insert[cstr[key_shape], i64](a, m, key, value) can Global{Read,Write}, Atomics.Load)
 
 def arena_dict_contains__i64(m: dict[cstr[key_shape], i64]&, key: cstr[key_shape]) -> bool:
     return arena_dict_contains[cstr[key_shape], i64](m, key)
 
 def arena_dict_remove__i64(m: mutable dict[cstr[key_shape], i64]&, key: cstr[key_shape]) -> bool:
-    return arena_dict_remove[cstr[key_shape], i64](m, key)
+    can Unsafe.Alias:
+        return arena_dict_remove[cstr[key_shape], i64](m, key)
 
 def arena_dict_clear__i64(m: mutable dict[cstr[key_shape], i64]&):
     arena_dict_clear[cstr[key_shape], i64](m)
@@ -1307,25 +1451,29 @@ def arena_dict_clear__i64(m: mutable dict[cstr[key_shape], i64]&):
 # ------------------------------------------------------------
 
 def arena_set_find_index[T](s: set[T]&, key: T) -> DictProbeResult:
-    DictProbeResult{index: 0, found: false} return if s.capacity == 0 or s.items == null
+    ensure (s.capacity == 0 or s.items == null) implies (result.index == 0 and not result.found)
+    ensure s.capacity > 0 implies result.index < s.capacity
+    ensure result.found implies (s.capacity > 0 and s.items != null)
+    return DictProbeResult{index: 0, found: false} if s.capacity == 0 or s.items == null
 
     assert s.items != null
     items: SetBucket[T]& = s.items
     mask: usize = s.capacity - 1
     slot: mutable usize = ctx_hash_value(key).usize() & mask
     insert_slot: mutable usize = s.capacity
-    probed: mutable usize = 0
-    trusted Unsafe.AssumeProgress:
-        while probed < s.capacity:
-            st: u8 = items[slot].state
-            if st == 0:
-                final_slot: usize = slot if insert_slot == s.capacity else insert_slot
-                return DictProbeResult{index: final_slot, found: false}
-            DictProbeResult{index: slot, found: true} return if st == 1 and items[slot].key == key
-            insert_slot <- slot if st == 2 and insert_slot == s.capacity
-            slot <- (slot + 1.usize()) & mask
-            probed <- probed + 1.usize()
-    DictProbeResult{index: insert_slot, found: false} return if insert_slot != s.capacity
+    for _ in 0..<s.capacity:
+        invariant slot < s.capacity
+        invariant insert_slot == s.capacity or insert_slot < s.capacity
+        st: u8 = items[slot].state
+        if st == 0:
+            final_slot: usize = slot if insert_slot == s.capacity else insert_slot
+            return DictProbeResult{index: final_slot, found: false}
+        return DictProbeResult{index: slot, found: true} if st == 1 and items[slot].key == key
+        insert_slot <- slot if st == 2 and insert_slot == s.capacity
+        slot <- (slot + 1.usize()) & mask
+    if insert_slot != s.capacity:
+        assert insert_slot < s.capacity
+        return DictProbeResult{index: insert_slot, found: false}
     return DictProbeResult{index: 0, found: false}
 
 def arena_set_place_fresh[T](s: mutable set[T]&, key: T) -> void:
@@ -1333,7 +1481,7 @@ def arena_set_place_fresh[T](s: mutable set[T]&, key: T) -> void:
     items: mutable SetBucket[T]& = s.items
     probe: DictProbeResult = arena_set_find_index(s, key)
     items[probe.index].key <- key
-    items[probe.index].state <- 1
+    items[probe.index].state <- COLLECTION_BUCKET_OCCUPIED
     s.count <- s.count + 1.usize()
     s.used <- s.used + 1.usize()
 
@@ -1342,21 +1490,22 @@ def arena_set_zero_buckets[T](items: mutable SetBucket[T]&, capacity: usize):
     can Abort.Panic:
         byte_count: usize = arena_checked_mul_usize(capacity, size_of(SetBucket[T]))
         trusted Unsafe.RawExtern:
-            # State zero denotes inactive storage, not a constructed T value.
-            # A key becomes readable only after insertion publishes state one.
+            # Clear inactive storage without constructing an invalid live payload.
+            # Readers inspect state first; insertion initializes before publishing occupied.
             memset(collections_mutable_void_from_items[SetBucket[T]](items), 0, byte_count)
 
+
 def arena_set_new[T](a: mutable Arena&, initial_capacity: usize) -> set[T]:
-    can Memory.Allocate, Abort.Panic:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
         out: mutable set[T] = zeroed
         out.arena as & <- a
 
         capacity: usize = arena_dict_next_capacity(initial_capacity)
-        out return if capacity == 0
+        return out if capacity == 0
 
         # Same as arena_dict_new: the table is on a collection stack of its own.
         table_bytes: usize = arena_checked_mul_usize(capacity, size_of(SetBucket[T])) can Abort.Panic
-        table_stack: mutable heap Region& = (collection_stack_acquire(a, null, collections_table_slots(table_bytes)) can Global{Read,Write})
+        table_stack: mutable heap Region& = (collection_stack_acquire(a, null, collections_table_slots(table_bytes)) can Global{Read,Write}, Atomics.Load)
         items: mutable SetBucket[T]& = collections_items_from_alloc[SetBucket[T]](collection_stack_table(table_stack))
         arena_set_zero_buckets(items, capacity)
 
@@ -1365,11 +1514,12 @@ def arena_set_new[T](a: mutable Arena&, initial_capacity: usize) -> set[T]:
         return out
 
 def arena_set_reserve[T](a: mutable Arena&, s: mutable set[T]&, min_capacity: usize) -> void error[RuntimeError]:
-    can Memory.Allocate, Abort.Panic:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
         target_capacity: usize = arena_dict_next_capacity(min_capacity)
-        return if target_capacity == 0
+        return if:
+            target_capacity == 0
 
-        return if target_capacity <= s.capacity
+            target_capacity <= s.capacity
 
         # Same shape as arena_dict_reserve: see the comments there.
         had_stack: bool = s.arena != null and s.items != null and s.capacity > 0
@@ -1382,7 +1532,7 @@ def arena_set_reserve[T](a: mutable Arena&, s: mutable set[T]&, min_capacity: us
 
         live_table: void&? = collections_void_from_items_opt[SetBucket[T]](old_items_opt) if had_stack else null
         table_bytes: usize = arena_checked_mul_usize(target_capacity, size_of(SetBucket[T])) can Abort.Panic
-        table_stack: mutable heap Region& = (collection_stack_acquire(owner, live_table, collections_table_slots(table_bytes)) can Global{Read,Write})
+        table_stack: mutable heap Region& = (collection_stack_acquire(owner, live_table, collections_table_slots(table_bytes)) can Global{Read,Write}, Atomics.Load)
         new_items: mutable SetBucket[T]& = collections_items_from_alloc[SetBucket[T]](collection_stack_table(table_stack))
         arena_set_zero_buckets(new_items, target_capacity)
 
@@ -1397,7 +1547,7 @@ def arena_set_reserve[T](a: mutable Arena&, s: mutable set[T]&, min_capacity: us
         if old_items_opt != null and old_capacity > 0:
             old_items: mutable SetBucket[T]& = old_items_opt
             for i in 0..<old_capacity:
-                arena_set_place_fresh(rehash, old_items[i].key) if old_items[i].state == 1
+                arena_set_place_fresh(rehash, old_items[i].key) if old_items[i].state == COLLECTION_BUCKET_OCCUPIED
 
         s.items as & <- rehash.items
         (collection_stack_profile_release(owner, live_table) can Global{Read,Write})
@@ -1407,7 +1557,7 @@ def arena_set_reserve[T](a: mutable Arena&, s: mutable set[T]&, min_capacity: us
         return
 
 def arena_set_add[T](a: mutable Arena&, s: mutable set[T]&, key: T) -> bool error[RuntimeError]:
-    can Memory.Allocate, Abort.Panic:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
         owner: mutable Arena& = s.arena if s.arena != null else a
         s.arena as & <- owner if s.arena == null
 
@@ -1416,45 +1566,54 @@ def arena_set_add[T](a: mutable Arena&, s: mutable set[T]&, key: T) -> bool erro
         # missing key. Non-growth adds pay only for the ordinary probe below.
         if s.capacity == 0:
             target_capacity: usize = DICT_INIT_CAP
-            try (arena_set_reserve(owner, s, target_capacity) can Global{Read,Write})
+            try (arena_set_reserve(owner, s, target_capacity) can Global{Read,Write}, Atomics.Load)
         elif s.used >= s.capacity / 2.usize():
             growth_probe: DictProbeResult = arena_set_find_index(s, key)
-            false return if growth_probe.found
+            return false if growth_probe.found
+            # A tombstone is already included in `used`; replacing it leaves that
+            # load unchanged and does not need a larger table or a rehash.
+            if s.items != null and growth_probe.index < s.capacity:
+                tombstone_items: mutable SetBucket[T]& = s.items
+                if tombstone_items[growth_probe.index].state == COLLECTION_BUCKET_TOMBSTONE:
+                    tombstone_items[growth_probe.index].key <- key
+                    tombstone_items[growth_probe.index].state <- COLLECTION_BUCKET_OCCUPIED
+                    s.count <- s.count + 1.usize()
+                    return true
             target_capacity: usize = arena_checked_mul_usize(s.capacity, 2) can Abort.Panic
-            try (arena_set_reserve(owner, s, target_capacity) can Global{Read,Write})
+            try (arena_set_reserve(owner, s, target_capacity) can Global{Read,Write}, Atomics.Load)
 
         assert s.items != null
         assert s.capacity > 0
 
         items: mutable SetBucket[T]& = s.items
         probe: DictProbeResult = arena_set_find_index(s, key)
-        false return if probe.found
+        return false if probe.found
 
-        reused_tombstone: bool = items[probe.index].state == 2
+        reused_tombstone: bool = items[probe.index].state == COLLECTION_BUCKET_TOMBSTONE
         items[probe.index].key <- key
-        items[probe.index].state <- 1
+        items[probe.index].state <- COLLECTION_BUCKET_OCCUPIED
         s.count <- s.count + 1.usize()
         s.used <- s.used + 1.usize() if not reused_tombstone
         return true
 
 def arena_set_add_or_panic[T](a: mutable Arena&, s: mutable set[T]&, key: T) -> bool:
-    can Memory.Allocate, Abort.Panic:
-        catch (arena_set_add(a, s, key) can Global{Read,Write}):
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        catch (arena_set_add(a, s, key) can Global{Read,Write}, Atomics.Load):
             inserted:
                 return inserted
             error e:
                 panic("set add: allocation failed")
 
 def arena_set_reserve_or_panic[T](a: mutable Arena&, s: mutable set[T]&, min_capacity: usize) -> void:
-    can Memory.Allocate, Abort.Panic:
-        catch (arena_set_reserve(a, s, min_capacity) can Global{Read,Write}):
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        catch (arena_set_reserve(a, s, min_capacity) can Global{Read,Write}, Atomics.Load):
             ok:
                 return
             error e:
                 panic("set reserve: allocation failed")
 
 def arena_set_contains[T](s: set[T]&, key: T) -> bool:
-    false return if s.count == 0 or s.items == null
+    return false if s.count == 0 or s.items == null
     probe: DictProbeResult = arena_set_find_index(s, key)
     return probe.found
 
@@ -1465,22 +1624,24 @@ def has[T](s: set[T]&, key: T) -> bool:
     return arena_set_contains[T](s, key)
 
 def arena_set_remove[T](s: mutable set[T]&, key: T) -> bool:
-    false return if s.count == 0 or s.items == null
+    can Unsafe.Alias:
+        return false if s.count == 0 or s.items == null
 
-    probe: DictProbeResult = arena_set_find_index(s, key)
-    false return if not probe.found
+        probe: DictProbeResult = arena_set_find_index(s, key)
+        return false if not probe.found
 
-    assert s.items != null
-    items: mutable SetBucket[T]& = s.items
-    trusted Unsafe.RawExtern:
-        # The tombstone state prevents readers from observing this inactive payload.
-        memset(collections_mutable_void_from_items[SetBucket[T]](&items[probe.index]), 0, size_of(SetBucket[T]))
-    items[probe.index].state <- 2
-    s.count <- s.count - 1.usize()
-    return true
+        assert s.items != null
+        items: mutable SetBucket[T]& = s.items
+        trusted Unsafe.RawExtern:
+            # The tombstone state prevents readers from observing this inactive payload.
+            memset(collections_mutable_void_from_items[SetBucket[T]](&items[probe.index]), 0, size_of(SetBucket[T]))
+        items[probe.index].state <- COLLECTION_BUCKET_TOMBSTONE
+        s.count <- s.count - 1.usize()
+        return true
 
 def remove[T](s: mutable set[T]&, key: T) -> bool:
-    return arena_set_remove[T](s, key)
+    can Unsafe.Alias:
+        return arena_set_remove[T](s, key)
 
 def arena_set_clear[T](s: mutable set[T]&):
     if s.items == null or s.capacity == 0:
@@ -1503,35 +1664,35 @@ def clear[T](s: mutable set[T]&):
 # ------------------------------------------------------------
 
 def index_map[K, T](owner: mutable Arena&, initial_capacity: usize) -> IndexMap[K, T]:
-    can Memory.Allocate, Abort.Panic:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
         map: mutable IndexMap[K, T] = zeroed
         map.owner as & <- owner
-        map.by_key <- (arena_dict_new[K, usize](owner, initial_capacity) can Global{Read,Write})
+        map.by_key <- (arena_dict_new[K, usize](owner, initial_capacity) can Global{Read,Write}, Atomics.Load)
         in owner:
             _ = map.entries.reserve(initial_capacity)
         return map
 
 
 def index_map_new[K, T](owner: mutable Arena&) -> IndexMap[K, T]:
-    can Memory.Allocate, Abort.Panic:
-        return (index_map[K, T](owner, 32) can Global{Read,Write})
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        return (index_map[K, T](owner, 32) can Global{Read,Write}, Atomics.Load)
 
 
 def new[K, T](api: IndexMapNamespace, owner: mutable Arena&) -> IndexMap[K, T]:
-    can Memory.Allocate, Abort.Panic:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
         _ = api
-        return (index_map_new[K, T](owner) can Global{Read,Write})
+        return (index_map_new[K, T](owner) can Global{Read,Write}, Atomics.Load)
 
 
 def index_map_with_capacity[K, T](owner: mutable Arena&, initial_capacity: usize) -> IndexMap[K, T]:
-    can Memory.Allocate, Abort.Panic:
-        return (index_map[K, T](owner, initial_capacity) can Global{Read,Write})
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        return (index_map[K, T](owner, initial_capacity) can Global{Read,Write}, Atomics.Load)
 
 
 def with_capacity[K, T](api: IndexMapNamespace, owner: mutable Arena&, initial_capacity: usize) -> IndexMap[K, T]:
-    can Memory.Allocate, Abort.Panic:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
         _ = api
-        return (index_map_with_capacity[K, T](owner, initial_capacity) can Global{Read,Write})
+        return (index_map_with_capacity[K, T](owner, initial_capacity) can Global{Read,Write}, Atomics.Load)
 
 
 def index_map_count[K, T](map: IndexMap[K, T]&) -> usize:
@@ -1548,7 +1709,7 @@ def index_map_valid_index[K, T](map: IndexMap[K, T]&, index: usize) -> bool:
 
 def index_map_find_index[K, T](map: IndexMap[K, T]&, key: K) -> usize?:
 	found: usize&? = arena_dict_get[K, usize](map.by_key, key)
-    null return if found == null
+    return null if found == null
     trusted Unsafe.UncheckedIndex:
         return found[0]
 
@@ -1583,7 +1744,7 @@ def entry_view[K, T](map: IndexMap[K, T]&) -> view[IndexMapEntry[K, T]]:
 
 
 def index_map_put[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize:
-    can Memory.Allocate, Abort.Panic:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
         match index_map_find_index[K, T](map, key):
             null:
                 pass
@@ -1597,7 +1758,7 @@ def index_map_put[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize
         index: usize = map.entries.count
         in owner:
             map.entries.push(IndexMapEntry[K, T]{key: key, value: value})
-        catch (arena_dict_put[K, usize](owner, map.by_key, key, index) can Global{Read,Write}):
+        catch (arena_dict_put[K, usize](owner, map.by_key, key, index) can Global{Read,Write}, Atomics.Load):
             inserted:
                 return index
             error e:
@@ -1607,18 +1768,18 @@ def index_map_put[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize
 
 
 def put[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize:
-    can Memory.Allocate, Abort.Panic:
-        return (index_map_put[K, T](map, key, value) can Global{Read,Write})
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        return (index_map_put[K, T](map, key, value) can Global{Read,Write}, Atomics.Load)
 
 
 def index_map_set[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize:
-    can Memory.Allocate, Abort.Panic:
-        return (index_map_put[K, T](map, key, value) can Global{Read,Write})
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        return (index_map_put[K, T](map, key, value) can Global{Read,Write}, Atomics.Load)
 
 
 def set[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize:
-    can Memory.Allocate, Abort.Panic:
-        return (index_map_set[K, T](map, key, value) can Global{Read,Write})
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        return (index_map_set[K, T](map, key, value) can Global{Read,Write}, Atomics.Load)
 
 
 def index_map_get[K, T](map: IndexMap[K, T]&, key: K) -> T?:
@@ -1640,7 +1801,7 @@ def has[K, T](map: IndexMap[K, T]&, key: K) -> bool:
 
 
 def update_at[K, T](map: mutable IndexMap[K, T]&, index: usize, value: T) -> bool:
-    false return if not index_map_valid_index[K, T](map, index)
+    return false if not index_map_valid_index[K, T](map, index)
     assert index < map.entries.count
     map.entries[index].value <- value
     return true
@@ -1681,7 +1842,11 @@ impl[T] Store for darray[T]:
     type Elem = T
     type Handle = usize
     def store_get(s: darray[T]&, h: usize) -> T&:
-        return s[h]
+        if h >= s.count:
+            can Abort.Panic:
+                panic("store_get: handle out of bounds")
+        trusted Unsafe.UncheckedIndex:
+            return s[h]
     def store_count(s: darray[T]&) -> usize:
         return s.count
 
@@ -1692,7 +1857,8 @@ impl[T] Store for Deque[T]:
     type Elem = T
     type Handle = usize
     def store_get(s: Deque[T]&, h: usize) -> T&:
-        return arena_deque_at(s, h)
+        can Abort.Panic:
+            return arena_deque_at(s, h)
     def store_count(s: Deque[T]&) -> usize:
         return arena_deque_len(s)
 

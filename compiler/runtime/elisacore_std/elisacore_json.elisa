@@ -278,11 +278,13 @@ module Json:
         # The byte at the cursor, or -1 at end of input. -1 (never 0) marks EOF so a
         # literal NUL inside the input stays distinguishable from running out of it.
         def json_peek(p: JsonParser&) -> i64:
-            return -1 if p.pos >= p.text.len else string_view_index(p.text, p.pos)
+            can Unsafe.UncheckedIndex:
+                return -1 if p.pos >= p.text.len else string_view_index(p.text, p.pos)
 
         def json_peek_at(p: JsonParser&, offset: i64) -> i64:
-            index: i64 = p.pos + offset
-            return -1 if index >= p.text.len else string_view_index(p.text, index)
+            can Unsafe.UncheckedIndex:
+                index: i64 = p.pos + offset
+                return -1 if index >= p.text.len else string_view_index(p.text, index)
 
         def json_bump(p: mutable JsonParser&):
             p.pos <- p.pos + 1 if p.pos < p.text.len
@@ -304,22 +306,24 @@ module Json:
 
         # RFC 8259 whitespace is exactly these four bytes.
         def json_skip_ws(p: mutable JsonParser&):
-            scanning: mutable bool = true
-            while scanning:
-                ch: i64 = json_peek(p)
-                if ch == JSON_CH_SPACE or ch == JSON_CH_TAB or ch == JSON_CH_NL or ch == JSON_CH_CR:
-                    json_bump(p)
-                else:
-                    scanning <- false
+            can Unsafe.UncheckedIndex:
+                scanning: mutable bool = true
+                while scanning:
+                    ch: i64 = json_peek(p)
+                    if ch == JSON_CH_SPACE or ch == JSON_CH_TAB or ch == JSON_CH_NL or ch == JSON_CH_CR:
+                        json_bump(p)
+                    else:
+                        scanning <- false
 
         # Consume `literal` if the input matches it exactly; leave the cursor put
         # otherwise.
         def json_match_literal(p: mutable JsonParser&, literal: sview) -> bool:
-            false return if p.pos + literal.len > p.text.len
-            for index in 0..<literal.len:
-                false return if string_view_index(p.text, p.pos + index) != string_view_index(literal, index)
-            p.pos <- p.pos + literal.len
-            return true
+            can Unsafe.UncheckedIndex:
+                return false if p.pos + literal.len > p.text.len
+                for index in 0..<literal.len:
+                    return false if string_view_index(p.text, p.pos + index) != string_view_index(literal, index)
+                p.pos <- p.pos + literal.len
+                return true
 
         # ------------------------------------------------------------
         # UTF-8 encoding
@@ -389,13 +393,14 @@ module Json:
 
         # Four hex digits as one value, or -1 when fewer than four are present.
         def json_read_hex4(p: mutable JsonParser&) -> i64:
-            value: mutable i64 = 0
-            for digits in 0..<4:
-                digit: i64 = json_hex_value(json_peek(p))
-                -1 return if digit < 0
-                value <- value * 16 + digit
-                json_bump(p)
-            return value
+            can Unsafe.UncheckedIndex:
+                value: mutable i64 = 0
+                for digits in 0..<4:
+                    digit: i64 = json_hex_value(json_peek(p))
+                    return -1 if digit < 0
+                    value <- value * 16 + digit
+                    json_bump(p)
+                return value
 
         # Decode one escape sequence, or -1 (with the failure recorded) when it is not
         # well formed. The cursor sits just past the backslash on entry and just past
@@ -403,42 +408,43 @@ module Json:
         # well-formed high+low surrogate pair for anything above it; a lone surrogate on
         # either side is rejected.
         def json_decode_escape(p: mutable JsonParser&) -> i64:
-            escape_pos: i64 = p.pos - 1
-            esc: i64 = json_peek(p)
-            if esc < 0:
-                json_note(p, JsonErrorCode.INVALID_ESCAPE, escape_pos)
-                return -1
-            json_bump(p)
+            can Unsafe.UncheckedIndex:
+                escape_pos: i64 = p.pos - 1
+                esc: i64 = json_peek(p)
+                if esc < 0:
+                    json_note(p, JsonErrorCode.INVALID_ESCAPE, escape_pos)
+                    return -1
+                json_bump(p)
 
-            return JSON_CH_DQUOTE if esc == JSON_CH_DQUOTE
-            return JSON_CH_BSLASH if esc == JSON_CH_BSLASH
-            return JSON_CH_SLASH if esc == JSON_CH_SLASH
-            return 8 if esc == JSON_CH_b
-            return 12 if esc == JSON_CH_f
-            return JSON_CH_NL if esc == JSON_CH_n
-            return JSON_CH_CR if esc == JSON_CH_r
-            return JSON_CH_TAB if esc == JSON_CH_t
-            if esc != JSON_CH_u:
-                json_note(p, JsonErrorCode.INVALID_ESCAPE, escape_pos)
-                return -1
+                return JSON_CH_DQUOTE if esc == JSON_CH_DQUOTE
+                return JSON_CH_BSLASH if esc == JSON_CH_BSLASH
+                return JSON_CH_SLASH if esc == JSON_CH_SLASH
+                return 8 if esc == JSON_CH_b
+                return 12 if esc == JSON_CH_f
+                return JSON_CH_NL if esc == JSON_CH_n
+                return JSON_CH_CR if esc == JSON_CH_r
+                return JSON_CH_TAB if esc == JSON_CH_t
+                if esc != JSON_CH_u:
+                    json_note(p, JsonErrorCode.INVALID_ESCAPE, escape_pos)
+                    return -1
 
-            first: i64 = json_read_hex4(p)
-            if first < 0 or json_is_low_surrogate(first):
-                json_note(p, JsonErrorCode.INVALID_ESCAPE, escape_pos)
-                return -1
-            return first if not json_is_high_surrogate(first)
+                first: i64 = json_read_hex4(p)
+                if first < 0 or json_is_low_surrogate(first):
+                    json_note(p, JsonErrorCode.INVALID_ESCAPE, escape_pos)
+                    return -1
+                return first if not json_is_high_surrogate(first)
 
-            if json_peek(p) != JSON_CH_BSLASH or json_peek_at(p, 1) != JSON_CH_u:
-                json_note(p, JsonErrorCode.INVALID_ESCAPE, escape_pos)
-                return -1
-            json_bump(p)
-            json_bump(p)
+                if json_peek(p) != JSON_CH_BSLASH or json_peek_at(p, 1) != JSON_CH_u:
+                    json_note(p, JsonErrorCode.INVALID_ESCAPE, escape_pos)
+                    return -1
+                json_bump(p)
+                json_bump(p)
 
-            second: i64 = json_read_hex4(p)
-            if second < 0 or not json_is_low_surrogate(second):
-                json_note(p, JsonErrorCode.INVALID_ESCAPE, escape_pos)
-                return -1
-            return 65536 + ((first - 55296) << 10) + (second - 56320)
+                second: i64 = json_read_hex4(p)
+                if second < 0 or not json_is_low_surrogate(second):
+                    json_note(p, JsonErrorCode.INVALID_ESCAPE, escape_pos)
+                    return -1
+                return 65536 + ((first - 55296) << 10) + (second - 56320)
 
         # ------------------------------------------------------------
         # String parsing
@@ -449,58 +455,60 @@ module Json:
         # validating control bytes and finding the exact decoded-buffer upper bound for
         # strings that contain escapes.
         def json_string_scan(p: JsonParser&, start: i64, stop: mutable i64&, has_escape: mutable bool&) -> bool:
-            cursor: mutable i64 = p.pos
-            cursor <- start
-            has_escape <- false
-            while cursor < p.text.len:
-                ch: i64 = string_view_index(p.text, cursor)
-                if ch == JSON_CH_DQUOTE:
-                    stop <- cursor
-                    return true
-                return false if ch < JSON_CH_SPACE
-                has_escape <- true if ch == JSON_CH_BSLASH
-                cursor <- cursor + 1
-            return false
+            can Unsafe.UncheckedIndex:
+                cursor: mutable i64 = p.pos
+                cursor <- start
+                has_escape <- false
+                while cursor < p.text.len:
+                    ch: i64 = string_view_index(p.text, cursor)
+                    if ch == JSON_CH_DQUOTE:
+                        stop <- cursor
+                        return true
+                    return false if ch < JSON_CH_SPACE
+                    has_escape <- true if ch == JSON_CH_BSLASH
+                    cursor <- cursor + 1
+                return false
 
         # Count immediate members/elements without changing the parser cursor. The
         # scan understands nested containers and quoted strings, so reserving exactly
         # here prevents arena_realloc from retaining obsolete backing arrays as a
         # parent container grows around already-parsed children.
         def json_container_item_count(p: JsonParser&, closing: i64) -> usize:
-            cursor: mutable i64 = p.pos
-            depth: mutable i64 = 0
-            count: mutable usize = 1.usize()
-            in_string: mutable bool = false
-            escaped: mutable bool = false
-            while cursor < p.text.len:
-                ch: i64 = string_view_index(p.text, cursor)
-                if in_string:
-                    if escaped:
-                        escaped <- false
-                    elif ch == JSON_CH_BSLASH:
-                        escaped <- true
-                    elif ch == JSON_CH_DQUOTE:
-                        in_string <- false
-                else:
-                    if ch == JSON_CH_DQUOTE:
-                        in_string <- true
-                    elif ch == JSON_CH_LBRACKET or ch == JSON_CH_LBRACE:
-                        depth <- depth + 1
-                    elif ch == JSON_CH_RBRACKET or ch == JSON_CH_RBRACE:
-                        if depth == 0:
-                            return count if ch == closing else count
-                        depth <- depth - 1
-                    elif ch == JSON_CH_COMMA and depth == 0:
-                        count <- count + 1.usize()
-                cursor <- cursor + 1
-            return count
+            can Unsafe.UncheckedIndex:
+                cursor: mutable i64 = p.pos
+                depth: mutable i64 = 0
+                count: mutable usize = 1.usize()
+                in_string: mutable bool = false
+                escaped: mutable bool = false
+                while cursor < p.text.len:
+                    ch: i64 = string_view_index(p.text, cursor)
+                    if in_string:
+                        if escaped:
+                            escaped <- false
+                        elif ch == JSON_CH_BSLASH:
+                            escaped <- true
+                        elif ch == JSON_CH_DQUOTE:
+                            in_string <- false
+                    else:
+                        if ch == JSON_CH_DQUOTE:
+                            in_string <- true
+                        elif ch == JSON_CH_LBRACKET or ch == JSON_CH_LBRACE:
+                            depth <- depth + 1
+                        elif ch == JSON_CH_RBRACKET or ch == JSON_CH_RBRACE:
+                            if depth == 0:
+                                return count if ch == closing else count
+                            depth <- depth - 1
+                        elif ch == JSON_CH_COMMA and depth == 0:
+                            count <- count + 1.usize()
+                    cursor <- cursor + 1
+                return count
 
         # Parse a quoted string into freshly arena-allocated, escape-decoded bytes.
         # The cursor sits on the opening quote on entry and just past the closing quote
         # on return. A NUL byte is always appended (not counted in `len`), so the result
         # doubles as a C string whenever the value itself contains no NUL byte.
         def json_parse_string_ref(a: mutable Arena&, p: mutable JsonParser&) -> JsonStringRef:
-            can Memory.Allocate, Abort.Panic, Unsafe.PointerCast, Global{Read,Write}:
+            can Abort.Panic, Atomics{Exchange,Load,Store}, Global{Read,Write}, Memory.Allocate, Unsafe{Alias,PointerArithmetic,PointerCast,RawExtern,UncheckedIndex}:
                 if json_peek(p) != JSON_CH_DQUOTE:
                     return json_fail_string(p, JsonErrorCode.UNEXPECTED_CHAR, p.pos)
                 open_pos: i64 = p.pos
@@ -557,39 +565,40 @@ module Json:
         # so a leading `+`, a leading zero ("01"), a bare ".5", a trailing "5." and an
         # exponent with no digits are all rejected.
         def json_scan_number(p: mutable JsonParser&) -> bool:
-            json_bump(p) if json_peek(p) == JSON_CH_MINUS
+            can Unsafe.UncheckedIndex:
+                json_bump(p) if json_peek(p) == JSON_CH_MINUS
 
-            ch: mutable i64 = json_peek(p)
-            if ch == JSON_CH_0:
-                json_bump(p)
-            elif json_is_digit(ch):
-                while json_is_digit(json_peek(p)):
+                ch: mutable i64 = json_peek(p)
+                if ch == JSON_CH_0:
                     json_bump(p)
-            else:
-                return false
+                elif json_is_digit(ch):
+                    while json_is_digit(json_peek(p)):
+                        json_bump(p)
+                else:
+                    return false
 
-            if json_peek(p) == JSON_CH_DOT:
-                json_bump(p)
-                false return if not json_is_digit(json_peek(p))
-                while json_is_digit(json_peek(p)):
+                if json_peek(p) == JSON_CH_DOT:
                     json_bump(p)
+                    return false if not json_is_digit(json_peek(p))
+                    while json_is_digit(json_peek(p)):
+                        json_bump(p)
 
-            ch <- json_peek(p)
-            if ch == JSON_CH_e or ch == JSON_CH_UPPER_E:
-                json_bump(p)
                 ch <- json_peek(p)
-                json_bump(p) if ch == JSON_CH_PLUS or ch == JSON_CH_MINUS
-                false return if not json_is_digit(json_peek(p))
-                while json_is_digit(json_peek(p)):
+                if ch == JSON_CH_e or ch == JSON_CH_UPPER_E:
                     json_bump(p)
+                    ch <- json_peek(p)
+                    json_bump(p) if ch == JSON_CH_PLUS or ch == JSON_CH_MINUS
+                    return false if not json_is_digit(json_peek(p))
+                    while json_is_digit(json_peek(p)):
+                        json_bump(p)
 
-            return true
+                return true
 
         # Convert the input slice [start, stop) with libc strtod. The lexeme is copied
         # into NUL-terminated storage first: strtod on the raw input would happily read
         # past the lexeme (hex, "inf", "nan"), and JSON allows none of that.
         def json_lexeme_to_f64(a: mutable Arena&, text: sview, start: i64, stop: i64) -> f64:
-            can Memory.Allocate, Abort.Panic, Unsafe.PointerCast:
+            can Abort.Panic, Memory.Allocate, Unsafe{PointerCast,RawExtern,UncheckedIndex}:
                 length: i64 = stop - start
                 if length < JSON_NUMBER_SCRATCH:
                     scratch: mutable u8[512]
@@ -618,7 +627,7 @@ module Json:
         # stack. On failure the parser's error code is set and the return value is a
         # meaningless `JsonValue.Null` - always check `json_failed(p)` first.
         def json_parse_value(a: mutable Arena&, p: mutable JsonParser&) -> JsonValue:
-            can Memory.Allocate, Abort.Panic, Unsafe.PointerCast, Global{Read,Write}:
+            can Abort.Panic, Atomics{Exchange,Load,Store}, Global{Read,Write}, Memory.Allocate, Unsafe{Alias,PointerArithmetic,PointerCast,RawExtern,UncheckedIndex}:
                 json_skip_ws(p)
                 ch: i64 = json_peek(p)
                 if ch < 0:
@@ -737,7 +746,7 @@ module Json:
         # `TRAILING_DATA`, so a truncated or doubled document cannot slip through.
     public:
         def json_parse_checked[@r](a: mutable Arena& @r, text: sview) -> JsonParseResult[r]:
-            can Memory.Allocate, Abort.Panic, Unsafe.PointerCast, Global{Read,Write}:
+            can Abort.Panic, Atomics{Exchange,Store}, Global{Read,Write}, Memory.Allocate, Unsafe{Alias,PointerArithmetic,PointerCast,RawExtern,UncheckedIndex}:
                 p: mutable JsonParser = JsonParser{text: text, pos: 0, depth: 0, error_code: JsonErrorCode.OK, error_pos: 0}
                 value: JsonValue = json_parse_value(a, &p)
                 if p.error_code == JsonErrorCode.OK:
@@ -768,7 +777,7 @@ module Json:
         # Copy `text` into the arena verbatim - the bytes are taken as already-decoded
         # UTF-8, exactly what a parsed string holds - and wrap it as a JSON string.
         def json_string(a: mutable Arena&, text: sview) -> JsonValue:
-            can Memory.Allocate, Abort.Panic, Unsafe.PointerCast:
+            can Abort.Panic, Memory.Allocate, Unsafe{PointerCast,UncheckedIndex}:
                 in a:
                     out: mutable darray[u8] = []
                     for index in 0..<text.len:
@@ -779,7 +788,7 @@ module Json:
 
     private:
         def json_member(a: mutable Arena&, key: sview, value: JsonValue) -> JsonMember:
-            can Memory.Allocate, Abort.Panic, Unsafe.PointerCast:
+            can Abort.Panic, Memory.Allocate, Unsafe{PointerCast,UncheckedIndex}:
                 in a:
                     out: mutable darray[u8] = []
                     for index in 0..<key.len:
@@ -790,7 +799,7 @@ module Json:
 
         # Build an array node over a copy of `items` in the arena.
         def json_array_from(a: mutable Arena&, items: darray[JsonValue]) -> JsonValue:
-            can Memory.Allocate, Abort.Panic, Unsafe.PointerCast:
+            can Abort.Panic, Memory.Allocate, Unsafe{PointerCast,UncheckedIndex}:
                 return JsonValue.Array(items_bits: 0.uintptr(), count: 0) if items.count == 0
                 in a:
                     copy: mutable darray[JsonValue] = []
@@ -801,7 +810,7 @@ module Json:
         # Build an object node over a copy of `members` in the arena; the given order is
         # the order `json_write` will emit.
         def json_object_from(a: mutable Arena&, members: darray[JsonMember]) -> JsonValue:
-            can Memory.Allocate, Abort.Panic, Unsafe.PointerCast:
+            can Abort.Panic, Memory.Allocate, Unsafe{PointerCast,UncheckedIndex}:
                 return JsonValue.Object(members_bits: 0.uintptr(), count: 0) if members.count == 0
                 in a:
                     copy: mutable darray[JsonMember] = []
@@ -870,18 +879,19 @@ module Json:
         # The decoded bytes of a JSON string. The view borrows the arena, so it stays
         # valid exactly as long as the parse does.
         def json_as_string(value: JsonValue) -> sview error[JsonAccessError]:
-            trusted Unsafe.PointerCast:
-                match value:
-                    JsonValue.String(data_bits, len):
-                        if len == JSON_EMPTY_STRING_LENGTH:
-                            return sview("", JSON_EMPTY_STRING_LENGTH, JSON_EMPTY_STRING_LENGTH)
-                        if len < JSON_EMPTY_STRING_LENGTH or data_bits == JSON_NULL_STRING_ADDRESS:
+            can Unsafe{PointerArithmetic,RawExtern}:
+                trusted Unsafe.PointerCast:
+                    match value:
+                        JsonValue.String(data_bits, len):
+                            if len == JSON_EMPTY_STRING_LENGTH:
+                                return sview("", JSON_EMPTY_STRING_LENGTH, JSON_EMPTY_STRING_LENGTH)
+                            if len < JSON_EMPTY_STRING_LENGTH or data_bits == JSON_NULL_STRING_ADDRESS:
+                                raise JsonAccessError.WrongType
+                            trusted Unsafe.PointerCast:
+                                return StringView{data: data_bits.cast[u8&], len: len}
+                        _:
                             raise JsonAccessError.WrongType
-                        trusted Unsafe.PointerCast:
-                            return StringView{data: data_bits.cast[u8&], len: len}
-                    _:
-                        raise JsonAccessError.WrongType
-                raise JsonAccessError.WrongType
+                    raise JsonAccessError.WrongType
 
         # The decoded bytes as a C string. Safe only when the value contains no
         # a NUL byte: an embedded NUL truncates the logical string, exactly as it does
@@ -911,12 +921,14 @@ module Json:
         # Interior addresses inside the contiguous child runs.
     private:
         def json_value_ref(bits: uintptr, index: i64) -> JsonValue&:
-            trusted Unsafe.PointerCast:
-                return (bits.cast[u8&] + index.usize() * size_of(JsonValue)).cast[JsonValue&]
+            can Unsafe.PointerArithmetic:
+                trusted Unsafe.PointerCast:
+                    return (bits.cast[u8&] + index.usize() * size_of(JsonValue)).cast[JsonValue&]
 
         def json_member_ref(bits: uintptr, index: i64) -> JsonMember&:
-            trusted Unsafe.PointerCast:
-                return (bits.cast[u8&] + index.usize() * size_of(JsonMember)).cast[JsonMember&]
+            can Unsafe.PointerArithmetic:
+                trusted Unsafe.PointerCast:
+                    return (bits.cast[u8&] + index.usize() * size_of(JsonMember)).cast[JsonMember&]
 
         # Lift one child out of a run BY VALUE. The copy goes through `arena_memcpy`
         # rather than the obvious `json_value_ref(bits, index)[0]`: dereferencing an
@@ -924,33 +936,37 @@ module Json:
         # drops the whole unit with it. Every by-value read in this module goes through
         # these two helpers for that reason.
         def json_value_copy(bits: uintptr, index: i64) -> JsonValue:
-            trusted Unsafe.PointerCast:
-                out: mutable JsonValue = zeroed
-                arena_memcpy((&out).cast[void&], json_value_ref(bits, index).cast[void&], size_of(JsonValue))
-                return move out
+            can Unsafe.PointerArithmetic:
+                trusted Unsafe.PointerCast:
+                    out: mutable JsonValue = zeroed
+                    arena_memcpy((&out).cast[void&], json_value_ref(bits, index).cast[void&], size_of(JsonValue))
+                    return move out
 
         def json_member_copy(bits: uintptr, index: i64) -> JsonMember:
-            trusted Unsafe.PointerCast:
-                out: mutable JsonMember = zeroed
-                arena_memcpy((&out).cast[void&], json_member_ref(bits, index).cast[void&], size_of(JsonMember))
-                return move out
+            can Unsafe.PointerArithmetic:
+                trusted Unsafe.PointerCast:
+                    out: mutable JsonMember = zeroed
+                    arena_memcpy((&out).cast[void&], json_member_ref(bits, index).cast[void&], size_of(JsonMember))
+                    return move out
 
         def json_member_key_view(member: JsonMember) -> sview:
-            if member.key_len <= JSON_EMPTY_STRING_LENGTH or member.key_bits == JSON_NULL_STRING_ADDRESS:
-                return sview("", JSON_EMPTY_STRING_LENGTH, JSON_EMPTY_STRING_LENGTH)
-            trusted Unsafe.PointerCast:
-                return StringView{data: member.key_bits.cast[u8&], len: member.key_len}
+            can Unsafe{PointerArithmetic,RawExtern}:
+                if member.key_len <= JSON_EMPTY_STRING_LENGTH or member.key_bits == JSON_NULL_STRING_ADDRESS:
+                    return sview("", JSON_EMPTY_STRING_LENGTH, JSON_EMPTY_STRING_LENGTH)
+                trusted Unsafe.PointerCast:
+                    return StringView{data: member.key_bits.cast[u8&], len: member.key_len}
 
     private:
         def json_at(value: JsonValue, index: i64) -> JsonValue error[JsonAccessError]:
-            match value:
-                JsonValue.Array(items_bits, count):
-                    if index < 0 or index >= count:
-                        raise JsonAccessError.OutOfRange
-                    return json_value_copy(items_bits, index)
-                _:
-                    raise JsonAccessError.WrongType
-            raise JsonAccessError.WrongType
+            can Unsafe.PointerArithmetic:
+                match value:
+                    JsonValue.Array(items_bits, count):
+                        if index < 0 or index >= count:
+                            raise JsonAccessError.OutOfRange
+                        return json_value_copy(items_bits, index)
+                    _:
+                        raise JsonAccessError.WrongType
+                raise JsonAccessError.WrongType
 
         # ------------------------------------------------------------
         # Object accessors
@@ -966,50 +982,55 @@ module Json:
             return -1
 
         def json_key_at(value: JsonValue, index: i64) -> sview error[JsonAccessError]:
-            match value:
-                JsonValue.Object(members_bits, count):
-                    if index < 0 or index >= count:
-                        raise JsonAccessError.OutOfRange
-                    return json_member_key_view(json_member_copy(members_bits, index))
-                _:
-                    raise JsonAccessError.WrongType
-            raise JsonAccessError.WrongType
+            can Unsafe{PointerArithmetic,RawExtern}:
+                match value:
+                    JsonValue.Object(members_bits, count):
+                        if index < 0 or index >= count:
+                            raise JsonAccessError.OutOfRange
+                        return json_member_key_view(json_member_copy(members_bits, index))
+                    _:
+                        raise JsonAccessError.WrongType
+                raise JsonAccessError.WrongType
 
         def json_value_at(value: JsonValue, index: i64) -> JsonValue error[JsonAccessError]:
-            match value:
-                JsonValue.Object(members_bits, count):
-                    if index < 0 or index >= count:
-                        raise JsonAccessError.OutOfRange
-                    member: JsonMember = json_member_copy(members_bits, index)
-                    return member.value
-                _:
-                    raise JsonAccessError.WrongType
-            raise JsonAccessError.WrongType
+            can Unsafe.PointerArithmetic:
+                match value:
+                    JsonValue.Object(members_bits, count):
+                        if index < 0 or index >= count:
+                            raise JsonAccessError.OutOfRange
+                        member: JsonMember = json_member_copy(members_bits, index)
+                        return member.value
+                    _:
+                        raise JsonAccessError.WrongType
+                raise JsonAccessError.WrongType
 
         # Index of the FIRST member whose key equals `key`, or -1. Duplicate keys are
         # legal JSON and all of them are kept; this answers with the earliest.
         def json_index_of(value: JsonValue, key: sview) -> i64:
-            match value:
-                JsonValue.Object(members_bits, count):
-                    for index in 0..<count:
-                        candidate: sview = json_member_key_view(json_member_copy(members_bits, index))
-                        index return if sview_eq(candidate, key)
-                    return -1
-                _:
-                    return -1
-            return -1
+            can Unsafe{PointerArithmetic,PointerCast,RawExtern}:
+                match value:
+                    JsonValue.Object(members_bits, count):
+                        for index in 0..<count:
+                            candidate: sview = json_member_key_view(json_member_copy(members_bits, index))
+                            return index if candidate == key
+                        return -1
+                    _:
+                        return -1
+                return -1
 
         def json_has(value: JsonValue, key: sview) -> bool:
-            return json_index_of(value, key) >= 0
+            can Unsafe{PointerArithmetic,PointerCast,RawExtern}:
+                return json_index_of(value, key) >= 0
 
         def json_get(value: JsonValue, key: sview) -> JsonValue error[JsonAccessError]:
-            if not json_is_object(value):
-                raise JsonAccessError.WrongType
-            index: i64 = json_index_of(value, key)
-            if index < 0:
-                raise JsonAccessError.MissingKey
-            found: JsonValue = try json_value_at(value, index)
-            return found
+            can Unsafe{PointerArithmetic,PointerCast,RawExtern}:
+                if not json_is_object(value):
+                    raise JsonAccessError.WrongType
+                index: i64 = json_index_of(value, key)
+                if index < 0:
+                    raise JsonAccessError.MissingKey
+                found: JsonValue = try json_value_at(value, index)
+                return found
 
         # Internal constructor and the checked document-to-handle boundary. Keeping
         # the raw-value constructor private prevents clients from manufacturing a
@@ -1055,15 +1076,18 @@ module Json:
             return json_is_array(value.node)
 
         def json_handle_has[@r](value: JsonValueHandle[r], key: sview) -> bool:
-            return json_has(value.node, key)
+            can Unsafe{PointerArithmetic,PointerCast,RawExtern}:
+                return json_has(value.node, key)
 
         def json_handle_get[@r](value: JsonValueHandle[r], key: sview) -> JsonValueHandle[r] error[JsonAccessError]:
-            found: JsonValue = try json_get(value.node, key)
-            return json_handle_like(found, value)
+            can Unsafe{PointerArithmetic,PointerCast,RawExtern}:
+                found: JsonValue = try json_get(value.node, key)
+                return json_handle_like(found, value)
 
         def json_handle_at[@r](value: JsonValueHandle[r], index: i64) -> JsonValueHandle[r] error[JsonAccessError]:
-            found: JsonValue = try json_at(value.node, index)
-            return json_handle_like(found, value)
+            can Unsafe.PointerArithmetic:
+                found: JsonValue = try json_at(value.node, index)
+                return json_handle_like(found, value)
 
         def json_handle_array_len[@r](value: JsonValueHandle[r]) -> i64:
             return json_array_len(value.node)
@@ -1075,20 +1099,24 @@ module Json:
             return json_as_number(value.node)
 
         def json_handle_as_string[@r](value: JsonValueHandle[r]) -> sview @r error[JsonAccessError]:
-            return json_as_string(value.node)
+            can Unsafe{PointerArithmetic,RawExtern}:
+                return json_as_string(value.node)
 
         def json_handle_object_len[@r](value: JsonValueHandle[r]) -> i64:
             return json_object_len(value.node)
 
         def json_handle_key_at[@r](value: JsonValueHandle[r], index: i64) -> sview @r error[JsonAccessError]:
-            return json_key_at(value.node, index)
+            can Unsafe{PointerArithmetic,RawExtern}:
+                return json_key_at(value.node, index)
 
         def json_handle_value_at[@r](value: JsonValueHandle[r], index: i64) -> JsonValueHandle[r] error[JsonAccessError]:
-            member_value: JsonValue = try json_value_at(value.node, index)
-            return json_handle_like(member_value, value)
+            can Unsafe.PointerArithmetic:
+                member_value: JsonValue = try json_value_at(value.node, index)
+                return json_handle_like(member_value, value)
 
         def json_handle_index_of[@r](value: JsonValueHandle[r], key: sview) -> i64:
-            return json_index_of(value.node, key)
+            can Unsafe{PointerArithmetic,PointerCast,RawExtern}:
+                return json_index_of(value.node, key)
 
         def json_handle_as_cstr[@r](value: JsonValueHandle[r]) -> cstr @r error[JsonAccessError]:
             return json_as_cstr(value.node)
@@ -1102,7 +1130,7 @@ module Json:
             return json_handle_in_arena(json_number(value), owner)
 
         def json_handle_string[@r](owner: mutable Arena& @r, text: sview) -> JsonValueHandle[r]:
-            can Memory.Allocate, Abort.Panic, Unsafe.PointerCast:
+            can Abort.Panic, Memory.Allocate, Unsafe{PointerCast,UncheckedIndex}:
                 return json_handle_in_arena(json_string(owner, text), owner)
 
         # ------------------------------------------------------------
@@ -1111,7 +1139,7 @@ module Json:
 
     private:
         def json_emit_text(out: mutable darray[u8]&, text: sview):
-            can Memory.Allocate, Abort.Panic:
+            can Abort.Panic, Memory.Allocate, Unsafe.UncheckedIndex:
                 for index in 0..<text.len:
                     out.push(string_view_index(text, index).u8())
 
@@ -1125,7 +1153,7 @@ module Json:
         # is friendlier), and non-ASCII bytes pass through as the UTF-8 they already
         # are, so output is UTF-8 rather than ASCII-only.
         def json_emit_escaped(out: mutable darray[u8]&, text: sview):
-            can Memory.Allocate, Abort.Panic:
+            can Abort.Panic, Memory.Allocate, Unsafe.UncheckedIndex:
                 out.push(JSON_CH_DQUOTE.u8())
                 for index in 0..<text.len:
                     ch: i64 = string_view_index(text, index)
@@ -1161,16 +1189,17 @@ module Json:
         # True when `text` looks like a JSON number rather than one of libc's
         # non-finite spellings ("inf", "-inf", "nan").
         def json_formatted_is_number(text: u8&) -> bool:
-            head: i64 = text[0.usize()].i64()
-            offset: usize = 1.usize() if head == JSON_CH_MINUS else 0.usize()
-            return json_is_digit(text[offset].i64())
+            can Unsafe.UncheckedIndex:
+                head: i64 = text[0.usize()].i64()
+                offset: usize = 1.usize() if head == JSON_CH_MINUS else 0.usize()
+                return json_is_digit(text[offset].i64())
 
         # Emit a number as the shortest of the 15-, 16- and 17-significant-digit forms
         # that converts back to the identical double, so `json_parse(json_write(v)) == v`
         # holds bit-for-bit. Values JSON cannot express - NaN and the infinities - are
         # emitted as `null`, matching JavaScript's JSON.stringify.
         def json_emit_number(out: mutable darray[u8]&, value: f64):
-            can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+            can Abort.Panic, Console.Format, Memory.Allocate, Unsafe{BufferReinterpret,PointerArithmetic,PointerCast,RawExtern,UncheckedIndex}:
                 wide: mutable u8[64]
                 _ = snprintf((&wide[0]).cast[u8&?], 64.usize(), "%.17g", value)
                 if not json_formatted_is_number(&wide[0]):
@@ -1194,7 +1223,7 @@ module Json:
                     json_emit_text(out, sview((&wide[0]).cast[cstr], 0, -1))
 
         def json_emit_value(out: mutable darray[u8]&, value: JsonValue):
-            can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+            can Abort.Panic, Console.Format, Memory.Allocate, Unsafe{BufferReinterpret,PointerArithmetic,PointerCast,RawExtern,UncheckedIndex}:
                 match value:
                     JsonValue.Null:
                         json_emit_text(out, sview("null", 0, -1))
@@ -1231,7 +1260,7 @@ module Json:
         # order exactly.
     private:
         def json_write(a: mutable Arena&, value: JsonValue) -> darray[u8]:
-            can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+            can Abort.Panic, Console.Format, Memory.Allocate, Unsafe{BufferReinterpret,PointerArithmetic,PointerCast,RawExtern,UncheckedIndex}:
                 in a:
                     out: mutable darray[u8] = []
                     json_emit_value(&out, value)
@@ -1241,7 +1270,7 @@ module Json:
         # string containing a NUL byte truncates the logical C string; use `json_write`
         # when that matters.
         def json_to_cstr(a: mutable Arena&, value: JsonValue) -> cstr:
-            can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+            can Abort.Panic, Console.Format, Memory.Allocate, Unsafe{BufferReinterpret,PointerArithmetic,PointerCast,RawExtern,UncheckedIndex}:
                 bytes: mutable darray[u8] = json_write(a, value)
                 in a:
                     bytes.push(0)
@@ -1251,7 +1280,7 @@ module Json:
         # Checked parsing with variant-style errors. The returned handle keeps the
         # backing arena's region in its type, including all decoded strings and children.
         def json_parse[@r](a: mutable Arena& @r, text: sview) -> JsonValueHandle[r] error[JsonError]:
-            can Memory.Allocate, Abort.Panic, Unsafe.PointerCast, Global{Read,Write}:
+            can Abort.Panic, Atomics{Exchange,Store}, Global{Read,Write}, Memory.Allocate, Unsafe{Alias,PointerArithmetic,PointerCast,RawExtern,UncheckedIndex}:
                 outcome: JsonParseResult[r] = json_parse_checked(a, text)
                 code: JsonErrorCode = outcome.code
                 pos: i64 = outcome.pos
@@ -1278,17 +1307,17 @@ module Json:
                 return outcome.value
 
         def json_parse_cstr[@r](a: mutable Arena& @r, text: cstr) -> JsonValueHandle[r] error[JsonError]:
-            can Memory.Allocate, Abort.Panic, Unsafe.PointerCast, Global{Read,Write}:
+            can Abort.Panic, Atomics{Exchange,Store}, Global{Read,Write}, Memory.Allocate, Unsafe{Alias,PointerArithmetic,PointerCast,RawExtern,UncheckedIndex}:
                 return try json_parse(a, sview(text, 0, -1))
 
         # The writer borrows the JSON tree only for this call and copies output bytes
         # into `a`, so only the returned buffer is tied to the output arena.
         def json_handle_write[@j, @r](a: mutable Arena& @r, value: JsonValueHandle[j]) -> darray[u8] @r:
-            can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+            can Abort.Panic, Console.Format, Memory.Allocate, Unsafe{BufferReinterpret,PointerArithmetic,PointerCast,RawExtern,UncheckedIndex}:
                 return json_write(a, value.node)
 
         def json_handle_to_cstr[@j, @r](a: mutable Arena& @r, value: JsonValueHandle[j]) -> cstr @r:
-            can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+            can Abort.Panic, Console.Format, Memory.Allocate, Unsafe{BufferReinterpret,PointerArithmetic,PointerCast,RawExtern,UncheckedIndex}:
                 return json_to_cstr(a, value.node)
 
 using Json

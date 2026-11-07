@@ -31,6 +31,10 @@ func (a *Analyzer) validatePermissionUsage(decls []scopedDecl) {
 }
 
 func (a *Analyzer) validateFunctionPermissionUsage(fn *ast.FuncDecl) {
+	// Ghost bodies are erased, so they need no local grants for runtime effects.
+	if fn != nil && fn.IsGhost {
+		return
+	}
 	granted := map[string]bool{}
 	savedFuncType := a.currentFuncType
 	defer func() { a.currentFuncType = savedFuncType }()

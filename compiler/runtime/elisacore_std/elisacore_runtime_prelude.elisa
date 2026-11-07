@@ -28,6 +28,7 @@ extern stderr: void&
 # ------------------------------------------------------------
 
 const CTX_SMALL_STRING_CACHE_BUCKETS: usize = 1024
+const CTX_STRING_LEN_CACHE_BUCKETS: usize = 4096
 const CTX_ENABLE_SMALL_STRING_CACHE_EXPERIMENT: bool = false
 
 # ------------------------------------------------------------
@@ -48,6 +49,12 @@ struct SmallStringCacheEntry:
 	len: mutable usize
 	text: mutable tail u8
 
+@intrusive
+struct StringLenCacheEntry:
+	next: mutable heap StringLenCacheEntry&?
+	ptr: mutable u8&
+	len: mutable usize
+
 struct StringView:
 	# Every view, including an empty one, has immutable valid backing and extent.
 	data: u8&
@@ -64,6 +71,7 @@ struct ProgressBudget:
 # ------------------------------------------------------------
 
 global mutable small_string_cache: heap SmallStringCacheEntry&?[CTX_SMALL_STRING_CACHE_BUCKETS] = zeroed
+global mutable string_len_cache: heap StringLenCacheEntry&?[CTX_STRING_LEN_CACHE_BUCKETS] = zeroed
 
 # ------------------------------------------------------------
 # Cooperative progress budget
@@ -136,30 +144,78 @@ def runtime_checked_i64_to_usize(value: i64) -> usize:
 		return converted
 
 def alloc_perm(size: i64) -> mutable heap void&:
-	can Global{Read,Write}:
+	can Atomics{Exchange,Load,Store}, Global{Read,Write}, Unsafe{Alias,MutableGlobal,PointerCast,RawExtern}:
 		resolved: usize = size.usize() if size > 0 else 1
-		return arena_alloc(&perm_arena, resolved) can Memory.Allocate, Abort.Panic
+		return arena_alloc(&perm_arena, resolved) can Memory.Allocate, Abort.Panic, Atomics.Load
 
 def alloc_scratch(size: i64) -> mutable heap void&:
-	can Global{Read,Write}:
+	can Atomics{Exchange,Load,Store}, Global{Read,Write}, Unsafe{Alias,MutableGlobal,PointerCast,RawExtern}:
 		resolved: usize = size.usize() if size > 0 else 1
-		return arena_alloc(&scratch_arena, resolved) can Memory.Allocate, Abort.Panic
+		return arena_alloc(&scratch_arena, resolved) can Memory.Allocate, Abort.Panic, Atomics.Load
 
 def reset_scratch():
-	arena_reset(&scratch_arena) can Global{Read,Write}
+	can Atomics{Exchange,Store}, Unsafe{MutableGlobal,PointerCast,RawExtern,UncheckedIndex}:
+		arena_reset(&scratch_arena) can Global{Read,Write}
 
 # ------------------------------------------------------------
-# String length registration (retired)
+# String length cache (pointer-keyed hash table)
 # ------------------------------------------------------------
 
-# The old pointer-keyed length cache was write-only: runtime_strlen stopped
-# consulting it because arena addresses are reused across lifetimes, so a
-# lookup could return a stale length. Every string copy still paid a bucket
-# walk plus a never-freed perm entry (O(n) chains, unbounded growth). This
-# shim is kept only so previously compiled objects that call it still link.
+def string_len_bucket(ptr: u8&) -> usize:
+	can Unsafe.PointerCast:
+		bits: mutable uintptr = ptr.uintptr()
+		bits ^= (bits >> 33)
+		bits *= 0xff51afd7ed558ccd.uintptr()
+		bits ^= (bits >> 33)
+		return (bits & (CTX_STRING_LEN_CACHE_BUCKETS - 1).uintptr()).usize()
+
 def register_perm_string_len(ptr: u8&?, len: usize):
-	_ = ptr
-	_ = len
+	can Atomics{Exchange,Load,Store}, Global{Read,Write}, Unsafe{Alias,MutableGlobal,PointerCast,RawExtern,UncheckedIndex}:
+		can Memory.Allocate, Abort.Panic, Atomics.Load:
+			return if ptr == null or len == 0
+
+			bucket: usize = string_len_bucket(ptr)
+
+			entry: mutable heap StringLenCacheEntry&? = string_len_cache[bucket]
+			trusted Unsafe.AssumeProgress:
+				while entry != null:
+					if entry.ptr.cast[uintptr] == ptr.cast[uintptr]:
+						entry.len <- len
+						return
+					entry <- entry.next
+
+			new_entry: mutable heap StringLenCacheEntry& = alloc_perm(size_of(StringLenCacheEntry).i64()).cast[heap StringLenCacheEntry&] can Global{Read,Write}, Atomics.Load
+			new_entry.next <- string_len_cache[bucket]
+			# ptr is the caller's string pointer cached in a program-long table; callers
+			# pass stable (static/interned) string data, a contract the type system can't
+			# see on a bare `u8&`. The trusted runtime takes responsibility for it.
+			trusted Unsafe.StaleRef:
+				new_entry.ptr <- ptr
+			new_entry.len <- len
+			string_len_cache[bucket] <- new_entry
+
+def lookup_cached_string_len(ptr: u8&?, len_out: mutable usize&) -> int:
+	can Unsafe{Alias,MutableGlobal,PointerCast,UncheckedIndex}:
+		return 0 if ptr == null
+		bucket: usize = string_len_bucket(ptr)
+		can Global{Read,Write}:
+			prev: mutable heap StringLenCacheEntry&? = null
+			entry: mutable heap StringLenCacheEntry&? = string_len_cache[bucket]
+
+			trusted Unsafe.AssumeProgress:
+				while entry != null:
+					if entry.ptr.cast[uintptr] == ptr.cast[uintptr]:
+						# Move-to-front heuristic
+						if prev != null:
+							prev.next <- entry.next
+							entry.next <- string_len_cache[bucket]
+							string_len_cache[bucket] <- entry
+						len_out <- entry.len
+						return 1
+					prev <- entry
+					entry <- entry.next
+
+			return 0
 
 # ------------------------------------------------------------
 # Runtime strlen (cache-aware)
@@ -172,14 +228,14 @@ def runtime_strlen(value: cstr?) -> usize:
 	# do not consult pointer-keyed cache here; non-permanent and reused
 	# arena addresses can make cache lookups unsafe across lifetimes. The cstr
 	# parameter is the required termination contract for this scan.
-	return strlen(src)
+	return strlen(src) can Unsafe.RawExtern
 
 # ------------------------------------------------------------
 # Small string interning
 # ------------------------------------------------------------
 
-def intern_small_string(src: u8&, len: usize) -> heap u8& can[Global.Read, Global.Write]:
-	can Memory.Allocate, Abort.Panic:
+def intern_small_string(src: u8&, len: usize) -> heap u8& can[Global{Read,Write}, Atomics.Load]:
+	can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,MutableGlobal,PointerCast,RawExtern,UncheckedIndex}:
 		# Conservative baseline after short-string crash investigations:
 		# always allocate+copy and avoid cache-backed return aliases.
 		# This path stays until the regression family proves a safe
@@ -192,9 +248,10 @@ def intern_small_string(src: u8&, len: usize) -> heap u8& can[Global.Read, Globa
 		# CTX_ENABLE_SMALL_STRING_CACHE_EXPERIMENT exists to host
 		# test-first cache experiments on dedicated branches.
 		allocation_bytes: usize = runtime_checked_add_usize(len, 1)
-		out: mutable heap u8& = alloc_perm(runtime_checked_usize_to_i64(allocation_bytes)).cast[heap u8&] can Global{Read,Write}
+		out: mutable heap u8& = alloc_perm(runtime_checked_usize_to_i64(allocation_bytes)).cast[heap u8&] can Global{Read,Write}, Atomics.Load
 		memcpy(out.cast[mutable void&], src.cast[void&], len) if len > 0
 		out[len] <- 0
+		register_perm_string_len(out.cast[u8&], len) can Global{Read,Write}, Atomics.Load
 		return out
 
 # ------------------------------------------------------------
@@ -202,8 +259,8 @@ def intern_small_string(src: u8&, len: usize) -> heap u8& can[Global.Read, Globa
 # ------------------------------------------------------------
 
 def int_to_string_into(arena: mutable Arena&, value: i64) -> cstr:
-	can Global.Read:
-		can Memory.Allocate, Console.Format, Abort.Panic:
+	can Atomics{Exchange,Load,Store}, Global.Read, Unsafe{Alias,MutableGlobal,PointerCast,RawExtern,UncheckedIndex}:
+		can Memory.Allocate, Console.Format, Abort.Panic, Atomics.Load:
 			len: int = snprintf(null, 0, "%lld", value)
 			panic("int_to_string_into: snprintf failed") if len < 0
 			string_len: usize = len.usize()
@@ -213,10 +270,12 @@ def int_to_string_into(arena: mutable Arena&, value: i64) -> cstr:
 				text: u8[9]
 				snprintf(&text[0], allocation_bytes, "%lld", value)
 				trusted Unsafe.PointerCast:
-					return intern_small_string(&text[0], string_len).cast[cstr] can Global{Read,Write}
+					return intern_small_string(&text[0], string_len).cast[cstr] can Global{Read,Write}, Atomics.Load
 
-			out: mutable heap u8& = (arena_alloc(arena, allocation_bytes) can Global{Read,Write}).cast[heap u8&]
+			out: mutable heap u8& = (arena_alloc(arena, allocation_bytes) can Global{Read,Write}, Atomics.Load).cast[heap u8&]
 			snprintf(out.cast[mutable u8&?], allocation_bytes, "%lld", value)
+
+			register_perm_string_len(out.cast[u8&], string_len) can Global{Read,Write}, Atomics.Load if arena == &perm_arena
 
 			trusted Unsafe.PointerCast:
 				return out.cast[cstr]
@@ -225,11 +284,11 @@ def bool_to_string_into(arena: Arena&, value: int) -> cstr:
 	_ = arena
 	return "True" if value != 0 else "False"
 
-def char_to_string_into(arena: Arena&, value: i64) -> cstr can[Global.Read, Global.Write]:
-	can Memory.Allocate, Abort.Panic:
+def char_to_string_into(arena: Arena&, value: i64) -> cstr can[Global{Read,Write}, Atomics.Load]:
+	can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,MutableGlobal,PointerCast,RawExtern,UncheckedIndex}:
 		_ = arena
 		text: u8[2]
 		text[0] <- value.u8()
 		text[1] <- 0
 		trusted Unsafe.PointerCast:
-			return intern_small_string(&text[0], 1).cast[cstr] can Global{Read,Write}
+			return intern_small_string(&text[0], 1).cast[cstr] can Global{Read,Write}, Atomics.Load

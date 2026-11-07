@@ -33,39 +33,39 @@ def fixed_buffer_checked_add_usize(left: usize, right: usize) -> usize:
 
 def fixed_buffer_align_forward(value: usize, alignment: usize) -> usize:
     can Abort.Panic:
-        value return if alignment <= 1
+        return value if alignment <= 1
 
         remainder: usize = value % alignment
         return value if remainder == 0
         return fixed_buffer_checked_add_usize(value, alignment - remainder)
 
 def fixed_buffer_owns_ptr(a: FixedBufferAllocator&, ptr: void&) -> bool:
-    false return if a.data == null
+    return false if a.data == null
 
     trusted Unsafe.PointerCast:
         base: uintptr = a.data.cast[u8&].uintptr()
         raw: uintptr = ptr.cast[u8&].uintptr()
-        false return if raw < base
+        return false if raw < base
         offset: usize = (raw - base).usize()
         return offset < a.capacity
 
 def fixed_buffer_owns_range(a: FixedBufferAllocator&, ptr: void&, size_bytes: usize) -> bool:
-    false return if a.data == null
+    return false if a.data == null
 
     trusted Unsafe.PointerCast:
         base: uintptr = a.data.cast[u8&].uintptr()
         raw: uintptr = ptr.cast[u8&].uintptr()
-        false return if raw < base
+        return false if raw < base
         offset: usize = (raw - base).usize()
         return offset <= a.capacity and size_bytes <= a.capacity - offset
 
 def fixed_buffer_is_last_allocation(a: FixedBufferAllocator&, ptr: void&, size_bytes: usize) -> bool:
-    false return if a.data == null
+    return false if a.data == null
 
     trusted Unsafe.PointerCast:
         base: uintptr = a.data.cast[u8&].uintptr()
         raw: uintptr = ptr.cast[u8&].uintptr()
-        false return if a.end_index > a.capacity or raw < base
+        return false if a.end_index > a.capacity or raw < base
         offset: usize = (raw - base).usize()
         return offset <= a.end_index and size_bytes == a.end_index - offset
 
@@ -138,7 +138,7 @@ def fixed_buffer_resize(a: mutable FixedBufferAllocator&, ptr: void&, old_size: 
     trusted Unsafe.PointerCast:
         base: uintptr = a.data.cast[u8&].uintptr()
         raw: uintptr = ptr.cast[u8&].uintptr()
-        false return if raw < base
+        return false if raw < base
         start_index: usize = (raw - base).usize()
         return false if:
             start_index > a.capacity
@@ -153,41 +153,41 @@ def fixed_buffer_release(a: mutable FixedBufferAllocator&, ptr: void&, size_byte
 def memory_pool_init[T]() -> MemoryPool[T]:
     return zeroed
 
-def memory_pool_init_capacity[T](count: usize) -> MemoryPool[T] can[Global.Read, Global.Write]:
-    out: mutable MemoryPool[T] = zeroed
-    (memory_pool_add_capacity(&out, count) can Global{Read,Write}) can Memory.Allocate, Abort.Panic
-    return out
+def memory_pool_init_capacity[T](count: usize) -> MemoryPool[T]:
+    can Atomics{Exchange,Load,Store}, Unsafe{Alias,PointerCast,RawExtern}:
+        out: mutable MemoryPool[T] = zeroed
+        (memory_pool_add_capacity(&out, count) can Global{Read,Write}, Atomics.Load) can Memory.Allocate, Abort.Panic
+        return out
 
-def memory_pool_add_capacity[T](pool: mutable MemoryPool[T]&, count: usize) can[Global.Read, Global.Write]:
-    can Memory.Allocate, Abort.Panic:
+def memory_pool_add_capacity[T](pool: mutable MemoryPool[T]&, count: usize):
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern}:
         item_size: mutable usize = size_of(T)
         item_size <- size_of(MemoryPoolFreeNode) if item_size < size_of(MemoryPoolFreeNode)
 
         for i in 0..<count:
-            raw: heap void& = (arena_alloc(&pool.arena, item_size) can Global{Read,Write})
+            raw: heap void& = (arena_alloc(&pool.arena, item_size) can Global{Read,Write}, Atomics.Load)
             trusted Unsafe.PointerCast:
                 node: mutable heap MemoryPoolFreeNode& = raw.cast[heap MemoryPoolFreeNode&]
                 node.next <- pool.free_list
                 pool.free_list as & <- node
 
-def memory_pool_create[T](pool: mutable MemoryPool[T]&) -> mutable heap T& can[Global.Read, Global.Write]:
-    can Memory.Allocate, Abort.Panic:
-        if pool.free_list != null:
-            node: heap MemoryPoolFreeNode& = pool.free_list
-            pool.free_list <- node.next
-            trusted Unsafe.PointerCast:
-                item: mutable heap T& = node.cast[heap T&]
-                item[0] <- zeroed
-                return item
-
-        item_size: mutable usize = size_of(T)
-        item_size <- size_of(MemoryPoolFreeNode) if item_size < size_of(MemoryPoolFreeNode)
-
-        raw: heap void& = (arena_alloc(&pool.arena, item_size) can Global{Read,Write})
+def memory_pool_create[T](pool: mutable MemoryPool[T]&) -> mutable heap T&:
+    if pool.free_list != null:
+        node: heap MemoryPoolFreeNode& = pool.free_list
+        pool.free_list <- node.next
         trusted Unsafe.PointerCast:
-            item: mutable heap T& = raw.cast[heap T&]
+            item: mutable heap T& = node.cast[heap T&]
             item[0] <- zeroed
             return item
+
+    item_size: mutable usize = size_of(T)
+    item_size <- size_of(MemoryPoolFreeNode) if item_size < size_of(MemoryPoolFreeNode)
+
+    raw: heap void& = (arena_alloc(&pool.arena, item_size) can Global{Read,Write}, Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern})
+    trusted Unsafe.PointerCast:
+        item: mutable heap T& = raw.cast[heap T&]
+        item[0] <- zeroed
+        return item
 
 def memory_pool_destroy[T](pool: mutable MemoryPool[T]&, ptr: mutable heap T&):
     trusted Unsafe.PointerCast:
@@ -197,12 +197,13 @@ def memory_pool_destroy[T](pool: mutable MemoryPool[T]&, ptr: mutable heap T&):
         node.next <- pool.free_list
         pool.free_list as & <- node
 
-def memory_pool_reset[T](pool: mutable MemoryPool[T]&) can[Global.Read, Global.Write]:
-    (arena_reset(&pool.arena) can Global{Read,Write})
+def memory_pool_reset[T](pool: mutable MemoryPool[T]&):
+    (arena_reset(&pool.arena) can Global{Read,Write}, Atomics{Exchange,Store}, Unsafe{PointerCast,RawExtern,UncheckedIndex})
     pool.free_list <- null
 
-def memory_pool_deinit[T](pool: mutable MemoryPool[T]&) can[Global.Read, Global.Write]:
-    (arena_free(&pool.arena) can Global{Read,Write}) can Memory.Release, Abort.Panic
+def memory_pool_deinit[T](pool: mutable MemoryPool[T]&):
+    can Global{Read,Write}, Atomics{Exchange,Store}, Memory.Release, Abort.Panic, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        arena_free(&pool.arena)
     pool.arena <- zeroed
     pool.free_list <- null
 
@@ -224,8 +225,8 @@ def region_pool_new[T](owner: mutable Arena&) -> RegionPool[T]:
     out.owner as & <- owner
     return out
 
-def region_pool_create[T](pool: mutable RegionPool[T]&) -> mutable heap T& can[Global.Read, Global.Write]:
-    can Memory.Allocate, Abort.Panic:
+def region_pool_create[T](pool: mutable RegionPool[T]&) -> mutable heap T&:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern}:
         if pool.free_list != null:
             node: heap MemoryPoolFreeNode& = pool.free_list
             pool.free_list <- node.next
@@ -239,7 +240,7 @@ def region_pool_create[T](pool: mutable RegionPool[T]&) -> mutable heap T& can[G
 
         assert pool.owner != null
         owner: mutable Arena& = pool.owner
-        raw: heap void& = (arena_alloc(owner, item_size) can Global{Read,Write})
+        raw: heap void& = (arena_alloc(owner, item_size) can Global{Read,Write}, Atomics.Load)
         trusted Unsafe.PointerCast:
             item: mutable heap T& = raw.cast[heap T&]
             item[0] <- zeroed
@@ -253,8 +254,9 @@ def region_pool_free[T](pool: mutable RegionPool[T]&, ptr: mutable heap T&):
         node.next <- pool.free_list
         pool.free_list as & <- node
 
-def create[T](pool: mutable RegionPool[T]&) -> mutable heap T& can[Global.Read, Global.Write]:
-    return (region_pool_create[T](pool) can Global{Read,Write}) can Memory.Allocate, Abort.Panic
+def create[T](pool: mutable RegionPool[T]&) -> mutable heap T&:
+    can Atomics{Exchange,Load,Store}, Unsafe{Alias,PointerCast,RawExtern}:
+        return (region_pool_create[T](pool) can Global{Read,Write}, Atomics.Load) can Memory.Allocate, Abort.Panic
 
 def recycle[T](pool: mutable RegionPool[T]&, ptr: mutable heap T&):
     region_pool_free[T](pool, ptr)
@@ -284,8 +286,9 @@ def recycle[T](pool: mutable RegionPool[T]&, ptr: mutable heap T&):
 affine struct Pooled[T]:
     ptr: mutable heap T&
 
-def region_pool_acquire[T](pool: mutable RegionPool[T]&) -> Pooled[T] can[Global.Read, Global.Write]:
-    return Pooled[T]{ptr: (region_pool_create[T](pool) can Global{Read,Write})} can Memory.Allocate, Abort.Panic
+def region_pool_acquire[T](pool: mutable RegionPool[T]&) -> Pooled[T]:
+    can Atomics{Exchange,Load,Store}, Unsafe{Alias,PointerCast,RawExtern}:
+        return Pooled[T]{ptr: (region_pool_create[T](pool) can Global{Read,Write}, Atomics.Load)} can Memory.Allocate, Abort.Panic
 
 def region_pool_release[T](pool: mutable RegionPool[T]&, handle: Pooled[T]):
     # Recycle inline (rather than calling region_pool_free) so we never hand the handle's
@@ -298,8 +301,9 @@ def region_pool_release[T](pool: mutable RegionPool[T]&, handle: Pooled[T]):
         node.next <- pool.free_list
         pool.free_list as & <- node
 
-def acquire[T](pool: mutable RegionPool[T]&) -> Pooled[T] can[Global.Read, Global.Write]:
-    return (region_pool_acquire[T](pool) can Global{Read,Write}) can Memory.Allocate, Abort.Panic
+def acquire[T](pool: mutable RegionPool[T]&) -> Pooled[T]:
+    can Atomics{Exchange,Load,Store}, Unsafe{Alias,PointerCast,RawExtern}:
+        return (region_pool_acquire[T](pool) can Global{Read,Write}, Atomics.Load) can Memory.Allocate, Abort.Panic
 
 def release[T](pool: mutable RegionPool[T]&, handle: Pooled[T]):
     region_pool_release[T](pool, move handle)

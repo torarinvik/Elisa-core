@@ -1275,7 +1275,7 @@ func (a *Analyzer) analyzeSpecClauseExpr(expr ast.Expr, clause string) Type {
 	if a.ghostReadSeen {
 		a.markGhostContract(expr)
 	}
-	if introduced := a.currentFunctionUsedPermissionRefs[start:]; len(introduced) > 0 {
+	if introduced := specClauseEffects(a.currentFunctionUsedPermissionRefs[start:]); len(introduced) > 0 {
 		msg := fmt.Sprintf("%s clause must be pure but uses the `%s` effect; a contract may not perform effects (no IO, allocation, mutation, time, or randomness) — an effectful or non-deterministic clause is unsound because the verifier treats a spec-position call as a single deterministic value", clause, lawEffectName(introduced[0]))
 		// A common cause is reading a module-level `global` inside the clause. If the offending read is
 		// of an IMMUTABLE global, `const` is the working fix: a `const` read is pure (records no effect),
@@ -1289,6 +1289,19 @@ func (a *Analyzer) analyzeSpecClauseExpr(expr ast.Expr, clause string) Type {
 	// inferred effect set; restore the snapshot regardless of outcome.
 	a.currentFunctionUsedPermissionRefs = savedRefs
 	return t
+}
+
+// specClauseEffects drops pointer arithmetic: computing an address reads and changes nothing, so
+// `result.data == view.data + k` is pure. Reading through that address stays an effect.
+func specClauseEffects(refs []ast.PermissionRef) []ast.PermissionRef {
+	var effects []ast.PermissionRef
+	for _, ref := range refs {
+		if ref.Name == "Unsafe" && ref.Member == "PointerArithmetic" {
+			continue
+		}
+		effects = append(effects, ref)
+	}
+	return effects
 }
 
 // contractGlobalReadConstHint returns an actionable "make it a `const`" suggestion when a rejected

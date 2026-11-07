@@ -1,0 +1,24 @@
+# Shared FNV-1a byte-fold model for runtime StringView and collection-key hashing.
+const SVIEW_FNV1A_OFFSET_BASIS: u64 = 0xcbf29ce484222325
+const SVIEW_FNV1A_PRIME: u64 = 0x100000001b3
+
+ghost def sview_fnv1a_fold_from(value: sview, index: usize, remaining: usize, state: u64) -> u64:
+    requires value.len > 0 and value.len.usize().i64() == value.len
+    requires index <= value.len.usize()
+    requires remaining == value.len.usize() - index
+    decreases remaining
+    ensure index == value.len.usize() implies result == state
+    ensure index < value.len.usize() implies result == sview_fnv1a_fold_from(
+        value, index + 1.usize(), remaining - 1.usize(),
+        (state ^ value[index].u8().u64()) * SVIEW_FNV1A_PRIME
+    )
+    return state if remaining == 0.usize()
+    byte: u8 = value[index].u8()
+    next_state: u64 = (state ^ byte.u64()) * SVIEW_FNV1A_PRIME
+    return sview_fnv1a_fold_from(value, index + 1.usize(), remaining - 1.usize(), next_state)
+
+ghost def sview_fnv1a_model(value: sview) -> u64:
+    ensure (value.len <= 0 or value.len.usize().i64() != value.len) implies result == SVIEW_FNV1A_OFFSET_BASIS
+    ensure (value.len > 0 and value.len.usize().i64() == value.len) implies result == sview_fnv1a_fold_from(value, 0.usize(), value.len.usize(), SVIEW_FNV1A_OFFSET_BASIS)
+    return SVIEW_FNV1A_OFFSET_BASIS if value.len <= 0 or value.len.usize().i64() != value.len
+    return sview_fnv1a_fold_from(value, 0.usize(), value.len.usize(), SVIEW_FNV1A_OFFSET_BASIS)

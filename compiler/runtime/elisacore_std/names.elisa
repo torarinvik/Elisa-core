@@ -51,7 +51,7 @@ def name_cstr_view(text: cstr) -> sview:
 
 
 def name_ascii_lower(ch: char) -> char:
-    (ch.i64() + 32).char() return if ch >= 'A' and ch <= 'Z'
+    return (ch.i64() + 32).char() if ch >= 'A' and ch <= 'Z'
     return ch
 
 
@@ -85,13 +85,13 @@ def name_text_eq(left: sview, right: sview, policy: NameCasePolicy) -> bool:
         if policy == NameCasePolicy.AsciiCaseInsensitive:
             left_ch <- name_ascii_lower(left_ch)
             right_ch <- name_ascii_lower(right_ch)
-        false return if left_ch != right_ch
+        return false if left_ch != right_ch
         index <- index + 1
     return true
 
 
 def name_table_valid_id(table: NameTable&, name_id: NameId) -> bool:
-    false return if name_id == NAME_TABLE_INVALID_ID
+    return false if name_id == NAME_TABLE_INVALID_ID
     return (!name_id).usize() <= table.entries.count
 
 
@@ -101,7 +101,7 @@ def name_table_entry(table: NameTable&, name_id: NameId) -> NameEntry:
 
 
 def name_table_text(table: NameTable&, name_id: NameId) -> sview:
-    ("".cast[cstr])[0:0] return if not name_table_valid_id(table, name_id)
+    return ("".cast[cstr])[0:0] if not name_table_valid_id(table, name_id)
     return table.entries[(!name_id).usize() - 1].text
 
 
@@ -218,14 +218,14 @@ def name_table_ensure_capacity(table: mutable NameTable&, next_count: usize) -> 
 
 
 def name_table_find(table: NameTable&, text: sview, hash: u64, policy: NameCasePolicy) -> NameId:
-    NAME_TABLE_INVALID_ID return if table.buckets.count == 0
+    return NAME_TABLE_INVALID_ID if table.buckets.count == 0
     index: mutable usize = name_table_bucket_index(hash, table.buckets.count)
     checked: mutable usize = 0
     while checked < table.buckets.count:
         name_id: NameId = table.buckets[index].name_id
-        NAME_TABLE_INVALID_ID return if name_id == NAME_TABLE_INVALID_ID
+        return NAME_TABLE_INVALID_ID if name_id == NAME_TABLE_INVALID_ID
         entry: NameEntry = name_table_entry(table, name_id)
-        name_id return if entry.hash == hash and name_text_eq(entry.text, text, policy)
+        return name_id if entry.hash == hash and name_text_eq(entry.text, text, policy)
         index <- (index + 1) & (table.buckets.count - 1)
         checked <- checked + 1
     return NAME_TABLE_INVALID_ID
@@ -235,7 +235,7 @@ def name_table_intern_view(table: mutable NameTable&, text: sview, policy: NameC
     can Memory.Allocate, Abort.Panic:
         hash: u64 = name_text_hash(text, policy)
         existing: NameId = table.name_table_find(text, hash, policy)
-        existing return if existing != NAME_TABLE_INVALID_ID
+        return existing if existing != NAME_TABLE_INVALID_ID
         table.name_table_ensure_capacity(table.entries.count + 1)
         in table.owner:
             original_hash: u64 = name_text_hash(text, NameCasePolicy.CaseSensitive)
@@ -252,10 +252,10 @@ def intern_view(table: mutable NameTable&, text: sview, policy: NameCasePolicy) 
 
 def name_table_intern_copy(table: mutable NameTable&, text: sview, policy: NameCasePolicy) -> NameId:
     can Memory.Allocate, Abort.Panic:
-        NAME_TABLE_INVALID_ID return if text.len < 0
+        return NAME_TABLE_INVALID_ID if text.len < 0
         hash: u64 = name_text_hash(text, policy)
         existing: NameId = table.name_table_find(text, hash, policy)
-        existing return if existing != NAME_TABLE_INVALID_ID
+        return existing if existing != NAME_TABLE_INVALID_ID
         table.name_table_ensure_capacity(table.entries.count + 1)
         in table.owner:
             original_hash: u64 = name_text_hash(text, NameCasePolicy.CaseSensitive)
@@ -295,7 +295,7 @@ def intern_ci(table: mutable NameTable&, text: cstr) -> NameId:
 
 
 def has_text_view(table: NameTable&, name_id: NameId, text: sview, policy: NameCasePolicy) -> bool:
-    false return if not name_table_valid_id(table, name_id)
+    return false if not name_table_valid_id(table, name_id)
     entry: NameEntry = name_table_entry(table, name_id)
     return name_text_eq(entry.text, text, policy)
 

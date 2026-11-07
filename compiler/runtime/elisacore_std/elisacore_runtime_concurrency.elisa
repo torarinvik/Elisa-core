@@ -93,6 +93,10 @@ struct ConcurrencyPoolState:
 	qhead: mutable heap PoolTaskRecord&?
 	qtail: mutable heap PoolTaskRecord&?
 	shutdown: mutable i64
+	# Number of task records whose completion wait has not finished. Records keep
+	# the pool synchronization state alive even after the owner requests shutdown.
+	outstanding_records: mutable usize
+	owner_closed: mutable i64
 	workers: mutable void&?
 
 # ------------------------------------------------------------
@@ -636,7 +640,7 @@ def ctx_pool_broadcast(c: void&):
 # `shutdown` is set and the queue is drained.
 def ctx_pool_worker_main(arg: void&?) -> void&?:
 	can Abort.Panic:
-		null return if arg == null
+		return null if arg == null
 		state: mutable heap ConcurrencyPoolState& = arg.cast[mutable heap ConcurrencyPoolState&] can Unsafe.PointerCast
 		mu: void& = ctx_sync_handle(state.mutex)
 		wc: void& = ctx_sync_handle(state.work_cond)
@@ -677,7 +681,7 @@ def ctx_pool_worker_main(arg: void&?) -> void&?:
 		return null
 
 # Push a spawned worker handle onto the pool's worker list. The list head is stored as
-# void& so the intrusive node is transferred by pointer rather than an owning assignment.
+# void& so the intrusive node is transferred by pointer rather than by an owning assignment.
 def ctx_pool_push_worker(state: mutable heap ConcurrencyPoolState&, whandle: uintptr):
 	can Memory.Allocate, Abort.Panic:
 		nraw: heap void& = ctx_concurrency_alloc(size_of(ConcurrencyRawTaskNode))
@@ -704,6 +708,8 @@ def ctx_pool_state_new(threads: usize) -> mutable heap ConcurrencyPoolState&:
 		state.qhead <- null
 		state.qtail <- null
 		state.shutdown <- 0
+		state.outstanding_records <- 0.usize()
+		state.owner_closed <- 0
 		state.workers <- null
 		# The mutex/condvar handles are heap-allocated (malloc'd in *_init) and live
 		# for the pool's lifetime, but they flow through nullable `void&?` fields
@@ -762,16 +768,14 @@ def pool_shutdown(pool: mutable ThreadPool&):
 				ctx_concurrency_join_handle(current.handle)
 				free(current.cast[heap void&])
 				current <- next
-		mutex_handle: mutable Mutex = zeroed
-		mutex_handle.handle <- state.mutex
-		mutex_destroy(&mutex_handle)
-		wc_handle: mutable CondVar = zeroed
-		wc_handle.handle <- state.work_cond
-		condvar_destroy(&wc_handle)
-		dc_handle: mutable CondVar = zeroed
-		dc_handle.handle <- state.done_cond
-		condvar_destroy(&dc_handle)
-		free(state.cast[heap void&])
+		dispose_state: mutable bool = false
+		can Sync.Lock:
+			ctx_pool_lock(mu)
+		state.owner_closed <- 1
+		dispose_state <- state.outstanding_records == 0.usize()
+		can Sync.Unlock:
+			ctx_pool_unlock(mu)
+		ctx_pool_state_destroy(state) if dispose_state
 		pool.handle <- null
 
 # The implicit pool for `parallel for` / each / reduce when there is no explicit
@@ -817,6 +821,11 @@ def pool_submit_raw(pool: mutable ThreadPool&, entry: void&, arg: void&?) -> Tas
 		wc: void& = ctx_sync_handle(state.work_cond)
 		can Sync.Lock:
 			ctx_pool_lock(mu)
+		if state.shutdown != 0:
+			can Sync.Unlock:
+				ctx_pool_unlock(mu)
+			panic("pool_submit on shut down pool")
+		state.outstanding_records <- state.outstanding_records + 1.usize()
 		tail_node: mutable heap PoolTaskRecord&? = state.qtail
 		if tail_node != null:
 			tail_node.next <- rec
@@ -834,8 +843,9 @@ def pool_submit_raw(pool: mutable ThreadPool&, entry: void&, arg: void&?) -> Tas
 
 # Block until a completion record is done, leaving it alive so a TaskGroup can follow
 # its separate group link after the wait.
+@internal
 def ctx_pool_wait_record_done(handle: uintptr):
-	can Abort.Panic:
+	can Memory.Release, Abort.Panic:
 		return if handle == 0
 		rec: mutable heap PoolTaskRecord& = handle.cast[mutable heap PoolTaskRecord&] can Unsafe.PointerCast
 		state: mutable heap ConcurrencyPoolState& = rec.pool.cast[mutable heap ConcurrencyPoolState&]
@@ -843,21 +853,43 @@ def ctx_pool_wait_record_done(handle: uintptr):
 		dc: void& = ctx_sync_handle(state.done_cond)
 		can Sync.Lock:
 			ctx_pool_lock(mu)
+		dispose_state: mutable bool = false
 		trusted Unsafe.AssumeProgress:
 			while rec.done == 0:
 				can Sync.Wait:
 					ctx_pool_wait(dc, mu)
+		state.outstanding_records <- state.outstanding_records - 1.usize()
+		dispose_state <- state.owner_closed != 0 and state.outstanding_records == 0.usize()
 		can Sync.Unlock:
 			ctx_pool_unlock(mu)
+		ctx_pool_state_destroy(state) if dispose_state
 
 # Standalone awaits consume their record immediately. TaskGroups use the retaining
 # helper above and free records only after every task in the batch has joined.
+@internal
 def ctx_pool_wait_record(handle: uintptr):
 	can Memory.Release, Abort.Panic:
 		return if handle == 0
 		ctx_pool_wait_record_done(handle)
 		rec: mutable heap PoolTaskRecord& = handle.cast[mutable heap PoolTaskRecord&] can Unsafe.PointerCast
 		free(rec.cast[heap void&])
+
+# The pool owner and every outstanding completion record share this state. Workers
+# are joined by pool_shutdown before owner_closed is set; the final record waiter
+# may then destroy the synchronization objects after releasing the pool lock.
+@internal
+def ctx_pool_state_destroy(state: mutable heap ConcurrencyPoolState&):
+	can Memory.Release:
+		mutex_handle: mutable Mutex = zeroed
+		mutex_handle.handle <- state.mutex
+		mutex_destroy(&mutex_handle)
+		wc_handle: mutable CondVar = zeroed
+		wc_handle.handle <- state.work_cond
+		condvar_destroy(&wc_handle)
+		dc_handle: mutable CondVar = zeroed
+		dc_handle.handle <- state.done_cond
+		condvar_destroy(&dc_handle)
+		free(state.cast[heap void&])
 
 def pool_await_raw(task: Task[void&?, Pending]) -> void&?:
 	can Pool.Await, Memory.Release, Abort.Panic:
@@ -868,10 +900,12 @@ def pool_await_raw(task: Task[void&?, Pending]) -> void&?:
 			ctx_pool_wait_record(handle)
 		return state_bits
 
+@internal
 def task_group_new_raw() -> TaskGroup:
 	out: TaskGroup = zeroed
 	return move out
 
+@internal
 def task_group_add_raw(group: mutable TaskGroup&, task: Task[void&?, Pending], state_bits: void&?):
 	can Abort.Panic:
 		handle: uintptr = task.handle
@@ -879,14 +913,15 @@ def task_group_add_raw(group: mutable TaskGroup&, task: Task[void&?, Pending], s
 		panic("task_group_add on invalid task") if handle == 0
 		node: mutable heap PoolTaskRecord& = handle.cast[mutable heap PoolTaskRecord&] can Unsafe.PointerCast
 		node.group_next <- null if group.handle == null else group.handle.cast[heap PoolTaskRecord&]
-		# state_bits is held by the group until every task in this batch has joined; its
-		# lifetime is the caller's contract, unverifiable by the type system.
+		# Keep task result state in the same intrusive record as its wait handle. The group
+		# owns it until every task in this batch has joined; its lifetime remains the caller's contract.
 		trusted Unsafe.StaleRef:
 			node.group_state_bits <- state_bits
 		group.handle <- node.cast[void&]
 
+@internal
 def task_group_wait_all_raw(group: mutable TaskGroup&):
-	can Pool.WaitAll, Abort.Panic:
+	can Pool.WaitAll, Memory.Release, Abort.Panic:
 		current: mutable heap PoolTaskRecord&? = group.handle.cast[heap PoolTaskRecord&?]
 		last_waited: mutable heap PoolTaskRecord&? = null
 		trusted Unsafe.AssumeProgress:
@@ -911,7 +946,8 @@ def ctx_concurrency_ref_release(slot: mutable AtomicSlot[i64]&) -> i64:
 		while true:
 			current: i64 = load(slot, MemoryOrder.Acquire) can Atomics.Load
 			next: i64 = current - 1
-			next return if compare_exchange(slot, current, next, MemoryOrder.AcqRel, MemoryOrder.Acquire) can Atomics.CompareExchange
+			released: bool = compare_exchange(slot, current, next, MemoryOrder.AcqRel, MemoryOrder.Acquire) can Atomics.CompareExchange
+			return next if released
 	return 0
 
 def ctx_concurrency_work1_release(state_bits: mutable void&?):
@@ -981,6 +1017,7 @@ def task_group_new() -> TaskGroup:
 	group.cleanup <- null
 	return move group
 
+@internal
 def ctx_task_group_release_all(group: mutable TaskGroup&):
 	can Memory.Release, Atomics.Load, Atomics.CompareExchange:
 		return if group.cleanup == null
@@ -1121,11 +1158,11 @@ static if ELISA_TARGET_OS_MACOS:
 		val: mutable i32 = 0
 		sz: mutable usize = 4
 		key_p: u8& = "hw.perflevel0.physicalcpu"
-		val.i64() return if sysctlbyname(key_p, (&val).cast[void&?], &sz, null, 0) == 0 and val > 0
+		return val.i64() if sysctlbyname(key_p, (&val).cast[void&?], &sz, null, 0) == 0 and val > 0
 		sz <- 4
 		val <- 0
 		key_l: u8& = "hw.logicalcpu"
-		val.i64() return if sysctlbyname(key_l, (&val).cast[void&?], &sz, null, 0) == 0 and val > 0
+		return val.i64() if sysctlbyname(key_l, (&val).cast[void&?], &sz, null, 0) == 0 and val > 0
 		return 1
 
 static elif ELISA_TARGET_OS_LINUX:

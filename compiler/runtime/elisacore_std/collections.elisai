@@ -238,9 +238,9 @@ extern free_region(r: heap Region&)
 
 extern free_region_backend(r: heap Region&, strategy: int)
 
-extern arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&
+extern arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void& can[Atomics.Load]
 
-extern arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz: usize) -> mutable heap void&
+extern arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz: usize) -> mutable heap void& can[Atomics.Load]
 
 extern arena_used_slots(a: mutable Arena&) -> usize
 
@@ -254,9 +254,9 @@ extern arena_memcpy(dest: mutable void&, src: void&, n: usize) -> mutable void&
 
 extern arena_memeq(lhs: void&, rhs: void&, n: usize) -> bool
 
-extern arena_strdup(a: mutable Arena&, cstr: u8&) -> mutable heap u8&
+extern arena_strdup(a: mutable Arena&, cstr: u8&) -> mutable heap u8& can[Atomics.Load]
 
-extern arena_memdup(a: mutable Arena&, data: void&, size: usize) -> mutable heap void&
+extern arena_memdup(a: mutable Arena&, data: void&, size: usize) -> mutable heap void& can[Atomics.Load]
 
 extern arena_snapshot(a: Arena&) -> ArenaMark
 
@@ -268,7 +268,7 @@ extern arena_free(a: mutable Arena&)
 
 extern arena_trim(a: mutable Arena&)
 
-extern arena_adopt(parent: mutable Arena&, child: mutable Arena&)
+extern arena_adopt(parent: mutable Arena&, child: mutable Arena&) can[Atomics.Load]
 
 const COLLECTION_STACK_MEMO_SLOTS: usize = 4096
 
@@ -285,6 +285,10 @@ struct CollectionArenaMemoEntry:
     begin: mutable uintptr
     last_table: mutable uintptr
     no_pooled: mutable bool
+    # When known, no pooled stack of the arena holds more than pooled_bound slots, so an
+    # acquire needing more skips the walk over the region chain.
+    pooled_bound_known: mutable bool
+    pooled_bound: mutable usize
 
 extern __elisa_collection_stack_memo: CollectionStackMemoEntry[COLLECTION_STACK_MEMO_SLOTS]
 
@@ -601,7 +605,7 @@ extern ctx_hash_cstr(s: cstr) -> u64
 
 extern ctx_hash_sview(view: sview) -> u64
 
-extern ctx_cstr_eq_sview(text: cstr, view: sview) -> bool
+extern ctx_cstr_eq_sview(text: cstr, expected_length: i64, view: sview) -> bool
 
 extern ctx_hash_u64(value: u64) -> u64
 
@@ -752,19 +756,19 @@ extern symbol_table_id_from_index(index: usize) -> SymbolTableId
 protocol Store:
     type Elem
     type Handle
-    def store_get(s: Self&, h: Handle) -> Elem&
+    def store_get(s: Self&, h: Handle) -> Elem& can[Abort.Panic]
     def store_count(s: Self&) -> usize
 
 impl[T] Store for darray[T]:
     type Elem = T
     type Handle = usize
-    def store_get(s: darray[T]&, h: usize) -> T&
+    def store_get(s: darray[T]&, h: usize) -> T& can[Abort.Panic]
     def store_count(s: darray[T]&) -> usize
 
 impl[T] Store for Deque[T]:
     type Elem = T
     type Handle = usize
-    def store_get(s: Deque[T]&, h: usize) -> T&
+    def store_get(s: Deque[T]&, h: usize) -> T& can[Abort.Panic]
     def store_count(s: Deque[T]&) -> usize
 
 protocol KeyedStore:

@@ -399,6 +399,10 @@ func (a *Analyzer) recordFunctionPermissionFamilies(families []string) {
 }
 
 func (a *Analyzer) recordFunctionPermissionRefs(refs []ast.PermissionRef) {
+	// A ghost body and its own contract are erased, so nothing in them is a runtime effect.
+	if a.currentFuncDecl != nil && a.currentFuncDecl.IsGhost {
+		return
+	}
 	refs = canonicalizePermissionRefs(refs)
 	if len(refs) == 0 {
 		return

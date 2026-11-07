@@ -1,6 +1,6 @@
 def ctx_packed_store_state_new_variant_sparse(a: mutable Arena&, row_bytes: usize) -> mutable heap void&:
-    can Memory.Allocate, Abort.Panic:
-        state: mutable heap PackedStoreState& = (arena_alloc(a, size_of(PackedStoreState)) can Global{Read,Write}).cast[heap PackedStoreState&]
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern}:
+        state: mutable heap PackedStoreState& = (arena_alloc(a, size_of(PackedStoreState)) can Global{Read,Write}, Atomics.Load).cast[heap PackedStoreState&]
         row_words: usize = packed_store_row_word_count(row_bytes)
         preferred_region_capacity: mutable usize = ARENA_REGION_DEFAULT_CAPACITY
         hinted_capacity: usize = row_words * PACKED_STORE_MIN_ROWS_PER_REGION
@@ -33,13 +33,13 @@ def ctx_packed_store_state_new_variant_sparse(a: mutable Arena&, row_bytes: usiz
         state.preferred_region_capacity <- preferred_region_capacity
         return state.cast[heap void&]
 def ctx_packed_store_state_new_variant_sparse_with_side_words(a: mutable Arena&, row_bytes: usize, side_words: usize) -> mutable heap void&:
-    can Memory.Allocate, Abort.Panic:
-        state_bits: mutable heap void& = (ctx_packed_store_state_new_variant_sparse(a, row_bytes) can Global{Read,Write})
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern}:
+        state_bits: mutable heap void& = (ctx_packed_store_state_new_variant_sparse(a, row_bytes) can Global{Read,Write}, Atomics.Load)
         state: mutable heap PackedStoreState& = state_bits.cast[heap PackedStoreState&]
         state.side_words <- side_words
         return state_bits
-def ctx_packed_store_alloc_tagged_variant_sparse_result(a: mutable Arena&, size_bytes: usize, state_bits: mutable void&, tag: u32) -> PackedStoreIndexAllocResult can[Global.Read]:
-    can Memory.Allocate, Abort.Panic:
+def ctx_packed_store_alloc_tagged_variant_sparse_result(a: mutable Arena&, size_bytes: usize, state_bits: mutable void&, tag: u32) -> PackedStoreIndexAllocResult can[Global.Read, Atomics.Load]:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
         store_rows_note() can Global{Read,Write}
         if state_bits == null:
             panic("packed store state is null")
@@ -53,7 +53,7 @@ def ctx_packed_store_alloc_tagged_variant_sparse_result(a: mutable Arena&, size_
         row_size_bytes: usize = row_words * size_of(uintptr)
         if row_size_bytes / size_of(uintptr) != row_words:
             panic("packed store row allocation size overflow")
-        row: heap void& = (arena_alloc(a, row_size_bytes) can Global{Read,Write})
+        row: heap void& = (arena_alloc(a, row_size_bytes) can Global{Read,Write}, Atomics.Load)
         global_index: u32 = state.handles.count.u32()
         needed_rows: usize = state.handles.count + 1
         (packed_store_ensure_metadata_capacity(a, state, needed_rows) can Global{Read,Write})
@@ -68,8 +68,8 @@ def ctx_packed_store_alloc_tagged_variant_sparse_result(a: mutable Arena&, size_
             state.variant_slots.push(slot)
 
         return PackedStoreIndexAllocResult{row: row, index: global_index}
-def ctx_packed_store_alloc_fixed_tagged_variant_sparse_result(a: mutable Arena&, state_bits: mutable void&, tag: u32) -> PackedStoreIndexAllocResult can[Global.Read]:
-    can Memory.Allocate, Abort.Panic:
+def ctx_packed_store_alloc_fixed_tagged_variant_sparse_result(a: mutable Arena&, state_bits: mutable void&, tag: u32) -> PackedStoreIndexAllocResult can[Global.Read, Atomics.Load]:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
         store_rows_note() can Global{Read,Write}
         if state_bits == null:
             panic("packed store state is null")
@@ -77,9 +77,9 @@ def ctx_packed_store_alloc_fixed_tagged_variant_sparse_result(a: mutable Arena&,
         row_size_bytes: usize = state.row_words * size_of(uintptr)
         if row_size_bytes / size_of(uintptr) != state.row_words:
             panic("packed store row allocation size overflow")
-        return ctx_packed_store_alloc_tagged_variant_sparse_result(a, row_size_bytes, state_bits, tag) can Global{Read,Write}
+        return ctx_packed_store_alloc_tagged_variant_sparse_result(a, row_size_bytes, state_bits, tag) can Global{Read,Write}, Atomics.Load
 def ctx_packed_store_encode_variant_sparse(ptr: void&, state_bits: mutable void&) -> u32:
-    can Abort.Panic:
+    can Abort.Panic, Unsafe.PointerCast:
         if state_bits == null:
             panic("packed store state is null")
         state: PackedStoreState& = state_bits.cast[PackedStoreState&]
@@ -90,11 +90,11 @@ def ctx_packed_store_encode_variant_sparse(ptr: void&, state_bits: mutable void&
         for i, handle in state.handles.enumerate():
             if i >= PACKED_STORE_MAX_INDEX:
                 panic("packed store index limit exceeded")
-            i.u32() return if handle == raw
+            return i.u32() if handle == raw
 
         panic("variant-sparse packed store encode missing row pointer")
 def ctx_packed_store_decode_variant_sparse(index: u32, state_bits: mutable void&) -> mutable void&:
-    can Abort.Panic:
+    can Abort.Panic, Unsafe{PointerCast,UncheckedIndex}:
         if state_bits == null:
             panic("packed store state is null")
         state: PackedStoreState& = state_bits.cast[PackedStoreState&]
@@ -107,7 +107,7 @@ def ctx_packed_store_decode_variant_sparse(index: u32, state_bits: mutable void&
         handles: uintptr& = state.handles.items
         return (handles[index_usize].cast[heap u8&].cast[mutable void&] can Unsafe.PointerCast)
 def ctx_packed_store_read_variant_sparse_tag(state_bits: mutable void&, index: u32) -> u32:
-    can Abort.Panic:
+    can Abort.Panic, Unsafe{PointerCast,UncheckedIndex}:
         if state_bits == null:
             panic("packed store state is null")
         state: PackedStoreState& = state_bits.cast[PackedStoreState&]
@@ -120,7 +120,7 @@ def ctx_packed_store_read_variant_sparse_tag(state_bits: mutable void&, index: u
         tags: u32& = state.tags.items
         return tags[index_usize]
 def ctx_packed_store_read_variant_sparse_word(index: u32, state_bits: mutable void&, word_offset: usize) -> uintptr:
-    can Abort.Panic:
+    can Abort.Panic, Unsafe{Alias,PointerCast,UncheckedIndex}:
         if state_bits == null:
             panic("packed store state is null")
         state: mutable PackedStoreState& = state_bits.cast[PackedStoreState&]

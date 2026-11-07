@@ -1,0 +1,40 @@
+# Path-component views are defined through the shared last-byte search contract.
+def sview_basename(view: sview, sep: u8) -> sview:
+    ensure (
+        ((view.len < 0 or view.len.usize().i64() != view.len) implies result.len == 0)
+        and ((view.len >= 0 and view.len.usize().i64() == view.len and sview_find_last_byte(view, sep) >= 0) implies result.len == view.len - (sview_find_last_byte(view, sep) + 1))
+        and ((view.len >= 0 and view.len.usize().i64() == view.len and sview_find_last_byte(view, sep) == -1) implies result.len == view.len)
+    )
+    ensure (view.len >= 0 and view.len.usize().i64() == view.len and sview_find_last_byte(view, sep) >= 0) implies result.data == view.data + (sview_find_last_byte(view, sep) + 1).usize()
+    ensure (view.len >= 0 and view.len.usize().i64() == view.len and sview_find_last_byte(view, sep) == -1) implies result.data == view.data
+    can Unsafe{PointerArithmetic,RawExtern,UncheckedIndex}:
+        return string_view_empty_at(view.data) if view.len < 0 or view.len.usize().i64() != view.len
+        last: i64 = sview_find_last_byte(view, sep)
+        assert last == sview_find_last_byte(view, sep)
+        assert last >= -1 and last < view.len
+        if last >= 0:
+            trusted Unsafe.PointerCast:
+                return StringView{data: view.data + (sview_find_last_byte(view, sep) + 1).usize(), len: view.len - (last + 1)}
+        assert last == -1
+        trusted Unsafe.PointerCast:
+            return StringView{data: view.data, len: view.len}
+
+def sview_dirname(view: sview, sep: u8) -> sview:
+    ensure (
+        ((view.len < 0 or view.len.usize().i64() != view.len) implies result.len == 0)
+        and ((view.len >= 0 and view.len.usize().i64() == view.len and sview_find_last_byte(view, sep) >= 0) implies result.len == sview_find_last_byte(view, sep))
+        and ((view.len >= 0 and view.len.usize().i64() == view.len and sview_find_last_byte(view, sep) == -1) implies result.len == 0)
+    )
+    ensure (view.len >= 0 and view.len.usize().i64() == view.len and sview_find_last_byte(view, sep) >= 0) implies result.data == view.data
+    ensure (view.len >= 0 and view.len.usize().i64() == view.len and sview_find_last_byte(view, sep) == -1) implies result.data == view.data
+    can Unsafe{PointerArithmetic,RawExtern,UncheckedIndex}:
+        return string_view_empty_at(view.data) if view.len < 0 or view.len.usize().i64() != view.len
+        last: i64 = sview_find_last_byte(view, sep)
+        assert last == sview_find_last_byte(view, sep)
+        assert last >= -1 and last < view.len
+        if last >= 0:
+            trusted Unsafe.PointerCast:
+                return StringView{data: view.data, len: last}
+        assert last == -1
+        trusted Unsafe.PointerCast:
+            return StringView{data: view.data, len: 0}

@@ -148,7 +148,9 @@ def wasm_component_arena_alloc(a: mutable void&, size_bytes: usize) -> u32:
             state.end_index <- used + requested
             return result
 
-    fresh: u32 = wasm_component_chunk_take(requested)
+    fresh: mutable u32 = 0
+    can Global{Read,Write}:
+        fresh <- wasm_component_chunk_take(requested)
     if state.end != 0:
         wasm_component_store_word(state.end, fresh)
     else:
@@ -158,7 +160,8 @@ def wasm_component_arena_alloc(a: mutable void&, size_bytes: usize) -> u32:
     return fresh + WASM_COMPONENT_CHUNK_HEADER_BYTES
 
 def arena_alloc(a: mutable void&, size_bytes: usize) -> mutable void&:
-    return wasm_component_arena_alloc(a, size_bytes).cast[mutable void&]
+    can Global{Read,Write}, Unsafe.PointerCast:
+        return wasm_component_arena_alloc(a, size_bytes).cast[mutable void&]
 
 def arena_realloc(
     a: mutable void&,
@@ -167,12 +170,13 @@ def arena_realloc(
     newsz: usize
 ) -> mutable void&:
     return oldptr if newsz <= oldsz
-    newptr: mutable void& = arena_alloc(a, newsz)
-    trusted [Unsafe.PointerCast]:
-        destination: u32 = newptr.cast[uintptr].u32()
-        source: u32 = oldptr.cast[uintptr].u32()
-        wasm_component_copy_bytes(destination, source, oldsz.u32())
-    return newptr
+    can Global{Read,Write}:
+        newptr: mutable void& = arena_alloc(a, newsz)
+        trusted [Unsafe.PointerCast]:
+            destination: u32 = newptr.cast[uintptr].u32()
+            source: u32 = oldptr.cast[uintptr].u32()
+            wasm_component_copy_bytes(destination, source, oldsz.u32())
+        return newptr
 
 def arena_free(a: mutable void&) -> void:
     can Global{Read,Write}:

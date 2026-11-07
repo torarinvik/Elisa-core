@@ -6,17 +6,17 @@
 # String concatenation
 # ------------------------------------------------------------
 
-def concat2(lhs: cstr?, rhs: cstr?) -> cstr can[Global.Read, Global.Write]:
-    can Memory.Allocate, Abort.Panic:
+def concat2(lhs: cstr?, rhs: cstr?) -> cstr can[Global.Read, Global.Write, Atomics.Load]:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,MutableGlobal,PointerArithmetic,PointerCast,RawExtern,UncheckedIndex}:
         left: cstr = lhs if lhs != null else ""
         right: cstr = rhs if rhs != null else ""
 
         left_len: usize = runtime_strlen(left)
         right_len: usize = runtime_strlen(right)
 
-        right return if left_len == 0
+        return right if left_len == 0
 
-        left return if right_len == 0
+        return left if right_len == 0
 
         result_len: usize = runtime_checked_add_usize(left_len, right_len)
 
@@ -26,27 +26,28 @@ def concat2(lhs: cstr?, rhs: cstr?) -> cstr can[Global.Read, Global.Write]:
             memcpy((&text[0] + left_len).cast[mutable void&], right.cast[void&], right_len)
             text[result_len] <- 0
             trusted Unsafe.PointerCast:
-                return intern_small_string(&text[0], result_len).cast[cstr] can Global{Read,Write}
+                return intern_small_string(&text[0], result_len).cast[cstr] can Global{Read,Write}, Atomics.Load
 
         allocation_bytes: usize = runtime_checked_add_usize(result_len, 1)
-        out: mutable u8& = alloc_perm(runtime_checked_usize_to_i64(allocation_bytes)).cast[u8&] can Global{Read,Write}
+        out: mutable u8& = alloc_perm(runtime_checked_usize_to_i64(allocation_bytes)).cast[u8&] can Global{Read,Write}, Atomics.Load
         memcpy(out.cast[mutable void&], left.cast[void&], left_len)
         memcpy((out + left_len).cast[mutable void&], right.cast[void&], right_len)
         out[result_len] <- 0
+        register_perm_string_len(out, result_len) can Global{Read,Write}, Atomics.Load
         trusted Unsafe.PointerCast:
             return out.cast[cstr]
 
-def concat2_scratch(lhs: cstr?, rhs: cstr?) -> cstr can[Global.Read, Global.Write]:
-    can Memory.Allocate, Abort.Panic:
+def concat2_scratch(lhs: cstr?, rhs: cstr?) -> cstr can[Global.Read, Global.Write, Atomics.Load]:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,MutableGlobal,PointerArithmetic,PointerCast,RawExtern,UncheckedIndex}:
         left: cstr = lhs if lhs != null else ""
         right: cstr = rhs if rhs != null else ""
 
         left_len: usize = runtime_strlen(left)
         right_len: usize = runtime_strlen(right)
 
-        right return if left_len == 0
+        return right if left_len == 0
 
-        left return if right_len == 0
+        return left if right_len == 0
 
         result_len: usize = runtime_checked_add_usize(left_len, right_len)
 
@@ -56,10 +57,10 @@ def concat2_scratch(lhs: cstr?, rhs: cstr?) -> cstr can[Global.Read, Global.Writ
             memcpy((&text[0] + left_len).cast[mutable void&], right.cast[void&], right_len)
             text[result_len] <- 0
             trusted Unsafe.PointerCast:
-                return intern_small_string(&text[0], result_len).cast[cstr] can Global{Read,Write}
+                return intern_small_string(&text[0], result_len).cast[cstr] can Global{Read,Write}, Atomics.Load
 
         allocation_bytes: usize = runtime_checked_add_usize(result_len, 1)
-        out: mutable u8& = alloc_scratch(runtime_checked_usize_to_i64(allocation_bytes)).cast[u8&] can Global{Read,Write}
+        out: mutable u8& = alloc_scratch(runtime_checked_usize_to_i64(allocation_bytes)).cast[u8&] can Global{Read,Write}, Atomics.Load
         memcpy(out.cast[mutable void&], left.cast[void&], left_len)
         memcpy((out + left_len).cast[mutable void&], right.cast[void&], right_len)
         out[result_len] <- 0
@@ -76,18 +77,18 @@ def concat2_scratch(lhs: cstr?, rhs: cstr?) -> cstr can[Global.Read, Global.Writ
 # (count == capacity), so growth-by-push in the caller goes through the
 # caller's own region machinery (arena_realloc copies out of perm).
 
-def ctx_fstr_alloc(total: usize) -> dstr can[Global.Read]:
-    can Memory.Allocate, Abort.Panic:
+def ctx_fstr_alloc(total: usize) -> dstr can[Global.Read, Atomics.Load]:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,MutableGlobal,PointerCast,RawExtern}:
         out: mutable dstr = zeroed
-        out return if total == 0
-        buf: mutable u8& = alloc_perm(runtime_checked_usize_to_i64(total)).cast[mutable u8&] can Global{Read,Write}
+        return out if total == 0
+        buf: mutable u8& = alloc_perm(runtime_checked_usize_to_i64(total)).cast[mutable u8&] can Global{Read,Write}, Atomics.Load
         out.items as & <- buf
         out.count <- 0
         out.capacity <- total
         return out
 
 def ctx_fstr_append(out: mutable dstr&, ptr: u8&?, len: usize):
-    can Memory.Allocate, Abort.Panic:
+    can Abort.Panic, Memory.Allocate, Unsafe.PointerCast:
         return if:
             ptr == null or len == 0
             out.items == null
@@ -102,18 +103,21 @@ def ctx_fstr_append(out: mutable dstr&, ptr: u8&?, len: usize):
 # ------------------------------------------------------------
 
 def string_index(value: cstr?, index: i64) -> i64:
-    return string_view_index(sview(value, 0, -1), index)
+    can Unsafe{PointerArithmetic,RawExtern,UncheckedIndex}:
+        return string_view_index(sview(value, 0, -1), index)
 
-    
+
 
 def string_slice_eq(value: cstr?, start: i64, end: i64, other: cstr?) -> int:
-    return string_view_eq(sview(value, start, end), other)
+    can Unsafe{PointerArithmetic,PointerCast,RawExtern}:
+        return string_view_eq(sview(value, start, end), other)
 
 def string_slices_eq(lhs: cstr?, lhs_start: i64, lhs_end: i64, rhs: cstr?, rhs_start: i64, rhs_end: i64) -> int:
-    return string_views_eq(sview(lhs, lhs_start, lhs_end), sview(rhs, rhs_start, rhs_end))
+    can Unsafe{PointerArithmetic,PointerCast,RawExtern}:
+        return string_views_eq(sview(lhs, lhs_start, lhs_end), sview(rhs, rhs_start, rhs_end))
 
-def string_slice(value: cstr?, start: i64, end: i64) -> cstr can[Global.Read, Global.Write]:
-    can Memory.Allocate, Abort.Panic:
+def string_slice(value: cstr?, start: i64, end: i64) -> cstr can[Global.Read, Global.Write, Atomics.Load]:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,MutableGlobal,PointerArithmetic,PointerCast,RawExtern,UncheckedIndex}:
         src: cstr = value if value != null else ""
         len: usize = runtime_strlen(src)
 
@@ -130,47 +134,49 @@ def string_slice(value: cstr?, start: i64, end: i64) -> cstr can[Global.Read, Gl
 
         hi <- lo if hi < lo
 
-        src return if lo == 0 and hi == len
+        return src if lo == 0 and hi == len
 
         out_len: usize = hi - lo
 
-        "" return if out_len == 0
+        return "" if out_len == 0
 
         if out_len <= 8:
             trusted Unsafe.PointerCast:
-                return intern_small_string(src.cast[u8&] + lo, out_len).cast[cstr] can Global{Read,Write}
+                return intern_small_string(src.cast[u8&] + lo, out_len).cast[cstr] can Global{Read,Write}, Atomics.Load
 
         allocation_bytes: usize = runtime_checked_add_usize(out_len, 1)
-        out: mutable u8& = alloc_perm(runtime_checked_usize_to_i64(allocation_bytes)).cast[u8&] can Global{Read,Write}
+        out: mutable u8& = alloc_perm(runtime_checked_usize_to_i64(allocation_bytes)).cast[u8&] can Global{Read,Write}, Atomics.Load
         memcpy(out.cast[mutable void&], (src.cast[u8&] + lo).cast[void&], out_len)
         out[out_len] <- 0
+        register_perm_string_len(out, out_len) can Global{Read,Write}, Atomics.Load
         trusted Unsafe.PointerCast:
             return out.cast[cstr]
 
 def sview(value: cstr?, start: i64, end: i64) -> sview:
-    src: cstr = value if value != null else ""
+    ensure result.len >= 0
+    ensure end == 0 implies result.len == 0
+    trusted Unsafe{PointerArithmetic,RawExtern}:
+        src: cstr = value if value != null else ""
+        trusted Unsafe.PointerCast:
+            src_bytes: u8& = src.cast[u8&]
+            len: usize = runtime_strlen(src)
+
+            # Clamp start to [0, len] and end (negative = to the end) to [start, len].
+            lo: usize = 0 if start <= 0 else (len if start.usize() > len else start.usize())
+            end_clamped: usize = len if end < 0 else (len if end.usize() > len else end.usize())
+            hi: usize = lo if end_clamped < lo else end_clamped
+
+            out_len: usize = hi - lo
+            signed_out_len: i64 = out_len.i64()
+            if signed_out_len < 0 or signed_out_len.usize() != out_len:
+                return StringView{data: src_bytes, len: 0}
+            return StringView{data: src_bytes + lo, len: signed_out_len}
+
+def string_view_empty_at(data: u8&) -> sview:
+    ensure result.len == 0
+    ensure result.data == data
     trusted Unsafe.PointerCast:
-        src_bytes: u8& = src.cast[u8&]
-        len: usize = runtime_strlen(src)
-
-        lo: mutable usize = 0
-        hi: mutable usize = len
-
-        if start > 0:
-            lo <- start.usize()
-            lo <- len if lo > len
-
-        if end >= 0:
-            hi <- end.usize()
-            hi <- len if hi > len
-
-        hi <- lo if hi < lo
-
-        out_len: usize = hi - lo
-        signed_out_len: i64 = out_len.i64()
-        if signed_out_len < 0 or signed_out_len.usize() != out_len:
-            return StringView{data: src_bytes, len: 0}
-        return StringView{data: src_bytes + lo, len: signed_out_len}
+        return StringView{data: data, len: 0}
 
 # A borrowed view over foreign or otherwise raw storage with a caller-supplied extent.
 # This is deliberately an unsafe boundary: the caller must prove that `count` bytes are
@@ -178,11 +184,12 @@ def sview(value: cstr?, start: i64, end: i64) -> sview:
 # `sview`, this function never scans for a NUL terminator. Prefer `bytes_view_range[_ref]`
 # for darrays, which proves the requested extent from the container itself.
 def unsafe_sview_bounded_bytes(data: u8&, count: usize) -> sview can[Unsafe.PointerCast]:
-    signed_count: i64 = count.i64()
-    if signed_count < 0 or signed_count.usize() != count:
-        return sview("", 0, 0)
-    can Unsafe.PointerCast:
-        return StringView{data: data, len: signed_count}
+    can Unsafe{PointerArithmetic,RawExtern}:
+        signed_count: i64 = count.i64()
+        if signed_count < 0 or signed_count.usize() != count:
+            return sview("", 0, 0)
+        can Unsafe.PointerCast:
+            return StringView{data: data, len: signed_count}
 
 # Ergonomic cast: a nullable C string pointer -> borrowed string view, so content
 # equality works directly (`bytes.sview() == "x86_64"`) instead of streq().
@@ -193,98 +200,147 @@ def unsafe_sview_bounded_bytes(data: u8&, count: usize) -> sview can[Unsafe.Poin
 # string that would require a copy), a view is alloc-free and is exactly the
 # right primitive for comparison.
 def __cast__(value: cstr?) -> sview:
-    source: cstr = value if value != null else ""
-    return sview(source, 0, -1)
+    can Unsafe{PointerArithmetic,RawExtern}:
+        source: cstr = value if value != null else ""
+        return sview(source, 0, -1)
 
 def string_view_len(view: sview) -> i64:
-    0 return if view.len < 0
+    return 0 if view.len < 0
     view_len: usize = view.len.usize()
     return 0 if view_len.i64() != view.len
     return view.len
 
 def string_view_slice(view: sview, start: i64, end: i64) -> sview:
-    empty: sview = sview("", 0, 0)
-    return empty if:
-        view.len < 0
-        view.len == 0
-    view_len: usize = view.len.usize()
-    return empty if view_len.i64() != view.len
-
-    lo: mutable i64 = start if start > 0 else 0
-    hi: mutable i64 = end if end >= 0 else view.len
-
-    lo <- view.len if lo > view.len
-    hi <- view.len if hi > view.len
-    hi <- lo if hi < lo
-
-    trusted Unsafe.PointerCast:
-        return StringView{data: view.data + lo.usize(), len: hi - lo}
+    ensure result.len >= 0 and result.len <= (view.len if view.len > 0 and view.len.usize().i64() == view.len else 0)
+    ensure (view.len >= 0 and view.len.usize().i64() == view.len) implies result.len == (
+        (view.len if end < 0 else (start if start > 0 and start <= view.len else view.len if start > view.len else 0) if end < (start if start > 0 and start <= view.len else view.len if start > view.len else 0) else end if end <= view.len else view.len)
+        - (start if start > 0 and start <= view.len else view.len if start > view.len else 0)
+    )
+    ensure (view.len >= 0 and view.len.usize().i64() == view.len) implies result.data == view.data + (start if start > 0 and start <= view.len else view.len if start > view.len else 0).usize()
+    can Unsafe{PointerArithmetic,RawExtern}:
+        return "" if view.len < 0
+        view_len: usize = view.len.usize()
+        return "" if view_len.i64() != view.len
+        low: i64 = start if start > 0 and start <= view.len else view.len if start > view.len else 0
+        high: i64 = view.len if end < 0 else low if end < low else end if end <= view.len else view.len
+        assert 0 <= low and low <= view.len
+        assert low <= high and high <= view.len
+        assert low == (start if start > 0 and start <= view.len else view.len if start > view.len else 0)
+        assert high == (view.len if end < 0 else (start if start > 0 and start <= view.len else view.len if start > view.len else 0) if end < (start if start > 0 and start <= view.len else view.len if start > view.len else 0) else end if end <= view.len else view.len)
+        assert high - low == ((view.len if end < 0 else (start if start > 0 and start <= view.len else view.len if start > view.len else 0) if end < (start if start > 0 and start <= view.len else view.len if start > view.len else 0) else end if end <= view.len else view.len) - (start if start > 0 and start <= view.len else view.len if start > view.len else 0))
+        trusted Unsafe.PointerCast:
+            return StringView{data: view.data + (start if start > 0 and start <= view.len else view.len if start > view.len else 0).usize(), len: high - low}
 
 def string_view_prefix(view: sview, end: i64) -> sview:
-    return string_view_slice(view, 0, end)
+    ensure (view.len >= 0 and view.len.usize().i64() == view.len) implies result.len == (view.len if end < 0 else end if end <= view.len else view.len)
+    ensure (view.len >= 0 and view.len.usize().i64() == view.len and end >= 0 and end <= view.len) implies result.len == end
+    ensure (view.len >= 0 and view.len.usize().i64() == view.len) implies result.data == view.data
+    can Unsafe{PointerArithmetic,RawExtern}:
+        return "" if view.len < 0
+        view_len: usize = view.len.usize()
+        return "" if view_len.i64() != view.len
+        high: i64 = view.len if end < 0 else end if end <= view.len else view.len
+        assert 0 <= high and high <= view.len
+        assert high == (view.len if end < 0 else end if end <= view.len else view.len)
+        trusted Unsafe.PointerCast:
+            return StringView{data: view.data, len: high}
 
 def string_view_suffix(view: sview, start: i64) -> sview:
-    return string_view_slice(view, start, view.len)
+    ensure result.len >= 0 and result.len <= (view.len if view.len > 0 and view.len.usize().i64() == view.len else 0)
+    ensure (view.len >= 0 and view.len.usize().i64() == view.len) implies result.len == view.len - (start if start > 0 and start <= view.len else view.len if start > view.len else 0)
+    ensure (view.len >= 0 and view.len.usize().i64() == view.len) implies result.data == view.data + (start if start > 0 and start <= view.len else view.len if start > view.len else 0).usize()
+    can Unsafe{PointerArithmetic,RawExtern}:
+        return "" if view.len < 0
+        view_len: usize = view.len.usize()
+        return "" if view_len.i64() != view.len
+        low: i64 = start if start > 0 and start <= view.len else view.len if start > view.len else 0
+        assert 0 <= low and low <= view.len
+        assert low == (start if start > 0 and start <= view.len else view.len if start > view.len else 0)
+        assert view.len - low == view.len - (start if start > 0 and start <= view.len else view.len if start > view.len else 0)
+        trusted Unsafe.PointerCast:
+            return StringView{data: view.data + (start if start > 0 and start <= view.len else view.len if start > view.len else 0).usize(), len: view.len - low}
+
+ghost def string_view_index_request_valid(view: sview, index: i64) -> bool:
+    ensure result == (
+        view.len >= 0
+        and view.len.usize().i64() == view.len
+        and index >= 0
+        and index < view.len
+        and index.usize().i64() == index
+    )
+    return (
+        view.len >= 0
+        and view.len.usize().i64() == view.len
+        and index >= 0
+        and index < view.len
+        and index.usize().i64() == index
+    )
 
 def string_view_index(view: sview, index: i64) -> i64:
-    0 return if view.len < 0
-    view_len: usize = view.len.usize()
-    index_usize: usize = index.usize()
-    # Preserve conversion checks for targets with a narrower usize.
-    return 0 if:
-        view_len.i64() != view.len
-        index_usize.i64() != index
-        index_usize >= view_len
-    return view.data[index_usize].i64()
+    ensure not string_view_index_request_valid(view, index) implies result == 0
+    # Not stated: a valid request returns byte `index`. `view[i]` lowers to this function, so the
+    # body must read `view.data`, and the prover treats that raw read as opaque in a contract.
+    ensure result >= 0 and result <= 255
+    trusted Unsafe.UncheckedIndex:
+        return 0 if view.len < 0
+        view_len: usize = view.len.usize()
+        index_usize: usize = index.usize()
+        # The round-trip checks keep this valid on targets where usize is narrower.
+        # A negative index cannot round-trip on those targets; on a full-width
+        # target its unsigned value is outside any nonnegative signed length.
+        return 0 if:
+            view_len.i64() != view.len
+            index_usize.i64() != index
+            index_usize >= view_len
+        return view.data[index_usize].i64()
 
 def string_view_eq(view: sview, other: cstr?) -> int:
-    rhs: cstr = other if other != null else ""
-    0 return if view.len < 0
-    view_len: usize = view.len.usize()
-    0 return if view_len.i64() != view.len
-    # No strlen: walk the view and the C string together and stop at the first difference or
-    # at the C string's terminator, which never reads past it. Equal iff every byte matched
-    # and the terminator sits exactly at view_len. A one-byte view against a literal costs two
-    # loads and two compares, and the body is small enough to inline into callers.
-    trusted Unsafe.PointerCast:
-        rhs_bytes: u8& = rhs.cast[u8&]
-        i: mutable usize = 0
-        while i < view_len |i|:
-            c: u8 = rhs_bytes[i]
-            0 return if c == 0 or c != view.data[i]
-            i <- i + 1
-        return 1 if rhs_bytes[view_len] == 0 else 0
+    can Unsafe{PointerCast,RawExtern}:
+        rhs: cstr = other if other != null else ""
+        rhs_len: usize = runtime_strlen(rhs)
+
+        return 0 if view.len < 0
+        view_len: usize = view.len.usize()
+        return 0 if view_len.i64() != view.len or view_len != rhs_len
+        #1 return if view.len == 0
+        #1 return if view.data == rhs
+
+        return 1 if view.len == 0 or view.data.cast[uintptr] == rhs.cast[uintptr]
+
+        return 1 if memcmp(view.data.cast[void&], rhs.cast[void&], view_len) == 0 else 0
 
 def string_views_eq(lhs: sview, rhs: sview) -> int:
-    0 return if lhs.len < 0 or rhs.len < 0
-    lhs_len: usize = lhs.len.usize()
-    rhs_len: usize = rhs.len.usize()
-    0 return if lhs_len.i64() != lhs.len or rhs_len.i64() != rhs.len
-    if likely lhs_len != rhs_len:
-        return 0
+    can Unsafe{PointerCast,RawExtern}:
+        return 0 if lhs.len < 0 or rhs.len < 0
+        lhs_len: usize = lhs.len.usize()
+        rhs_len: usize = rhs.len.usize()
+        return 0 if lhs_len.i64() != lhs.len or rhs_len.i64() != rhs.len
+        if likely lhs_len != rhs_len:
+            return 0
 
-    #1 return if lhs.len == 0
-    #1 return if lhs.data == rhs.data
-    1 return if lhs.len == 0 or lhs.data.cast[uintptr] == rhs.data.cast[uintptr]
-    
-    return 1 if memcmp(lhs.data.cast[void&], rhs.data.cast[void&], lhs_len) == 0 else 0
+        #1 return if lhs.len == 0
+        #1 return if lhs.data == rhs.data
+        return 1 if lhs.len == 0 or lhs.data.cast[uintptr] == rhs.data.cast[uintptr]
 
-def string_view_copy(view: sview) -> cstr can[Global.Read, Global.Write]:
-    can Memory.Allocate, Abort.Panic:
+        return 1 if memcmp(lhs.data.cast[void&], rhs.data.cast[void&], lhs_len) == 0 else 0
+
+def string_view_copy(view: sview) -> cstr can[Global.Read, Global.Write, Atomics.Load]:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,MutableGlobal,PointerCast,RawExtern,UncheckedIndex}:
         if view.len <= 0:
-            can Global{Read,Write}:
+            can Global{Read,Write}, Atomics.Load:
                 trusted Unsafe.PointerCast:
                     return intern_small_string("", 0).cast[cstr]
         view_len: usize = runtime_checked_i64_to_usize(view.len)
         if view_len <= 8:
-            can Global{Read,Write}:
+            can Global{Read,Write}, Atomics.Load:
                 trusted Unsafe.PointerCast:
                     return intern_small_string(view.data, view_len).cast[cstr]
 
         allocation_bytes: usize = runtime_checked_add_usize(view_len, 1)
-        out: mutable heap u8& = arena_alloc(&perm_arena, allocation_bytes).cast[heap u8&] can Global{Read,Write}
+        out: mutable heap u8& = arena_alloc(&perm_arena, allocation_bytes).cast[heap u8&] can Global{Read,Write}, Atomics.Load
         memcpy(out.cast[mutable void&], view.data.cast[void&], view_len)
         out[view_len] <- 0
+        register_perm_string_len(out.cast[u8&], view_len) can Global{Read,Write}, Atomics.Load
         trusted Unsafe.PointerCast:
             return out.cast[cstr]
 
@@ -292,66 +348,73 @@ def string_view_copy(view: sview) -> cstr can[Global.Read, Global.Write]:
 # Ergonomic string-view queries.
 #
 # Length is available directly as `.len`, and bounded byte reads use `view[index]`.
-# Higher-level helpers below compose the checked slice/equality operations.
+# These higher-level helpers operate on the same signed extent.
 # ------------------------------------------------------------
 
 def sview_is_empty(view: sview) -> bool:
     return view.len <= 0
 
 def sview_eq(lhs: sview, rhs: sview) -> bool:
-    return string_views_eq(lhs, rhs) == 1
+    can Unsafe{PointerCast,RawExtern}:
+        return string_views_eq(lhs, rhs) == 1
 
 def sview_starts_with(view: sview, prefix: sview) -> bool:
-    return false if:
-        view.len < 0 or prefix.len < 0
-        prefix.len > view.len
-    return string_views_eq(string_view_prefix(view, prefix.len), prefix) == 1
+    can Unsafe{PointerArithmetic,PointerCast,RawExtern}:
+        return false if:
+            view.len < 0 or prefix.len < 0
+            prefix.len > view.len
+        return string_views_eq(string_view_prefix(view, prefix.len), prefix) == 1
 
 def sview_ends_with(view: sview, suffix: sview) -> bool:
-    return false if:
-        view.len < 0 or suffix.len < 0
-        suffix.len > view.len
-    return string_views_eq(string_view_suffix(view, view.len - suffix.len), suffix) == 1
+    can Unsafe{PointerArithmetic,PointerCast,RawExtern}:
+        return false if:
+            view.len < 0 or suffix.len < 0
+            suffix.len > view.len
+        return string_views_eq(string_view_suffix(view, view.len - suffix.len), suffix) == 1
 
 # Index of the first occurrence of `byte`, or -1 if absent.
 def sview_find_byte(view: sview, byte: u8) -> i64:
-    -1 return if view.len < 0
-    view_len: usize = view.len.usize()
-    -1 return if view_len.i64() != view.len
-    i: mutable i64 = 0
-    while i < view.len:
-        i return if string_view_index(view, i) == byte.i64()
-        i <- i + 1
-    return -1
+    ensure (view.len < 0 or view.len.usize().i64() != view.len) implies result == -1
+    ensure result >= -1
+    ensure result >= 0 implies result < view.len
+    ensure result >= 0 implies string_view_index(view, result) == byte.i64()
+    ensure result >= 0 implies (forall prior in 0..<result: string_view_index(view, prior) != byte.i64())
+    ensure (view.len >= 0 and view.len.usize().i64() == view.len and result == -1) implies (forall candidate in 0..<view.len: string_view_index(view, candidate) != byte.i64())
+    trusted Unsafe.UncheckedIndex:
+        return -1 if view.len < 0
+        view_len: usize = view.len.usize()
+        return -1 if view_len.i64() != view.len
+        i: mutable i64 = 0
+        while i < view.len:
+            decreases view.len - i
+            invariant 0 <= i and i <= view.len
+            invariant forall prior in 0..<i: string_view_index(view, prior) != byte.i64()
+            return i if string_view_index(view, i) == byte.i64()
+            i <- i + 1
+        return -1
 
 def sview_contains_byte(view: sview, byte: u8) -> bool:
-    return sview_find_byte(view, byte) >= 0
+    ensure result == (sview_find_byte(view, byte) >= 0)
+    can Unsafe.UncheckedIndex:
+        return sview_find_byte(view, byte) >= 0
 
 # Drop a trailing byte (e.g. a path separator) without copying.
 def sview_trim_trailing(view: sview, byte: u8) -> sview:
-    return string_view_slice(view, 0, 0) if view.len < 0 or view.len.usize().i64() != view.len
-    hi: mutable i64 = view.len
-    while hi > 0 and string_view_index(view, hi - 1) == byte.i64():
-        hi <- hi - 1
-    return string_view_prefix(view, hi)
-
-# The basename: the slice after the last `sep`, or the whole view if none.
-def sview_basename(view: sview, sep: u8) -> sview:
-    return string_view_slice(view, 0, 0) if view.len < 0 or view.len.usize().i64() != view.len
-    i: mutable i64 = view.len
-    while i > 0:
-        string_view_suffix(view, i) return if string_view_index(view, i - 1) == sep.i64()
-        i <- i - 1
-    return view
-
-# The dirname: the slice before the last `sep` (empty if none).
-def sview_dirname(view: sview, sep: u8) -> sview:
-    return string_view_slice(view, 0, 0) if view.len < 0 or view.len.usize().i64() != view.len
-    i: mutable i64 = view.len
-    while i > 0:
-        string_view_prefix(view, i - 1) return if string_view_index(view, i - 1) == sep.i64()
-        i <- i - 1
-    return string_view_prefix(view, 0)
+    ensure result.len >= 0 and result.len <= (view.len if view.len > 0 and view.len.usize().i64() == view.len else 0)
+    ensure result.len > 0 implies (string_view_index(view, result.len - 1) != byte.i64() and result.data == view.data)
+    ensure forall suffix_index in result.len..<(view.len if view.len > 0 and view.len.usize().i64() == view.len else 0): string_view_index(view, suffix_index) == byte.i64()
+    can Unsafe{PointerArithmetic,RawExtern,UncheckedIndex}:
+        return "" if view.len < 0
+        view_len: usize = view.len.usize()
+        return "" if view_len.i64() != view.len
+        assert view.len >= 0 and view_len.i64() == view.len
+        hi: mutable i64 = view.len
+        while hi > 0 and string_view_index(view, hi - 1) == byte.i64():
+            decreases hi
+            invariant 0 <= hi and hi <= view.len and hi.usize().i64() == hi
+            invariant forall suffix_index in hi..<view.len: string_view_index(view, suffix_index) == byte.i64()
+            hi <- hi - 1
+        return string_view_prefix(view, hi)
 
 # A bounds-safe view over the live bytes of a darray[u8]. This is the bridge
 # that lets raw byte-buffer scanning (ELF string tables, parse buffers, ...) be
@@ -363,107 +426,279 @@ def sview_dirname(view: sview, sep: u8) -> sview:
 # darray is alive and un-grown (a relocating push invalidates it — the compiler
 # tracks this for interior darray borrows).
 def bytes_view(buf: darray[u8]) -> sview:
-    n: usize = buf.count
-    return sview("", 0, 0) if:
-        n == 0
-        buf.items == null or n > buf.capacity
-    signed_len: i64 = n.i64()
-    if signed_len < 0 or signed_len.usize() != n:
-        return sview("", 0, 0)
-    trusted Unsafe.UncheckedIndex:
-        trusted Unsafe.PointerCast:
-            return StringView{data: &buf[0], len: signed_len}
+    can Unsafe{PointerArithmetic,RawExtern}:
+        n: usize = buf.count
+        return sview("", 0, 0) if:
+            n == 0
+            buf.items == null or n > buf.capacity
+        signed_len: i64 = n.i64()
+        if signed_len < 0 or signed_len.usize() != n:
+            return sview("", 0, 0)
+        trusted Unsafe.UncheckedIndex:
+            trusted Unsafe.PointerCast:
+                return StringView{data: &buf[0], len: signed_len}
 
 # A bounded borrowed view into a byte buffer. The source's count and capacity provide
 # the extent; this never scans for a NUL byte and cannot be used with an arbitrary pointer.
 def bytes_view_range(buf: darray[u8], start: usize, count: usize) -> sview:
-    base: sview = bytes_view(buf)
-    empty: sview = sview("", 0, 0)
-    return empty if base.len < 0
-    base_len: usize = base.len.usize()
-    return empty if base_len.i64() != base.len or start > base_len or count > base_len - start
-    start_signed: i64 = start.i64()
-    count_signed: i64 = count.i64()
-    return empty if start_signed < 0 or start_signed.usize() != start or count_signed < 0 or count_signed.usize() != count
-    return string_view_slice(base, start_signed, start_signed + count_signed)
+    can Unsafe{PointerArithmetic,RawExtern}:
+        base: sview = bytes_view(buf)
+        empty: sview = sview("", 0, 0)
+        return empty if base.len < 0
+        base_len: usize = base.len.usize()
+        return empty if base_len.i64() != base.len or start > base_len or count > base_len - start
+        start_signed: i64 = start.i64()
+        count_signed: i64 = count.i64()
+        return empty if start_signed < 0 or start_signed.usize() != start or count_signed < 0 or count_signed.usize() != count
+        return string_view_slice(base, start_signed, start_signed + count_signed)
 
 # Reference-taking counterpart for APIs that already receive a darray borrow. It
 # proves the requested extent against the live container before the only indexed
 # address calculation, so the returned view carries the borrow rather than a copy.
+ghost def bytes_view_range_ref_request_valid(buf: darray[u8]&, start: usize, count: usize) -> bool:
+    ensure result == (
+        buf.count > 0
+        and buf.items != null
+        and buf.count <= buf.capacity
+        and buf.count.i64() >= 0
+        and buf.count.i64().usize() == buf.count
+        and start <= buf.count
+        and count <= buf.count - start
+        and start.i64() >= 0
+        and start.i64().usize() == start
+        and count.i64() >= 0
+        and count.i64().usize() == count
+        and count > 0
+        and start < buf.count
+    )
+    return (
+        buf.count > 0
+        and buf.items != null
+        and buf.count <= buf.capacity
+        and buf.count.i64() >= 0
+        and buf.count.i64().usize() == buf.count
+        and start <= buf.count
+        and count <= buf.count - start
+        and start.i64() >= 0
+        and start.i64().usize() == start
+        and count.i64() >= 0
+        and count.i64().usize() == count
+        and count > 0
+        and start < buf.count
+    )
+
 def bytes_view_range_ref(buf: darray[u8]&, start: usize, count: usize) -> sview:
-    empty: sview = sview("", 0, 0)
-    n: usize = buf.count
-    return empty if n == 0 or buf.items == null or n > buf.capacity
-    signed_n: i64 = n.i64()
-    return empty if:
-        signed_n < 0 or signed_n.usize() != n
-        start > n or count > n - start
-    start_signed: i64 = start.i64()
-    count_signed: i64 = count.i64()
-    return empty if:
-        start_signed < 0 or start_signed.usize() != start or count_signed < 0 or count_signed.usize() != count
-        count == 0
-    trusted Unsafe.UncheckedIndex:
-        trusted Unsafe.PointerCast:
-            return StringView{data: &buf[start], len: count_signed}
+    ensure result.len >= 0
+    ensure result.len == 0 or result.len == count.i64()
+    ensure (count == 0) implies result.len == 0
+    ensure (start > buf.count) implies result.len == 0
+    ensure (start <= buf.count and count > buf.count - start) implies result.len == 0
+    ensure (buf.count == 0 or buf.items == null or buf.count > buf.capacity) implies result.len == 0
+    ensure (buf.count.i64() < 0 or buf.count.i64().usize() != buf.count) implies result.len == 0
+    ensure (start.i64() < 0 or start.i64().usize() != start) implies result.len == 0
+    ensure (count.i64() < 0 or count.i64().usize() != count) implies result.len == 0
+    ensure (
+        buf.count > 0
+        and buf.items != null
+        and buf.count <= buf.capacity
+        and buf.count.i64() >= 0
+        and buf.count.i64().usize() == buf.count
+        and start <= buf.count
+        and count <= buf.count - start
+        and start.i64() >= 0
+        and start.i64().usize() == start
+        and count.i64() >= 0
+        and count.i64().usize() == count
+        and count > 0
+        and start < buf.count
+    ) implies result.len == count.i64()
+    ensure (
+        buf.count > 0
+        and buf.items != null
+        and buf.count <= buf.capacity
+        and buf.count.i64() >= 0
+        and buf.count.i64().usize() == buf.count
+        and start <= buf.count
+        and count <= buf.count - start
+        and start.i64() >= 0
+        and start.i64().usize() == start
+        and count.i64() >= 0
+        and count.i64().usize() == count
+        and count > 0
+        and start < buf.count
+    ) implies result.data == buf.items + start
+    ensure not (
+        buf.count > 0
+        and buf.items != null
+        and buf.count <= buf.capacity
+        and buf.count.i64() >= 0
+        and buf.count.i64().usize() == buf.count
+        and start <= buf.count
+        and count <= buf.count - start
+        and start.i64() >= 0
+        and start.i64().usize() == start
+        and count.i64() >= 0
+        and count.i64().usize() == count
+        and count > 0
+        and start < buf.count
+    ) implies result.len == 0
+    can Unsafe{PointerArithmetic,RawExtern}:
+        empty: sview = sview("", 0, 0)
+        if (
+            buf.count > 0
+            and buf.items != null
+            and buf.count <= buf.capacity
+            and buf.count.i64() >= 0
+            and buf.count.i64().usize() == buf.count
+            and start <= buf.count
+            and count <= buf.count - start
+            and start.i64() >= 0
+            and start.i64().usize() == start
+            and count.i64() >= 0
+            and count.i64().usize() == count
+            and count > 0
+            and start < buf.count
+        ):
+            trusted Unsafe.PointerArithmetic:
+                trusted Unsafe.PointerCast:
+                    return StringView{data: buf.items + start, len: count.i64()}
+        assert not (
+            buf.count > 0
+            and buf.items != null
+            and buf.count <= buf.capacity
+            and buf.count.i64() >= 0
+            and buf.count.i64().usize() == buf.count
+            and start <= buf.count
+            and count <= buf.count - start
+            and start.i64() >= 0
+            and start.i64().usize() == start
+            and count.i64() >= 0
+            and count.i64().usize() == count
+            and count > 0
+            and start < buf.count
+        )
+        return empty
 
-# FNV-1a 64-bit hash of the bytes of `value` (std::hash<std::string_view>). Deterministic
-# and order-sensitive; to hash a C-string / dstr, take a `sview` of its bytes first.
-def hash_sview(value: sview) -> u64:
-    h: mutable u64 = 0xcbf29ce484222325
-    return h if value.len <= 0
-    view_len: usize = value.len.usize()
-    return h if view_len.i64() != value.len
-    i: mutable usize = 0
-    while i < view_len:
-        ch: u8 = string_view_index(value, i.i64()).u8()
-        h <- h ^ ch.u64()
-        h <- h * 0x100000001b3
-        i <- i + 1
-    return h
-
-# Last index of `byte` in `view`, or -1 if absent (the rfind companion to
-# sview_find_byte). Used by the Fs path helpers below.
+# Last index of a byte in a view, or -1 when absent; used by the Fs path helpers.
 def sview_find_last_byte(view: sview, byte: u8) -> i64:
-    return -1 if view.len <= 0 or view.len.usize().i64() != view.len
-    i: mutable i64 = view.len
-    trusted Unsafe.AssumeProgress:
+    # Keep scalar range facts in independent clauses so call-site SMT projection
+    # can retain them even when the quantified character facts are opaque.
+    ensure (view.len < 0 or view.len.usize().i64() != view.len) implies result == -1
+    ensure result >= -1
+    ensure (result >= 0) implies result < view.len
+    ensure (result >= 0) implies string_view_index(view, result) == byte.i64()
+    ensure (result >= 0) implies (forall later in result + 1..<view.len: string_view_index(view, later) != byte.i64())
+    ensure (view.len >= 0 and view.len.usize().i64() == view.len and result == -1) implies (forall candidate in 0..<view.len: string_view_index(view, candidate) != byte.i64())
+    trusted Unsafe.UncheckedIndex:
+        return -1 if view.len < 0
+        view_len: usize = view.len.usize()
+        return -1 if view_len.i64() != view.len
+        assert view.len >= 0 and view_len.i64() == view.len
+        i: mutable i64 = view.len
         while i > 0:
-            i <- i - 1
-            i return if view[i.usize()] == byte.i64()
-    return -1
+            decreases i
+            invariant 0 <= i and i <= view.len
+            invariant forall later in i..<view.len: string_view_index(view, later) != byte.i64()
+            candidate: i64 = i - 1
+            if string_view_index(view, candidate) == byte.i64():
+                return candidate
+            i <- candidate
+        return -1
 
-# `Fs`: pure (allocation-free, OS-free) std::filesystem::path string decomposition.
-# All operate on a `/`-separated path `sview` and return sub-views into it — the OS-backed
-# queries (exists / is_directory / create_directory / directory_iterator) are separate and
-# live with the host FFI. Semantics mirror C++ std::filesystem::path:
-#   filename("a/b/c.txt")=="c.txt", parent("a/b/c.txt")=="a/b",
-#   extension("a/b/c.txt")==".txt" (incl. the dot; "" for none or a leading-dot name),
-#   stem("a/b/c.txt")=="c".
+# Pure StringView path decomposition; OS-backed filesystem queries live in the host FFI.
+# filename and parent select the final component and its preceding prefix.
 module Fs:
     def filename(p: sview) -> sview:
-        slash: i64 = sview_find_last_byte(p, 47)
-        return string_view_suffix(p, slash + 1)
+        ensure (p.len >= 0 and p.len.usize().i64() == p.len) implies result.len == p.len - (sview_find_last_byte(p, 47) + 1)
+        ensure (p.len >= 0 and p.len.usize().i64() == p.len and sview_find_last_byte(p, 47) >= 0) implies result.data == p.data + (sview_find_last_byte(p, 47) + 1).usize()
+        ensure (p.len >= 0 and p.len.usize().i64() == p.len and sview_find_last_byte(p, 47) == -1) implies result.data == p.data
+        can Unsafe{PointerArithmetic,RawExtern,UncheckedIndex}:
+            return string_view_empty_at(p.data) if p.len < 0 or p.len.usize().i64() != p.len
+            slash: i64 = sview_find_last_byte(p, 47)
+            assert slash == sview_find_last_byte(p, 47)
+            assert slash >= -1 and slash < p.len
+            if slash >= 0:
+                trusted Unsafe.PointerCast:
+                    return StringView{data: p.data + (sview_find_last_byte(p, 47) + 1).usize(), len: p.len - (slash + 1)}
+            assert slash == -1
+            trusted Unsafe.PointerCast:
+                return StringView{data: p.data, len: p.len - (slash + 1)}
 
     def parent(p: sview) -> sview:
-        slash: i64 = sview_find_last_byte(p, 47)
-        return string_view_prefix(p, slash) if slash >= 0 else sview("", 0, 0)
+        ensure (p.len >= 0 and p.len.usize().i64() == p.len) implies ((sview_find_last_byte(p, 47) >= 0 and result.len == sview_find_last_byte(p, 47) and (result.len == 0 or result.data == p.data)) or (sview_find_last_byte(p, 47) == -1 and result.len == 0))
+        can Unsafe{PointerArithmetic,RawExtern,UncheckedIndex}:
+            return string_view_empty_at(p.data) if p.len < 0 or p.len.usize().i64() != p.len
+            slash: i64 = sview_find_last_byte(p, 47)
+            assert slash == sview_find_last_byte(p, 47)
+            assert slash >= -1 and slash < p.len
+            if slash >= 0:
+                return string_view_empty_at(p.data) if slash == 0
+                trusted Unsafe.PointerCast:
+                    return StringView{data: p.data, len: slash}
+            assert slash == -1
+            return string_view_empty_at(p.data)
 
+    # The malformed-input and exhaustive valid-length cases below imply result.len >= 0.
     def extension(p: sview) -> sview:
-        name_start: i64 = sview_find_last_byte(p, 47) + 1
-        dot: i64 = sview_find_last_byte(p, 46)
-        return string_view_suffix(p, dot) if dot > name_start else sview("", 0, 0)
+        ensure (p.len < 0 or p.len.usize().i64() != p.len) implies result.len == 0
+        ensure (p.len >= 0 and p.len.usize().i64() == p.len and sview_find_last_byte(p, 46) > sview_find_last_byte(p, 47) + 1) implies result.len == p.len - sview_find_last_byte(p, 46)
+        ensure (p.len >= 0 and p.len.usize().i64() == p.len and sview_find_last_byte(p, 46) <= sview_find_last_byte(p, 47) + 1) implies result.len == 0
+        ensure (p.len >= 0 and p.len.usize().i64() == p.len and sview_find_last_byte(p, 46) > sview_find_last_byte(p, 47) + 1) implies result.data == p.data + sview_find_last_byte(p, 46).usize()
+        can Unsafe{PointerArithmetic,RawExtern,UncheckedIndex}:
+            return string_view_empty_at(p.data) if p.len < 0 or p.len.usize().i64() != p.len
+            slash: i64 = sview_find_last_byte(p, 47)
+            name_start: i64 = slash + 1
+            dot: i64 = sview_find_last_byte(p, 46)
+            assert slash >= -1 and slash < p.len
+            assert name_start == sview_find_last_byte(p, 47) + 1
+            assert dot == sview_find_last_byte(p, 46)
+            assert name_start >= 0 and name_start <= p.len
+            assert dot >= -1 and dot < p.len
+            if dot > name_start:
+                trusted Unsafe.PointerCast:
+                    return StringView{data: p.data + sview_find_last_byte(p, 46).usize(), len: p.len - dot}
+            assert dot <= name_start
+            trusted Unsafe.PointerCast:
+                return StringView{data: p.data, len: 0}
 
+    # The malformed-input and exhaustive valid-length cases imply result.len >= 0.
     def stem(p: sview) -> sview:
-        name_start: i64 = sview_find_last_byte(p, 47) + 1
-        dot: i64 = sview_find_last_byte(p, 46)
-        return string_view_slice(p, name_start, dot) if dot > name_start else string_view_suffix(p, name_start)
+        ensure (p.len < 0 or p.len.usize().i64() != p.len) implies result.len == 0
+        ensure (p.len >= 0 and p.len.usize().i64() == p.len and sview_find_last_byte(p, 46) > sview_find_last_byte(p, 47) + 1) implies result.len == sview_find_last_byte(p, 46) - (sview_find_last_byte(p, 47) + 1)
+        ensure (p.len >= 0 and p.len.usize().i64() == p.len and sview_find_last_byte(p, 46) <= sview_find_last_byte(p, 47) + 1) implies result.len == p.len - (sview_find_last_byte(p, 47) + 1)
+        ensure (p.len >= 0 and p.len.usize().i64() == p.len and sview_find_last_byte(p, 47) >= 0) implies result.data == p.data + (sview_find_last_byte(p, 47) + 1).usize()
+        ensure (p.len >= 0 and p.len.usize().i64() == p.len and sview_find_last_byte(p, 47) == -1) implies result.data == p.data
+        can Unsafe{PointerArithmetic,RawExtern,UncheckedIndex}:
+            return string_view_empty_at(p.data) if p.len < 0 or p.len.usize().i64() != p.len
+            slash: i64 = sview_find_last_byte(p, 47)
+            name_start: i64 = slash + 1
+            dot: i64 = sview_find_last_byte(p, 46)
+            assert slash >= -1 and slash < p.len
+            assert slash == sview_find_last_byte(p, 47)
+            assert name_start == sview_find_last_byte(p, 47) + 1
+            assert dot == sview_find_last_byte(p, 46)
+            assert name_start >= 0 and name_start <= p.len
+            assert dot >= -1 and dot < p.len
+            if dot > name_start:
+                if slash >= 0:
+                    trusted Unsafe.PointerCast:
+                        return StringView{data: p.data + (sview_find_last_byte(p, 47) + 1).usize(), len: dot - name_start}
+                assert slash == -1
+                trusted Unsafe.PointerCast:
+                    return StringView{data: p.data, len: dot - name_start}
+            assert dot <= name_start
+            if slash >= 0:
+                trusted Unsafe.PointerCast:
+                    return StringView{data: p.data + (sview_find_last_byte(p, 47) + 1).usize(), len: p.len - name_start}
+            assert slash == -1
+            trusted Unsafe.PointerCast:
+                return StringView{data: p.data, len: p.len - name_start}
 
     # Build `base / leaf` into arena `a` (std::filesystem::path::operator/). Inserts a
     # single `/` separator (no doubled slash if `base` already ends with one); an absolute
     # `leaf` (leading `/`) replaces `base`, as in C++. Allocates, so it takes the arena.
     def join(a: mutable Arena&, base: sview, leaf: sview) -> dstr:
-        can Memory.Allocate, Abort.Panic:
+        can Abort.Panic, Memory.Allocate, Unsafe{PointerArithmetic,PointerCast,RawExtern}:
             out: mutable dstr = []
             sep: sview = sview("/", 0, -1)
             in a:
@@ -473,7 +708,10 @@ module Fs:
                     return out
                 for cb in base:
                     _ = out.push(cb)
-                out.push(47) if base.len > 0 and base.len.usize().i64() == base.len and not sview_ends_with(base, sep)
+                out.push(47) if base.len > 0 and not sview_ends_with(base, sep)
                 for cl in leaf:
                     _ = out.push(cl)
             return out
+
+include "./elisacore_runtime_string_path_views.elisa"
+include "./elisacore_runtime_string_hash.elisa"

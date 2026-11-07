@@ -117,6 +117,10 @@ func (a *Analyzer) collectFunctionPermissionRefs(fn *ast.FuncDecl) []ast.Permiss
 	if fn == nil {
 		return nil
 	}
+	// A ghost function is erased: its body never runs, so nothing in it is a runtime effect.
+	if fn.IsGhost {
+		return nil
+	}
 	collector := permissionEffectCollector{analyzer: a}
 	if sym, ok := a.symbolForFuncDecl(fn); ok {
 		if ft, ok := sym.Type.(*FuncType); ok {

@@ -21,9 +21,9 @@ include "./heap.elisa"
 
 protocol Allocator:
     type State
-    def allocate(s: mutable State&, size: usize) -> mutable heap void&? can[Memory.Allocate, Abort.Panic, Atomics{Exchange, Store}, Global{Read, Write}]
+    def allocate(s: mutable State&, size: usize) -> mutable heap void&? can[Memory.Allocate, Atomics.Load]
     def deallocate(s: mutable State&, ptr: heap void&, size: usize) can[Memory.Release]
-    def reallocate(s: mutable State&, ptr: mutable void&, old_size: usize, new_size: usize) -> mutable heap void&? can[Memory.Allocate, Abort.Panic, Atomics{Exchange, Store}, Global{Read, Write}]
+    def reallocate(s: mutable State&, ptr: mutable void&, old_size: usize, new_size: usize) -> mutable heap void&? can[Memory.Allocate, Atomics.Load]
 
 # ------------------------------------------------------------
 # Bump allocator — backed by an Arena.
@@ -36,17 +36,16 @@ struct BumpAllocator:
 impl Allocator for BumpAllocator:
     type State = Arena
 
-    def allocate(s: mutable Arena&, size: usize) -> mutable heap void&? can[Memory.Allocate, Abort.Panic, Atomics{Exchange, Store}, Global{Read, Write}]:
-        can Memory.Allocate, Abort.Panic, Atomics{Exchange, Store}, Global{Read, Write}:
+    def allocate(s: mutable Arena&, size: usize) -> mutable heap void&? can[Memory.Allocate, Atomics.Load]:
+        can Memory.Allocate, Abort.Panic, Atomics.Load:
             return arena_alloc(s, size)
 
     def deallocate(s: mutable Arena&, ptr: heap void&, size: usize) can[Memory.Release]:
         return
 
-    def reallocate(s: mutable Arena&, ptr: mutable void&, old_size: usize, new_size: usize) -> mutable heap void&? can[Memory.Allocate, Abort.Panic, Atomics{Exchange, Store}, Global{Read, Write}]:
-        can Memory.Allocate, Abort.Panic, Atomics{Exchange, Store}, Global{Read, Write}:
-            trusted Unsafe.PointerCast:
-                return arena_realloc(s, ptr, old_size, new_size)
+    def reallocate(s: mutable Arena&, ptr: mutable void&, old_size: usize, new_size: usize) -> mutable heap void&? can[Memory.Allocate, Atomics.Load]:
+        can Memory.Allocate, Abort.Panic, Atomics.Load:
+            return arena_realloc(s, ptr, old_size, new_size)
 
 # ------------------------------------------------------------
 # Malloc-backed allocator — per-object libc malloc / free / realloc.
@@ -61,6 +60,8 @@ struct MallocAllocator:
 impl Allocator for MallocAllocator:
     type State = MallocAllocator
 
+    # Concrete calls only allocate from libc; generic Allocator dispatch uses the
+    # protocol's wider effect row, which also accommodates BumpAllocator.
     def allocate(s: mutable MallocAllocator&, size: usize) -> mutable heap void&? can[Memory.Allocate]:
         can Memory.Allocate:
             return malloc(size)

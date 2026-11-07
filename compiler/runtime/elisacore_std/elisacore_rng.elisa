@@ -68,11 +68,11 @@ def xoshiro256_next_f64(rng: mutable Xoshiro256&) -> f64:
 # method: reject values below 2^64 mod bound, then reduce. Chosen over
 # Lemire's method because it needs no 128-bit multiply.
 def xoshiro256_next_below(rng: mutable Xoshiro256&, bound: u64) -> u64:
-    0 return if bound == 0
+    return 0 if bound == 0
     threshold: u64 = (0.u64() - bound) % bound
     while true:
         x: u64 = xoshiro256_next(rng)
-        x % bound return if x >= threshold
+        return x % bound if x >= threshold
     return 0
 
 # ------------------------------------------------------------

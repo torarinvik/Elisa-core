@@ -50,7 +50,7 @@ def len[T](s: Slice[T]) -> usize:
 def slice_band[T](s: Slice[T], start: usize, end: usize) -> Slice[T]:
 	lo: usize = start if start < s.count else s.count
 	hi: usize = end if end < s.count else s.count
-	Slice[T] { base: s.base, count: 0.usize() } return if hi <= lo
+	return Slice[T] { base: s.base, count: 0.usize() } if hi <= lo
 	p: mutable T& = s.base.cast[mutable T&]
 	return Slice[T] { base: (&p[lo]).cast[uintptr], count: hi - lo }
 
@@ -59,7 +59,7 @@ def slice_band[T](s: Slice[T], start: usize, end: usize) -> Slice[T]:
 def split[T](s: Slice[T], nbands: usize, idx: usize) -> Slice[T]:
 	band: usize = (s.count + nbands - 1.usize()) / nbands
 	lo: usize = idx * band
-	Slice[T] { base: s.base, count: 0.usize() } return if lo >= s.count
+	return Slice[T] { base: s.base, count: 0.usize() } if lo >= s.count
 	hi: usize = (lo + band if lo + band < s.count else s.count)
 	p: mutable T& = s.base.cast[mutable T&]
 	return Slice[T] { base: (&p[lo]).cast[uintptr], count: hi - lo }
@@ -128,7 +128,7 @@ def read_view[T](da: darray[T]&) -> ReadView[T]:
 def split[T](v: ReadView[T], nbands: usize, idx: usize) -> ReadView[T]:
 	band: usize = (v.count + nbands - 1.usize()) / nbands
 	lo: usize = idx * band
-	ReadView[T] { base: v.base, count: 0.usize() } return if lo >= v.count
+	return ReadView[T] { base: v.base, count: 0.usize() } if lo >= v.count
 	hi: usize = (lo + band if lo + band < v.count else v.count)
 	p: T& = v.base.cast[T&]
 	return ReadView[T] { base: (&p[lo]).cast[uintptr], count: hi - lo }
