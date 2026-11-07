@@ -53,12 +53,15 @@ func containsTypeParam(t Type) bool {
 // Shared tuple graphs can contain exponentially many paths to the same node.
 // Keep a small inline set and only allocate a map for larger graphs.
 type typeParamSeen struct {
-	enums     [16]*EnumType
-	enumCount int
-	enumLarge map[*EnumType]bool
-	small     [16]*TupleType
-	count     int
-	large     map[*TupleType]bool
+	generics     [16]*GenericInstanceType
+	genericCount int
+	genericLarge map[*GenericInstanceType]bool
+	enums        [16]*EnumType
+	enumCount    int
+	enumLarge    map[*EnumType]bool
+	small        [16]*TupleType
+	count        int
+	large        map[*TupleType]bool
 }
 
 func (s *typeParamSeen) addTuple(t *TupleType) bool {
@@ -113,7 +116,33 @@ func (s *typeParamSeen) addEnum(t *EnumType) bool {
 	return true
 }
 
-// Enum cycles and repeated tuple nodes are visited once per query.
+func (s *typeParamSeen) addGeneric(t *GenericInstanceType) bool {
+	if s.genericLarge != nil {
+		if s.genericLarge[t] {
+			return false
+		}
+		s.genericLarge[t] = true
+		return true
+	}
+	for i := 0; i < s.genericCount; i++ {
+		if s.generics[i] == t {
+			return false
+		}
+	}
+	if s.genericCount < len(s.generics) {
+		s.generics[s.genericCount] = t
+		s.genericCount++
+		return true
+	}
+	s.genericLarge = make(map[*GenericInstanceType]bool, 2*len(s.generics))
+	for _, prior := range s.generics {
+		s.genericLarge[prior] = true
+	}
+	s.genericLarge[t] = true
+	return true
+}
+
+// Enum cycles and repeated tuple and generic nodes are visited once per query.
 func containsTypeParamSeen(t Type, seen *typeParamSeen) bool {
 	switch n := t.(type) {
 	case nil:
@@ -145,6 +174,9 @@ func containsTypeParamSeen(t Type, seen *typeParamSeen) bool {
 		}
 		return false
 	case *GenericInstanceType:
+		if !seen.addGeneric(n) {
+			return false
+		}
 		for _, arg := range n.Args {
 			if containsTypeParamSeen(arg, seen) {
 				return true

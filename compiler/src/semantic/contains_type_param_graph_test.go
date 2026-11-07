@@ -42,3 +42,27 @@ func TestContainsTypeParamSharedAndRecursiveGraphs(t *testing.T) {
 		t.Fatal("concrete deep enum graph contains a type parameter")
 	}
 }
+
+func TestContainsTypeParamSharedAndRecursiveGenericGraphs(t *testing.T) {
+	base := &GenericInstanceType{Name: "Leaf", Args: []Type{&BuiltinType{Name: "i64"}}}
+	var graph Type = base
+	for i := 0; i < 40; i++ {
+		graph = &GenericInstanceType{Name: "Pair", Args: []Type{graph, graph}}
+	}
+	if containsTypeParam(graph) {
+		t.Fatal("concrete generic graph contains a type parameter")
+	}
+	base.Args[0] = &TypeParamType{Name: "T"}
+	if !containsTypeParam(graph) {
+		t.Fatal("shared generic graph lost its type parameter")
+	}
+	cycle := &GenericInstanceType{Name: "Cycle"}
+	cycle.Args = []Type{cycle, &TypeParamType{Name: "U"}}
+	if !containsTypeParam(cycle) {
+		t.Fatal("recursive generic graph lost its type parameter")
+	}
+	cycle.Args = []Type{cycle}
+	if containsTypeParam(cycle) {
+		t.Fatal("concrete recursive generic graph contains a type parameter")
+	}
+}
