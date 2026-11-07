@@ -303,7 +303,7 @@ func (a *Analyzer) storeScanAliasClosureFrom(decl *ast.FuncDecl, idx *storeScanD
 				}
 			}
 		}
-		for _, node := range idx.flat {
+		for _, node := range idx.aliasClosureNodes() {
 			switch n := node.(type) {
 			case *ast.VarDeclStmt:
 				if n != nil {

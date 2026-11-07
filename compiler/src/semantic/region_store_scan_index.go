@@ -194,6 +194,10 @@ type storeScanDeclIndex struct {
 	// subset on first use, rather than dispatching every AST node per query.
 	payloadNodes      []any
 	payloadNodesReady bool
+	// Alias closure only processes statements and calls, not other expression
+	// nodes. Its fixpoint and per-parameter queries reuse this ordered subset.
+	aliasNodes      []any
+	aliasNodesReady bool
 	// bindingWrites is populated on demand once per function. Pattern binder typing used to
 	// reflectively rescan the entire body for every binder name.
 	bindingWrites      map[string]int
@@ -210,6 +214,21 @@ type storeScanDeclIndex struct {
 	identCounts     map[ast.Expr]map[string]int
 	bodyIdentCounts map[string]int
 	kindScopes      *storeFlowKindScopes
+}
+
+func (idx *storeScanDeclIndex) aliasClosureNodes() []any {
+	if !idx.aliasNodesReady {
+		for _, node := range idx.flat {
+			switch node.(type) {
+			case *ast.ForStmt:
+				// The closure's ForStmt case has no effect.
+			case ast.Stmt, *ast.CallExpr:
+				idx.aliasNodes = append(idx.aliasNodes, node)
+			}
+		}
+		idx.aliasNodesReady = true
+	}
+	return idx.aliasNodes
 }
 
 func (a *Analyzer) storeScanIndex(decl *ast.FuncDecl) *storeScanDeclIndex {
