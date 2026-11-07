@@ -247,18 +247,31 @@ func smtProofChecksum(key string) string {
 func (c *smtProofCache) path(key string) string {
 	return filepath.Join(c.directory, key[:2], key+".json")
 }
-func (c *smtProofCache) contains(query string) bool {
-	if c == nil {
-		return false
-	}
-	if c.containsKey(c.key(query)) {
-		return true
-	}
-	if key, ok := c.alphaKey(query); ok {
-		return c.containsKey(key)
-	}
-	return false
+
+type smtProofKeys struct {
+	exact string
+	alpha string
 }
+
+func (c *smtProofCache) contains(query string) bool {
+	_, found := c.lookupProof(query)
+	return found
+}
+
+// Return the calculated keys with a miss so a definitive proof can be
+// published without hashing and normalizing the query a second time.
+func (c *smtProofCache) lookupProof(query string) (smtProofKeys, bool) {
+	if c == nil {
+		return smtProofKeys{}, false
+	}
+	keys := smtProofKeys{exact: c.key(query)}
+	if c.containsKey(keys.exact) {
+		return keys, true
+	}
+	keys.alpha, _ = c.alphaKey(query)
+	return keys, keys.alpha != "" && c.containsKey(keys.alpha)
+}
+
 func (c *smtProofCache) containsKey(key string) bool {
 	f, err := os.Open(c.path(key))
 	if err != nil {
@@ -279,9 +292,18 @@ func (c *smtProofCache) publish(query string) {
 	if c == nil {
 		return
 	}
-	c.publishKey(c.key(query))
-	if key, ok := c.alphaKey(query); ok {
-		c.publishKey(key)
+	keys := smtProofKeys{exact: c.key(query)}
+	keys.alpha, _ = c.alphaKey(query)
+	c.publishProof(keys)
+}
+
+func (c *smtProofCache) publishProof(keys smtProofKeys) {
+	if c == nil || keys.exact == "" {
+		return
+	}
+	c.publishKey(keys.exact)
+	if keys.alpha != "" {
+		c.publishKey(keys.alpha)
 	}
 }
 func (c *smtProofCache) publishKey(key string) {

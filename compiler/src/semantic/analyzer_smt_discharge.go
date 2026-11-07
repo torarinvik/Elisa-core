@@ -702,7 +702,7 @@ func (a *Analyzer) smtCheckQueryWithLogLabel(tr *smtTranslator, hyps string, obl
 	query := tr.takeFactPreamble() + hyps + "(assert (not " + obligation + "))\n" + tr.counterexampleExprDefinitions()
 	a.noteSMTHistory(query)
 	key := a.smtVerdictKey(query)
-	hit, ok, flight := a.smtCachedQuery(key)
+	hit, ok, flight, proofKeys := a.smtCachedQuery(key)
 	if ok {
 		return hit.proven, hit.ce
 	}
@@ -723,10 +723,10 @@ func (a *Analyzer) smtCheckQueryWithLogLabel(tr *smtTranslator, hyps string, obl
 			a.smtStats.SolverProven++
 		}
 		a.cacheSMTQuery(key, smtQueryResult{proven: true})
-		a.smtProofCache.publish(query)
 		if key != query {
-			a.smtProofCache.publish(key)
+			a.smtProofCache.publish(query)
 		}
+		a.smtProofCache.publishProof(proofKeys)
 		return true, ""
 	}
 	a.smtStats.Declined++
@@ -835,7 +835,7 @@ func (a *Analyzer) withSMTEscalation(prove func() bool) bool {
 
 // smtCachedQuery returns a cached exact verdict, if available. Query layout is part of the cache key, so
 // callers may use this for the historical raw-query form as well as the standard negate-and-check form.
-func (a *Analyzer) smtCachedQuery(query string) (smtQueryResult, bool, *smtFlight) {
+func (a *Analyzer) smtCachedQuery(query string) (smtQueryResult, bool, *smtFlight, smtProofKeys) {
 	// Query cache (brick 5): an identical query has the same deterministic verdict, so serve it without a
 	// solver call. Attempts and Proven/Declined still count (the obligation was discharged), but no solver
 	// time accrues — the cache hit is the whole point. SolverProven is left to mean "proven by an actual
@@ -848,7 +848,7 @@ func (a *Analyzer) smtCachedQuery(query string) (smtQueryResult, bool, *smtFligh
 		} else {
 			a.smtStats.Declined++
 		}
-		return hit, true, nil
+		return hit, true, nil, smtProofKeys{}
 	}
 	hit, ok, flight := a.awaitSharedSMTQuery(query)
 	if ok {
@@ -860,20 +860,21 @@ func (a *Analyzer) smtCachedQuery(query string) (smtQueryResult, bool, *smtFligh
 			a.smtStats.Declined++
 		}
 		a.cacheSMTQuery(query, hit)
-		return hit, true, nil
+		return hit, true, nil, smtProofKeys{}
 	}
 	if !a.smtProofCacheInitialized {
 		a.smtProofCacheInitialized = true
 		a.smtProofCache = newSMTProofCache(os.Getenv("ELISACORE_SMT_CACHE_DIR"), a.smtBinary)
 	}
-	if a.smtProofCache.contains(query) {
+	proofKeys, proven := a.smtProofCache.lookupProof(query)
+	if proven {
 		a.recordSMTAttempt(query)
 		a.smtStats.CacheHits++
 		a.smtStats.PersistentCacheHits++
 		a.smtStats.Proven++
 		result := smtQueryResult{proven: true}
 		a.cacheSMTQuery(query, result)
-		return result, true, nil
+		return result, true, nil, smtProofKeys{}
 	}
 	if ce, ok := a.smtProofCache.declined(query); ok {
 		a.recordSMTAttempt(query)
@@ -882,9 +883,9 @@ func (a *Analyzer) smtCachedQuery(query string) (smtQueryResult, bool, *smtFligh
 		a.smtStats.Declined++
 		result := smtQueryResult{proven: false, ce: ce}
 		a.cacheSMTQuery(query, result)
-		return result, true, nil
+		return result, true, nil, smtProofKeys{}
 	}
-	return smtQueryResult{}, false, flight
+	return smtQueryResult{}, false, flight, proofKeys
 }
 
 // smtCheckRawQueryWithLogLabel preserves checks whose historical query was a satisfiability test rather
@@ -895,7 +896,7 @@ func (a *Analyzer) smtCheckRawQueryWithLogLabel(query string, label string, logO
 		return false, ""
 	}
 	a.smtStats.Enabled = true
-	hit, ok, flight := a.smtCachedQuery(query)
+	hit, ok, flight, proofKeys := a.smtCachedQuery(query)
 	if ok {
 		return hit.proven, hit.ce
 	}
@@ -911,7 +912,7 @@ func (a *Analyzer) smtCheckRawQueryWithLogLabel(query string, label string, logO
 		a.smtStats.Proven++
 		a.smtStats.SolverProven++
 		a.cacheSMTQuery(query, smtQueryResult{proven: true})
-		a.smtProofCache.publish(query)
+		a.smtProofCache.publishProof(proofKeys)
 		return true, ""
 	}
 	if res == smt.Sat {

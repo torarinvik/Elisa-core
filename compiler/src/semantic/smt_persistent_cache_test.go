@@ -250,7 +250,7 @@ func TestResetSMTForRetainedUpdateRefreshesSolverAndBudgetState(t *testing.T) {
 		smtProofCache:            oldCache,
 		smtProofCacheInitialized: true,
 		smtUnavailable:           true,
-		smtSnapshotTainted:      true,
+		smtSnapshotTainted:       true,
 		smtSolver:                &fixedSMTSolver{result: smt.Unknown},
 		smtHistory:               []string{"old declaration query"},
 		smtHistoryFor:            &ast.FuncDecl{},
@@ -262,7 +262,7 @@ func TestResetSMTForRetainedUpdateRefreshesSolverAndBudgetState(t *testing.T) {
 		t.Fatalf("retained SMT state survived reset incorrectly: solver=%v query=%v proof=%v initialized=%v unavailable=%v snapshotTainted=%v history=%v historyFor=%v",
 			a.smtSolver, a.smtQueryCache, a.smtProofCache, a.smtProofCacheInitialized, a.smtUnavailable, a.smtSnapshotTainted, a.smtHistory, a.smtHistoryFor)
 	}
-	if _, ok, _ := a.smtCachedQuery(query); ok {
+	if _, ok, _, _ := a.smtCachedQuery(query); ok {
 		t.Fatal("resource decline from the old solver or budget survived retained update")
 	}
 	if a.smtProofCache == nil || a.smtProofCache.identity == oldCache.identity {

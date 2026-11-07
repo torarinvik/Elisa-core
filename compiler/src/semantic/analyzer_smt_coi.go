@@ -301,14 +301,15 @@ const smtAfterSatAbstractionBudget = 50000
 // query. SAT models and Unknown results must follow the existing solver path.
 // The outer query initializes the cache; nil keeps caching fully disabled.
 func (a *Analyzer) smtCheckTransformedProof(query string, check func() (smt.Result, map[string]string)) (smt.Result, map[string]string) {
-	if a.smtProofCache.contains(query) {
+	keys, hit := a.smtProofCache.lookupProof(query)
+	if hit {
 		a.smtStats.CacheHits++
 		a.smtStats.PersistentCacheHits++
 		return smt.Unsat, nil
 	}
 	result, model := check()
 	if result == smt.Unsat {
-		a.smtProofCache.publish(query)
+		a.smtProofCache.publishProof(keys)
 	}
 	return result, model
 }
