@@ -1034,6 +1034,9 @@ type Analyzer struct {
 	// globalDerivedLoopCandidates caches the global scope's derived-state bindings for
 	// captureDerivedLoopEntry (valid for one globalScope symbolsVersion and symbolTypeEpoch).
 	globalDerivedLoopCandidates derivedLoopCandidates
+	// Parallel body workers read a frozen global symbol table. Cache its local
+	// names per scope/version rather than filtering the entire table per proof.
+	smtGlobalLocalNames smtGlobalLocalNameCache
 }
 
 type castHookSignature struct {

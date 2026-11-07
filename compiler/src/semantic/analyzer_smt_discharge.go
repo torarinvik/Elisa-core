@@ -2472,6 +2472,30 @@ func (a *Analyzer) canAssumeContractFact(expr ast.Expr) bool {
 // variables (docs/85 gap #2). Sound: an immutable local equals its initializer wherever it
 // is in scope, and it is never reassigned. A definition outside the integer fragment (a call,
 // a float) is skipped — fewer hypotheses only declines a proof, never admits an unsound one.
+type smtGlobalLocalNameCache struct {
+	scope   *Scope
+	version uint64
+	names   []string
+}
+
+// The parallel body's global symbol kinds and mutability are fixed at fork.
+// Each worker owns this cache; a changed scope or definition version rebuilds it.
+func (a *Analyzer) smtGlobalImmutableLocalNames(sc *Scope) []string {
+	cache := &a.smtGlobalLocalNames
+	if cache.scope == sc && cache.version == sc.symbolsVersion {
+		return cache.names
+	}
+	var names []string
+	for name, sym := range sc.Symbols {
+		if sym != nil && !sym.Mutable && sym.Kind == SymbolLocal {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	*cache = smtGlobalLocalNameCache{scope: sc, version: sc.symbolsVersion, names: names}
+	return names
+}
+
 func (a *Analyzer) smtImmutableLocalHypotheses(tr *smtTranslator) string {
 	if a == nil || a.currentScope == nil || tr == nil {
 		return ""
@@ -2488,14 +2512,21 @@ func (a *Analyzer) smtImmutableLocalHypotheses(tr *smtTranslator) string {
 		// immutable locals, and sorting all of them on every query was ~9 s of a stage1 build.
 		// The filter is exactly the per-name skip below, so the emitted hypotheses are unchanged.
 		var names []string
-		for name, sym := range sc.Symbols {
-			if sym == nil || sym.Mutable || sym.Kind != SymbolLocal || seen[name] {
+		if a.parallel != nil && sc == a.globalScope {
+			names = a.smtGlobalImmutableLocalNames(sc)
+		} else {
+			for name, sym := range sc.Symbols {
+				if sym == nil || sym.Mutable || sym.Kind != SymbolLocal || seen[name] {
+					continue
+				}
+				names = append(names, name)
+			}
+			sort.Strings(names)
+		}
+		for _, name := range names {
+			if seen[name] {
 				continue
 			}
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		for _, name := range names {
 			sym := sc.Symbols[name]
 			seen[name] = true // a closer scope's binding shadows an outer one
 			vd, ok := sym.Node.(*ast.VarDeclStmt)
