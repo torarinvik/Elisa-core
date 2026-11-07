@@ -3,7 +3,6 @@ package semantic
 import (
 	"reflect"
 	"strings"
-	"sync"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -453,20 +452,8 @@ func fillMayAdoptWalkReflect(v reflect.Value, visit func(any), seen map[uintptr]
 	}
 }
 
-var fillMayAdoptFieldCache sync.Map // map[reflect.Type][]int
-
 func fillMayAdoptExportedFields(t reflect.Type) []int {
-	if cached, ok := fillMayAdoptFieldCache.Load(t); ok {
-		return cached.([]int)
-	}
-	indices := make([]int, 0, t.NumField())
-	for i := 0; i < t.NumField(); i++ {
-		if t.Field(i).IsExported() {
-			indices = append(indices, i)
-		}
-	}
-	cached, _ := fillMayAdoptFieldCache.LoadOrStore(t, indices)
-	return cached.([]int)
+	return reflectMetaOf(t).exportedFields
 }
 
 // fillMayAdoptNonAllocatingMethods are builtin container methods that never allocate a value of

@@ -17,6 +17,7 @@ import (
 
 type reflectTypeMeta struct {
 	fields          []reflect.StructField
+	exportedFields  []int
 	compositeFields []int
 	// byName maps every name t.FieldByName resolves (direct or promoted, unambiguous) to its
 	// Index. Built eagerly from VisibleFields, so it is immutable once published.
@@ -60,6 +61,9 @@ func reflectMetaSlow(t reflect.Type) *reflectTypeMeta {
 	for i := range meta.fields {
 		meta.fields[i] = t.Field(i)
 		f := meta.fields[i]
+		if f.IsExported() {
+			meta.exportedFields = append(meta.exportedFields, i)
+		}
 		if f.IsExported() && f.Type != syntaxWalkPositionType {
 			switch f.Type.Kind() {
 			case reflect.Pointer, reflect.Interface, reflect.Struct, reflect.Slice, reflect.Array, reflect.Map:
