@@ -166,6 +166,18 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 		if choice, ok := inner.(*ast.TernaryExpr); ok && choice != nil {
 			return maxStoreMode(valueMode(choice.Value), valueMode(choice.Alt))
 		}
+		// Simple payloads must mention a tainted name to retain its storage.
+		// Compound literals and calls still check their component expressions,
+		// including call arguments that may have been resolved since indexing.
+		mentionsChecked := false
+		switch inner.(type) {
+		case *ast.StructLitExpr, *ast.CallExpr:
+		default:
+			if !scanIdx.mentions(value, content) {
+				return storeNone
+			}
+			mentionsChecked = true
+		}
 		// A value whose (already analyzed) type cannot hold region storage carries none.
 		// Probe the cached storage property before walking generic enum payloads.
 		if t, known := a.lookupExprType(inner); known && a.storeScanTypeIsPlainValue(t) {
@@ -243,7 +255,7 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 				return mode
 			}
 		}
-		if !scanIdx.mentions(value, content) {
+		if !mentionsChecked && !scanIdx.mentions(value, content) {
 			return storeNone
 		}
 		// A nested call's result carries, from each argument, only what its callee may RETURN
