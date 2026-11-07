@@ -3,6 +3,7 @@ package semantic
 import (
 	"elisacore/src/ast"
 	"reflect"
+	"sync"
 )
 
 // A field selector contributes only its receiver's name. Keep this fast path
@@ -185,7 +186,8 @@ type storeScanDeclIndex struct {
 	parameterNames map[string]bool               // immutable names, shared by this declaration's taint queries
 	// nameNodes lists offsets into flat for nodes whose own expressions
 	// (a statement's header only) mention the name.
-	nameNodes map[string][]int // lazily built only for filled-local proofs
+	nameNodesOnce sync.Once
+	nameNodes     map[string][]int // lazily built only for filled-local proofs
 	// flat: every node walkStoreScanNodes visits, in walk order (fixpoints iterate this instead
 	// of re-walking the AST reflectively per iteration).
 	flat    []any
@@ -241,7 +243,7 @@ func (idx *storeScanDeclIndex) bindingEffectNodes() []any {
 // Most store scans never ask for filled-local proofs. Avoid walking every
 // expression to build their reverse name index until the first such query.
 func (idx *storeScanDeclIndex) nodesForName(name string) []int {
-	if idx.nameNodes == nil {
+	idx.nameNodesOnce.Do(func() {
 		idx.nameNodes = map[string][]int{}
 		exprNames := make(map[string]bool)
 		for offset, node := range idx.flat {
@@ -276,7 +278,7 @@ func (idx *storeScanDeclIndex) nodesForName(name string) []int {
 			}
 			clear(exprNames)
 		}
-	}
+	})
 	return idx.nameNodes[name]
 }
 

@@ -3,6 +3,7 @@ package semantic
 import (
 	"fmt"
 	"reflect"
+	"sync"
 	"testing"
 
 	"elisacore/src/ast"
@@ -23,6 +24,21 @@ func TestStoreScanNameNodesBuiltOnDemand(t *testing.T) {
 			t.Fatalf("%s: got %v, want %v", name, got, want)
 		}
 	}
+}
+
+func TestStoreScanNameNodesConcurrentReaders(t *testing.T) {
+	idx := &storeScanDeclIndex{flat: []any{&ast.VarDeclStmt{Name: "x", Value: &ast.Ident{Name: "source"}}}}
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if got := idx.nodesForName("source"); !reflect.DeepEqual(got, []int{0}) {
+				t.Errorf("offsets = %v", got)
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 func BenchmarkStoreScanIndexLazyNames(b *testing.B) {
