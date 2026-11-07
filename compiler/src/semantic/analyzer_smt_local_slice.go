@@ -19,25 +19,37 @@ func sliceImmutableLocalHypotheses(localHyps, context string) string {
 		return ""
 	}
 	type block struct {
-		sym   string
-		lines []string
+		sym         string
+		first, last int
 	}
-	var blocks []block
-	index := map[string]int{}
-	for _, line := range strings.SplitAfter(localHyps, "\n") {
-		if line == "" {
-			continue
+	type hypothesisLine struct {
+		text string
+		next int
+	}
+	lineCount := strings.Count(localHyps, "\n") + 1
+	blocks := make([]block, 0, lineCount)
+	lines := make([]hypothesisLine, 0, lineCount)
+	index := make(map[string]int, lineCount)
+	for rest := localHyps; rest != ""; {
+		line := rest
+		if end := strings.IndexByte(rest, '\n'); end >= 0 {
+			line, rest = rest[:end+1], rest[end+1:]
+		} else {
+			rest = ""
 		}
 		sym, ok := localHypothesisSymbol(line)
 		if !ok {
-			return localHyps // unexpected shape: keep everything
+			return localHyps
 		}
+		next := len(lines)
+		lines = append(lines, hypothesisLine{text: line, next: -1})
 		if i, seen := index[sym]; seen {
-			blocks[i].lines = append(blocks[i].lines, line)
-			continue
+			lines[blocks[i].last].next = next
+			blocks[i].last = next
+		} else {
+			index[sym] = len(blocks)
+			blocks = append(blocks, block{sym: sym, first: next, last: next})
 		}
-		index[sym] = len(blocks)
-		blocks = append(blocks, block{sym: sym, lines: []string{line}})
 	}
 	// Only block symbols can make another block reachable. Queue each one
 	// once instead of repeatedly scanning every block and retaining all SMT tokens.
@@ -54,15 +66,15 @@ func sliceImmutableLocalHypotheses(localHyps, context string) string {
 	}
 	enqueue(context)
 	for next := 0; next < len(queue); next++ {
-		for _, line := range blocks[queue[next]].lines {
-			enqueue(line)
+		for i := blocks[queue[next]].first; i >= 0; i = lines[i].next {
+			enqueue(lines[i].text)
 		}
 	}
 	var b strings.Builder
 	for i, blk := range blocks {
 		if keep[i] {
-			for _, line := range blk.lines {
-				b.WriteString(line)
+			for j := blk.first; j >= 0; j = lines[j].next {
+				b.WriteString(lines[j].text)
 			}
 		}
 	}

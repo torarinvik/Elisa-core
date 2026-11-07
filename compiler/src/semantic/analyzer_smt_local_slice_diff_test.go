@@ -89,3 +89,20 @@ func TestImmutableLocalSliceMatchesReference(t *testing.T) {
 		}
 	}
 }
+
+func TestImmutableLocalSliceInterleavedAndMalformed(t *testing.T) {
+	cases := []struct{ hyps, context string }{
+		{"(assert (= v_a v_b))\n(assert (= v_b 1))\n(assert (< v_a 8))\n", "(assert (> v_a 0))"},
+		{"(assert (= v_a v_b))\n(assert (= v_b v_a))", "v_a"},
+		{"(assert (= b_x v_a))\n(assert (= v_a 1))\n", "b_x"},
+		{"(assert (= v_a 1))\n\n", "v_a"},
+		{"(assert (= v_a 1))", ""},
+	}
+	for _, tc := range cases {
+		got := sliceImmutableLocalHypotheses(tc.hyps, tc.context)
+		want := referenceSliceImmutableLocalHypotheses(tc.hyps, tc.context)
+		if got != want {
+			t.Fatalf("%q: got %q want %q", tc.hyps, got, want)
+		}
+	}
+}
