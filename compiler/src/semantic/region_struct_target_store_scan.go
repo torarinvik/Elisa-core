@@ -1203,7 +1203,33 @@ func rootNameOfDotted(name string) string {
 
 // stmtBoundNames over-approximates the names a statement may bind: every string field in its
 // non-body parts (patterns, binder names, rebind targets).
+// These common statement schemas contain only a source position and an
+// expression, which the reference walk skips. Check the schema at startup so
+// added fields automatically fall back to reflection.
+var storeScanExprStmtNoBinders = storeScanSimpleExprStmtSchema(reflect.TypeOf(ast.ExprStmt{}), "Expr")
+var storeScanDiscardStmtNoBinders = storeScanSimpleExprStmtSchema(reflect.TypeOf(ast.DiscardStmt{}), "Value")
+var storeScanReturnStmtNoBinders = storeScanSimpleExprStmtSchema(reflect.TypeOf(ast.ReturnStmt{}), "Value")
+
+func storeScanSimpleExprStmtSchema(t reflect.Type, exprField string) bool {
+	return t.NumField() == 2 && t.Field(0).Name == "Position" && t.Field(0).Type == storeScanPosType &&
+		t.Field(1).Name == exprField && t.Field(1).Type == reflect.TypeOf((*ast.Expr)(nil)).Elem()
+}
+
 func stmtBoundNames(stmt ast.Stmt) []string {
+	switch stmt.(type) {
+	case *ast.ExprStmt:
+		if storeScanExprStmtNoBinders {
+			return nil
+		}
+	case *ast.DiscardStmt:
+		if storeScanDiscardStmtNoBinders {
+			return nil
+		}
+	case *ast.ReturnStmt:
+		if storeScanReturnStmtNoBinders {
+			return nil
+		}
+	}
 	var out []string
 	v := reflect.ValueOf(stmt)
 	if v.Kind() == reflect.Pointer {
