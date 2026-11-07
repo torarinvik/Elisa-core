@@ -716,10 +716,12 @@ func (a *Analyzer) smtCheckQueryWithLogLabel(tr *smtTranslator, hyps string, obl
 	persistentHits := a.smtStats.PersistentCacheHits
 	resourceBefore, transientBefore, canCertify := smtUnknownCacheEpoch(solver)
 	snapshotBefore, snapshotClassified := smtSnapshotUnknownEpoch(solver)
-	res, model := a.smtCheckSliced(solver, query, "(assert (not "+obligation+"))", tr.declaredSMTVars())
+	res, model, sharedProof := a.smtShareOuterProof(proofKeys, func() (smt.Result, map[string]string) {
+		return a.smtCheckSliced(solver, query, "(assert (not "+obligation+"))", tr.declaredSMTVars())
+	})
 	if res == smt.Unsat {
 		a.smtStats.Proven++
-		if a.smtStats.PersistentCacheHits == persistentHits {
+		if !sharedProof && a.smtStats.PersistentCacheHits == persistentHits {
 			a.smtStats.SolverProven++
 		}
 		a.cacheSMTQuery(key, smtQueryResult{proven: true})
@@ -757,6 +759,35 @@ func (a *Analyzer) smtCheckQueryWithLogLabel(tr *smtTranslator, hyps string, obl
 	// Every other Unknown is retryable, including unclassified test/third-party solvers.
 
 	return false, ""
+}
+
+// Equivalent complete obligations may be analyzed concurrently by different
+// workers. Reuse only definitive proofs: SAT models are named for the original
+// query and Unknown must remain retryable. The distinct flight namespace avoids
+// nesting this outer check with the transformed-query flights it may invoke.
+func (a *Analyzer) smtShareOuterProof(keys smtProofKeys, check func() (smt.Result, map[string]string)) (smt.Result, map[string]string, bool) {
+	key := keys.alpha
+	namespace := "\x00outer-alpha-proof\x00"
+	if key == "" {
+		key = keys.exact
+		namespace = "\x00outer-exact-proof\x00"
+	}
+	if key == "" || a.parallel == nil || a.parallel.smtFlights == nil {
+		result, model := check()
+		return result, model, false
+	}
+	flightKey := namespace + key
+	shared, hit, flight := a.awaitSharedSMTQuery(flightKey)
+	if hit && shared.proven {
+		a.smtStats.CacheHits++
+		return smt.Unsat, nil, true
+	}
+	defer a.releaseSMTFlight(flightKey, flight)
+	result, model := check()
+	if result == smt.Unsat && flight != nil {
+		a.resolveSMTFlight(flightKey, smtQueryResult{proven: true})
+	}
+	return result, model, false
 }
 
 func smtSnapshotUnknownEpoch(solver smt.Solver) (uint64, bool) {
