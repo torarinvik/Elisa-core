@@ -1022,12 +1022,18 @@ func storeScanMentionsHeader(node any, names map[string]bool) bool {
 					continue
 				}
 			}
-			return storeScanMentionsHeaderWalk(reflect.ValueOf(node), names, map[uintptr]bool{})
+			return storeScanMentionsHeaderPooled(node, names)
 		default:
-			return storeScanMentionsHeaderWalk(reflect.ValueOf(node), names, map[uintptr]bool{})
+			return storeScanMentionsHeaderPooled(node, names)
 		}
 	}
-	return storeScanMentionsHeaderWalk(reflect.ValueOf(node), names, map[uintptr]bool{})
+	return storeScanMentionsHeaderPooled(node, names)
+}
+
+func storeScanMentionsHeaderPooled(node any, names map[string]bool) bool {
+	seen := borrowStoreScanSeen()
+	defer releaseStoreScanSeen(seen)
+	return storeScanMentionsHeaderWalk(reflect.ValueOf(node), names, seen)
 }
 
 func storeScanScalarHeaderField(name string) bool {

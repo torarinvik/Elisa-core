@@ -51,3 +51,32 @@ func BenchmarkStoreScanIndexedHeader(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkStoreScanHeaderCompound(b *testing.B) {
+	var expr ast.Expr = &ast.FieldExpr{Object: &ast.Ident{Name: "values"}, Field: "count"}
+	for range 16 {
+		expr = &ast.BinaryExpr{Left: expr, Right: &ast.Ident{Name: "other"}}
+	}
+	names := map[string]bool{"values": true}
+	for _, pooled := range []bool{false, true} {
+		label := "fresh"
+		if pooled {
+			label = "pooled"
+		}
+		b.Run(label, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				var seen map[uintptr]bool
+				if pooled {
+					seen = borrowStoreScanSeen()
+				} else {
+					seen = map[uintptr]bool{}
+				}
+				storeScanMentionsSink = storeScanMentionsHeaderWalk(reflect.ValueOf(expr), names, seen)
+				if pooled {
+					releaseStoreScanSeen(seen)
+				}
+			}
+		})
+	}
+}
