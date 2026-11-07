@@ -277,7 +277,10 @@ extern "C" unsigned elisacoreUnrollBoundedDivisionLoops(LLVMModuleRef Ref) {
       PHINode *P = BDU_FindRecurrence(*L, C.Divisor);
       if (!P) break; // Never query the stale pre-normalization LVI again.
 
-      UnrollLoopOptions Options{C.Bound, false, false, false, true, false,
+      // Full expansion hoists many division constants before the first exit.
+      // Four iterations keep short inputs compact while unrolling long inputs.
+      unsigned Factor = C.Bound > 4 ? 4 : C.Bound;
+      UnrollLoopOptions Options{Factor, false, false, false, true, false,
                                 nullptr, 1000, true, false};
       Loop *Remainder = nullptr;
       LoopUnrollResult Result = UnrollLoop(L, Options, &LI, &SE, &DT, &AC,
