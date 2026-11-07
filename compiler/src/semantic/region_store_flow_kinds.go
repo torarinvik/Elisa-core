@@ -613,7 +613,7 @@ func (a *Analyzer) computeStoreFlowKinds(decl *ast.FuncDecl, s *storeFlowSummary
 		if id, isIdent := storeScanUnwrap(expr).(*ast.Ident); (!ok || t == nil) && isIdent && id != nil && a.storeScanPatternBindersShareNot(decl, id.Name) {
 			return storeFlowEdgeElements
 		}
-		if ok && t != nil && !containsTypeParam(t) {
+		if ok && t != nil && !a.containsTypeParamCached(t) {
 			if a.storeScanSharesCached(t) {
 				return storeFlowEdgeHeader
 			}
@@ -665,7 +665,7 @@ func (a *Analyzer) computeStoreFlowKinds(decl *ast.FuncDecl, s *storeFlowSummary
 		if inner == nil {
 			return out
 		}
-		if t, ok := a.storeScanStaticType(decl, inner); ok && t != nil && !containsTypeParam(t) && a.storeScanHoldsNoRegionStorage(t) && !a.typeMayHoldFrameBorrow(t, map[Type]bool{}) {
+		if t, ok := a.storeScanStaticType(decl, inner); ok && t != nil && !a.containsTypeParamCached(t) && a.storeScanHoldsNoRegionStorage(t) && !a.typeMayHoldFrameBorrow(t, map[Type]bool{}) {
 			return out
 		}
 		switch e := inner.(type) {

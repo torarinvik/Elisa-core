@@ -190,7 +190,7 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 			if !ok || t == nil {
 				t, ok = a.storeScanParamProjectionType(decl, inner)
 			}
-			if ok && t != nil && !containsTypeParam(t) {
+			if ok && t != nil && !a.containsTypeParamCached(t) {
 				if a.storeScanHoldsNoRegionStorage(t) && !a.storeScanTypeMayEncodeAddress(t, map[Type]bool{}) {
 					return storeNone
 				}
@@ -202,7 +202,7 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 			}
 			// A by-value loop binder copies one element, not the container's backing storage.
 			if id, isIdent := inner.(*ast.Ident); isIdent {
-				if t, ok := a.storeScanLoopBinderElemType(decl, id); ok && t != nil && !containsTypeParam(t) && !a.storeScanTypeMayEncodeAddress(t, map[Type]bool{}) && (a.storeScanHoldsNoRegionStorage(t) || (len(a.programRegions) != 0 && a.typeIsProgramLivedCached(t))) {
+				if t, ok := a.storeScanLoopBinderElemType(decl, id); ok && t != nil && !a.containsTypeParamCached(t) && !a.storeScanTypeMayEncodeAddress(t, map[Type]bool{}) && (a.storeScanHoldsNoRegionStorage(t) || (len(a.programRegions) != 0 && a.typeIsProgramLivedCached(t))) {
 					return storeNone
 				}
 			}
@@ -767,7 +767,7 @@ func (a *Analyzer) storeScanStoredElementExprProgramLivedSeen(decl *ast.FuncDecl
 	if !known || t == nil {
 		return false
 	}
-	if containsTypeParam(t) {
+	if a.containsTypeParamCached(t) {
 		return false
 	}
 	if a.storeScanTypeMayEncodeAddress(t, map[Type]bool{}) {
@@ -1537,7 +1537,7 @@ func (a *Analyzer) declParamCarriesStorage(decl *ast.FuncDecl, index int) bool {
 		return true
 	}
 	param := fnType.Params[index]
-	if containsTypeParam(param) {
+	if a.containsTypeParamCached(param) {
 		return true
 	}
 	return !a.storeScanHoldsNoRegionStorage(param)
@@ -1564,7 +1564,7 @@ func (a *Analyzer) storeScanTypeIsProgramLivedForStoreProof(t Type) bool {
 		return false
 	}
 	return a.memoTypePredicate(&a.storeScanProgramLivedMemo, t, func() bool {
-		return !containsTypeParam(t) && !a.storeScanTypeMayEncodeAddress(t, map[Type]bool{}) &&
+		return !a.containsTypeParamCached(t) && !a.storeScanTypeMayEncodeAddress(t, map[Type]bool{}) &&
 			a.typeCanContainRegionRefs(stripRefForBounds(t), map[string]bool{}) && a.typeIsProgramLivedCached(t)
 	})
 }
@@ -1576,7 +1576,7 @@ func (a *Analyzer) storeScanTypeIsPlainValue(t Type) bool {
 		return false
 	}
 	return a.memoTypePredicate(&a.storeScanPlainValueMemo, t, func() bool {
-		return a.storeScanHoldsNoRegionStorage(t) && !containsTypeParam(t) && !a.storeScanTypeMayEncodeAddress(t, map[Type]bool{})
+		return a.storeScanHoldsNoRegionStorage(t) && !a.containsTypeParamCached(t) && !a.storeScanTypeMayEncodeAddress(t, map[Type]bool{})
 	})
 }
 
@@ -1842,7 +1842,7 @@ func (a *Analyzer) storeScanTypeExprIsOpaque(t ast.TypeExpr) bool {
 			}
 			// A named value type that can hold no region reference (`ValueType`, a struct of
 			// scalars) carries nothing either.
-			return resolved != nil && !containsTypeParam(resolved) && !a.storeScanTypeMayEncodeAddress(resolved, map[Type]bool{}) && a.storeScanHoldsNoRegionStorage(resolved)
+			return resolved != nil && !a.containsTypeParamCached(resolved) && !a.storeScanTypeMayEncodeAddress(resolved, map[Type]bool{}) && a.storeScanHoldsNoRegionStorage(resolved)
 		}
 		return false
 	}
@@ -2006,7 +2006,7 @@ func (a *Analyzer) declParamIsViewOrScalar(decl *ast.FuncDecl, index int) bool {
 	if _, isRef := t.(*RefType); isRef {
 		return false
 	}
-	if t == nil || containsTypeParam(t) {
+	if t == nil || a.containsTypeParamCached(t) {
 		return false
 	}
 	if _, isOpaque := t.(*OpaqueType); isOpaque {
@@ -2043,7 +2043,7 @@ func (a *Analyzer) storeScanTaintBinders(decl *ast.FuncDecl, idx *storeScanDeclI
 		// A by-value loop capture whose element type cannot contain region storage does
 		// not inherit taint from the container's header or contents. Opaque foreign
 		// handles such as LLVMValueRef are copied values, not Elisa borrows.
-		if elem, ok := a.storeScanLoopBinderElemType(decl, &ast.Ident{Name: name}); ok && elem != nil && !containsTypeParam(elem) && !a.storeScanTypeMayEncodeAddress(elem, map[Type]bool{}) && a.storeScanHoldsNoRegionStorage(elem) {
+		if elem, ok := a.storeScanLoopBinderElemType(decl, &ast.Ident{Name: name}); ok && elem != nil && !a.containsTypeParamCached(elem) && !a.storeScanTypeMayEncodeAddress(elem, map[Type]bool{}) && a.storeScanHoldsNoRegionStorage(elem) {
 			continue
 		}
 		if add(content, name) {
@@ -2232,7 +2232,7 @@ func (a *Analyzer) declParamIsWritableRef(decl *ast.FuncDecl, index int) bool {
 	// enum payload holding one, or a reference) SHARES its indirect storage with the caller:
 	// `p[i] <- x` / `p.items[0] <- x` writes caller-visible memory. Only a by-value type that
 	// reaches no shared indirect storage is exempt.
-	return containsTypeParam(fnType.Params[index]) || a.storeScanSharesCached(fnType.Params[index])
+	return a.containsTypeParamCached(fnType.Params[index]) || a.storeScanSharesCached(fnType.Params[index])
 }
 
 // typeSharesIndirectStorage reports whether a by-value copy of t can still reach storage it
@@ -2585,7 +2585,7 @@ func (a *Analyzer) storeScanLiteralFieldsProgramLived(decl *ast.FuncDecl, lit *a
 	}
 	for _, fieldDecl := range st.Decl.Fields {
 		field, exists := st.Fields[fieldDecl.Name]
-		if !exists || field.Type == nil || containsTypeParam(field.Type) || a.storeScanTypeMayEncodeAddress(field.Type, map[Type]bool{}) {
+		if !exists || field.Type == nil || a.containsTypeParamCached(field.Type) || a.storeScanTypeMayEncodeAddress(field.Type, map[Type]bool{}) {
 			return fail(fieldDecl.Name, "unknown-or-address-type")
 		}
 		if field.Ghost || field.Phantom {
@@ -2952,7 +2952,7 @@ func (a *Analyzer) storeScanDeclReturnsViewOnly(decl *ast.FuncDecl) bool {
 		return false
 	}
 	ft, ok := sym.Type.(*FuncType)
-	if !ok || ft == nil || ft.Return == nil || containsTypeParam(ft.Return) {
+	if !ok || ft == nil || ft.Return == nil || a.containsTypeParamCached(ft.Return) {
 		return false
 	}
 	return a.storeScanViewOnlyCached(ft.Return)
@@ -3373,8 +3373,8 @@ func (a *Analyzer) storeScanExtendArgMode(decl *ast.FuncDecl, arg ast.Expr, mode
 		// element types too, even before their expression types are populated.
 		t, known = a.storeScanParamProjectionType(decl, storeScanUnwrap(arg))
 	}
-	if known && t != nil && !containsTypeParam(t) {
-		if da, ok := stripRefForBounds(t).(*DArrayType); ok && da.Elem != nil && !containsTypeParam(da.Elem) && !a.storeScanTypeMayEncodeAddress(da.Elem, map[Type]bool{}) && (a.storeScanHoldsNoRegionStorage(da.Elem) || a.storeScanTypeIsProgramLivedForStoreProof(da.Elem)) {
+	if known && t != nil && !a.containsTypeParamCached(t) {
+		if da, ok := stripRefForBounds(t).(*DArrayType); ok && da.Elem != nil && !a.containsTypeParamCached(da.Elem) && !a.storeScanTypeMayEncodeAddress(da.Elem, map[Type]bool{}) && (a.storeScanHoldsNoRegionStorage(da.Elem) || a.storeScanTypeIsProgramLivedForStoreProof(da.Elem)) {
 			return storeNone
 		}
 	}
@@ -3480,7 +3480,7 @@ func (a *Analyzer) declParamIsProgramLived(decl *ast.FuncDecl, index int) bool {
 		return false
 	}
 	t := fnType.Params[index]
-	if t == nil || containsTypeParam(t) {
+	if t == nil || a.containsTypeParamCached(t) {
 		return false
 	}
 	elem := stripRefForBounds(t)

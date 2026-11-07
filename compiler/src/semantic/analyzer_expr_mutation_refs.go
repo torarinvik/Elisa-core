@@ -50,6 +50,13 @@ func containsTypeParam(t Type) bool {
 	}
 }
 
+func (a *Analyzer) containsTypeParamCached(t Type) bool {
+	if a == nil || !a.typeShapesFrozen || t == nil {
+		return containsTypeParam(t)
+	}
+	return a.memoTypePredicate(&a.typeParamMemo, t, func() bool { return containsTypeParam(t) })
+}
+
 // Shared tuple graphs can contain exponentially many paths to the same node.
 // Keep a small inline set and only allocate a map for larger graphs.
 type typeParamSeen struct {

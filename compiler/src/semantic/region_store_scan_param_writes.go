@@ -153,7 +153,7 @@ func (a *Analyzer) storeScanMayShare(decl *ast.FuncDecl, value ast.Expr) bool {
 		return false
 	}
 	inner := storeScanUnwrap(value)
-	if t, ok := a.storeScanStaticType(decl, inner); ok && t != nil && !containsTypeParam(t) && !a.storeScanSharesCached(t) {
+	if t, ok := a.storeScanStaticType(decl, inner); ok && t != nil && !a.containsTypeParamCached(t) && !a.storeScanSharesCached(t) {
 		return false
 	}
 	switch e := inner.(type) {
@@ -172,7 +172,7 @@ func (a *Analyzer) storeScanMayShare(decl *ast.FuncDecl, value ast.Expr) bool {
 		}
 	case *ast.CallExpr:
 		// An un-typed call result: the callee's declared return type.
-		if t := a.storeScanCallReturnType(e); t != nil && !containsTypeParam(t) && !a.storeScanSharesCached(t) {
+		if t := a.storeScanCallReturnType(e); t != nil && !a.containsTypeParamCached(t) && !a.storeScanSharesCached(t) {
 			return false
 		}
 	case *ast.TernaryExpr:
@@ -627,7 +627,7 @@ func storeScanNameIsRefParam(decl *ast.FuncDecl, name string, idx *storeScanDecl
 func (a *Analyzer) storeScanContainerElemsMayShare(decl *ast.FuncDecl, receiver ast.Expr) bool {
 	decl = a.readDecl(decl)
 	t, ok := a.storeScanStaticType(decl, storeScanUnwrap(receiver))
-	if !ok || t == nil || containsTypeParam(t) {
+	if !ok || t == nil || a.containsTypeParamCached(t) {
 		// Declared annotations: every declaration of the name (parameter or local, no other
 		// binder) a builtin container of non-sharing elements.
 		id, isIdent := storeScanUnwrap(receiver).(*ast.Ident)
@@ -699,7 +699,7 @@ func (a *Analyzer) storeScanTypeExprElemsShareNot(t ast.TypeExpr) bool {
 			return true
 		}
 		// A named struct / enum of such values (`ValueType`).
-		if resolved := a.storeFlowNamedType(named.Name); resolved != nil && !containsTypeParam(resolved) && !a.storeScanSharesCached(resolved) {
+		if resolved := a.storeFlowNamedType(named.Name); resolved != nil && !a.containsTypeParamCached(resolved) && !a.storeScanSharesCached(resolved) {
 			return true
 		}
 	}

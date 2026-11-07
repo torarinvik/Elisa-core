@@ -241,6 +241,7 @@ var specializationOpaqueMapFields = [...]string{
 	"storeFlowParams",
 	"storeFlowSCC",
 	"storeFlowStmtEnv",
+	"storeFlowStructLookup",
 	"storeFlowSummaries",
 	"storeFlowViews",
 	"storeLivedCache",
@@ -274,6 +275,7 @@ var specializationOpaqueMapFields = [...]string{
 	"terminationVerified",
 	"treeConstructorCallees",
 	"trustedRuntimeSourceFiles",
+	"typeParamMemo",
 	"typeSeenScratch",
 	"ufcsByLastSegment",
 	"ufcsFunctionsByName",
@@ -995,6 +997,9 @@ func cloneSpecializationOpaqueMap(dst, src *Analyzer, name string, field reflect
 	case "storeFlowStmtEnv":
 		dst.storeFlowStmtEnv = maps.Clone(src.storeFlowStmtEnv)
 		return true
+	case "storeFlowStructLookup":
+		dst.storeFlowStructLookup = maps.Clone(src.storeFlowStructLookup)
+		return true
 	case "storeFlowSummaries":
 		dst.storeFlowSummaries = maps.Clone(src.storeFlowSummaries)
 		return true
@@ -1093,6 +1098,9 @@ func cloneSpecializationOpaqueMap(dst, src *Analyzer, name string, field reflect
 		return true
 	case "trustedRuntimeSourceFiles":
 		dst.trustedRuntimeSourceFiles = maps.Clone(src.trustedRuntimeSourceFiles)
+		return true
+	case "typeParamMemo":
+		dst.typeParamMemo = maps.Clone(src.typeParamMemo)
 		return true
 	case "typeSeenScratch":
 		dst.typeSeenScratch = maps.Clone(src.typeSeenScratch)

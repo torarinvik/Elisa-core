@@ -66,3 +66,28 @@ func TestContainsTypeParamSharedAndRecursiveGenericGraphs(t *testing.T) {
 		t.Fatal("concrete recursive generic graph contains a type parameter")
 	}
 }
+
+func TestContainsTypeParamMemoRespectsShapeLifecycle(t *testing.T) {
+	a := &Analyzer{}
+	typ := &TupleType{Fields: []TupleField{{Type: &BuiltinType{Name: "i64"}}}}
+	if a.containsTypeParamCached(typ) {
+		t.Fatal("concrete tuple")
+	}
+	typ.Fields[0].Type = &TypeParamType{Name: "T"}
+	if !a.containsTypeParamCached(typ) || a.typeParamMemo != nil {
+		t.Fatal("unfrozen shape was cached")
+	}
+	a.typeShapesFrozen = true
+	if !a.containsTypeParamCached(typ) || len(a.typeParamMemo) != 1 {
+		t.Fatal("frozen shape was not cached")
+	}
+	typ.Fields[0].Type = &BuiltinType{Name: "i64"}
+	a.clearRetainedTypeMemos()
+	if a.containsTypeParamCached(typ) {
+		t.Fatal("retained edit did not invalidate memo")
+	}
+	worker := cloneAnalyzerValueForBodyWorker(a).Addr().Interface().(*Analyzer)
+	if worker.typeParamMemo != nil {
+		t.Fatal("worker inherited mutable memo")
+	}
+}

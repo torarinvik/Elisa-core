@@ -989,6 +989,8 @@ type Analyzer struct {
 	resolvedStructFieldsMemo map[Type][]moveBindResolvedField
 	// affineHandleMemo caches containsAffineHandleValues per type once typeShapesFrozen.
 	affineHandleMemo map[Type]bool
+	// typeParamMemo caches complete type-parameter graph queries after shapes freeze.
+	typeParamMemo map[Type]bool
 	// retained is non-nil when this analysis is kept for in-place updates (retained_analysis.go).
 	retained            *RetainedAnalysis
 	explicitBackingMemo *regionBackingMemo // live only during inferRegionParamsForGrownContainerParams

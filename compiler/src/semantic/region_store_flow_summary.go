@@ -3056,8 +3056,8 @@ func (a *Analyzer) storeFlowPushedElemMayShare(receiver, elem ast.Expr) bool {
 	if a.storeFlowDeclaredViewOrScalarElements(receiver) {
 		return false
 	}
-	if rt := a.exprType(receiver); rt != nil && !containsTypeParam(rt) {
-		if d, ok := StripAggregateStateType(stripRefForBounds(rt)).(*DArrayType); ok && d != nil && d.Elem != nil && !containsTypeParam(d.Elem) && !a.storeScanSharesCached(d.Elem) {
+	if rt := a.exprType(receiver); rt != nil && !a.containsTypeParamCached(rt) {
+		if d, ok := StripAggregateStateType(stripRefForBounds(rt)).(*DArrayType); ok && d != nil && d.Elem != nil && !a.containsTypeParamCached(d.Elem) && !a.storeScanSharesCached(d.Elem) {
 			return false
 		}
 	}
@@ -3065,7 +3065,7 @@ func (a *Analyzer) storeFlowPushedElemMayShare(receiver, elem ast.Expr) bool {
 	if t == nil {
 		t = a.storeFlowStructLitType(elem)
 	}
-	return t == nil || containsTypeParam(t) || a.storeScanSharesCached(t)
+	return t == nil || a.containsTypeParamCached(t) || a.storeScanSharesCached(t)
 }
 
 // storeFlowStructLitType is the declared struct type of a plain, non-generic struct literal

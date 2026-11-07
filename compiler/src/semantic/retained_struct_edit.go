@@ -89,7 +89,7 @@ func retainedStructFieldEditAllowed(old, current *ast.StructDecl) bool {
 // retainedTypeMemos are analyzer memos keyed by type whose answers depend on struct fields.
 var retainedTypeMemos = []string{
 	"storeScanNoStorageCache", "storeScanViewOnlyCache", "storeScanSharesCache", "resolvedStructFieldsMemo",
-	"affineHandleMemo", "typeSeenScratch", "borrowedOwnerRefMemo", "regionRefsMemo",
+	"affineHandleMemo", "typeParamMemo", "typeSeenScratch", "borrowedOwnerRefMemo", "regionRefsMemo",
 	"mutableBorrowCapabilityMemo", "containerRegionMemo", "storeScanAddressMemo", "storeScanAddressSeen",
 	"storeScanPlainValueMemo", "storeScanProgramLivedMemo", "programLivedTypes",
 	"returnBorrowMayTargetMemo", "returnBorrowResultMayTargetMemo",
