@@ -7,6 +7,9 @@ import "strings"
 // but SAT or UNKNOWN says nothing and must fall back to the full hypotheses.
 // Declarations, definitions, the goal and all subsequent commands stay intact.
 func smtWithoutQuantifiedHypotheses(query, goalAssert string) (string, bool) {
+	if !strings.Contains(query, "forall") && !strings.Contains(query, "exists") {
+		return "", false
+	}
 	containsQuantifier := func(command string) bool {
 		scan := smtAtomScanner{text: command}
 		for atom, present := scan.next(); present; atom, present = scan.next() {
@@ -33,34 +36,32 @@ func smtWithoutQuantifiedHypotheses(query, goalAssert string) (string, bool) {
 	if goalIndex < 0 {
 		return "", false
 	}
-	replacements := make([]string, goalIndex)
-	drop := make([]bool, goalIndex)
-	dropped := false
-	for i := 0; i < goalIndex; i++ {
-		if smtCommandHead(commands[i]) == "assert" && containsQuantifier(commands[i]) {
-			drop[i] = true
-			if consequence, ok := smtQuantifierFreeConsequence(commands[i]); ok {
-				replacements[i] = consequence
-			}
-			dropped = true
-		}
-	}
-	if !dropped {
-		// Nothing to weaken: callers only use the text when a hypothesis was dropped.
-		return "", false
-	}
 	var out strings.Builder
-	out.Grow(len(query))
+	dropped := false
 	for i, command := range commands {
-		if i < goalIndex && drop[i] {
-			if replacements[i] != "" {
-				out.WriteString(replacements[i])
+		if i < goalIndex && smtCommandHead(command) == "assert" && containsQuantifier(command) {
+			if !dropped {
+				// The prefix is unchanged. Copy it only when a weakening exists.
+				out.Grow(len(query))
+				for _, kept := range commands[:i] {
+					out.WriteString(kept)
+					out.WriteByte('\n')
+				}
+				dropped = true
+			}
+			if consequence, ok := smtQuantifierFreeConsequence(command); ok {
+				out.WriteString(consequence)
 				out.WriteByte('\n')
 			}
 			continue
 		}
-		out.WriteString(command)
-		out.WriteByte('\n')
+		if dropped {
+			out.WriteString(command)
+			out.WriteByte('\n')
+		}
+	}
+	if !dropped {
+		return "", false
 	}
 	return out.String(), true
 }
