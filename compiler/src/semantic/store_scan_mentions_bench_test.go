@@ -54,6 +54,52 @@ func TestStoreScanMentionTokensPreserveNameMembership(t *testing.T) {
 	}
 }
 
+func TestStoreScanReturnMentionsMatchesWalk(t *testing.T) {
+	shared := &ast.FieldExpr{Object: &ast.Ident{Name: "root.item"}, Field: "field"}
+	queries := []ast.Expr{
+		shared, &ast.Ident{Name: "root.item"},
+		&ast.CallExpr{Func: &ast.Ident{Name: "f"}, Args: []ast.Expr{shared, shared, &ast.Ident{Name: "other"}}},
+		&ast.BinaryExpr{Left: shared, Right: &ast.Ident{Name: "rhs"}},
+		&ast.IndexExpr{Object: shared, Index: &ast.Ident{Name: "index"}},
+	}
+	for _, expr := range queries {
+		for _, names := range []map[string]bool{nil, {"root": true}, {"root.item": true}, {"other": true}, {"rhs": true}, {"index": true}, {"field": true}, {"absent": true}} {
+			if got, want := storeScanReturnMentions(expr, names), storeScanMentions(expr, names); got != want {
+				t.Fatalf("%T %v: got %v want %v", expr, names, got, want)
+			}
+		}
+	}
+	call := &ast.CallExpr{Func: &ast.Ident{Name: "f"}}
+	if storeScanReturnMentions(call, map[string]bool{"later": true}) {
+		t.Fatal("unexpected mention")
+	}
+	call.ResolvedArgs = []ast.Expr{&ast.Ident{Name: "later"}}
+	if !storeScanReturnMentions(call, map[string]bool{"later": true}) {
+		t.Fatal("missed newly resolved argument")
+	}
+}
+
+func BenchmarkStoreScanReturnMentions(b *testing.B) {
+	var expr ast.Expr = &ast.FieldExpr{Object: &ast.FieldExpr{Object: &ast.Ident{Name: "item"}, Field: "inner"}, Field: "value"}
+	names := map[string]bool{"absent": true}
+	for _, cached := range []bool{false, true} {
+		name := "reflective"
+		if cached {
+			name = "direct"
+		}
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if cached {
+					storeScanMentionsSink = storeScanReturnMentions(expr, names)
+				} else {
+					storeScanMentionsSink = storeScanMentions(expr, names)
+				}
+			}
+		})
+	}
+}
+
 func TestStoreScanTwoNameSetsMatchesIndependentQueries(t *testing.T) {
 	expr := &ast.CallExpr{Func: &ast.Ident{Name: "pkg.func"}, Args: []ast.Expr{&ast.Ident{Name: "value"}}}
 	idx := &storeScanDeclIndex{exprTokens: map[ast.Expr][]string{}}

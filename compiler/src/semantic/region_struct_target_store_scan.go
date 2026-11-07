@@ -2174,7 +2174,7 @@ func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[st
 					argMode := storeNone
 					if storeScanMentionsHeader(arg, header) {
 						argMode = storeHeader
-					} else if storeScanMentions(arg, content) {
+					} else if storeScanReturnMentions(arg, content) {
 						argMode = storeElements
 					}
 					if argMode != storeNone {
@@ -2184,7 +2184,7 @@ func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[st
 				return callMode
 			}
 		}
-		if !storeScanMentions(value, content) {
+		if !storeScanReturnMentions(value, content) {
 			return storeNone
 		}
 		if views != nil && (a.storeScanValueIsView(decl, value, views) || a.storeScanDeclReturnsViewOnly(decl) || storeScanRootedAtFilled(value, filled)) {
@@ -2207,6 +2207,20 @@ func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[st
 	}
 	a.storeScanCycleHit = saved || (a.storeScanCycleHit && !final)
 	return mode
+}
+
+// A simple identifier or field chain has no resolver-populated children.
+// Compound return expressions can gain resolved call arguments during analysis,
+// so keep the live walk for them rather than reusing earlier token snapshots.
+func storeScanReturnMentions(expr ast.Expr, names map[string]bool) bool {
+	if name, simple := storeScanSimpleMentionName(expr); simple {
+		if names[name] {
+			return true
+		}
+		root := rootNameOfDotted(name)
+		return root != name && names[root]
+	}
+	return storeScanMentions(expr, names)
 }
 
 // storeScanUnwrap strips value-preserving wrappers (parens, an inline `can ...` grant, `move`)
