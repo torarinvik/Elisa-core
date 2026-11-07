@@ -75,6 +75,16 @@ func nodeExportFixture(count int) (*Analyzer, []ast.Stmt) {
 func TestParallelNodeExportMatchesAllMapDispatch(t *testing.T) {
 	a, stmts := nodeExportFixture(4)
 	want := legacyExportNodeEntries(a, stmts)
+	for i, facts := range exportNodeEntries(a, stmts) {
+		seen := map[any]bool{}
+		for _, fact := range facts {
+			key := fact.key.Interface()
+			if seen[key] {
+				t.Fatalf("duplicate node key in column %d", i)
+			}
+			seen[key] = true
+		}
+	}
 	check := func() {
 		target := &Analyzer{}
 		importNodeEntries(target, exportNodeEntries(a, stmts))
@@ -121,6 +131,46 @@ func BenchmarkParallelNodeExport(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
 				tc.run()
+			}
+		})
+	}
+}
+
+func BenchmarkParallelNodeImport(b *testing.B) {
+	a, stmts := nodeExportFixture(64)
+	entries := exportNodeEntries(a, stmts)
+	for _, fast := range []bool{false, true} {
+		label := "lookup"
+		if fast {
+			label = "empty-map"
+		}
+		b.Run(label, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				target := &Analyzer{}
+				if fast {
+					importNodeEntries(target, entries)
+					continue
+				}
+				paths := nodeKeyedMapPaths()
+				root := settable(reflect.ValueOf(target).Elem())
+				for pi, facts := range entries {
+					if len(facts) == 0 {
+						continue
+					}
+					v := root
+					for _, index := range paths[pi].path {
+						v = settable(v.Field(index))
+					}
+					if v.IsNil() {
+						v.Set(reflect.MakeMapWithSize(v.Type(), len(facts)))
+					}
+					for _, fact := range facts {
+						if !v.MapIndex(fact.key).IsValid() {
+							v.SetMapIndex(fact.key, deepCloneValue(fact.value))
+						}
+					}
+				}
 			}
 		})
 	}

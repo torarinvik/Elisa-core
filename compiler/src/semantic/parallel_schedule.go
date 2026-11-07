@@ -817,6 +817,12 @@ func importNodeEntries(a *Analyzer, entries [][]nodeFact) {
 		}
 		if v.IsNil() {
 			v.Set(reflect.MakeMapWithSize(v.Type(), len(facts)))
+			// The exporter visits each syntax node once, so a newly allocated
+			// column has no existing entries and its keys are distinct.
+			for _, fact := range facts {
+				v.SetMapIndex(fact.key, deepCloneValue(fact.value))
+			}
+			continue
 		}
 		for _, fact := range facts {
 			if !v.MapIndex(fact.key).IsValid() {
