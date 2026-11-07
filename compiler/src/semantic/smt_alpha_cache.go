@@ -173,6 +173,8 @@ type smtAlphaToken struct {
 	kind byte
 }
 
+var smtAlphaAtomEnd = [256]bool{' ': true, '\t': true, '\r': true, '\n': true, '(': true, ')': true, ';': true, '"': true, '|': true}
+
 // SMT strings escape a quote by doubling it. Quoted identifiers are symbols,
 // not strings. Comments and whitespace are separators; neither changes a query.
 // Unsupported or malformed lexical input simply retains the exact cache path.
@@ -240,15 +242,11 @@ func smtAlphaWalk(query string, visit func(smtAlphaToken, int) bool) bool {
 				return false
 			}
 		default:
-			for i < len(query) {
-				c := query[i]
-				if c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '(' || c == ')' || c == ';' {
-					break
-				}
-				if c == '"' || c == '|' {
-					return false
-				}
+			for i < len(query) && !smtAlphaAtomEnd[query[i]] {
 				i++
+			}
+			if i < len(query) && (query[i] == '"' || query[i] == '|') {
+				return false
 			}
 			if !visit(smtAlphaToken{query[start:i], 'a'}, depth) {
 				return false
