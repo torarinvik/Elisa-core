@@ -1787,8 +1787,7 @@ func (a *Analyzer) noteReturnBorrowCallArgumentStores(expr ast.Expr, aliases map
 				}
 				// The same bound the caller-side store check applies: a summarized callee
 				// states which arguments reach this parameter, and with what of them.
-				keep := func(other int) bool { return !a.callArgNeverReaches(call, other, index) }
-				contentsOnly := a.returnBorrowCallContentsOnly(call, index)
+				keep, contentsOnly := a.returnBorrowCallStorePredicates(call, index)
 				if flow := a.returnBorrowCallOtherArgsFlowWhereKinds(args, index, fnType.Params, keep, contentsOnly, aliases, active, localBindings); !flow.empty() {
 					a.setReturnBorrowAlias(aliases, root, flow, true)
 				}

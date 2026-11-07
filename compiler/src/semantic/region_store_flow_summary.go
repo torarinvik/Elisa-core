@@ -2740,22 +2740,21 @@ func (a *Analyzer) storeFlowStructNamed(name string) Type {
 	return found
 }
 
-// callArgsKeptApart reports that the callee is summarized and never lets argument other reach
-// the container bound to parameter index.
-func (a *Analyzer) callArgsKeptApart(call *ast.CallExpr, index, other int) bool {
+// storeFlowCalleeForArgCheck returns the declared callee only when its summary
+// can be used with the call's actual argument positions.
+func (a *Analyzer) storeFlowCalleeForArgCheck(call *ast.CallExpr) *ast.FuncDecl {
 	decl, ok := a.resolveReadOnlyScanCallee(call)
 	if !ok || decl == nil || !storeFlowCallFitsParams(decl, call) || funcHasArenaParam(decl) {
-		return false
+		return nil
 	}
-	summary := a.storeFlowSummaryFor(decl)
-	return summary != nil && !summary.connected(index, other)
+	return decl
 }
 
 // callArgNeverReaches reports that the callee is summarized and the contents of argument other
 // never reach parameter index (directed: other is never stored into index).
 func (a *Analyzer) callArgNeverReaches(call *ast.CallExpr, other, index int) bool {
-	decl, ok := a.resolveReadOnlyScanCallee(call)
-	if !ok || decl == nil || !storeFlowCallFitsParams(decl, call) || funcHasArenaParam(decl) {
+	decl := a.storeFlowCalleeForArgCheck(call)
+	if decl == nil {
 		return false
 	}
 	summary := a.storeFlowSummaryFor(decl)

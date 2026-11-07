@@ -46,7 +46,7 @@ func (a *Analyzer) checkCallArgumentHolderStoreEscape(call *ast.CallExpr) {
 			if other == index || arg == nil {
 				continue
 			}
-			if a.callArgNeverReaches(call, other, index) || a.callArgsKeptApart(call, index, other) {
+			if a.callArgNeverReaches(call, other, index) {
 				continue
 			}
 			// Only a VIEW argument (sview, cstr, view[T]) is checked: it is what a holder's view

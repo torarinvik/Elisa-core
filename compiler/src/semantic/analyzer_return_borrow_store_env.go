@@ -1392,34 +1392,54 @@ func (a *Analyzer) returnBorrowCallArgStoreFlow(call *ast.CallExpr, index int) r
 	args := returnBorrowCallArgs(call)
 	// A summarized callee states which arguments' contents may reach the written parameter; the
 	// others cannot be stored through it.
-	keep := func(other int) bool { return !a.callArgNeverReaches(call, other, index) }
-	contentsOnly := a.returnBorrowCallContentsOnly(call, index)
+	keep, contentsOnly := a.returnBorrowCallStorePredicates(call, index)
 	flow := a.returnBorrowCallOtherArgsFlowWhereKinds(args, index, fnType.Params, keep, contentsOnly, map[string]returnBorrowFlow{}, map[*ast.FuncDecl]bool{}, map[*Symbol]bool{})
 	return flow
 }
 
-// returnBorrowCallContentsOnly refines only settled element-copy edges.
-// Unknown calls and disabled kind refinement retain address provenance.
-func (a *Analyzer) returnBorrowCallContentsOnly(call *ast.CallExpr, index int) func(int) bool {
-	if a.storeFlowKindsOff {
-		return nil
-	}
-	var summary *storeFlowSummary
+// returnBorrowCallStorePredicates resolves the callee once for a transfer.
+// An in-progress flow summary may be replaced while the component settles;
+// only the published summary can be reused across arguments.
+func (a *Analyzer) returnBorrowCallStorePredicates(call *ast.CallExpr, index int) (keep, contentsOnly func(int) bool) {
+	var decl *ast.FuncDecl
 	resolved := false
-	return func(other int) bool {
+	resolve := func() *ast.FuncDecl {
 		if !resolved {
 			resolved = true
-			decl, ok := a.resolveReadOnlyScanCallee(call)
-			if ok && decl != nil && storeFlowCallFitsParams(decl, call) && !funcHasArenaParam(decl) {
-				summary = a.storeFlowKindsFor(decl)
+			decl = a.storeFlowCalleeForArgCheck(call)
+		}
+		return decl
+	}
+	var flow *storeFlowSummary
+	settled := false
+	keep = func(other int) bool {
+		if !settled {
+			if target := resolve(); target != nil {
+				flow = a.storeFlowSummaryFor(target)
+				_, settled = a.storeFlowSummaries[a.readDecl(target)]
 			}
 		}
-		if summary == nil {
+		return flow == nil || flow.reaches(other, index)
+	}
+	if a.storeFlowKindsOff {
+		return keep, nil
+	}
+	var kinds *storeFlowSummary
+	kindsResolved := false
+	contentsOnly = func(other int) bool {
+		if !kindsResolved {
+			kindsResolved = true
+			if target := resolve(); target != nil {
+				kinds = a.storeFlowKindsFor(target)
+			}
+		}
+		if kinds == nil {
 			return false
 		}
-		kind := a.storeFlowReachKind(summary, other, index)
+		kind := a.storeFlowReachKind(kinds, other, index)
 		return kind == storeFlowEdgeElements || kind == storeFlowEdgeNone
 	}
+	return keep, contentsOnly
 }
 
 // traceLocalBorrowStoreArgs (trace only): which other argument's flow is frame-local.
@@ -1429,9 +1449,9 @@ func (a *Analyzer) traceLocalBorrowStoreArgs(call *ast.CallExpr, index int) {
 		return
 	}
 	args := returnBorrowCallArgs(call)
-	contentsOnly := a.returnBorrowCallContentsOnly(call, index)
+	keep, contentsOnly := a.returnBorrowCallStorePredicates(call, index)
 	for other := range args {
-		if other == index || a.callArgNeverReaches(call, other, index) {
+		if other == index || !keep(other) {
 			continue
 		}
 		f := a.returnBorrowCallOtherArgsFlowWhereKinds(args, index, fnType.Params, func(k int) bool { return k == other }, contentsOnly, map[string]returnBorrowFlow{}, map[*ast.FuncDecl]bool{}, map[*Symbol]bool{})

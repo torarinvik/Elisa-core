@@ -2575,7 +2575,7 @@ func (a *Analyzer) checkCallArgumentRegionStoreEscape(call *ast.CallExpr) {
 			// when its contents can reach the writable container at `index`.
 			// Symmetric connectivity alone also includes the reverse-only case
 			// (the target feeds the source), which cannot create this escape.
-			if a.callArgNeverReaches(call, other, index) || a.callArgsKeptApart(call, index, other) {
+			if a.callArgNeverReaches(call, other, index) {
 				continue
 			}
 			state, ok := a.regionRefStateForExpr(arg)
@@ -2621,7 +2621,7 @@ func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, 
 		if other == index || !typeCarriesRegionStorage(a.exprType(arg)) {
 			continue
 		}
-		if a.callArgNeverReaches(call, other, index) || a.callArgsKeptApart(call, index, other) {
+		if a.callArgNeverReaches(call, other, index) {
 			continue
 		}
 		// The store-flow summary is undirected between written params; refine it with the
