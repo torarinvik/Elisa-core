@@ -1163,6 +1163,12 @@ var storeFlowBinaryFast = func() bool {
 		t.Field(4).Name == "LoweredCall" && t.Field(4).Type == reflect.TypeOf((*ast.CallExpr)(nil))
 }()
 
+var storeFlowParenFast = func() bool {
+	t := reflect.TypeOf(ast.ParenExpr{})
+	return t.NumField() == 2 && t.Field(0).Name == "Position" && t.Field(0).Type == reflect.TypeOf(lexer.Pos{}) &&
+		t.Field(1).Name == "Inner" && t.Field(1).Type == reflect.TypeOf((*ast.Expr)(nil)).Elem()
+}()
+
 // storeFlowTypeInfo caches what storeFlowMentions asks of a reflect.Type on every node it
 // visits: method-set tests (Implements) and the struct field filter were ~4 s of a stage1
 // driver compile when recomputed per node.
@@ -1804,6 +1810,13 @@ func (a *Analyzer) storeFlowCollectMentionsWithQuery(root reflect.Value, self ui
 		case reflect.Pointer:
 			if v.IsNil() || !v.CanInterface() {
 				return
+			}
+			if storeFlowParenFast {
+				if paren, ok := v.Interface().(*ast.ParenExpr); ok {
+					walk(reflect.ValueOf(&paren.Position).Elem())
+					walk(reflect.ValueOf(paren.Inner))
+					return
+				}
 			}
 			if storeFlowSimpleFieldQueryFast {
 				if field, ok := v.Interface().(*ast.FieldExpr); ok {

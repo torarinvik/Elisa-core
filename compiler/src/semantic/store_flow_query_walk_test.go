@@ -166,3 +166,25 @@ func TestStoreFlowFieldFastMatchesReflective(t *testing.T) {
 		t.Fatalf("got %v %v %v, want %v %v %v", got, gp, gb, want, wp, wb)
 	}
 }
+
+func TestStoreFlowParenFastMatchesReflective(t *testing.T) {
+	if !storeFlowParenFast {
+		t.Skip("parenthesis schema changed")
+	}
+	saved := storeFlowParenFast
+	defer func() { storeFlowParenFast = saved }()
+	q := &ast.QueryExpr{Kind: ast.QueryExprAny, Name: "item", Source: &ast.Ident{Name: "items"}}
+	stmt := reflect.ValueOf(&ast.ReturnStmt{Value: &ast.ParenExpr{Inner: q}})
+	run := func(fast bool) ([]string, [][]string, bool) {
+		storeFlowParenFast = fast
+		a := &Analyzer{}
+		scan := storeFlowQueryScan{}
+		names := a.storeFlowCollectMentionsWithQuery(stmt.Elem(), stmt.Pointer(), nil, nil, nil, false, true, &scan)
+		return names, scan.pairs, a.storeFlowBinds
+	}
+	want, wp, wb := run(false)
+	got, gp, gb := run(true)
+	if !reflect.DeepEqual(got, want) || !reflect.DeepEqual(gp, wp) || gb != wb {
+		t.Fatalf("got %v %v %v, want %v %v %v", got, gp, gb, want, wp, wb)
+	}
+}
