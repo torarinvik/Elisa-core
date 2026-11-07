@@ -285,28 +285,10 @@ func (c *smtProofCache) publish(query string) {
 	}
 }
 func (c *smtProofCache) publishKey(key string) {
-	path := c.path(key)
-	if os.MkdirAll(filepath.Dir(path), 0700) != nil {
-		return
-	}
 	payload, err := json.Marshal(smtProofCacheRecord{smtProofCacheSchema, key, "unsat", smtProofChecksum(key)})
-	if err != nil {
-		return
+	if err == nil {
+		writeSMTCacheRecord(c.path(key), ".proof-*", payload)
 	}
-	f, err := os.CreateTemp(filepath.Dir(path), ".proof-*")
-	if err != nil {
-		return
-	}
-	temporary := f.Name()
-	defer os.Remove(temporary)
-	if _, err = f.Write(payload); err != nil {
-		f.Close()
-		return
-	}
-	if err = f.Close(); err != nil {
-		return
-	}
-	_ = os.Rename(temporary, path)
 }
 
 // Bound identity-probe output as well as its elapsed time.
@@ -386,26 +368,31 @@ func (c *smtProofCache) publishDeclineVerdict(query, verdict, counterexample str
 		return
 	}
 	key := c.declineKey(query)
-	path := c.declinePath(key)
-	if os.MkdirAll(filepath.Dir(path), 0700) != nil {
-		return
-	}
 	payload, err := json.Marshal(smtDeclineCacheRecord{smtDeclineCacheSchema, key, verdict, counterexample, smtDeclineChecksum(key, verdict, counterexample)})
-	if err != nil || len(payload) > 1<<20 {
-		return
+	if err == nil && len(payload) <= 1<<20 {
+		writeSMTCacheRecord(c.declinePath(key), ".decline-*", payload)
 	}
-	f, err := os.CreateTemp(filepath.Dir(path), ".decline-*")
+}
+
+// Write to a sibling temporary file and publish with a rename. Existing
+// shards need no directory probe, and successful rename consumes the temp.
+func writeSMTCacheRecord(path, pattern string, payload []byte) {
+	dir := filepath.Dir(path)
+	f, err := os.CreateTemp(dir, pattern)
+	if os.IsNotExist(err) {
+		if os.MkdirAll(dir, 0700) != nil {
+			return
+		}
+		f, err = os.CreateTemp(dir, pattern)
+	}
 	if err != nil {
 		return
 	}
 	temporary := f.Name()
-	defer os.Remove(temporary)
-	if _, err = f.Write(payload); err != nil {
-		f.Close()
+	_, writeErr := f.Write(payload)
+	closeErr := f.Close()
+	if writeErr == nil && closeErr == nil && os.Rename(temporary, path) == nil {
 		return
 	}
-	if err = f.Close(); err != nil {
-		return
-	}
-	_ = os.Rename(temporary, path)
+	_ = os.Remove(temporary)
 }
