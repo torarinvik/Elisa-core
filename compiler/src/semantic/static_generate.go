@@ -16,7 +16,10 @@ func (a *Analyzer) expandActiveAndGeneratedDecls(decls []ast.Decl, generated map
 			out = append(out, a.expandActiveAndGeneratedDecls(a.activeDeclBranch(n), generated)...)
 		case *ast.NamespaceDecl:
 			copied := *n
-			copied.Decls = a.expandActiveAndGeneratedDecls(n.Decls, generated)
+			namespace := joinQualifiedName(a.currentNamespace, n.Name)
+			a.withResolutionContext(namespace, a.currentUsings, func() {
+				copied.Decls = a.expandActiveAndGeneratedDecls(n.Decls, generated)
+			})
 			out = append(out, &copied)
 		case *ast.StaticGenerateDecl:
 			emitted := a.evalStaticGenerateDecl(n)

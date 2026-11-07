@@ -533,8 +533,23 @@ func (g *llvmGenerator) emitModule() error {
 	return nil
 }
 
-func (g *llvmGenerator) activeDeclBranch(decl *ast.StaticIfDecl) ([]ast.Decl, error) {
-	selected, ok := g.evalConstBoolExpr(decl.Cond)
+func (g *llvmGenerator) activeDeclBranch(decl *ast.StaticIfDecl, namespace string) ([]ast.Decl, error) {
+	lookup := func(name string) (semantic.ConstValue, bool) {
+		for _, candidate := range llvmVisibleGlobalNamesWithAliases(name, namespace, g.result.ModuleAliases) {
+			if value, ok := g.constValue(candidate); ok {
+				return value, true
+			}
+		}
+		return semantic.ConstValue{}, false
+	}
+	eval := func(expr ast.Expr) (bool, bool) {
+		value, ok := evalConstExprWithLookup(expr, lookup, g.evalStaticFunctionCall, g.constExprType)
+		if !ok {
+			return g.evalConstBoolExpr(expr)
+		}
+		return value.Bool, value.Kind == semantic.ConstBool
+	}
+	selected, ok := eval(decl.Cond)
 	if !ok {
 		return nil, fmt.Errorf("static if condition must be a compile-time bool")
 	}
@@ -542,7 +557,7 @@ func (g *llvmGenerator) activeDeclBranch(decl *ast.StaticIfDecl) ([]ast.Decl, er
 		return decl.Then, nil
 	}
 	for _, elif := range decl.Elifs {
-		selected, ok := g.evalConstBoolExpr(elif.Cond)
+		selected, ok := eval(elif.Cond)
 		if !ok {
 			return nil, fmt.Errorf("static elif condition must be a compile-time bool")
 		}
@@ -683,12 +698,12 @@ func (g *llvmGenerator) predeclareDeclTypesInNamespace(decl ast.Decl, namespace 
 		}
 		return nil
 	case *ast.StaticIfDecl:
-		branch, err := g.activeDeclBranch(n)
+		branch, err := g.activeDeclBranch(n, namespace)
 		if err != nil {
 			return err
 		}
 		for _, inner := range branch {
-			if err := g.predeclareDeclTypes(inner); err != nil {
+			if err := g.predeclareDeclTypesInNamespace(inner, namespace); err != nil {
 				return err
 			}
 		}
@@ -900,12 +915,12 @@ func (g *llvmGenerator) emitDeclInNamespace(decl ast.Decl, namespace string) err
 		}
 		return nil
 	case *ast.StaticIfDecl:
-		branch, err := g.activeDeclBranch(n)
+		branch, err := g.activeDeclBranch(n, namespace)
 		if err != nil {
 			return err
 		}
 		for _, inner := range branch {
-			if err := g.emitDecl(inner); err != nil {
+			if err := g.emitDeclInNamespace(inner, namespace); err != nil {
 				return err
 			}
 		}

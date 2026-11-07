@@ -16,15 +16,14 @@ func (a *Analyzer) nameIsModulePath(key string) bool {
 	if a.declaredModules[key] {
 		return true
 	}
-	if _, ok := a.moduleAliases[key]; ok {
-		return true
-	}
 	// Aliases store canonical targets, but a nested module path still carries
 	// the alias as its first segment (Second.Nested -> Outer.Right.Nested).
 	if root, suffix, qualified := strings.Cut(key, "."); qualified {
-		if canonical, ok := a.moduleAliases[root]; ok && a.declaredModules[joinQualifiedName(canonical, suffix)] {
+		if canonical, ok := a.lookupModuleAliasTarget(a.currentNamespace, root); ok && a.declaredModules[joinQualifiedName(canonical, suffix)] {
 			return true
 		}
+	} else if _, ok := a.lookupModuleAliasTarget(a.currentNamespace, key); ok {
+		return true
 	}
 	namespace := a.currentNamespace
 	for namespace != "" {

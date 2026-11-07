@@ -84,7 +84,26 @@ func (a *Analyzer) declIsPrivate(decl ast.Decl, inheritedPrivate bool) bool {
 }
 
 func (a *Analyzer) flattenScopedDecls(decls []ast.Decl, namespace string, inheritedUsings []string) []scopedDecl {
-	return a.flattenScopedDeclsWithVisibility(decls, namespace, inheritedUsings, false)
+	a.indexUnconditionalModuleNames(decls, namespace)
+	result := a.flattenScopedDeclsWithVisibility(decls, namespace, inheritedUsings, false)
+	for key, path := range a.moduleAliasPaths {
+		a.moduleAliases[key] = a.resolveModuleAliasPath(path)
+	}
+	if len(a.moduleAliasPaths) != 0 {
+		a.visibleAliasGen++
+	}
+	a.moduleAliasPaths = nil
+	return result
+}
+
+// Declaration selection and extension validation must see aliases from the
+// same lexical module when evaluating a static branch condition.
+func (a *Analyzer) activeDeclBranchInNamespace(decl *ast.StaticIfDecl, namespace string) []ast.Decl {
+	var branch []ast.Decl
+	a.withResolutionContext(namespace, a.currentUsings, func() {
+		branch = a.activeDeclBranch(decl)
+	})
+	return branch
 }
 
 // validateModuleExtensions enforces the `module`/`extend` contract before symbol
@@ -107,7 +126,7 @@ func (a *Analyzer) validateModuleExtensions(decls []ast.Decl) {
 		for _, decl := range decls {
 			switch n := decl.(type) {
 			case *ast.StaticIfDecl:
-				walk(a.activeDeclBranch(n), namespace)
+				walk(a.activeDeclBranchInNamespace(n, namespace), namespace)
 			case *ast.NamespaceDecl:
 				full := joinQualifiedName(namespace, n.Name)
 				if n.Extend {
@@ -151,7 +170,9 @@ func (a *Analyzer) flattenScopedDeclsWithVisibility(decls []ast.Decl, namespace 
 	for _, decl := range decls {
 		switch n := decl.(type) {
 		case *ast.StaticIfDecl:
-			out = append(out, a.flattenScopedDeclsWithVisibility(a.activeDeclBranch(n), namespace, effectiveUsings, inheritedPrivate)...)
+			branch := a.activeDeclBranchInNamespace(n, namespace)
+			a.indexUnconditionalModuleNames(branch, namespace)
+			out = append(out, a.flattenScopedDeclsWithVisibility(branch, namespace, effectiveUsings, inheritedPrivate)...)
 		case *ast.NamespaceDecl:
 			childNamespace := joinQualifiedName(namespace, n.Name)
 			// A private module hides the MODULE, not its members: its body starts at the
@@ -256,8 +277,74 @@ func (a *Analyzer) registerUsingMember(n *ast.UsingDecl, namespace string) {
 	a.visibleAliasGen++
 }
 
-// registerModuleAlias records `using Foo as F` so the qualifier `F` rewrites to the
-// module `Foo`: `F::x` resolves to `Foo.x`. Qualification is kept, just shortened.
+type moduleAliasPath struct {
+	scope string
+	name  string
+}
+
+func (a *Analyzer) indexUnconditionalModuleNames(decls []ast.Decl, namespace string) {
+	for _, decl := range decls {
+		module, ok := decl.(*ast.NamespaceDecl)
+		if !ok {
+			continue
+		}
+		name := joinQualifiedName(namespace, module.Name)
+		if a.declaredModules == nil {
+			a.declaredModules = map[string]bool{}
+		}
+		if !module.Extend && !a.declaredModules[name] {
+			a.declaredModules[name] = true
+			a.visibleAliasGen++
+		}
+		a.indexUnconditionalModuleNames(module.Decls, name)
+	}
+}
+
+func moduleAliasKey(aliases map[string]string, namespace, name string) (string, bool) {
+	if len(aliases) == 0 {
+		return "", false
+	}
+	for namespace != "" {
+		if _, found := aliases[namespace+"."+name]; found {
+			return namespace + "." + name, true
+		}
+		namespace = privateOwnerNamespace(namespace)
+	}
+	_, found := aliases[name]
+	return name, found
+}
+
+// ScopedModuleAliasTarget finds the closest module alias visible from namespace.
+func ScopedModuleAliasTarget(aliases map[string]string, namespace, name string) (string, bool) {
+	key, ok := moduleAliasKey(aliases, namespace, name)
+	return aliases[key], ok
+}
+
+func (a *Analyzer) resolveModuleAliasPath(path moduleAliasPath) string {
+	for scope := path.scope; scope != ""; scope = privateOwnerNamespace(scope) {
+		if name := joinQualifiedName(scope, path.name); a.declaredModules[name] {
+			return name
+		}
+	}
+	if a.declaredModules[path.name] {
+		return path.name
+	}
+	return joinQualifiedName(path.scope, path.name)
+}
+
+func (a *Analyzer) lookupModuleAliasTarget(namespace, name string) (string, bool) {
+	key, ok := moduleAliasKey(a.moduleAliases, namespace, name)
+	if !ok {
+		return "", false
+	}
+	if path, pending := a.moduleAliasPaths[key]; pending {
+		return a.resolveModuleAliasPath(path), true
+	}
+	return a.moduleAliases[key], true
+}
+
+// registerModuleAlias retains the original lexical target until active module
+// declarations are known. Alias chains preserve the scope of their first target.
 func (a *Analyzer) registerModuleAlias(n *ast.UsingDecl, namespace string) {
 	if a == nil || n == nil || n.Alias == "" {
 		return
@@ -265,21 +352,34 @@ func (a *Analyzer) registerModuleAlias(n *ast.UsingDecl, namespace string) {
 	if a.moduleAliases == nil {
 		a.moduleAliases = make(map[string]string)
 	}
-	target := joinQualifiedName(namespace, n.Name)
-	// Previously declared aliases already carry canonical targets. Resolve the
-	// root here so types and backend declarations share the same identity.
+	path := moduleAliasPath{scope: namespace, name: n.Name}
 	root, suffix, qualified := strings.Cut(n.Name, ".")
-	if canonical, ok := a.moduleAliases[root]; ok {
-		target = canonical
+	if key, ok := moduleAliasKey(a.moduleAliases, namespace, root); ok {
+		if pending, exists := a.moduleAliasPaths[key]; exists {
+			path = pending
+		} else {
+			path = moduleAliasPath{name: a.moduleAliases[key]}
+		}
 		if qualified {
-			target = joinQualifiedName(canonical, suffix)
+			path.name = joinQualifiedName(path.name, suffix)
 		}
 	}
-	if existing, ok := a.moduleAliases[n.Alias]; ok && existing != target {
-		a.errorf(n.Pos(), "conflicting alias: %q already aliases module %q, cannot also alias %q", n.Alias, existing, target)
-		return
+	key := joinQualifiedName(namespace, n.Alias)
+	target := a.resolveModuleAliasPath(path)
+	if existing, ok := a.moduleAliases[key]; ok {
+		if pending, exists := a.moduleAliasPaths[key]; exists {
+			existing = a.resolveModuleAliasPath(pending)
+		}
+		if existing != target {
+			a.errorf(n.Pos(), "conflicting alias: %q already aliases module %q, cannot also alias %q", n.Alias, existing, target)
+			return
+		}
 	}
-	a.moduleAliases[n.Alias] = target
+	if a.moduleAliasPaths == nil {
+		a.moduleAliasPaths = make(map[string]moduleAliasPath)
+	}
+	a.moduleAliasPaths[key] = path
+	a.moduleAliases[key] = target
 	a.visibleAliasGen++
 }
 
@@ -420,7 +520,7 @@ func (a *Analyzer) buildVisibleNameCandidates(namespace, name string) []string {
 		}
 	} else if idx := strings.Index(name, "."); idx > 0 {
 		// Module-alias qualifier rewrite: `F.x` (from `using Foo as F`) -> `Foo.x`.
-		if canon, ok := a.moduleAliases[name[:idx]]; ok {
+		if canon, ok := a.lookupModuleAliasTarget(namespace, name[:idx]); ok {
 			candidates = append(candidates, canon+name[idx:])
 		}
 	}

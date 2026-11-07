@@ -272,13 +272,20 @@ func (s *functionState) currentNamespace() string {
 }
 
 func (s *functionState) visibleGlobalNames(name string) []string {
+	var aliases map[string]string
+	if s.g != nil && s.g.result != nil {
+		aliases = s.g.result.ModuleAliases
+	}
+	return llvmVisibleGlobalNamesWithAliases(name, s.currentNamespace(), aliases)
+}
+
+func llvmVisibleGlobalNamesWithAliases(name, namespace string, aliases map[string]string) []string {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil
 	}
 	// `::` is the surface module separator; symbols are registered joined with `.`.
 	qualified := strings.ReplaceAll(name, "::", ".")
-	namespace := s.currentNamespace()
 	candidates := make([]string, 0, 3)
 	// Keep the analyzer's precedence: lexical namespace, canonical alias target,
 	// then the explicitly written path.
@@ -290,8 +297,8 @@ func (s *functionState) visibleGlobalNames(name string) []string {
 			lexical = ""
 		}
 	}
-	if dot := strings.Index(qualified, "."); dot > 0 && s.g != nil && s.g.result != nil {
-		if target, ok := s.g.result.ModuleAliases[qualified[:dot]]; ok {
+	if dot := strings.Index(qualified, "."); dot > 0 {
+		if target, ok := semantic.ScopedModuleAliasTarget(aliases, namespace, qualified[:dot]); ok {
 			candidates = append(candidates, target+qualified[dot:])
 		}
 	}

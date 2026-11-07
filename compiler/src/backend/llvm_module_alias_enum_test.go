@@ -98,3 +98,29 @@ def main() -> i64:
 		t.Fatal(err)
 	}
 }
+
+func TestModuleAliasSelectsStaticDeclarationDuringLowering(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "module_alias_static_if.elisa", `
+module Target:
+    const enabled = true
+
+module Caller:
+    using Target as Flags
+    static if Flags::enabled:
+        def selected() -> i64:
+            return 7
+    static else:
+        def selected() -> i64:
+            return 9
+
+def main() -> i64:
+    return Caller::selected()
+`)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output, "ret i64 7") || strings.Contains(output, "ret i64 9") {
+		t.Fatal("lowering selected the wrong declaration")
+	}
+}

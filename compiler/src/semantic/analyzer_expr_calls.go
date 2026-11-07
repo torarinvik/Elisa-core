@@ -502,19 +502,30 @@ func (a *Analyzer) rewriteQualifiedFunctionCallee(expr *ast.CallExpr) {
 	if a == nil || expr == nil || expr.Func == nil {
 		return
 	}
-	if _, alreadyIdent := expr.Func.(*ast.Ident); alreadyIdent {
-		return
-	}
 	name, ok := qualifiedTypePathFromExpr(expr.Func)
 	if !ok || name == "" {
 		return
 	}
-	sym, _, ok := a.lookupVisibleGlobal(name)
+	aliased := false
+	if head, _, qualifiedPath := strings.Cut(name, "."); qualifiedPath {
+		namespace := a.currentNamespace
+		if namespace == "" && a.currentFuncType != nil {
+			namespace = privateOwnerNamespace(a.currentFuncType.Name)
+		}
+		_, aliased = a.lookupModuleAliasTarget(namespace, head)
+	}
+	if _, alreadyIdent := expr.Func.(*ast.Ident); alreadyIdent && !aliased {
+		return
+	}
+	sym, qualified, ok := a.lookupVisibleGlobal(name)
 	if !ok || sym == nil {
 		return
 	}
 	if _, ok := sym.Type.(*FuncType); !ok {
 		return
+	}
+	if aliased {
+		name = qualified
 	}
 	expr.Func = &ast.Ident{Position: expr.Func.Pos(), Name: name}
 }

@@ -42,3 +42,42 @@ func TestModuleAliasPrefixDoesNotTurnTypesIntoModules(t *testing.T) {
 		}
 	}
 }
+
+func TestModuleAliasUsesDeclaringScope(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "scoped_alias.elisa", `
+module Other:
+    def inspect(value: i64) -> i64:
+        return value
+
+module Bytes:
+    def inspect(value: sview) -> i64:
+        return 0
+
+module Target:
+    const enabled = true
+
+module Caller:
+    using Target as Flags
+    static if Flags::enabled:
+        using Other as Bytes
+
+    def call() -> i64:
+        return Bytes::inspect("zero")
+
+module Sibling:
+    module Local:
+        def inspect(value: sview) -> i64:
+            return 1
+    using Local as Bytes
+
+    def call() -> i64:
+        return Bytes::inspect("zero")
+
+def outside() -> i64:
+    return Bytes::inspect("zero")
+`)
+	errs := result.Errors()
+	if len(errs) != 1 || !strings.Contains(errs[0], `argument 1 to "Other.inspect" expects i64`) {
+		t.Fatalf("expected only the aliased call inside Caller to fail, got %v", errs)
+	}
+}

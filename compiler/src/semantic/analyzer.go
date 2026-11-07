@@ -780,10 +780,10 @@ type Analyzer struct {
 	// SMT discharge tier (docs/90). The solver is opened LAZILY on the first obligation that needs it
 	// (so a compile with no hard obligations never spawns a process) and closed at the end of
 	// analysis. smtUnavailable latches once Open fails, so we don't retry a missing solver per query.
-	smtEnabled         bool
-	smtBinary          string
-	smtSolver          smtSolverHandle
-	smtUnavailable     bool
+	smtEnabled     bool
+	smtBinary      string
+	smtSolver      smtSolverHandle
+	smtUnavailable bool
 	// smtSnapshotTainted prevents reuse of semantic results produced after a
 	// solver failure or an Unknown that cannot be safely memoized. It is sticky
 	// across retained updates because unaffected bodies may retain those results.
@@ -956,6 +956,7 @@ type Analyzer struct {
 	currentUsings               []string
 	importAliases               map[string]string
 	moduleAliases               map[string]string
+	moduleAliasPaths            map[string]moduleAliasPath
 	// visibleAliasGen counts alias registrations (invalidates visibleCandidates).
 	visibleAliasGen   int
 	visibleCandidates visibleCandidateCache
@@ -986,7 +987,7 @@ type Analyzer struct {
 	// affineHandleMemo caches containsAffineHandleValues per type once typeShapesFrozen.
 	affineHandleMemo map[Type]bool
 	// retained is non-nil when this analysis is kept for in-place updates (retained_analysis.go).
-	retained *RetainedAnalysis
+	retained            *RetainedAnalysis
 	explicitBackingMemo *regionBackingMemo // live only during inferRegionParamsForGrownContainerParams
 	// preBody stops a scratch analysis after the declaration phase (retained_prebody.go).
 	preBody *preBodyState

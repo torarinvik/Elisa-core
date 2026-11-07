@@ -321,7 +321,7 @@ func (a *Analyzer) preflightLookupSelectionCandidates(spec lookupSelectionSpec) 
 			}
 		}
 	} else if i := strings.Index(name, "."); i > 0 {
-		if canon, ok := a.moduleAliases[name[:i]]; ok {
+		if canon, ok := a.lookupModuleAliasTarget(spec.Context.Namespace, name[:i]); ok {
 			if !reserve(canon, name[i:], false) {
 				return fail()
 			}

@@ -85,7 +85,7 @@ func (a *Analyzer) retainedLiveUsings(live, edited *ast.File) (map[ast.Decl][]st
 			case *ast.NamespaceDecl:
 				why = walk(n.Decls, m.(*ast.NamespaceDecl).Decls, joinQualifiedName(namespace, n.Name), effective)
 			case *ast.StaticIfDecl:
-				why = walk(a.activeDeclBranch(n), a.activeDeclBranch(m.(*ast.StaticIfDecl)), namespace, effective)
+				why = walk(a.activeDeclBranchInNamespace(n, namespace), a.activeDeclBranchInNamespace(m.(*ast.StaticIfDecl), namespace), namespace, effective)
 			}
 			if why != "" {
 				return why

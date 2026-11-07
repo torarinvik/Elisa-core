@@ -129,6 +129,7 @@ var specializationOpaqueMapFields = [...]string{
 	"localArenaEscapeLocals",
 	"loopRepeatReported",
 	"loweredInitCalls",
+	"moduleAliasPaths",
 	"moduleAliases",
 	"mutableBorrowCapabilityMemo",
 	"mutableGlobalBorrowAssignRefs",
@@ -657,6 +658,9 @@ func cloneSpecializationOpaqueMap(dst, src *Analyzer, name string, field reflect
 		return true
 	case "loweredInitCalls":
 		dst.loweredInitCalls = maps.Clone(src.loweredInitCalls)
+		return true
+	case "moduleAliasPaths":
+		dst.moduleAliasPaths = maps.Clone(src.moduleAliasPaths)
 		return true
 	case "moduleAliases":
 		dst.moduleAliases = maps.Clone(src.moduleAliases)
