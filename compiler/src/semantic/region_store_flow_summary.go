@@ -1781,7 +1781,7 @@ func (a *Analyzer) storeFlowCollectMentionsWithQuery(root reflect.Value, self ui
 				walk(v.Index(i))
 			}
 		case reflect.String:
-			if collectNames && condDepth == 0 && storeFlowVariableName(v.String()) && (!callsOnly || callDepth > 0) {
+			if collectNames && condDepth == 0 && (!callsOnly || callDepth > 0) && storeFlowVariableName(v.String()) {
 				name := v.String()
 				if renamed, ok := rename[name]; ok {
 					name = renamed
@@ -2275,8 +2275,11 @@ func (a *Analyzer) applyCallStoreFlow(call *ast.CallExpr, c *storeFlowCtx, handl
 		c.link(groupNames[j])
 	}
 	for i := 0; i < len(args); i++ {
+		if len(groupNames[i]) == 0 {
+			continue
+		}
 		for j := i + 1; j < len(args); j++ {
-			if !summary.connected(i, j) || len(groupNames[i]) == 0 || len(groupNames[j]) == 0 {
+			if len(groupNames[j]) == 0 || !summary.connected(i, j) {
 				continue
 			}
 			// A pair flows only into a parameter the callee writes; one that flows both ways
