@@ -312,7 +312,7 @@ func (a *Analyzer) smtCheckTransformedProof(query string, check func() (smt.Resu
 	return a.smtCheckTransformedVerdict(query, false, check)
 }
 
-// A weakening caller uses SAT only as a boolean and never consumes its model.
+// A model-free caller uses SAT only as a boolean and never consumes its model.
 // It can therefore share SAT across alpha-equivalent queries without remapping
 // model names. Other transformed-query callers share only UNSAT.
 func (a *Analyzer) smtCheckTransformedVerdict(query string, shareSat bool, check func() (smt.Result, map[string]string)) (smt.Result, map[string]string) {
@@ -467,7 +467,7 @@ func (a *Analyzer) smtCheckSlicedOnce(solver smt.Solver, query, goalAssert strin
 	}
 	if abstracted, ok := smtAbstractBitvectorReads(query); ok {
 		a.smtSetLogLabelForQuery(solver, "bv-abstract", goalAssert, abstracted)
-		res, _ := a.smtCheckTransformedProof(abstracted, func() (smt.Result, map[string]string) {
+		res, _ := a.smtCheckTransformedVerdict(abstracted, true, func() (smt.Result, map[string]string) {
 			result, model, _ := solver.CheckValues(abstracted, nil)
 			return result, model
 		})

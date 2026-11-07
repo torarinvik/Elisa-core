@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -34,6 +35,30 @@ func TestSMTBitvectorAbstractionProvesMaskBoundCheaply(t *testing.T) {
 	a := &Analyzer{}
 	if res, _ := a.smtCheckSliced(small, query, goal, nil); res != smt.Unsat {
 		t.Fatalf("smtCheckSliced must prove the mask bound; got %s", res)
+	}
+}
+
+func TestSMTBitvectorAbstractionSharesSatWithoutModel(t *testing.T) {
+	shared, dir := &sync.Map{}, t.TempDir()
+	worker := func() *Analyzer {
+		return &Analyzer{smtProofCache: &smtProofCache{directory: dir, identity: "solver"}, parallel: &parallelWorkerState{smtFlights: shared}}
+	}
+	goal := "(assert (not (< key_index keys_len)))"
+	query := "(declare-const h Int)\n(declare-const mask Int)\n(declare-const key_index Int)\n(declare-const keys_len Int)\n" +
+		"(assert (>= h 0))\n(assert (>= mask 0))\n(assert (< mask 18446744073709551616))\n(assert (>= keys_len 0))\n" +
+		smtAndBoundLemma(maskAnd, "h", "mask", 64) + "(assert (= key_index " + maskAnd + "))\n" + goal + "\n"
+	first := &budgetRecorder{Solver: openCOISolver(t, 500000)}
+	second := &budgetRecorder{Solver: openCOISolver(t, 500000)}
+	for _, item := range []struct {
+		a      *Analyzer
+		solver *budgetRecorder
+	}{{worker(), first}, {worker(), second}} {
+		if result, _ := item.a.smtCheckSliced(item.solver, query, goal, nil); result == smt.Unsat {
+			t.Fatal("false goal proved")
+		}
+	}
+	if first.sessionChecks != 1 || second.sessionChecks != 0 || len(second.budgets) != 1 || second.budgets[0] != smtAfterSatAbstractionBudget {
+		t.Fatalf("abstraction SAT was not shared: first=%d second=%d budgets=%v", first.sessionChecks, second.sessionChecks, second.budgets)
 	}
 }
 
