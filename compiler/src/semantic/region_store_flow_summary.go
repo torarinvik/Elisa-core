@@ -1673,12 +1673,7 @@ func storeFlowPatternBinders(pattern ast.MatchPattern) []string {
 				binders = append(binders, v.String())
 			}
 		case reflect.Struct:
-			rfs := reflectFields(v.Type())
-			for i := 0; i < v.NumField(); i++ {
-				field := &rfs[i]
-				if !field.IsExported() || storeFlowSkipFields[field.Name] && (field.Type.Kind() == reflect.String || field.Type.Kind() == reflect.Slice && field.Type.Elem().Kind() == reflect.String) {
-					continue
-				}
+			for _, i := range storeFlowTypeInfoOf(v.Type()).fields {
 				walk(v.Field(i))
 			}
 		}

@@ -50,3 +50,13 @@ func BenchmarkStoreFlowTypedBinderNames(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkStoreFlowPatternBinders(b *testing.B) {
+	pattern := &ast.MatchVariantPattern{EnumName: "Expr", Variant: "Group", As: "whole", Args: []ast.MatchPatternArg{{Name: "field", Pattern: &ast.MatchBindPattern{Name: "payload"}}}}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if len(storeFlowPatternBinders(pattern)) == 0 {
+			b.Fatal("missing binder")
+		}
+	}
+}
