@@ -1182,11 +1182,7 @@ func (a *Analyzer) storeFlowUnit(stmt reflect.Value, c *storeFlowCtx) []reflect.
 		c.link([]string{target})
 		return nested
 	}
-	isReturn := false
-	if _, ok := stmt.Interface().(*ast.ReturnStmt); ok {
-		isReturn = true
-		names = append(names, storeFlowRetName)
-	}
+	_, isReturn := stmt.Interface().(*ast.ReturnStmt)
 	// Names inside calls to summarized callees are linked per the callee's connections instead.
 	handled := map[*ast.CallExpr][]string{}
 	// Innermost calls first (calls lists a call before the calls in its arguments): an
@@ -1210,15 +1206,22 @@ func (a *Analyzer) storeFlowUnit(stmt reflect.Value, c *storeFlowCtx) []reflect.
 		// initializer mentions may reach v, but nothing flows back into those names, and they
 		// are not joined to each other through it. Every call inside must be summarized, so the
 		// names in its arguments were already placed by the callee's connections.
-		outside := a.storeFlowMentions(stmt.Elem(), stmt.Pointer(), handled, nil, nil, false)
-		c.flow(outside, []string{binding})
+		if len(calls) != 0 || callsOnly {
+			names = a.storeFlowMentions(stmt.Elem(), stmt.Pointer(), handled, nil, nil, false)
+		}
+		c.flow(names, []string{binding})
 		c.link([]string{binding})
 	} else if isReturn && !binds && len(handled) == len(calls) {
 		// `return e` with every call summarized: what e mentions reaches the result, but the
 		// return itself stores nothing into those names nor joins them to each other.
-		outside := a.storeFlowMentions(stmt.Elem(), stmt.Pointer(), handled, nil, nil, false)
-		c.flow(outside, []string{storeFlowRetName})
+		if len(calls) != 0 || callsOnly {
+			names = a.storeFlowMentions(stmt.Elem(), stmt.Pointer(), handled, nil, nil, false)
+		}
+		c.flow(names, []string{storeFlowRetName})
 	} else if len(handled) == 0 {
+		if isReturn {
+			names = append(names, storeFlowRetName)
+		}
 		c.link(names)
 	} else if call, binding := a.storeFlowViewBinding(stmt); call != nil && handled[call] != nil {
 		// `v: sview = f(...)`: the result views bytes the arguments hold, so they reach v, but a
