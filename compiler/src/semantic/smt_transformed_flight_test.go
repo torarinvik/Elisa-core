@@ -145,3 +145,48 @@ func TestSMTTransformedFlightSharesAlphaEquivalentProof(t *testing.T) {
 		t.Fatalf("alpha-equivalent proof solved %d times", calls.Load())
 	}
 }
+
+func TestSMTWeakeningFlightSharesSATWithoutModels(t *testing.T) {
+	shared := &sync.Map{}
+	dir := t.TempDir()
+	makeAnalyzer := func() *Analyzer {
+		return &Analyzer{smtProofCache: &smtProofCache{directory: dir, identity: "same"}, parallel: &parallelWorkerState{smtFlights: shared}}
+	}
+	first, second := makeAnalyzer(), makeAnalyzer()
+	q1 := "(declare-const v_old Int)\n(assert (> v_old 0))\n"
+	q2 := "(declare-const v_new Int)\n(assert (> v_new 0))\n"
+	k1, ok1 := first.smtProofCache.alphaKey(q1)
+	k2, ok2 := second.smtProofCache.alphaKey(q2)
+	if !ok1 || !ok2 || k1 != k2 {
+		t.Fatal("fixture is not alpha-equivalent")
+	}
+	calls := 0
+	result, _ := first.smtCheckTransformedVerdict(q1, true, func() (smt.Result, map[string]string) {
+		calls++
+		return smt.Sat, map[string]string{"v_old": "1"}
+	})
+	if result != smt.Sat {
+		t.Fatal(result)
+	}
+	result, model := second.smtCheckTransformedVerdict(q2, true, func() (smt.Result, map[string]string) {
+		calls++
+		return smt.Unknown, nil
+	})
+	if result != smt.Sat || model != nil || calls != 1 {
+		t.Fatalf("shared verdict=%v model=%v calls=%d", result, model, calls)
+	}
+	normal := makeAnalyzer()
+	result, _ = normal.smtCheckTransformedProof(q2, func() (smt.Result, map[string]string) { calls++; return smt.Unknown, nil })
+	if result != smt.Unknown || calls != 2 {
+		t.Fatal("model-consuming path reused SAT")
+	}
+	for _, worker := range []*Analyzer{makeAnalyzer(), makeAnalyzer()} {
+		result, _ = worker.smtCheckTransformedVerdict("(assert unknown)", true, func() (smt.Result, map[string]string) { calls++; return smt.Unknown, nil })
+		if result != smt.Unknown {
+			t.Fatal("unknown changed")
+		}
+	}
+	if calls != 4 {
+		t.Fatal("unknown was shared")
+	}
+}

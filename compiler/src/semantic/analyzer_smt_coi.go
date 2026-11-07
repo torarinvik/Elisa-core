@@ -309,6 +309,13 @@ const smtAfterSatAbstractionBudget = 50000
 // query. SAT models and Unknown results must follow the existing solver path.
 // The outer query initializes the cache; nil keeps caching fully disabled.
 func (a *Analyzer) smtCheckTransformedProof(query string, check func() (smt.Result, map[string]string)) (smt.Result, map[string]string) {
+	return a.smtCheckTransformedVerdict(query, false, check)
+}
+
+// A weakening caller uses SAT only as a boolean and never consumes its model.
+// It can therefore share SAT across alpha-equivalent queries without remapping
+// model names. Other transformed-query callers share only UNSAT.
+func (a *Analyzer) smtCheckTransformedVerdict(query string, shareSat bool, check func() (smt.Result, map[string]string)) (smt.Result, map[string]string) {
 	keys, hit := a.smtProofCache.lookupProof(query)
 	if hit {
 		a.smtStats.CacheHits++
@@ -328,10 +335,18 @@ func (a *Analyzer) smtCheckTransformedProof(query string, check func() (smt.Resu
 		} else {
 			flightKey = "\x00transformed-unsat\x00" + keys.exact
 		}
+		if shareSat {
+			flightKey = "\x00weakening-verdict\x00" + flightKey
+		}
 		shared, ok, owned := a.awaitSharedSMTQuery(flightKey)
-		if ok && shared.proven {
+		if ok {
 			a.smtStats.CacheHits++
-			return smt.Unsat, nil
+			if shared.proven {
+				return smt.Unsat, nil
+			}
+			if shareSat {
+				return smt.Sat, nil
+			}
 		}
 		flight = owned
 		defer a.releaseSMTFlight(flightKey, flight)
@@ -342,6 +357,8 @@ func (a *Analyzer) smtCheckTransformedProof(query string, check func() (smt.Resu
 		if flight != nil {
 			a.resolveSMTFlight(flightKey, smtQueryResult{proven: true})
 		}
+	} else if result == smt.Sat && shareSat && flight != nil {
+		a.resolveSMTFlight(flightKey, smtQueryResult{proven: false})
 	}
 	return result, model
 }
@@ -481,7 +498,7 @@ func (a *Analyzer) smtCheckSlicedOnce(solver smt.Solver, query, goalAssert strin
 				// A reported obligation: its cheap weakening also gets the larger budget.
 				budget *= smtEscalationFactor
 			}
-			res, model := a.smtCheckTransformedProof(weaker, func() (smt.Result, map[string]string) {
+			res, model := a.smtCheckTransformedVerdict(weaker, true, func() (smt.Result, map[string]string) {
 				return budgeted.CheckBudgetValues(weaker, vars, budget)
 			})
 			if res == smt.Unsat {
