@@ -502,7 +502,7 @@ func buildStoreFlowBinderIndex(decl *ast.FuncDecl) *storeFlowBinderIndex {
 			out = &idx.rangeOther
 		}
 		rfs := reflectFields(elem.Type())
-		for i := 0; i < elem.NumField(); i++ {
+		for _, i := range storeFlowTypeInfoOf(elem.Type()).binderFields {
 			f := elem.Field(i)
 			if fieldName := rfs[i].Name; fieldName == "Captures" || fieldName == "HeaderCaptures" {
 				continue // capture lists name existing bindings; they bind nothing new
@@ -1251,11 +1251,12 @@ var storeFlowIndexFast = func() bool {
 // visits: method-set tests (Implements) and the struct field filter were ~4 s of a stage1
 // driver compile when recomputed per node.
 type storeFlowTypeInfo struct {
-	isStmt     bool  // pointer type implementing ast.Stmt
-	isTypeExpr bool  // pointer type implementing ast.TypeExpr
-	binding    bool  // pointer to a storeFlowBindingExprs node
-	binder     bool  // pointer to a syntax node that can introduce binders
-	fields     []int // struct: exported fields to walk, in declaration order
+	isStmt       bool  // pointer type implementing ast.Stmt
+	isTypeExpr   bool  // pointer type implementing ast.TypeExpr
+	binding      bool  // pointer to a storeFlowBindingExprs node
+	binder       bool  // pointer to a syntax node that can introduce binders
+	fields       []int // struct: exported fields to walk, in declaration order
+	binderFields []int // fields the binder-index collector can examine
 }
 
 var storeFlowTypeInfoCache sync.Map // map[reflect.Type]*storeFlowTypeInfo
@@ -1294,6 +1295,19 @@ func storeFlowTypeInfoSlow(t reflect.Type) *storeFlowTypeInfo {
 	case reflect.Struct:
 		for i := 0; i < t.NumField(); i++ {
 			field := t.Field(i)
+			if field.Name != "Captures" && field.Name != "HeaderCaptures" {
+				switch field.Type.Kind() {
+				case reflect.String:
+					if !storeScanQualifierFields[field.Name] {
+						info.binderFields = append(info.binderFields, i)
+					}
+				case reflect.Slice:
+					elem := field.Type.Elem()
+					if elem.Kind() == reflect.String || (elem.Kind() == reflect.Struct && elem != storeScanPatternArgType) {
+						info.binderFields = append(info.binderFields, i)
+					}
+				}
+			}
 			if !field.IsExported() {
 				continue
 			}
