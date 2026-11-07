@@ -96,3 +96,52 @@ func TestSMTTransformedReentrantCallDoesNotReleaseOwner(t *testing.T) {
 		return smt.Unknown, nil
 	})
 }
+
+func TestSMTTransformedFlightSharesAlphaEquivalentProof(t *testing.T) {
+	shared := &sync.Map{}
+	dir := t.TempDir()
+	cache := func() *smtProofCache { return &smtProofCache{directory: dir, identity: "same"} }
+	first := &Analyzer{smtProofCache: cache(), parallel: &parallelWorkerState{smtFlights: shared}}
+	second := &Analyzer{smtProofCache: cache(), parallel: &parallelWorkerState{smtFlights: shared}}
+	q1 := "(declare-const v_old Int)\n(assert (< v_old v_old))\n"
+	q2 := "(declare-const v_new Int)\n(assert (< v_new v_new))\n"
+	k1, ok1 := first.smtProofCache.alphaKey(q1)
+	k2, ok2 := second.smtProofCache.alphaKey(q2)
+	if !ok1 || !ok2 || k1 != k2 {
+		t.Fatal("fixture is not alpha-equivalent")
+	}
+	entered, release := make(chan struct{}), make(chan struct{})
+	results := make(chan smt.Result, 2)
+	var calls atomic.Int32
+	go func() {
+		r, _ := first.smtCheckTransformedProof(q1, func() (smt.Result, map[string]string) { calls.Add(1); close(entered); <-release; return smt.Unsat, nil })
+		results <- r
+	}()
+	<-entered
+	started := make(chan struct{})
+	go func() {
+		close(started)
+		r, _ := second.smtCheckTransformedProof(q2, func() (smt.Result, map[string]string) { calls.Add(1); return smt.Unsat, nil })
+		results <- r
+	}()
+	<-started
+	select {
+	case r := <-results:
+		t.Fatalf("follower solved before proof completed: %v", r)
+	case <-time.After(25 * time.Millisecond):
+	}
+	close(release)
+	for i := 0; i < 2; i++ {
+		select {
+		case r := <-results:
+			if r != smt.Unsat {
+				t.Fatal(r)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("flight did not complete")
+		}
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("alpha-equivalent proof solved %d times", calls.Load())
+	}
+}

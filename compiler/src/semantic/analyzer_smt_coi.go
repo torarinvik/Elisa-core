@@ -320,9 +320,14 @@ func (a *Analyzer) smtCheckTransformedProof(query string, check func() (smt.Resu
 	var flightKey string
 	var flight *smtFlight
 	if a.smtProofCache != nil && a.parallel != nil && a.parallel.smtFlights != nil {
-		// The exact key binds the solver identity and query without copying the
-		// potentially large query into a second shared-map key.
-		flightKey = "\x00transformed-unsat\x00" + keys.exact
+		// The proof cache already validates alpha-equivalence for UNSAT records.
+		// Share that same key when available; otherwise use the exact digest.
+		// Separate namespaces prevent an exact key being interpreted as alpha.
+		if keys.alpha != "" {
+			flightKey = "\x00transformed-alpha\x00" + keys.alpha
+		} else {
+			flightKey = "\x00transformed-unsat\x00" + keys.exact
+		}
 		shared, ok, owned := a.awaitSharedSMTQuery(flightKey)
 		if ok && shared.proven {
 			a.smtStats.CacheHits++
