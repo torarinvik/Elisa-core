@@ -158,15 +158,14 @@ type smtTokenScanner struct {
 	offset int
 }
 
-func smtTokenDelimiter(c byte) bool {
-	return c == ' ' || c == '(' || c == ')' || c == '\n' || c == '\t'
-}
+var smtTokenDelimiter = [256]bool{' ': true, '(': true, ')': true, '\n': true, '\t': true}
+
 func (scan *smtTokenScanner) next() (string, bool) {
-	for scan.offset < len(scan.text) && smtTokenDelimiter(scan.text[scan.offset]) {
+	for scan.offset < len(scan.text) && smtTokenDelimiter[scan.text[scan.offset]] {
 		scan.offset++
 	}
 	start := scan.offset
-	for scan.offset < len(scan.text) && !smtTokenDelimiter(scan.text[scan.offset]) {
+	for scan.offset < len(scan.text) && !smtTokenDelimiter[scan.text[scan.offset]] {
 		scan.offset++
 	}
 	if start == scan.offset {
