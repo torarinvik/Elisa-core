@@ -319,8 +319,10 @@ func (a *Analyzer) smtCheckTransformedProof(query string, check func() (smt.Resu
 	// Share only definitive proofs; SAT models and Unknown remain local.
 	var flightKey string
 	var flight *smtFlight
-	if a.smtProofCache != nil {
-		flightKey = "\x00transformed-unsat\x00" + a.smtProofCache.identity + "\x00" + query
+	if a.smtProofCache != nil && a.parallel != nil && a.parallel.smtFlights != nil {
+		// The exact key binds the solver identity and query without copying the
+		// potentially large query into a second shared-map key.
+		flightKey = "\x00transformed-unsat\x00" + keys.exact
 		shared, ok, owned := a.awaitSharedSMTQuery(flightKey)
 		if ok && shared.proven {
 			a.smtStats.CacheHits++

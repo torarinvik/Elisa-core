@@ -54,6 +54,15 @@ func TestSMTTransformedFlightSharesOnlyProofs(t *testing.T) {
 	if r != smt.Unknown || calls.Load() != 2 {
 		t.Fatal("proof crossed solver identities")
 	}
+	proofA, proofB := makeAnalyzer("same-base"), makeAnalyzer("same-base")
+	proofA.smtProofCache.proofIdentity = "solver-one"
+	proofB.smtProofCache.proofIdentity = "solver-two"
+	_, _ = proofA.smtCheckTransformedProof("(assert false)", func() (smt.Result, map[string]string) { return smt.Unsat, nil })
+	distinctChecks := 0
+	r, _ = proofB.smtCheckTransformedProof("(assert false)", func() (smt.Result, map[string]string) { distinctChecks++; return smt.Unknown, nil })
+	if r != smt.Unknown || distinctChecks != 1 {
+		t.Fatal("proof crossed proof identities")
+	}
 	for _, verdict := range []smt.Result{smt.Sat, smt.Unknown} {
 		a, b := makeAnalyzer("nonproof"), makeAnalyzer("nonproof")
 		checks := 0
@@ -73,7 +82,7 @@ func TestSMTTransformedReentrantCallDoesNotReleaseOwner(t *testing.T) {
 	a := &Analyzer{smtProofCache: &smtProofCache{directory: t.TempDir(), identity: "same"}, parallel: &parallelWorkerState{smtFlights: &sync.Map{}}}
 	query := "(assert false)"
 	_, _ = a.smtCheckTransformedProof(query, func() (smt.Result, map[string]string) {
-		key := "\x00transformed-unsat\x00same\x00" + query
+		key := "\x00transformed-unsat\x00" + a.smtProofCache.key(query)
 		outer := a.parallel.leading[key]
 		_, _ = a.smtCheckTransformedProof(query, func() (smt.Result, map[string]string) { return smt.Unsat, nil })
 		if a.parallel.leading[key] != outer || outer == nil {
