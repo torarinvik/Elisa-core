@@ -1078,6 +1078,24 @@ var astStmtType = reflect.TypeOf((*ast.Stmt)(nil)).Elem()
 var astTypeExprType = reflect.TypeOf((*ast.TypeExpr)(nil)).Elem()
 var astMatchArmType = reflect.TypeOf(ast.MatchArm{})
 
+// The identifier fast path is valid only for the schema whose sole string
+// fields are Position.File and Name. Fall back if the AST schema changes.
+var storeFlowIdentFast = func() bool {
+	id := reflect.TypeOf(ast.Ident{})
+	pos := reflect.TypeOf(lexer.Pos{})
+	if id.NumField() != 2 || id.Field(0).Name != "Position" || id.Field(0).Type != pos || id.Field(1).Name != "Name" || id.Field(1).Type.Kind() != reflect.String || pos.NumField() != 7 {
+		return false
+	}
+	fields := []string{"File", "Line", "Col", "Offset", "EndLine", "EndCol", "EndOffset"}
+	for i, name := range fields {
+		field := pos.Field(i)
+		if field.Name != name || (i == 0 && field.Type.Kind() != reflect.String) || (i != 0 && field.Type.Kind() != reflect.Int) {
+			return false
+		}
+	}
+	return true
+}()
+
 // storeFlowTypeInfo caches what storeFlowMentions asks of a reflect.Type on every node it
 // visits: method-set tests (Implements) and the struct field filter were ~4 s of a stage1
 // driver compile when recomputed per node.
@@ -1663,6 +1681,21 @@ func (a *Analyzer) storeFlowCollectMentionsWithQuery(root reflect.Value, self ui
 		case reflect.Pointer:
 			if v.IsNil() || !v.CanInterface() {
 				return
+			}
+			if storeFlowIdentFast {
+				if ident, ok := v.Interface().(*ast.Ident); ok {
+					if collectNames && condDepth == 0 && (!callsOnly || callDepth > 0) {
+						for _, name := range [...]string{ident.Position.File, ident.Name} {
+							if storeFlowVariableName(name) {
+								if renamed, ok := rename[name]; ok {
+									name = renamed
+								}
+								names = append(names, name)
+							}
+						}
+					}
+					return
+				}
 			}
 			info := storeFlowTypeInfoOf(v.Type())
 			if info.isStmt && v.Pointer() != self {
