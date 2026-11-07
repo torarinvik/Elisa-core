@@ -1191,19 +1191,17 @@ func (a *Analyzer) storeFlowUnit(stmt reflect.Value, c *storeFlowCtx) []reflect.
 	// its calls from the start, without first gathering unused name facts.
 	scalarDecl := a.storeFlowScalarDecl(stmt)
 	callsOnly := scalarDecl || a.storeFlowCondOnly(stmt)
-	mayHaveQuery := false
-	names := a.storeFlowCollectMentionsWithQuery(stmt.Elem(), stmt.Pointer(), nil, &nested, &calls, callsOnly, true, &mayHaveQuery)
+	queryScan := storeFlowQueryScan{}
+	names := a.storeFlowCollectMentionsWithQuery(stmt.Elem(), stmt.Pointer(), nil, &nested, &calls, callsOnly, true, &queryScan)
 	binds := a.storeFlowBinds
 	if callsOnly && binds && !scalarDecl {
 		callsOnly = false
 		nested, calls = nil, nil
-		mayHaveQuery = false
-		names = a.storeFlowCollectMentionsWithQuery(stmt.Elem(), stmt.Pointer(), nil, &nested, &calls, false, true, &mayHaveQuery)
+		queryScan = storeFlowQueryScan{}
+		names = a.storeFlowCollectMentionsWithQuery(stmt.Elem(), stmt.Pointer(), nil, &nested, &calls, false, true, &queryScan)
 	}
-	if mayHaveQuery {
-		for _, pair := range a.storeFlowQueryBinderPairs(stmt) {
-			c.link(pair)
-		}
+	for _, pair := range queryScan.result(a, stmt) {
+		c.link(pair)
 	}
 	if target, roots := a.storeFlowElementCopy(stmt); target != "" {
 		// `v: darray[sview] = [x for x in src]`: the copy's elements are views or scalars read
@@ -1609,9 +1607,21 @@ func (a *Analyzer) storeFlowCollectMentions(root reflect.Value, self uintptr, ha
 	return a.storeFlowCollectMentionsWithQuery(root, self, handled, nested, calls, callsOnly, collectNames, nil)
 }
 
-// mayHaveQuery is conservative: any skipped call subtree forces the separate
-// query walk. Otherwise this scan proves whether that walk can find a query.
-func (a *Analyzer) storeFlowCollectMentionsWithQuery(root reflect.Value, self uintptr, handled map[*ast.CallExpr][]string, nested *[]reflect.Value, calls *[]*ast.CallExpr, callsOnly, collectNames bool, mayHaveQuery *bool) []string {
+// Skipped call subtrees force the original query walk; otherwise the first
+// walk collects exactly the same query pairs as that walk.
+type storeFlowQueryScan struct {
+	incomplete bool
+	pairs      [][]string
+}
+
+func (q *storeFlowQueryScan) result(a *Analyzer, stmt reflect.Value) [][]string {
+	if q.incomplete {
+		return a.storeFlowQueryBinderPairs(stmt)
+	}
+	return q.pairs
+}
+
+func (a *Analyzer) storeFlowCollectMentionsWithQuery(root reflect.Value, self uintptr, handled map[*ast.CallExpr][]string, nested *[]reflect.Value, calls *[]*ast.CallExpr, callsOnly, collectNames bool, queryScan *storeFlowQueryScan) []string {
 	var names []string
 	callDepth := 0
 	condDepth := 0 // inside a ternary condition: a bool, so its names reach no value
@@ -1695,12 +1705,11 @@ func (a *Analyzer) storeFlowCollectMentionsWithQuery(root reflect.Value, self ui
 				walk(reflect.ValueOf(&tern.Alt).Elem())
 				return
 			}
-			if mayHaveQuery != nil {
-				if _, ok := v.Interface().(*ast.QueryExpr); ok {
-					*mayHaveQuery = true
-				}
-			}
 			if q, ok := v.Interface().(*ast.QueryExpr); ok && q != nil && storeFlowScalarQuery(q) {
+				if queryScan != nil {
+					roots, _ := storeFlowChainRoots(q.Source)
+					queryScan.pairs = append(queryScan.pairs, append([]string{q.Name}, a.storeFlowRenamedAll(roots)...))
+				}
 				// `any/all/count x in src where p`: a bool or a count. Its binder is scoped to the
 				// query and its value holds nothing, so its names are tested, not moved; calls in
 				// it are still recorded.
@@ -1715,8 +1724,8 @@ func (a *Analyzer) storeFlowCollectMentionsWithQuery(root reflect.Value, self ui
 			if call, ok := v.Interface().(*ast.CallExpr); ok {
 				if callsOnly {
 					if fe, isField := call.Func.(*ast.FieldExpr); isField && fe != nil && storeFlowReadOnlyMethods[fe.Field] && !a.isDeclaredFuncName(fe.Field) {
-						if mayHaveQuery != nil {
-							*mayHaveQuery = true
+						if queryScan != nil {
+							queryScan.incomplete = true
 						}
 						for _, arg := range call.Args {
 							walk(reflect.ValueOf(arg))
@@ -1732,8 +1741,8 @@ func (a *Analyzer) storeFlowCollectMentionsWithQuery(root reflect.Value, self ui
 					*calls = append(*calls, call)
 				}
 				if retNames, isHandled := handled[call]; isHandled {
-					if mayHaveQuery != nil {
-						*mayHaveQuery = true
+					if queryScan != nil {
+						queryScan.incomplete = true
 					}
 					if collectNames && condDepth == 0 {
 						names = append(names, retNames...)
@@ -1742,8 +1751,8 @@ func (a *Analyzer) storeFlowCollectMentionsWithQuery(root reflect.Value, self ui
 				}
 				// A declared function's own name is not a variable.
 				if ident, ok := call.Func.(*ast.Ident); ok && ident != nil && a.isDeclaredFuncName(ident.Name) && !a.storeFlowParams[ident.Name] {
-					if mayHaveQuery != nil {
-						*mayHaveQuery = true
+					if queryScan != nil {
+						queryScan.incomplete = true
 					}
 					for _, arg := range call.Args {
 						walk(reflect.ValueOf(arg))
@@ -2168,8 +2177,8 @@ func (a *Analyzer) storeFlowWritten(decl *ast.FuncDecl, scalars map[string]bool)
 			*ast.ExprStmt, *ast.ReturnStmt, *ast.IfStmt, *ast.WhileStmt, *ast.DiscardStmt:
 			collectNames = false
 		}
-		mayHaveQuery := false
-		names := a.storeFlowCollectMentionsWithQuery(stmt.Elem(), stmt.Pointer(), nil, &nested, &calls, false, collectNames, &mayHaveQuery)
+		queryScan := storeFlowQueryScan{}
+		names := a.storeFlowCollectMentionsWithQuery(stmt.Elem(), stmt.Pointer(), nil, &nested, &calls, false, collectNames, &queryScan)
 		binds := a.storeFlowBinds
 		for _, call := range calls {
 			fn, isMethod := call.Func.(*ast.FieldExpr)
@@ -2234,9 +2243,7 @@ func (a *Analyzer) storeFlowWritten(decl *ast.FuncDecl, scalars map[string]bool)
 				written[n] = true
 			}
 		}
-		if mayHaveQuery {
-			groups = append(groups, a.storeFlowQueryBinderPairs(stmt)...)
-		}
+		groups = append(groups, queryScan.result(a, stmt)...)
 		if binds && !a.storeFlowScalarDecl(stmt) {
 			if target, _ := a.storeFlowElementCopy(stmt); target == "" {
 				if !collectNames {

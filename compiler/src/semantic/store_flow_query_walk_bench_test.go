@@ -16,11 +16,9 @@ func BenchmarkStoreFlowStatementScans(b *testing.B) {
 	a := &Analyzer{}
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		mayHaveQuery := false
-		a.storeFlowCollectMentionsWithQuery(stmt.Elem(), stmt.Pointer(), nil, nil, nil, false, true, &mayHaveQuery)
-		if mayHaveQuery {
-			a.storeFlowQueryBinderPairs(stmt)
-		}
+		queryScan := storeFlowQueryScan{}
+		a.storeFlowCollectMentionsWithQuery(stmt.Elem(), stmt.Pointer(), nil, nil, nil, false, true, &queryScan)
+		_ = queryScan.result(a, stmt)
 	}
 }
 
@@ -33,10 +31,23 @@ func BenchmarkStoreFlowCallQueryScans(b *testing.B) {
 	a := &Analyzer{}
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		mayHaveQuery := false
-		a.storeFlowCollectMentionsWithQuery(stmt.Elem(), stmt.Pointer(), nil, nil, nil, false, true, &mayHaveQuery)
-		if mayHaveQuery {
-			a.storeFlowQueryBinderPairs(stmt)
-		}
+		queryScan := storeFlowQueryScan{}
+		a.storeFlowCollectMentionsWithQuery(stmt.Elem(), stmt.Pointer(), nil, nil, nil, false, true, &queryScan)
+		_ = queryScan.result(a, stmt)
+	}
+}
+
+func BenchmarkStoreFlowScalarQueries(b *testing.B) {
+	args := make([]ast.Expr, 32)
+	for i := range args {
+		args[i] = &ast.QueryExpr{Kind: ast.QueryExprAny, Name: "item", Source: &ast.Ident{Name: "items"}}
+	}
+	stmt := reflect.ValueOf(&ast.ReturnStmt{Value: &ast.CallExpr{Func: &ast.Ident{Name: "unknown"}, Args: args}})
+	a := &Analyzer{}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		queryScan := storeFlowQueryScan{}
+		a.storeFlowCollectMentionsWithQuery(stmt.Elem(), stmt.Pointer(), nil, nil, nil, false, true, &queryScan)
+		_ = queryScan.result(a, stmt)
 	}
 }
