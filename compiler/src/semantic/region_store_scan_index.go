@@ -536,7 +536,7 @@ func (idx *storeScanDeclIndex) parameters(decl *ast.FuncDecl) map[string]bool {
 	return idx.parameterNames
 }
 
-func (idx *storeScanDeclIndex) eachPayloadNode(visit func(any)) {
+func (idx *storeScanDeclIndex) payloadNodeList() []any {
 	if !idx.payloadNodesReady {
 		for _, node := range idx.flat {
 			switch node.(type) {
@@ -546,7 +546,11 @@ func (idx *storeScanDeclIndex) eachPayloadNode(visit func(any)) {
 		}
 		idx.payloadNodesReady = true
 	}
-	for _, node := range idx.payloadNodes {
+	return idx.payloadNodes
+}
+
+func (idx *storeScanDeclIndex) eachPayloadNode(visit func(any)) {
+	for _, node := range idx.payloadNodeList() {
 		visit(node)
 	}
 }

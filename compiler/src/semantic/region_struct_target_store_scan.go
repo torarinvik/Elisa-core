@@ -285,10 +285,7 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 	mode := storeNone
 	// Only assignments and calls can contribute to this scan. The cached subset
 	// preserves their flat-walk order, including calls nested inside assignments.
-	scanIdx.eachPayloadNode(func(node any) {
-		if mode == storeHeader {
-			return
-		}
+	visitPayload := func(node any) {
 		switch n := node.(type) {
 		case *ast.AssignStmt:
 			if n == nil {
@@ -437,7 +434,13 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 				}
 			}
 		}
-	})
+	}
+	for _, node := range scanIdx.payloadNodeList() {
+		if mode == storeHeader {
+			break
+		}
+		visitPayload(node)
+	}
 	return mode
 }
 
