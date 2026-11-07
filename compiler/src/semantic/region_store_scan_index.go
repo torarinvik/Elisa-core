@@ -52,6 +52,9 @@ func (idx *storeScanDeclIndex) mentions(expr ast.Expr, names map[string]bool) bo
 	tokens, ok := idx.exprTokens[expr]
 	if !ok {
 		tokens = storeScanCompactMentionTokens(storeScanMentionTokens(expr))
+		if idx.exprTokens == nil {
+			idx.exprTokens = map[ast.Expr][]string{}
+		}
 		idx.exprTokens[expr] = tokens
 	}
 	return storeScanTokensHit(tokens, names)
@@ -78,6 +81,9 @@ func (idx *storeScanDeclIndex) mentionsTwo(expr ast.Expr, left, right map[string
 	tokens, ok := idx.exprTokens[expr]
 	if !ok {
 		tokens = storeScanCompactMentionTokens(storeScanMentionTokens(expr))
+		if idx.exprTokens == nil {
+			idx.exprTokens = map[ast.Expr][]string{}
+		}
 		idx.exprTokens[expr] = tokens
 	}
 	leftHit, rightHit := false, false
@@ -118,6 +124,9 @@ func (idx *storeScanDeclIndex) headerMentions(stmt ast.Stmt, names map[string]bo
 	tokens, ok := idx.headerTokens[stmt]
 	if !ok {
 		tokens = storeScanHeaderTokens(stmt)
+		if idx.headerTokens == nil {
+			idx.headerTokens = map[ast.Stmt][]string{}
+		}
 		idx.headerTokens[stmt] = tokens
 	}
 	return storeScanTokensHit(tokens, names)
@@ -306,7 +315,7 @@ func (a *Analyzer) storeScanIndex(decl *ast.FuncDecl) *storeScanDeclIndex {
 	if idx, ok := a.storeScanIndexCache[decl]; ok {
 		return idx
 	}
-	idx := &storeScanDeclIndex{decls: map[string][]*ast.VarDeclStmt{}, otherBound: map[string]bool{}, locals: map[string]bool{}, iterBinders: map[string][]*ast.IterForStmt{}, nonIterBinder: map[string]bool{}, exprTokens: map[ast.Expr][]string{}, headerTokens: map[ast.Stmt][]string{}, bound: map[ast.Stmt][]string{}}
+	idx := &storeScanDeclIndex{decls: map[string][]*ast.VarDeclStmt{}, otherBound: map[string]bool{}, locals: map[string]bool{}, iterBinders: map[string][]*ast.IterForStmt{}, nonIterBinder: map[string]bool{}, bound: map[ast.Stmt][]string{}}
 
 	walkStoreScanNodes(decl.Body, func(node any) {
 		idx.flat = append(idx.flat, node)
