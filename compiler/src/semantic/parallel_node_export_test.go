@@ -76,13 +76,19 @@ func TestParallelNodeExportMatchesAllMapDispatch(t *testing.T) {
 	a, stmts := nodeExportFixture(4)
 	want := legacyExportNodeEntries(a, stmts)
 	check := func() {
-		got := exportNodeEntries(a, stmts)
-		for i := range want {
-			if got[i].IsValid() != want[i].IsValid() {
+		target := &Analyzer{}
+		importNodeEntries(target, exportNodeEntries(a, stmts))
+		root := settable(reflect.ValueOf(target).Elem())
+		for i, path := range nodeKeyedMapPaths() {
+			got := root
+			for _, field := range path.path {
+				got = settable(got.Field(field))
+			}
+			if got.IsNil() == want[i].IsValid() {
 				t.Errorf("map %d validity differs", i)
 				continue
 			}
-			if got[i].IsValid() && !reflect.DeepEqual(got[i].Interface(), want[i].Interface()) {
+			if want[i].IsValid() && !reflect.DeepEqual(got.Interface(), want[i].Interface()) {
 				t.Errorf("map %d entries differ", i)
 			}
 		}
@@ -96,7 +102,7 @@ func TestParallelNodeExportMatchesAllMapDispatch(t *testing.T) {
 	wg.Wait()
 	// The dispatch table must not retain any worker's map or entries.
 	for i, v := range exportNodeEntries(&Analyzer{}, stmts) {
-		if v.IsValid() {
+		if len(v) != 0 {
 			t.Errorf("empty worker inherited map %d", i)
 		}
 	}
@@ -106,12 +112,15 @@ func BenchmarkParallelNodeExport(b *testing.B) {
 	a, stmts := nodeExportFixture(64)
 	for _, tc := range []struct {
 		name string
-		run  func(*Analyzer, []ast.Stmt) []reflect.Value
-	}{{"all-maps", legacyExportNodeEntries}, {"compatible-maps", exportNodeEntries}} {
+		run  func()
+	}{
+		{"all-maps", func() { legacyExportNodeEntries(a, stmts) }},
+		{"compatible-maps", func() { exportNodeEntries(a, stmts) }},
+	} {
 		b.Run(tc.name, func(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
-				_ = tc.run(a, stmts)
+				tc.run()
 			}
 		})
 	}

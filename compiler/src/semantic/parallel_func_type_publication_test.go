@@ -65,7 +65,7 @@ func TestParallelImportedFuncTypeReplacesProvisionalSnapshot(t *testing.T) {
 	scope.Define(symbol)
 	schedule := &bodySchedule{
 		funcs: [][]*ast.FuncDecl{{decl}}, done: []chan struct{}{make(chan struct{})},
-		exported: make([]map[int]reflect.Value, 1), nodes: make([][]reflect.Value, 1),
+		exported: make([]map[int]reflect.Value, 1), nodes: make([][][]nodeFact, 1),
 	}
 	worker := &Analyzer{
 		globalScope: scope, funcDeclSymbols: map[*ast.FuncDecl]*Symbol{decl: symbol},

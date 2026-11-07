@@ -368,7 +368,7 @@ type bodySchedule struct {
 	funcs      [][]*ast.FuncDecl       // function declarations per unit
 	cyclic     map[*ast.FuncDecl]bool  // declarations that need recursive summary seeding
 	took       []time.Duration
-	nodes      [][]reflect.Value // per unit: node-keyed entries of its bodies
+	nodes      [][][]nodeFact // per unit, then per node-keyed map
 	stmts      [][]ast.Stmt
 	sccOf      []int
 	sccUnits   map[int][]int
@@ -477,7 +477,7 @@ func planBodySchedule(bodies []scopedDecl, workers int) *bodySchedule {
 	}
 	s := &bodySchedule{units: units, unitOf: make([]int, len(bodies)), worker: make([]int, len(units)),
 		deps: make([][]int, len(units)), done: make([]chan struct{}, len(units)),
-		exported: make([]map[int]reflect.Value, len(units)), funcs: make([][]*ast.FuncDecl, len(units)), took: make([]time.Duration, len(units)), nodes: make([][]reflect.Value, len(units)), stmts: make([][]ast.Stmt, len(units))}
+		exported: make([]map[int]reflect.Value, len(units)), funcs: make([][]*ast.FuncDecl, len(units)), took: make([]time.Duration, len(units)), nodes: make([][][]nodeFact, len(units)), stmts: make([][]ast.Stmt, len(units))}
 	s.cyclic = g.cyclicFunctions()
 	s.sccOf = sccOf
 	s.sccUnits = map[int][]int{}
@@ -556,31 +556,35 @@ func planBodySchedule(bodies []scopedDecl, workers int) *bodySchedule {
 // unit and publishes its function types; closing done orders both before any
 // importer's reads.
 func (s *bodySchedule) exportUnit(a *Analyzer, u int) {
-	out := map[int]reflect.Value{}
-	root := settable(reflect.ValueOf(a).Elem())
-	for pi, path := range exportDeclMapPaths() {
-		v := root
-		for _, i := range path {
-			v = settable(v.Field(i))
-		}
-		if v.IsNil() || holdsLazyCache(v.Type().Elem()) {
-			continue
-		}
-		var m reflect.Value
-		for _, fn := range s.funcs[u] {
-			if val := v.MapIndex(reflect.ValueOf(fn)); val.IsValid() {
-				if !m.IsValid() {
-					m = reflect.MakeMap(v.Type())
+	// A unit with no dependents cannot be reached by an import. Its worker
+	// still owns its facts for the final merge and publishes its function types.
+	if len(s.rdeps[u]) != 0 {
+		out := map[int]reflect.Value{}
+		root := settable(reflect.ValueOf(a).Elem())
+		for pi, path := range exportDeclMapPaths() {
+			v := root
+			for _, i := range path {
+				v = settable(v.Field(i))
+			}
+			if v.IsNil() || holdsLazyCache(v.Type().Elem()) {
+				continue
+			}
+			var m reflect.Value
+			for _, fn := range s.funcs[u] {
+				if val := v.MapIndex(reflect.ValueOf(fn)); val.IsValid() {
+					if !m.IsValid() {
+						m = reflect.MakeMap(v.Type())
+					}
+					m.SetMapIndex(reflect.ValueOf(fn), deepCloneValue(val))
 				}
-				m.SetMapIndex(reflect.ValueOf(fn), deepCloneValue(val))
+			}
+			if m.IsValid() {
+				out[pi] = m
 			}
 		}
-		if m.IsValid() {
-			out[pi] = m
-		}
+		s.exported[u] = out
+		s.nodes[u] = exportNodeEntries(a, s.stmts[u])
 	}
-	s.exported[u] = out
-	s.nodes[u] = exportNodeEntries(a, s.stmts[u])
 	var owned [][2]*FuncType
 	if p := a.parallel; p != nil {
 		for _, fn := range s.funcs[u] {
@@ -743,11 +747,16 @@ func nodeKeyedMapIndices(t reflect.Type) []int {
 	return actual.([]int)
 }
 
-// exportNodeEntries copies the node-keyed entries of a unit's bodies.
-func exportNodeEntries(a *Analyzer, stmts []ast.Stmt) []reflect.Value {
+type nodeFact struct {
+	key, value reflect.Value
+}
+
+// exportNodeEntries copies the node-keyed entries of a unit's bodies. Imports
+// consume each column in order, so the published copy needs no hash table.
+func exportNodeEntries(a *Analyzer, stmts []ast.Stmt) [][]nodeFact {
 	paths := nodeKeyedMapPaths()
 	maps := make([]reflect.Value, len(paths))
-	out := make([]reflect.Value, len(paths))
+	out := make([][]nodeFact, len(paths))
 	root := settable(reflect.ValueOf(a).Elem())
 	for pi, m := range paths {
 		v := root
@@ -765,23 +774,23 @@ func exportNodeEntries(a *Analyzer, stmts []ast.Stmt) []reflect.Value {
 			if !v.IsValid() {
 				continue
 			}
-			key := nv.Convert(paths[pi].key)
+			key := nv
+			if nv.Type() != paths[pi].key {
+				key = nv.Convert(paths[pi].key)
+			}
 			if val := v.MapIndex(key); val.IsValid() {
-				if !out[pi].IsValid() {
-					out[pi] = reflect.MakeMap(v.Type())
-				}
-				out[pi].SetMapIndex(key, deepCloneValue(val))
+				out[pi] = append(out[pi], nodeFact{key, deepCloneValue(val)})
 			}
 		}
 	})
 	return out
 }
 
-func importNodeEntries(a *Analyzer, entries []reflect.Value) {
+func importNodeEntries(a *Analyzer, entries [][]nodeFact) {
 	paths := nodeKeyedMapPaths()
 	root := settable(reflect.ValueOf(a).Elem())
-	for pi, m := range entries {
-		if !m.IsValid() {
+	for pi, facts := range entries {
+		if len(facts) == 0 {
 			continue
 		}
 		v := root
@@ -789,12 +798,11 @@ func importNodeEntries(a *Analyzer, entries []reflect.Value) {
 			v = settable(v.Field(i))
 		}
 		if v.IsNil() {
-			v.Set(reflect.MakeMap(v.Type()))
+			v.Set(reflect.MakeMapWithSize(v.Type(), len(facts)))
 		}
-		iter := m.MapRange()
-		for iter.Next() {
-			if !v.MapIndex(iter.Key()).IsValid() {
-				v.SetMapIndex(iter.Key(), deepCloneValue(iter.Value()))
+		for _, fact := range facts {
+			if !v.MapIndex(fact.key).IsValid() {
+				v.SetMapIndex(fact.key, deepCloneValue(fact.value))
 			}
 		}
 	}

@@ -364,8 +364,9 @@ func TestParallelWorkerDoesNotExportShadowCallGraphCaches(t *testing.T) {
 
 	s := &bodySchedule{
 		funcs: [][]*ast.FuncDecl{{owner}}, exported: make([]map[int]reflect.Value, 1),
-		nodes: make([][]reflect.Value, 1), stmts: make([][]ast.Stmt, 1),
-		done: []chan struct{}{make(chan struct{})}, sccOf: []int{0},
+		nodes: make([][][]nodeFact, 1), stmts: make([][]ast.Stmt, 1),
+		rdeps: [][]int{{1}},
+		done:  []chan struct{}{make(chan struct{})}, sccOf: []int{0},
 		sccLeft: map[int]int{0: 1}, sccPublish: map[int][][2]*FuncType{},
 	}
 	s.exportUnit(a, 0)
