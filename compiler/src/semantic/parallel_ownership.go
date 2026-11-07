@@ -440,6 +440,13 @@ func (a *Analyzer) awaitSharedSMTQuery(query string) (smtQueryResult, bool, *smt
 		// Same-worker recursion must not wait on or release its caller's flight.
 		return smtQueryResult{}, false, nil
 	}
+	// A shared proof is usually already present. Avoid allocating a new
+	// flight and channel before discovering that common hit.
+	if v, loaded := p.smtFlights.Load(query); loaded {
+		f := v.(*smtFlight)
+		<-f.done
+		return f.result, f.ok, nil
+	}
 	fresh := &smtFlight{done: make(chan struct{})}
 	if v, loaded := p.smtFlights.LoadOrStore(query, fresh); loaded {
 		f := v.(*smtFlight)
