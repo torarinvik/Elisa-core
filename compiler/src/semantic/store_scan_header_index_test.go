@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -76,6 +77,24 @@ func BenchmarkStoreScanHeaderCompound(b *testing.B) {
 				if pooled {
 					releaseStoreScanSeen(seen)
 				}
+			}
+		})
+	}
+}
+
+func BenchmarkStoreScanHeaderMapCapacity(b *testing.B) {
+	var expr ast.Expr = &ast.Ident{Name: "other"}
+	for i := 0; i < 16; i++ {
+		expr = &ast.BinaryExpr{Left: expr, Right: &ast.Ident{Name: "other"}}
+	}
+	names := map[string]bool{"values": true}
+	for _, size := range []int{32, 8192} {
+		b.Run(fmt.Sprint(size), func(b *testing.B) {
+			seen := make(map[uintptr]bool, size)
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				storeScanMentionsSink = storeScanMentionsHeaderWalk(reflect.ValueOf(expr), names, seen)
+				clear(seen)
 			}
 		})
 	}

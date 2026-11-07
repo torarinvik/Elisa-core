@@ -1030,9 +1030,19 @@ func storeScanMentionsHeader(node any, names map[string]bool) bool {
 	return storeScanMentionsHeaderPooled(node, names)
 }
 
+// Header expressions are typically much smaller than whole function bodies.
+// Keep their visited maps separate so a large body walk cannot make every
+// subsequent small header scan clear a large map.
+var storeScanHeaderSeenPool = sync.Pool{New: func() any { return make(map[uintptr]bool, 32) }}
+
 func storeScanMentionsHeaderPooled(node any, names map[string]bool) bool {
-	seen := borrowStoreScanSeen()
-	defer releaseStoreScanSeen(seen)
+	seen := storeScanHeaderSeenPool.Get().(map[uintptr]bool)
+	defer func() {
+		if len(seen) <= 512 {
+			clear(seen)
+			storeScanHeaderSeenPool.Put(seen)
+		}
+	}()
 	return storeScanMentionsHeaderWalk(reflect.ValueOf(node), names, seen)
 }
 
