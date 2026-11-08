@@ -752,6 +752,7 @@ func (a *Analyzer) analyzeListComprehensionExprWithExpected(expr *ast.ListCompre
 	if expr.RangeEnd != nil {
 		startType := a.analyzeExpr(expr.Source)
 		endType := a.analyzeExpr(expr.RangeEnd)
+		a.recordComprehensionEndUpperBound(expr)
 		itemType = CommonNumericType(startType, endType)
 		if !IsIntegralType(itemType) {
 			a.errorf(expr.Pos(), "list comprehension range requires integral bounds, got %s and %s", startType, endType)

@@ -38,7 +38,7 @@ func (a *Analyzer) stackBlockAdvisoryBound(body []ast.Stmt, name string, elem Ty
 	if !stackBlockElemEligible(elem) {
 		return nil, false
 	}
-	s := &stackBlockScan{hardBoundScan: hardBoundScan{name: name}, resizeBounds: a.resizeArgUpperBound}
+	s := &stackBlockScan{hardBoundScan: hardBoundScan{name: name}, paramNames: paramNames, upperBounds: a.stackBlockUpperBound}
 	s.walk(reflect.ValueOf(body))
 	if s.disqualified || s.decls != 1 || s.bound == nil || s.mentions != s.allowed {
 		return nil, false
@@ -62,8 +62,9 @@ type stackBlockScan struct {
 	decls    int
 	mentions int // Ident occurrences of name
 	allowed  int // occurrences in an allowed position
-	// resizeBounds: proven constant upper bound of each resize call's argument.
-	resizeBounds map[*ast.CallExpr]int64
+	// upperBounds: proven constant upper bound of each resize argument / comprehension end.
+	upperBounds map[ast.Expr]int64
+	paramNames  map[string]bool
 }
 
 func (s *stackBlockScan) addSite(site ast.Expr, pos lexer.Pos) {
@@ -95,6 +96,16 @@ func (s *stackBlockScan) declInit(vd *ast.VarDeclStmt) {
 		}
 		if start, ok := stripParenExpr(v.Source).(*ast.IntLit); !ok || start.Value != "0" {
 			s.disqualified = true
+			return
+		}
+		// A range end that codegen cannot evaluate at region entry (a local computed later)
+		// still sizes the block when flow facts proved a constant upper bound for it.
+		if hi, ok := s.upperBounds[v]; ok && !stackBlockBoundEvaluable(v.RangeEnd, s.paramNames) {
+			if hi < 0 || hi > stackBlockMaxConstElems {
+				s.disqualified = true
+				return
+			}
+			s.addSite(semanticIntReserveExpr(int(hi), vd.Position), vd.Position)
 			return
 		}
 		s.addSite(v.RangeEnd, vd.Position)
@@ -202,7 +213,7 @@ func (s *stackBlockScan) checkPush(call *ast.CallExpr) {
 	case "push":
 		s.addSite(semanticIntReserveExpr(hardBoundPushElementCount(call), call.Pos()), call.Pos())
 	case "resize":
-		hi, ok := s.resizeBounds[call]
+		hi, ok := s.upperBounds[call]
 		if !ok || hi < 0 || hi > stackBlockMaxConstElems {
 			s.disqualified = true
 			return
@@ -224,8 +235,21 @@ func (a *Analyzer) recordResizeArgUpperBound(call *ast.CallExpr) {
 	if a == nil || call == nil || len(call.Args) != 1 {
 		return
 	}
+	a.recordStackBlockUpperBound(call, call.Args[0])
+}
+
+// recordComprehensionEndUpperBound does the same for a `[v for _ in 0..<n]` range end, so a
+// darray sized by a local (not a parameter) can still take an exactly-sized frame block.
+func (a *Analyzer) recordComprehensionEndUpperBound(expr *ast.ListComprehensionExpr) {
+	if a == nil || expr == nil || expr.RangeEnd == nil {
+		return
+	}
+	a.recordStackBlockUpperBound(expr, expr.RangeEnd)
+}
+
+func (a *Analyzer) recordStackBlockUpperBound(site ast.Expr, bound ast.Expr) {
 	var hi int64
-	switch arg := stripParenExpr(call.Args[0]).(type) {
+	switch arg := stripParenExpr(bound).(type) {
 	case *ast.IntLit:
 		v, ok := parseStackBlockIntLit(arg.Value)
 		if !ok {
@@ -244,10 +268,10 @@ func (a *Analyzer) recordResizeArgUpperBound(call *ast.CallExpr) {
 	if hi < 0 {
 		return
 	}
-	if a.resizeArgUpperBound == nil {
-		a.resizeArgUpperBound = map[*ast.CallExpr]int64{}
+	if a.stackBlockUpperBound == nil {
+		a.stackBlockUpperBound = map[ast.Expr]int64{}
 	}
-	a.resizeArgUpperBound[call] = hi
+	a.stackBlockUpperBound[site] = hi
 }
 
 func parseStackBlockIntLit(text string) (int64, bool) {

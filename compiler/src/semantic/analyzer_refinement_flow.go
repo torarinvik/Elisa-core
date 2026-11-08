@@ -1307,7 +1307,7 @@ func (a *Analyzer) recordWideningCastRangeFact(target ast.Expr, value ast.Expr, 
 	if IsFloatType(sym.Type) {
 		return
 	}
-	if _, _, isInt := BitIntInfo(sym.Type); !isInt {
+	if _, _, isInt := rangeIntInfo(sym.Type); !isInt {
 		return
 	}
 	// Peel the cast chain, collecting each intermediate target type for value-preservation checks.
@@ -1330,15 +1330,14 @@ func (a *Analyzer) recordWideningCastRangeFact(target ast.Expr, value ast.Expr, 
 		t := a.resolveType(ce.Target)
 		a.suppressDiagnostics = savedSuppress
 		restoreReportProbe1.restore()
-		if _, _, isInt := BitIntInfo(t); !isInt {
+		if _, _, isInt := rangeIntInfo(t); !isInt {
 			return // non-integer intermediate — cannot reason about value preservation
 		}
 		castTypes = append(castTypes, t)
 		expr = ce.Operand
 	}
-	if len(castTypes) == 0 {
-		return // value is not a cast at all
-	}
+	// No casts: a plain copy `m = n` of an integer identifier. The target is immutable, so the
+	// source range at the binding point holds for the target's whole lifetime.
 	// The innermost expr must be an immutable integer identifier with a known range.
 	ident, ok := expr.(*ast.Ident)
 	if !ok || ident == nil {
@@ -1353,7 +1352,7 @@ func (a *Analyzer) recordWideningCastRangeFact(target ast.Expr, value ast.Expr, 
 	}
 	// Validate that every cast in the chain is value-preserving (range fits in each target type).
 	for _, t := range castTypes {
-		if !IntegerTypeFitsValue(t, r.lo) || !IntegerTypeFitsValue(t, r.hi) {
+		if !rangeIntFits(t, r.lo) || !rangeIntFits(t, r.hi) {
 			return // narrowing or sign-changing cast somewhere in the chain — decline
 		}
 	}
@@ -3355,4 +3354,32 @@ func (a *Analyzer) analyzeLoopBodyKeepingWrites(analyze func() affineFlowSnapsho
 		}
 	}
 	return snapshot
+}
+
+// rangeIntInfo is BitIntInfo extended with the pointer-sized integer names (usize/uintptr are
+// unsigned 64-bit, isize/int signed 64-bit on every supported target), so range facts carry
+// through the `.usize()` conversions that index arithmetic is full of.
+func rangeIntInfo(t Type) (signed bool, width int, ok bool) {
+	if b, isBuiltin := t.(*BuiltinType); isBuiltin {
+		switch b.Name {
+		case "usize", "uintptr":
+			return false, 64, true
+		case "isize", "int":
+			return true, 64, true
+		}
+	}
+	return BitIntInfo(t)
+}
+
+// rangeIntFits reports whether value is representable in integer type t (per rangeIntInfo).
+// Unlike IntegerTypeFitsValue it is fail-closed: an unrecognized type fits nothing.
+func rangeIntFits(t Type, value int64) bool {
+	signed, width, ok := rangeIntInfo(t)
+	if !ok {
+		return false
+	}
+	if signed {
+		return width >= 64 || (value >= -(int64(1)<<(width-1)) && value <= (int64(1)<<(width-1))-1)
+	}
+	return value >= 0 && (width >= 64 || value <= (int64(1)<<width)-1)
 }

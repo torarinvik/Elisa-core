@@ -182,7 +182,6 @@ var specializationOpaqueMapFields = [...]string{
 	"reportedDotModulePaths",
 	"reportedDotModuleTypes",
 	"requiresReportData",
-	"resizeArgUpperBound",
 	"resolvedCastHooks",
 	"resolvedGlobalStorage",
 	"resolvedStructFieldsMemo",
@@ -226,6 +225,7 @@ var specializationOpaqueMapFields = [...]string{
 	"smtQueryCache",
 	"smtStaleLocalDefs",
 	"specializationStaticBranches",
+	"stackBlockUpperBound",
 	"staticImpls",
 	"staticInterfaces",
 	"storageViewCalleeWriteCache",
@@ -822,9 +822,6 @@ func cloneSpecializationOpaqueMap(dst, src *Analyzer, name string, field reflect
 	case "requiresReportData":
 		dst.requiresReportData = maps.Clone(src.requiresReportData)
 		return true
-	case "resizeArgUpperBound":
-		dst.resizeArgUpperBound = maps.Clone(src.resizeArgUpperBound)
-		return true
 	case "resolvedCastHooks":
 		dst.resolvedCastHooks = maps.Clone(src.resolvedCastHooks)
 		return true
@@ -953,6 +950,9 @@ func cloneSpecializationOpaqueMap(dst, src *Analyzer, name string, field reflect
 		return true
 	case "specializationStaticBranches":
 		dst.specializationStaticBranches = maps.Clone(src.specializationStaticBranches)
+		return true
+	case "stackBlockUpperBound":
+		dst.stackBlockUpperBound = maps.Clone(src.stackBlockUpperBound)
 		return true
 	case "staticImpls":
 		dst.staticImpls = maps.Clone(src.staticImpls)

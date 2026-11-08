@@ -62,6 +62,22 @@ def guarded(n: i64) -> i64:
         factor <- factor + 1
     total.i64()
 
+def local_sized(n: i64) -> i64:
+    if n < 1 or n > 64:
+        return -1
+    k: usize = n.usize()
+    m: usize = k
+    xs: mutable darray[i64] = [2 for _ in 0..<k]
+    ys: mutable darray[i64] = [3 for _ in 0..<m]
+    xs[k - 1] + ys[0]
+
+def open_low(n: i64) -> i64:
+    if n > 64:
+        return -1
+    k: usize = n.usize()
+    xs: mutable darray[i64] = [2 for _ in 0..<k]
+    xs.count.i64()
+
 @test
 def region_stack_block() -> void:
     can Abort.Panic:
@@ -77,6 +93,8 @@ def region_stack_block() -> void:
             panic("nested")
         if guarded(5) != 70 or guarded(0) != 0 or guarded(200) != 2800 or guarded(201) != -2:
             panic("guarded resize")
+        if local_sized(1) != 5 or local_sized(64) != 5 or local_sized(0) != -1 or open_low(3) != 3:
+            panic("local sized")
 `
 
 func TestRegionStackBlock(t *testing.T) {
@@ -86,7 +104,8 @@ func TestRegionStackBlock(t *testing.T) {
 }
 
 // steps and nested get frame blocks, and guarded gets an exactly-sized one from its
-// guard-proven resize bound. pushed is auto-reserved onto the shared stack 0, which keeps the
+// guard-proven resize bound. local_sized gets two from the guard range carried through
+// `n.usize()` and the plain copy; open_low (no lower bound: a negative n wraps) gets none. pushed is auto-reserved onto the shared stack 0, which keeps the
 // region's main arena and never takes this path.
 func TestRegionStackBlockEmitted(t *testing.T) {
 	t.Parallel()
@@ -94,7 +113,7 @@ func TestRegionStackBlockEmitted(t *testing.T) {
 	if exit != 0 {
 		t.Fatalf("emit llvm: exit %d\n%s", exit, stderr)
 	}
-	if n := strings.Count(out, "call void @arena_init_stack_block"); n != 3 {
-		t.Fatalf("expected frame blocks for steps, nested and guarded, got %d calls", n)
+	if n := strings.Count(out, "call void @arena_init_stack_block"); n != 5 {
+		t.Fatalf("expected frame blocks for steps, nested, guarded and local_sized (2), got %d calls", n)
 	}
 }
