@@ -20,6 +20,29 @@ func TestStoreScanTerminalReachability(t *testing.T) {
 	}
 }
 
+func TestStoreScanReachabilityCyclesAndLargeGraphs(t *testing.T) {
+	for _, size := range []int{3, 12} {
+		for _, writes := range []bool{false, true} {
+			a := &Analyzer{}
+			keys := make([]storeScanParamKey, size)
+			for i := range keys {
+				keys[i] = storeScanParamKey{decl: &ast.FuncDecl{Name: "f"}, index: i}
+			}
+			for i, key := range keys {
+				a.setStoreScanParamFacts(key, storeScanParamFacts{writes: writes && i == size-1, reach: []storeScanParamKey{keys[(i+1)%size]}})
+			}
+			if got := a.storeScanParamReaches(keys[0]); got != writes {
+				t.Fatalf("size %d: got %v, want %v", size, got, writes)
+			}
+			for _, key := range keys {
+				if got := a.storeScanParamReaches(key); got != writes {
+					t.Fatalf("size %d, node %d: got %v, want %v", size, key.index, got, writes)
+				}
+			}
+		}
+	}
+}
+
 func BenchmarkStoreScanTerminalReachability(b *testing.B) {
 	key := storeScanParamKey{decl: &ast.FuncDecl{Name: "f"}}
 	a := &Analyzer{}

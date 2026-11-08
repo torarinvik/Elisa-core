@@ -74,13 +74,15 @@ func (a *Analyzer) storeScanParamReaches(start storeScanParamKey) bool {
 	// A local writer or a node with no outgoing edges is already a
 	// complete answer. Avoid constructing a graph walk for this common case.
 	// Keep the ordinary path when tracing so it still records its explanation.
+	var startFacts storeScanParamFacts
 	if !storeScanTrace {
-		if facts := a.storeScanParamLocalFacts(start); facts.writes || len(facts.reach) == 0 {
+		startFacts = a.storeScanParamLocalFacts(start)
+		if facts := startFacts; facts.writes || len(facts.reach) == 0 {
 			a.setStoreScanParamWriteCache(start, facts.writes)
 			return facts.writes
 		}
 	}
-	visited := map[storeScanParamKey]bool{start: true}
+	var visited map[storeScanParamKey]bool
 	type reachEntry struct {
 		key    storeScanParamKey
 		parent int
@@ -104,7 +106,10 @@ func (a *Analyzer) storeScanParamReaches(start storeScanParamKey) bool {
 			result = result || cached
 			continue // a cached false already covers everything it reaches
 		}
-		facts := a.storeScanParamLocalFacts(key)
+		facts := startFacts
+		if head != 0 || storeScanTrace {
+			facts = a.storeScanParamLocalFacts(key)
+		}
 		if facts.writes {
 			resultIndex = head
 			if storeScanTrace {
@@ -124,6 +129,25 @@ func (a *Analyzer) storeScanParamReaches(start storeScanParamKey) bool {
 			break
 		}
 		for _, next := range facts.reach {
+			if visited == nil && len(queue) < len(queueStorage) {
+				found := false
+				for _, entry := range queue {
+					if entry.key == next {
+						found = true
+						break
+					}
+				}
+				if !found {
+					queue = append(queue, reachEntry{key: next, parent: head})
+				}
+				continue
+			}
+			if visited == nil {
+				visited = make(map[storeScanParamKey]bool, len(queue)+1)
+				for _, entry := range queue {
+					visited[entry.key] = true
+				}
+			}
 			if !visited[next] {
 				visited[next] = true
 				queue = append(queue, reachEntry{key: next, parent: head})
@@ -143,8 +167,8 @@ func (a *Analyzer) storeScanParamReaches(start storeScanParamKey) bool {
 		}
 	} else {
 		// Nothing reachable writes: the same holds for every node visited.
-		for key := range visited {
-			a.setStoreScanParamWriteCache(key, false)
+		for _, entry := range queue {
+			a.setStoreScanParamWriteCache(entry.key, false)
 		}
 	}
 	return result

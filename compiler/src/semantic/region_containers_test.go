@@ -7,6 +7,16 @@ import (
 	"elisacore/src/ast"
 )
 
+func TestLiveRegionDependencyNamesSkipsEmptyProvenance(t *testing.T) {
+	state := regionRefState{HasDirectParamDep: true, DirectParamDep: 0}
+	if got := liveRegionDependencyNames(state); len(got) != 0 {
+		t.Fatalf("parameter-only provenance has concrete region names: %v", got)
+	}
+	if allocs := testing.AllocsPerRun(100, func() { liveRegionDependencyNames(state) }); allocs != 0 {
+		t.Fatalf("empty provenance traversal allocated %.2f objects per call", allocs)
+	}
+}
+
 // A container allocated in a scope-owned region must not escape via return
 // (use-after-free); a container in a caller-provided region param may.
 func TestRegionContainerReturnEscapeChecking(t *testing.T) {

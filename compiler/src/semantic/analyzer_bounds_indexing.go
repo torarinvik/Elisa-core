@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"maps"
 	"strconv"
 	"strings"
 
@@ -159,6 +160,9 @@ func cloneViewStaticLen(src map[string]int64) map[string]int64 {
 	if len(src) == 0 {
 		return nil
 	}
+	if len(src) >= 16 {
+		return maps.Clone(src)
+	}
 	out := make(map[string]int64, len(src))
 	for name, length := range src {
 		out[name] = length
@@ -169,6 +173,9 @@ func cloneViewStaticLen(src map[string]int64) map[string]int64 {
 func cloneViewMutable(src map[string]bool) map[string]bool {
 	if len(src) == 0 {
 		return nil
+	}
+	if len(src) >= 16 {
+		return maps.Clone(src)
 	}
 	out := make(map[string]bool, len(src))
 	for name, mut := range src {

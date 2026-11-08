@@ -23,7 +23,7 @@ func (c *syntaxFastCopier) captureField() *FieldExpr {
 		return new(FieldExpr)
 	}
 	if len(c.fieldSlab) == 0 {
-		size := 4
+		size := 8
 		if !c.fieldSlabStarted {
 			size = 1
 			c.fieldSlabStarted = true
@@ -53,7 +53,7 @@ func (c *syntaxFastCopier) captureCall() *CallExpr {
 	}
 	if len(c.callSlab) == 0 {
 		// Small declarations commonly have just one call. Avoid retaining
-		// three unused call nodes in each of their snapshots.
+		// seven unused call nodes in each of their snapshots.
 		size := 4
 		if !c.callSlabStarted {
 			size = 1
@@ -91,8 +91,8 @@ func (c *syntaxFastCopier) captureIdent() *Ident {
 		// slots too, so a tight transient budget cannot hide slab capacity.
 		// Many functions contain only a few identifiers. Start small to avoid
 		// retaining twelve unused nodes in every such snapshot; larger bodies
-		// still use sixteen-node slabs after the initial allocation.
-		size := 16
+		// still use thirty-two-node slabs after the initial allocation.
+		size := 32
 		if !c.identSlabStarted {
 			size = 4
 			c.identSlabStarted = true

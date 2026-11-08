@@ -739,15 +739,13 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	}
 	a.returnProvenanceInProgress[original] = true
 	defer delete(a.returnProvenanceInProgress, original)
-	private, release, ok := a.privateReturnInferenceDecl(fn)
-	if !ok {
-		return
-	}
-	defer release()
-	fn = private
+	// Reuse a completed declaration summary before taking a speculative syntax
+	// snapshot. The snapshot is needed only when the body must be reanalyzed; the
+	// matching path below reads declaration metadata and copies the already
+	// published provenance into this function view.
 	if symbol := a.funcDeclSymbols[fn]; symbol != nil {
 		if sourceType, ok := symbol.Type.(*FuncType); ok {
-			sourceType = a.privateFuncType(nil, sourceType)
+			sourceType = a.privateFuncType(fn, sourceType)
 			if state, ok := reusableDeclReturnProvenance(fn, sourceType, fnType); ok {
 				fnType.ReturnProvenance = state
 				fnType.ReturnProvenanceKnown = true
@@ -765,6 +763,12 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 		fnType.ReturnProvenanceKnown = true
 		return
 	}
+	private, release, ok := a.privateReturnInferenceDecl(fn)
+	if !ok {
+		return
+	}
+	defer release()
+	fn = private
 	defer a.enterFunctionBoundsFacts()()
 
 	restoreFreshShapes := a.enterFreshShapeScope(fn, nil, "infer-provenance")

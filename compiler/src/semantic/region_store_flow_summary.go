@@ -268,24 +268,44 @@ func (idx *storeFlowBinderIndex) singleNamedTypes() map[string]string {
 		}
 		return ""
 	}
-	candidates := idx.typedNames(func(t ast.TypeExpr) bool { return named(t) != "" })
-	result := map[string]string{}
-	conflict := map[string]bool{}
+	var result map[string]string
+	var rejected map[string]bool
+	reject := func(name string) {
+		if rejected == nil {
+			rejected = map[string]bool{}
+		}
+		rejected[name] = true
+		delete(result, name)
+	}
 	note := func(name string, t ast.TypeExpr) {
-		if !candidates[name] {
+		if rejected[name] {
 			return
 		}
 		n := named(t)
+		if n == "" {
+			reject(name)
+			return
+		}
 		if prev, ok := result[name]; ok && prev != n {
-			conflict[name] = true
+			reject(name)
+			return
+		}
+		if result == nil {
+			result = make(map[string]string, len(idx.typed))
 		}
 		result[name] = n
 	}
 	for _, binder := range idx.typed {
 		note(binder.name, binder.t)
 	}
-	for name := range conflict {
+	for _, name := range idx.rangeOther {
 		delete(result, name)
+	}
+	for _, name := range idx.other {
+		delete(result, name)
+	}
+	if result == nil {
+		return map[string]string{}
 	}
 	return result
 }
@@ -425,34 +445,55 @@ func (idx *storeFlowBinderIndex) sets(pred func(ast.TypeExpr) bool) (map[string]
 }
 
 func (idx *storeFlowBinderIndex) typedNames(pred func(ast.TypeExpr) bool) map[string]bool {
-	// A false entry is a permanent veto from a conflicting declaration or
-	// untyped binder. Keep candidates and vetoes in one pre-sized map rather
-	// than growing two maps and then subtracting one from the other.
-	names := make(map[string]bool, len(idx.binderNames()))
-	note := func(name string, accepted bool) {
-		if previous, exists := names[name]; !exists || !accepted || previous {
-			names[name] = accepted
+	// First count accepted declarations to size the map to possible members,
+	// not all binders. A second pass applies every veto after candidates have
+	// been added, preserving shadowing regardless of declaration order.
+	var inline [64]bool
+	var matches []bool
+	count := 0
+	for i, binder := range idx.typed {
+		if pred(binder.t) {
+			if matches == nil {
+				if len(idx.typed) > len(inline) {
+					matches = make([]bool, len(idx.typed))
+				} else {
+					matches = inline[:len(idx.typed)]
+				}
+			}
+			matches[i] = true
+			count++
 		}
 	}
-	for _, binder := range idx.typed {
-		note(binder.name, pred(binder.t))
+	rangeAccepted := pred(storeFlowRangeIndexType)
+	if rangeAccepted {
+		count += len(idx.rangeNames)
 	}
-	if pred(storeFlowRangeIndexType) {
+	if count == 0 {
+		return map[string]bool{}
+	}
+	names := make(map[string]bool, count)
+	for i, binder := range idx.typed {
+		if matches != nil && matches[i] {
+			names[binder.name] = true
+		}
+	}
+	if rangeAccepted {
 		for _, name := range idx.rangeNames {
-			note(name, true)
+			names[name] = true
 		}
-	} else {
+	}
+	for i, binder := range idx.typed {
+		if matches == nil || !matches[i] {
+			delete(names, binder.name)
+		}
+	}
+	if !rangeAccepted {
 		for _, name := range idx.rangeOther {
-			note(name, false)
+			delete(names, name)
 		}
 	}
 	for _, name := range idx.other {
-		note(name, false)
-	}
-	for name, accepted := range names {
-		if !accepted {
-			delete(names, name)
-		}
+		delete(names, name)
 	}
 	return names
 }
@@ -829,7 +870,14 @@ func (a *Analyzer) storeFlowSummaryFor(decl *ast.FuncDecl) *storeFlowSummary {
 			settled = false
 			break
 		}
-		a.storeFlowInProgress[m] = storeFlowSummaryJoin(cur, next)
+		// Most iterations only add facts, so next already is the union. Reuse
+		// its matrices when it contains the previous assumption; retain the
+		// full union for non-monotone intermediate results.
+		if storeFlowSummaryWithin(cur, next) {
+			a.storeFlowInProgress[m] = next
+		} else {
+			a.storeFlowInProgress[m] = storeFlowSummaryJoin(cur, next)
+		}
 		for _, c := range callers[m] {
 			if !queued[c] {
 				queued[c] = true
@@ -1020,7 +1068,8 @@ func storeFlowBoolMatrix(n int) [][]bool {
 
 // newStoreFlowSummary is the least summary: each parameter reaches only itself.
 func newStoreFlowSummary(n int) *storeFlowSummary {
-	s := &storeFlowSummary{conn: storeFlowBoolMatrix(n), reach: storeFlowBoolMatrix(n), retConn: make([]bool, n), written: make([]bool, n)}
+	vectors := make([]bool, 2*n)
+	s := &storeFlowSummary{conn: storeFlowBoolMatrix(n), reach: storeFlowBoolMatrix(n), retConn: vectors[:n:n], written: vectors[n : 2*n : 2*n]}
 	for i := 0; i < n; i++ {
 		s.conn[i][i] = true
 		s.reach[i][i] = true
@@ -1141,17 +1190,38 @@ func (a *Analyzer) computeStoreFlow(decl *ast.FuncDecl) *storeFlowSummary {
 			}
 		}
 	}
+	// These classifications and union roots are fixed after the body scan.
+	// Compute them once per parameter instead of once per matrix cell.
+	type paramClass struct {
+		pure bool
+		root string
+	}
+	var classBuf [16]paramClass
+	classes := classBuf[:]
+	if n > len(classes) {
+		classes = make([]paramClass, n)
+	} else {
+		classes = classes[:n]
+	}
+	for i, p := range decl.Params {
+		classes[i].pure = c.isPure(p.Name)
+		if classes[i].pure {
+			classes[i].root = c.pu.find(p.Name)
+		} else {
+			classes[i].root = c.u.find(p.Name)
+		}
+	}
 	for i, pi := range decl.Params {
-		iPure := c.isPure(pi.Name)
+		iPure := classes[i].pure
 		for j, pj := range decl.Params {
-			jPure := c.isPure(pj.Name)
+			jPure := classes[j].pure
 			switch {
 			case i == j:
 				reach[i][j] = true
 			case !iPure && !jPure:
-				reach[i][j] = c.u.find(pi.Name) == c.u.find(pj.Name) || reachMemo.reaches(pi.Name, pj.Name)
+				reach[i][j] = classes[i].root == classes[j].root || reachMemo.reaches(pi.Name, pj.Name)
 			case iPure && jPure:
-				reach[i][j] = c.pu.find(pi.Name) == c.pu.find(pj.Name)
+				reach[i][j] = classes[i].root == classes[j].root
 			case iPure:
 				reach[i][j] = reachMemo.reaches(pi.Name, pj.Name)
 			default:
@@ -1163,19 +1233,19 @@ func (a *Analyzer) computeStoreFlow(decl *ast.FuncDecl) *storeFlowSummary {
 		for j := range decl.Params {
 			conn[i][j] = reach[i][j] || reach[j][i]
 		}
-		iPure := c.isPure(pi.Name)
+		iPure := classes[i].pure
 		if iPure {
 			retConn[i] = implicit || reachMemo.reaches(pi.Name, storeFlowRetName)
 		} else {
-			retConn[i] = implicit || c.u.find(pi.Name) == c.u.find(storeFlowRetName) || reachMemo.reaches(pi.Name, storeFlowRetName)
+			retConn[i] = implicit || classes[i].root == c.u.find(storeFlowRetName) || reachMemo.reaches(pi.Name, storeFlowRetName)
 		}
 		if scalarResult {
 			retConn[i] = false
 		}
 	}
 	written := make([]bool, n)
-	for i, pi := range decl.Params {
-		written[i] = !c.isPure(pi.Name)
+	for i := range decl.Params {
+		written[i] = !classes[i].pure
 	}
 	return &storeFlowSummary{conn: conn, reach: reach, retConn: retConn, written: written}
 }

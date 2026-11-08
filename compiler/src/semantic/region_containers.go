@@ -1464,6 +1464,12 @@ func (a *Analyzer) checkProgramViewElementArg(paramType Type, arg ast.Expr) {
 }
 
 func liveRegionDependencyNames(state regionRefState) []string {
+	// Parameter-only provenance, packed-store provenance, and empty states do not
+	// name a concrete live region. This is the common local-initializer path; avoid
+	// creating traversal maps for it.
+	if len(state.Deps) == 0 && len(state.Fields) == 0 {
+		return nil
+	}
 	seen := make(map[string]struct{})
 	seenFields := make(map[uintptr]struct{})
 	var visit func(regionRefState)
