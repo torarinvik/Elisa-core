@@ -753,6 +753,7 @@ func (a *Analyzer) analyzeBuiltinDarrayResizeCall(expr *ast.CallExpr) (Type, boo
 	if !AssignableTo(usizeType, argType) {
 		a.errorf(expr.Args[0].Pos(), "darray resize expects %s, got %s", usizeType, argType)
 	}
+	a.recordResizeArgUpperBound(expr)
 	resultType := receiverRefType
 	if resultType == nil {
 		resultType = &RefType{

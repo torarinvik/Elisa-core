@@ -299,6 +299,9 @@ type Analyzer struct {
 	loweredInitCalls      map[*ast.StructLitExpr]*ast.CallExpr
 	postfixShorthandCalls map[*ast.CastExpr]*ast.CallExpr
 	regionStacks          map[*ast.RegionStmt]RegionStackAssignment
+	// resizeArgUpperBound: darray.resize call -> constant upper bound of its argument proven by
+	// flow facts at the call (analyzer_region_stack_block.go). Read by region-stack assignment.
+	resizeArgUpperBound map[*ast.CallExpr]int64
 	// ambientGrownCalleeParamIndex maps a void-grower function name to the index (among its
 	// explicit params) of the container param whose region becomes the callee's ambient
 	// allocation region (AmbientGrownContainerRegion). Recorded by the region-param pre-pass;

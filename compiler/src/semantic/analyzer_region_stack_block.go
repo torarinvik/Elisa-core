@@ -2,6 +2,8 @@ package semantic
 
 import (
 	"reflect"
+	"strconv"
+	"strings"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -24,6 +26,9 @@ import (
 //   - the name is initialized by `[]`, a list literal, or a single-binder list comprehension
 //     over `0..<K` (optionally filtered), and grows only through counting-loop pushes — every
 //     such site multiplies by its enclosing counting loops, as hardBoundForName does;
+//   - `name.resize(n)` is also accepted when flow facts at the call proved a constant upper
+//     bound on n (recordResizeArgUpperBound). resize SETS the count, so the site contributes
+//     that bound once, wherever it sits (loops included), rather than multiplying by loops;
 //   - every other mention of the name is an element read/write `name[i]`, a `.count`/`.len`
 //     read, or a `for x in name` source. Passing it anywhere, copying, rebinding, or taking an
 //     address disqualifies (the darray could then grow or be refilled out of sight).
@@ -33,7 +38,7 @@ func (a *Analyzer) stackBlockAdvisoryBound(body []ast.Stmt, name string, elem Ty
 	if !stackBlockElemEligible(elem) {
 		return nil, false
 	}
-	s := &stackBlockScan{hardBoundScan: hardBoundScan{name: name}}
+	s := &stackBlockScan{hardBoundScan: hardBoundScan{name: name}, resizeBounds: a.resizeArgUpperBound}
 	s.walk(reflect.ValueOf(body))
 	if s.disqualified || s.decls != 1 || s.bound == nil || s.mentions != s.allowed {
 		return nil, false
@@ -57,6 +62,8 @@ type stackBlockScan struct {
 	decls    int
 	mentions int // Ident occurrences of name
 	allowed  int // occurrences in an allowed position
+	// resizeBounds: proven constant upper bound of each resize call's argument.
+	resizeBounds map[*ast.CallExpr]int64
 }
 
 func (s *stackBlockScan) addSite(site ast.Expr, pos lexer.Pos) {
@@ -136,8 +143,8 @@ func (s *stackBlockScan) walk(v reflect.Value) {
 				switch n.Field {
 				case "count", "len":
 					s.allowed++
-				case "push":
-					s.allowed++ // bounded by checkCall below (non-counting loops disqualify)
+				case "push", "resize":
+					s.allowed++ // bounded by checkPush below (unbounded sites disqualify)
 				}
 			}
 		case *ast.CallExpr:
@@ -188,10 +195,64 @@ func (s *stackBlockScan) walk(v reflect.Value) {
 // FieldExpr was not counted), so it disqualifies through the mention/allowed balance.
 func (s *stackBlockScan) checkPush(call *ast.CallExpr) {
 	field, ok := call.Func.(*ast.FieldExpr)
-	if !ok || !s.isName(field.Object) || field.Field != "push" {
+	if !ok || !s.isName(field.Object) {
 		return
 	}
-	s.addSite(semanticIntReserveExpr(hardBoundPushElementCount(call), call.Pos()), call.Pos())
+	switch field.Field {
+	case "push":
+		s.addSite(semanticIntReserveExpr(hardBoundPushElementCount(call), call.Pos()), call.Pos())
+	case "resize":
+		hi, ok := s.resizeBounds[call]
+		if !ok || hi < 0 || hi > stackBlockMaxConstElems {
+			s.disqualified = true
+			return
+		}
+		// resize sets the count to at most hi; it never accumulates across iterations.
+		s.bound = semanticAddReserveExpr(s.bound, semanticIntReserveExpr(int(hi), call.Pos()), call.Pos())
+	}
+}
+
+// stackBlockMaxConstElems caps a recorded resize bound well below any overflow in the
+// footprint arithmetic; codegen applies the real byte limit.
+const stackBlockMaxConstElems = 1 << 20
+
+// recordResizeArgUpperBound remembers the constant upper bound flow facts prove for a
+// `darray.resize(n)` argument at the call (e.g. after `if n > 1600: return -1`). Only a plain
+// identifier or integer literal is considered; anything else records nothing (sound: the
+// stack simply keeps its lazy reservation).
+func (a *Analyzer) recordResizeArgUpperBound(call *ast.CallExpr) {
+	if a == nil || call == nil || len(call.Args) != 1 {
+		return
+	}
+	var hi int64
+	switch arg := stripParenExpr(call.Args[0]).(type) {
+	case *ast.IntLit:
+		v, ok := parseStackBlockIntLit(arg.Value)
+		if !ok {
+			return
+		}
+		hi = v
+	case *ast.Ident:
+		r, ok := a.rangeForBranchExpr(arg)
+		if !ok || !r.hiKnown {
+			return
+		}
+		hi = r.hi
+	default:
+		return
+	}
+	if hi < 0 {
+		return
+	}
+	if a.resizeArgUpperBound == nil {
+		a.resizeArgUpperBound = map[*ast.CallExpr]int64{}
+	}
+	a.resizeArgUpperBound[call] = hi
+}
+
+func parseStackBlockIntLit(text string) (int64, bool) {
+	v, err := strconv.ParseInt(strings.ReplaceAll(text, "_", ""), 0, 64)
+	return v, err == nil
 }
 
 // stackBlockBoundEvaluable accepts the bound shapes codegen evaluates without trapping:

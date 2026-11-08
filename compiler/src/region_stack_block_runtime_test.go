@@ -42,6 +42,26 @@ def nested(depth: i64) -> i64:
     inner: i64 = nested(depth - 1)
     xs[0] + xs[3] + inner
 
+def guarded(n: i64) -> i64:
+    if n < 0:
+        return -1
+    xs: mutable darray[u64] = []
+    total: mutable u64 = 0
+    factor: mutable u64 = 1
+    while factor <= 3:
+        size: usize = (n.u64() * factor).usize()
+        if size > 600:
+            return -2
+        xs.resize(size)
+        i: mutable usize = 0
+        while i < size:
+            xs[i] <- factor
+            i <- i + 1
+        for x in xs:
+            total <- total + x
+        factor <- factor + 1
+    total.i64()
+
 @test
 def region_stack_block() -> void:
     can Abort.Panic:
@@ -55,6 +75,8 @@ def region_stack_block() -> void:
             panic("pushed")
         if nested(50) != 2550:
             panic("nested")
+        if guarded(5) != 70 or guarded(0) != 0 or guarded(200) != 2800 or guarded(201) != -2:
+            panic("guarded resize")
 `
 
 func TestRegionStackBlock(t *testing.T) {
@@ -63,15 +85,16 @@ func TestRegionStackBlock(t *testing.T) {
 	assertAllPassed(t, exit, stdout, stderr, "region_stack_block")
 }
 
-// steps and nested get frame blocks. pushed is auto-reserved onto the shared stack 0, which
-// keeps the region's main arena and never takes this path.
+// steps and nested get frame blocks, and guarded gets an exactly-sized one from its
+// guard-proven resize bound. pushed is auto-reserved onto the shared stack 0, which keeps the
+// region's main arena and never takes this path.
 func TestRegionStackBlockEmitted(t *testing.T) {
 	t.Parallel()
 	exit, out, stderr := compileStressProgram(t, "region_stack_block_ir", regionStackBlockBody)
 	if exit != 0 {
 		t.Fatalf("emit llvm: exit %d\n%s", exit, stderr)
 	}
-	if n := strings.Count(out, "call void @arena_init_stack_block"); n != 2 {
-		t.Fatalf("expected frame blocks for steps and nested, got %d calls", n)
+	if n := strings.Count(out, "call void @arena_init_stack_block"); n != 3 {
+		t.Fatalf("expected frame blocks for steps, nested and guarded, got %d calls", n)
 	}
 }

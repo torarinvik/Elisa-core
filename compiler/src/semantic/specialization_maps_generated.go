@@ -182,6 +182,7 @@ var specializationOpaqueMapFields = [...]string{
 	"reportedDotModulePaths",
 	"reportedDotModuleTypes",
 	"requiresReportData",
+	"resizeArgUpperBound",
 	"resolvedCastHooks",
 	"resolvedGlobalStorage",
 	"resolvedStructFieldsMemo",
@@ -820,6 +821,9 @@ func cloneSpecializationOpaqueMap(dst, src *Analyzer, name string, field reflect
 		return true
 	case "requiresReportData":
 		dst.requiresReportData = maps.Clone(src.requiresReportData)
+		return true
+	case "resizeArgUpperBound":
+		dst.resizeArgUpperBound = maps.Clone(src.resizeArgUpperBound)
 		return true
 	case "resolvedCastHooks":
 		dst.resolvedCastHooks = maps.Clone(src.resolvedCastHooks)

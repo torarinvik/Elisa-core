@@ -48,12 +48,20 @@ func (s *functionState) emitStackBlockInit(arenaPtr C.LLVMValueRef, arenaType se
 	if err != nil {
 		return err
 	}
+	i64 := C.LLVMInt64TypeInContext(s.g.context)
+	i1 := C.LLVMInt1TypeInContext(s.g.context)
+	// A compile-time-constant bound (e.g. a resize capped by a guard) gets a block sized to its
+	// exact worst footprint, installed unconditionally; it may exceed the default 8 KiB block.
+	if n, ok := stackBlockConstBound(bound); ok {
+		if slots, fits := stackBlockConstPayloadSlots(n, elemBytes); fits {
+			return s.emitStackBlockInstall(arenaPtr, arenaType, s.createStackBlockAllocaSlots(i64, stackBlockHeaderSlots+slots), slots)
+		}
+		return nil
+	}
 	maxN := stackBlockMaxElems(elemBytes)
 	if maxN <= 0 {
 		return nil
 	}
-	i64 := C.LLVMInt64TypeInContext(s.g.context)
-	i1 := C.LLVMInt1TypeInContext(s.g.context)
 	value, overflow, ok, err := s.emitStackBlockBoundValue(bound, i64, i1)
 	if err != nil || !ok {
 		return err
@@ -69,6 +77,17 @@ func (s *functionState) emitStackBlockInit(arenaPtr C.LLVMValueRef, arenaType se
 	C.LLVMBuildCondBr(s.builder, use, useBB, contBB)
 	C.LLVMPositionBuilderAtEnd(s.builder, useBB)
 
+	if err := s.emitStackBlockInstall(arenaPtr, arenaType, block, stackBlockPayloadSlots); err != nil {
+		return err
+	}
+	C.LLVMBuildBr(s.builder, contBB)
+	C.LLVMPositionBuilderAtEnd(s.builder, contBB)
+	return nil
+}
+
+// emitStackBlockInstall calls arena_init_stack_block(arena, block, payloadSlots) at the builder.
+func (s *functionState) emitStackBlockInstall(arenaPtr C.LLVMValueRef, arenaType semantic.Type, block C.LLVMValueRef, payloadSlots uint64) error {
+	i64 := C.LLVMInt64TypeInContext(s.g.context)
 	usizeType := s.g.namedType("usize")
 	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	voidRef := s.lambdaVoidRefType()
@@ -81,15 +100,65 @@ func (s *functionState) emitStackBlockInit(arenaPtr C.LLVMValueRef, arenaType se
 	if err != nil {
 		return err
 	}
-	s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaPtr, block, C.LLVMConstInt(i64, stackBlockPayloadSlots, 0)}, "")
-	C.LLVMBuildBr(s.builder, contBB)
-	C.LLVMPositionBuilderAtEnd(s.builder, contBB)
+	s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaPtr, block, C.LLVMConstInt(i64, C.ulonglong(payloadSlots), 0)}, "")
 	return nil
+}
+
+// stackBlockConstMaxBytes caps an exactly-sized constant-bound frame block.
+const stackBlockConstMaxBytes = 64 * 1024
+
+// stackBlockConstBound folds a bound built only from integer literals, `+`, `*`, and parens.
+func stackBlockConstBound(e ast.Expr) (int64, bool) {
+	switch b := e.(type) {
+	case *ast.IntLit:
+		v, err := strconv.ParseInt(b.Value, 0, 64)
+		return v, err == nil && v >= 0
+	case *ast.ParenExpr:
+		return stackBlockConstBound(b.Inner)
+	case *ast.BinaryExpr:
+		l, ok := stackBlockConstBound(b.Left)
+		if !ok {
+			return 0, false
+		}
+		r, ok := stackBlockConstBound(b.Right)
+		if !ok || l > 1<<30 || r > 1<<30 {
+			return 0, false
+		}
+		switch b.Op {
+		case lexer.TOKEN_PLUS:
+			return l + r, true
+		case lexer.TOKEN_STAR:
+			return l * r, true
+		}
+	}
+	return 0, false
+}
+
+// stackBlockConstPayloadSlots is the payload (in 8-byte slots) covering the worst footprint of
+// a growable bounded by n elements — capacity <= max(8, 2n), plus slack — and whether the
+// whole block stays within stackBlockConstMaxBytes.
+func stackBlockConstPayloadSlots(n int64, elemBytes uint64) (uint64, bool) {
+	if elemBytes == 0 {
+		elemBytes = 1
+	}
+	if n < 0 || n > 1<<24 {
+		return 0, false
+	}
+	bytes := (uint64(2*n) + 16) * elemBytes
+	slots := (bytes+7)/8 + 2
+	if (slots+stackBlockHeaderSlots)*8 > stackBlockConstMaxBytes {
+		return 0, false
+	}
+	return slots, true
 }
 
 // createStackBlockAlloca places the frame block in the entry block so it is one fixed frame
 // slot (no dynamic stack growth when the region sits inside a loop).
 func (s *functionState) createStackBlockAlloca(i64 C.LLVMTypeRef) C.LLVMValueRef {
+	return s.createStackBlockAllocaSlots(i64, stackBlockHeaderSlots+stackBlockPayloadSlots)
+}
+
+func (s *functionState) createStackBlockAllocaSlots(i64 C.LLVMTypeRef, totalSlots uint64) C.LLVMValueRef {
 	builder := C.LLVMCreateBuilderInContext(s.g.context)
 	defer C.LLVMDisposeBuilder(builder)
 	entry := C.LLVMGetEntryBasicBlock(s.fnValue)
@@ -98,7 +167,7 @@ func (s *functionState) createStackBlockAlloca(i64 C.LLVMTypeRef) C.LLVMValueRef
 	} else {
 		C.LLVMPositionBuilderAtEnd(builder, entry)
 	}
-	arrayType := C.LLVMArrayType2(i64, C.uint64_t(stackBlockHeaderSlots+stackBlockPayloadSlots))
+	arrayType := C.LLVMArrayType2(i64, C.uint64_t(totalSlots))
 	alloca := C.LLVMBuildAlloca(builder, arrayType, cStringFree("stack.block"))
 	C.LLVMSetAlignment(alloca, 16)
 	return alloca
