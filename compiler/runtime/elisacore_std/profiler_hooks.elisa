@@ -27,12 +27,9 @@ extern elisa_profile_region_layout_v1(arena: uintptr, region: usize, header: uin
 # Geometry uses the runtime's actual data pointer, never an assumed header size.
 @internal
 def arena_profile_region_layout(a: Arena&, r: heap Region&) -> void:
+    return if not (arena_profile_region_layout_supported() can Global{Read,Write}, Atomics{Exchange,Load,Store}, Unsafe.RawExtern)
     can Unsafe{PointerCast,RawExtern}:
-        match elisa_profile_region_layout_negotiate(ELISA_PROFILE_REGION_LAYOUT_ABI_V1):
-            1:
-                elisa_profile_region_layout_v1(a.cast[uintptr], r.global_index, r.cast[uintptr], arena_heap_u8_from_region_data(r).uintptr(), r.capacity * size_of(uintptr))
-            _:
-                pass
+        elisa_profile_region_layout_v1(a.cast[uintptr], r.global_index, r.cast[uintptr], arena_heap_u8_from_region_data(r).uintptr(), r.capacity * size_of(uintptr))
 
 extern elisa_profile_allocation_negotiate(requested_version: u32) -> u32
 
