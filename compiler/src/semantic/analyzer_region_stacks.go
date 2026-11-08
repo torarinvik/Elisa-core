@@ -39,6 +39,9 @@ type RegionStackAssignment struct {
 	StackStrategy map[int]string   // stack id -> "chained" (default) | "reserve_commit" (Phase C)
 	StackCapacity map[int]ast.Expr // reserve_commit stack id -> proven element-count bound N
 	StackElemType map[int]Type     // reserve_commit stack id -> the darray's element type (for sizing)
+	// StackBlockBound: default (lazy) reserve_commit stack id -> proven element-count bound that
+	// codegen may use to back the stack with a frame block when it fits (analyzer_region_stack_block.go).
+	StackBlockBound map[int]ast.Expr
 	// StackEarlyFreeAfter (Phase B2): own-stack id -> byte offset of the top-level statement after
 	// which the stack's arena can be freed early (the object dies before region exit and nothing
 	// references it past then). Absent when the stack must live to region exit.
@@ -184,7 +187,7 @@ func (a *Analyzer) collectRegionParamForwardedContainers(body []ast.Stmt, candid
 }
 
 func (a *Analyzer) assignRegionStacks(region *ast.RegionStmt, paramNames map[string]bool) RegionStackAssignment {
-	asn := RegionStackAssignment{StackOf: map[string]int{}, StackKind: map[int]string{0: "shared"}, StackStrategy: map[int]string{}, StackCapacity: map[int]ast.Expr{}, StackElemType: map[int]Type{}, StackEarlyFreeAfter: map[int]int{}, StackCount: 1}
+	asn := RegionStackAssignment{StackOf: map[string]int{}, StackKind: map[int]string{0: "shared"}, StackStrategy: map[int]string{}, StackCapacity: map[int]ast.Expr{}, StackElemType: map[int]Type{}, StackBlockBound: map[int]ast.Expr{}, StackEarlyFreeAfter: map[int]int{}, StackCount: 1}
 	order := make([]string, 0, 4)
 	seen := map[string]bool{}
 	elemTypeByName := map[string]Type{}
@@ -289,6 +292,12 @@ func (a *Analyzer) assignRegionStacks(region *ast.RegionStmt, paramNames map[str
 		// the checker reads this same strategy, so trust and runtime stay consistent everywhere.
 		if a.targetMmapOvercommit() && !ambientForwarded[n] && !regionParamForwarded[n] {
 			asn.StackStrategy[next] = "reserve_commit"
+			if elem, ok := elemTypeByName[n]; ok {
+				if bound, ok := a.stackBlockAdvisoryBound(region.Body, n, elem, paramNames); ok {
+					asn.StackBlockBound[next] = bound
+					asn.StackElemType[next] = elem
+				}
+			}
 		}
 		next++
 	}

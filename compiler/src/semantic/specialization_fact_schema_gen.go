@@ -499,6 +499,7 @@ var sparseFactSchemas = map[reflect.Type]sparseFactSchema{
 		{name: "StackStrategy", typ: reflect.TypeFor[map[int]string](), anonymous: false, tag: ""},
 		{name: "StackCapacity", typ: reflect.TypeFor[map[int]ast.Expr](), anonymous: false, tag: ""},
 		{name: "StackElemType", typ: reflect.TypeFor[map[int]Type](), anonymous: false, tag: ""},
+		{name: "StackBlockBound", typ: reflect.TypeFor[map[int]ast.Expr](), anonymous: false, tag: ""},
 		{name: "StackEarlyFreeAfter", typ: reflect.TypeFor[map[int]int](), anonymous: false, tag: ""},
 		{name: "StackCount", typ: reflect.TypeFor[int](), anonymous: false, tag: ""},
 		{name: "Merged", typ: reflect.TypeFor[bool](), anonymous: false, tag: ""},

@@ -1147,6 +1147,9 @@ func (s *functionState) emitRegionExtraStacksWithAssignment(n *ast.RegionStmt, l
 				// loop-body bound is intentionally ignored here: an eager loop-variable-dependent
 				// reservation can't be hoisted, and the lazy default is sound (stable base) anyway.
 				initErr = s.emitDefaultReserveCommitStackInit(alloca, arenaType)
+				if initErr == nil && !loopReset && asn.StackBlockBound[k] != nil {
+					initErr = s.emitStackBlockInit(alloca, arenaType, asn.StackBlockBound[k], asn.StackElemType[k])
+				}
 			}
 			if initErr != nil {
 				return noop, initErr

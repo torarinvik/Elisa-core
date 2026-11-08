@@ -217,6 +217,10 @@ const ARENA_NARROW_RESERVE_COMMIT_SLOTS: usize = 2097152
 # arena_alloc from ever bumping into one; 1 is arena_adopt's marker, so this is 2.
 const ARENA_OWNER_TAG_COLLECTION: usize = 2
 
+# Owner tag of a caller-frame block (see arena_init_stack_block). The block lives in the
+# function's stack frame, so arena_free and arena_trim must never hand it to the backend.
+const ARENA_OWNER_TAG_STACK: usize = 3
+
 # Address space reserved per collection stack on the demand-paged backends, in uintptr
 # slots: 1Mi slots = 8 MiB, committed page by page as the table is touched, so a doubled
 # table lands in the spare with no new mapping. On the eager backends (libc malloc, wasm)
@@ -1755,6 +1759,27 @@ def arena_rewind(a: mutable Arena&, m: ArenaMark):
             region_index
         ) can Global{Read,Write}, Atomics{Exchange,Load,Store}
 
+# Install a caller-frame block as the arena's single region. The backend emits this for a
+# reserve_commit stack whose proven element bound fits the block at run time, so the stack
+# never needs a second block: allocation bumps within it (overflow still panics on the
+# reserve_commit path) and the base never moves. `block` must be uintptr-aligned, hold
+# `capacity` payload slots after the Region header, and outlive the arena (it lives in the
+# frame of the function that owns the region, which frees the arena before returning).
+def arena_init_stack_block(a: mutable Arena&, block: mutable heap void&, capacity: usize):
+    can Unsafe.Alias:
+        r: mutable heap Region& = arena_region_from_raw(block)
+        r.next <- null
+        r.count <- 0
+        r.capacity <- capacity
+        r.owner_tag <- ARENA_OWNER_TAG_STACK.uintptr()
+        r.owner_next <- null
+        r.global_index <- 0
+        r.committed <- 0
+        r.free_list <- null
+        a.begin as & <- r
+        a.end as & <- r
+        a.end_index <- 0
+
 def arena_free(a: mutable Arena&):
     can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Release, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
         r: mutable heap Region&? = a.begin
@@ -1784,8 +1809,9 @@ def arena_free(a: mutable Arena&):
                 r0: mutable heap Region& = r
                 r <- r.next
                 (collection_stack_memo_forget(r0) can Global{Read,Write}) if r0.owner_tag == ARENA_OWNER_TAG_COLLECTION.uintptr()
-                trusted Unsafe.RawExtern:
-                    (free_region_backend(r0, a.strategy) can Global{Read,Write})
+                if r0.owner_tag != ARENA_OWNER_TAG_STACK.uintptr():
+                    trusted Unsafe.RawExtern:
+                        (free_region_backend(r0, a.strategy) can Global{Read,Write})
 
 
 def arena_trim(a: mutable Arena&):
@@ -1798,8 +1824,9 @@ def arena_trim(a: mutable Arena&):
                 r0: mutable heap Region& = r
                 r <- r.next
                 (collection_stack_memo_forget(r0) can Global{Read,Write}) if r0.owner_tag == ARENA_OWNER_TAG_COLLECTION.uintptr()
-                trusted Unsafe.RawExtern:
-                    (free_region_backend(r0, a.strategy) can Global{Read,Write})
+                if r0.owner_tag != ARENA_OWNER_TAG_STACK.uintptr():
+                    trusted Unsafe.RawExtern:
+                        (free_region_backend(r0, a.strategy) can Global{Read,Write})
 
         a.end.next as ! <- null
         (arena_free_hint_update(a.cast[uintptr], arena_find_free_region(a.begin)) can Global{Read,Write})
