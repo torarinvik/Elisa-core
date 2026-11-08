@@ -45,6 +45,34 @@ func TestStorageViewBodyScanPreservesNamesAndRelevantOrder(t *testing.T) {
 	}
 }
 
+func TestStorageViewNodePoolClearsUnusedCapacity(t *testing.T) {
+	nodes := make([]any, 8)
+	for i := range nodes {
+		nodes[i] = &ast.Ident{Name: "retained"}
+	}
+	releaseStorageViewNodes(nodes[:1])
+	for i, node := range nodes {
+		if node != nil {
+			t.Fatalf("node %d retained a reference", i)
+		}
+	}
+}
+
+func TestStorageViewHandledPoolClearsPreviousWalk(t *testing.T) {
+	handled := borrowStorageViewHandled()
+	ident := &ast.Ident{Name: "value"}
+	handled[ident] = true
+	releaseStorageViewHandled(handled)
+	if len(handled) != 0 {
+		t.Fatal("handled identifiers retained after release")
+	}
+	next := borrowStorageViewHandled()
+	defer releaseStorageViewHandled(next)
+	if next[ident] {
+		t.Fatal("previous walk contaminated the next one")
+	}
+}
+
 func BenchmarkStorageViewBodyScan(b *testing.B) {
 	decl := storageViewBodyScanFixture(b)
 	for _, mode := range []string{"all_nodes", "relevant_nodes"} {
@@ -76,6 +104,50 @@ func BenchmarkStorageViewBodyScanWide(b *testing.B) {
 		if len(storageViewScanBody(decl).nodes) != 256 {
 			b.Fatal("wrong node count")
 		}
+	}
+}
+
+func BenchmarkStorageViewBodyScanSmallBuffer(b *testing.B) {
+	decl := &ast.FuncDecl{Body: make([]ast.Stmt, 128)}
+	for i := range decl.Body {
+		decl.Body[i] = &ast.ReturnStmt{Value: &ast.Ident{Name: "x"}}
+	}
+	seed := make([]any, 0, 8)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if len(storageViewScanBodyWithNodes(decl, seed).nodes) != 256 {
+			b.Fatal("wrong node count")
+		}
+	}
+}
+
+func BenchmarkStorageViewHandledSet(b *testing.B) {
+	idents := make([]*ast.Ident, 64)
+	for i := range idents {
+		idents[i] = &ast.Ident{}
+	}
+	for _, pooled := range []bool{false, true} {
+		name := "fresh"
+		if pooled {
+			name = "pooled"
+		}
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				var handled map[*ast.Ident]bool
+				if pooled {
+					handled = borrowStorageViewHandled()
+				} else {
+					handled = make(map[*ast.Ident]bool)
+				}
+				for _, ident := range idents {
+					handled[ident] = true
+				}
+				if pooled {
+					releaseStorageViewHandled(handled)
+				}
+			}
+		})
 	}
 }
 

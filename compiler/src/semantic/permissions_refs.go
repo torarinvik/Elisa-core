@@ -103,6 +103,12 @@ func permissionFamiliesFromRefs(refs []ast.PermissionRef) []string {
 	if len(refs) == 0 {
 		return nil
 	}
+	if len(refs) == 1 {
+		if refs[0].Name == "" {
+			return []string{}
+		}
+		return []string{refs[0].Name}
+	}
 	if len(refs) == 2 && refs[0].Name != "" && refs[0].Name == refs[1].Name {
 		return []string{refs[0].Name}
 	}
@@ -399,6 +405,11 @@ func (a *Analyzer) resolvePermissionRefs(refs []ast.PermissionRef, report bool) 
 			valid = append(valid, viaClone)
 		}
 	}
+	// Validation already cloned this plain singleton, which is canonical and
+	// independent of the input. Avoid cloning the owned row a second time.
+	if len(valid) == 1 && valid[0].Name != "" && len(valid[0].TypeArgs) == 0 && len(valid[0].Via) == 0 {
+		return valid
+	}
 	return canonicalizePermissionRefs(valid)
 }
 
@@ -414,6 +425,15 @@ func (a *Analyzer) recordFunctionPermissionFamilies(families []string) {
 func (a *Analyzer) recordFunctionPermissionRefs(refs []ast.PermissionRef) {
 	// A ghost body and its own contract are erased, so nothing in them is a runtime effect.
 	if a.currentFuncDecl != nil && a.currentFuncDecl.IsGhost {
+		return
+	}
+	if len(refs) == 1 && refs[0].Name != "" && len(refs[0].TypeArgs) == 0 && len(refs[0].Via) == 0 {
+		// A plain singleton is already canonical, and appending its value
+		// detaches it from the caller without an intermediate row or family list.
+		a.currentFunctionUsedPermissionRefs = append(a.currentFunctionUsedPermissionRefs, refs[0])
+		if a.currentFunctionUsedPermissions != nil {
+			a.currentFunctionUsedPermissions[refs[0].Name] = true
+		}
 		return
 	}
 	refs = canonicalizePermissionRefs(refs)

@@ -147,6 +147,7 @@ func TestSpecializationReusesStoreScanIndexForPrivateSyntax(t *testing.T) {
 	fn := &ast.FuncDecl{Name: "indexed", TypeParams: []string{"T"}, Body: []ast.Stmt{decl, assign, expr, ret}}
 	source := &Analyzer{}
 	sourceIndex := source.storeScanIndex(fn)
+	sourceIndex.viewLocalNodes()
 	worker, context := specializationStoreWriteCacheContext(source)
 	foreignIndex := worker.storeScanIndex(fn)
 	private := worker.parallel.readShadows[fn]
@@ -173,6 +174,9 @@ func TestSpecializationReusesStoreScanIndexForPrivateSyntax(t *testing.T) {
 	if privateIndex == nil {
 		t.Fatal("specialization rebuilt instead of reusing the source store-scan index")
 	}
+	if !privateIndex.viewNodesReady || len(privateIndex.viewNodes) != len(sourceIndex.viewNodes) {
+		t.Fatal("specialization did not reuse the view-local node index")
+	}
 	if len(privateIndex.flat) != len(sourceIndex.flat) || len(privateIndex.returns) != len(sourceIndex.returns) {
 		t.Fatalf("copied index shape differs: private flat/returns=%d/%d source=%d/%d", len(privateIndex.flat), len(privateIndex.returns), len(sourceIndex.flat), len(sourceIndex.returns))
 	}
@@ -180,6 +184,11 @@ func TestSpecializationReusesStoreScanIndexForPrivateSyntax(t *testing.T) {
 	privateAssign := private.Body[1].(*ast.AssignStmt)
 	privateExpr := private.Body[2].(*ast.ExprStmt)
 	privateRet := private.Body[3].(*ast.ReturnStmt)
+	for _, node := range privateIndex.viewNodes {
+		if node == decl || node == assign || node == expr || node == ret {
+			t.Fatal("view-local index retained source syntax identities")
+		}
+	}
 	flatNodes := make(map[any]bool, len(privateIndex.flat))
 	for _, node := range privateIndex.flat {
 		flatNodes[node] = true
@@ -189,6 +198,126 @@ func TestSpecializationReusesStoreScanIndexForPrivateSyntax(t *testing.T) {
 	}
 	if _, ok := privateIndex.bound[privateExpr]; !ok {
 		t.Fatal("private statement-to-binder index did not rebind its syntax key")
+	}
+}
+
+func TestCanonicalStoreScanIndexKeepsAuxiliarySyntax(t *testing.T) {
+	aux := &ast.CallArgItem{}
+	source := &storeScanDeclIndex{flat: []any{aux}}
+	private := cloneStoreScanIndexForSyntax(source, nil)
+	if private == nil || len(private.flat) != 1 || private.flat[0] != aux {
+		t.Fatal("canonical index rejected an auxiliary syntax pointer")
+	}
+	private.flat[0] = nil
+	if source.flat[0] != aux {
+		t.Fatal("canonical index clone shared its mutable slice")
+	}
+}
+
+func TestPrivateStoreScanIndexRemapsAuxiliarySyntax(t *testing.T) {
+	aux := &ast.CallArgItem{}
+	privateAux := &ast.CallArgItem{}
+	ident := &ast.Ident{Name: "source"}
+	privateIdent := &ast.Ident{Name: "source"}
+	value := reflect.ValueOf(aux)
+	auxiliary := map[specializationPointer]reflect.Value{
+		{value.Type(), value.Pointer()}: reflect.ValueOf(privateAux),
+	}
+	source := &storeScanDeclIndex{flat: []any{ident, aux}, paramFactNodes: []any{aux}, paramFactNodesReady: true}
+	private := cloneStoreScanIndexForSyntax(source, map[ast.Node]ast.Node{ident: privateIdent}, auxiliary)
+	if private == nil || len(private.flat) != 2 || private.flat[0] != privateIdent || private.flat[1] != privateAux {
+		t.Fatal("private index did not remap ordinary and auxiliary syntax")
+	}
+	if !private.paramFactNodesReady || len(private.paramFactNodes) != 1 || private.paramFactNodes[0] != privateAux {
+		t.Fatal("parameter-fact index did not remap auxiliary syntax")
+	}
+	if cloneStoreScanIndexForSyntax(source, map[ast.Node]ast.Node{ident: privateIdent}, nil) != nil {
+		t.Fatal("index reuse must decline when an auxiliary pointer is missing")
+	}
+}
+
+func TestSpecializationReusesIndexWithResolvedPatternArgument(t *testing.T) {
+	pattern := &ast.MatchVariantPattern{EnumName: "Choice", Variant: "Some", Args: []ast.MatchPatternArg{{Name: "value", Pattern: &ast.MatchBindPattern{Name: "item"}}}}
+	pattern.ResolvedArgs = []*ast.MatchPatternArg{&pattern.Args[0]}
+	fn := &ast.FuncDecl{Name: "indexed", TypeParams: []string{"T"}, Body: []ast.Stmt{&ast.MatchStmt{Value: &ast.Ident{Name: "x"}, Arms: []ast.MatchArm{{Pattern: pattern}}}}}
+	source := &Analyzer{}
+	sourceIndex := source.storeScanIndex(fn)
+	worker, context := specializationStoreWriteCacheContext(source)
+	private := context.copyDecl(fn)
+	if context.err != nil {
+		t.Fatal(context.err)
+	}
+	index := worker.storeScanIndexCache[private]
+	if index == nil || len(index.flat) != len(sourceIndex.flat) {
+		t.Fatal("specialization rebuilt or lost the indexed syntax")
+	}
+	privatePattern := private.Body[0].(*ast.MatchStmt).Arms[0].Pattern.(*ast.MatchVariantPattern)
+	if privatePattern.ResolvedArgs[0] != &privatePattern.Args[0] {
+		t.Fatal("copied pattern lost its interior alias")
+	}
+	found := false
+	for _, node := range index.flat {
+		if node == pattern.ResolvedArgs[0] {
+			t.Fatal("index retained the source pattern argument")
+		}
+		if node == privatePattern.ResolvedArgs[0] {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("index omitted the copied pattern argument")
+	}
+}
+
+func BenchmarkSpecializationStoreScanIndexWithPatternArgs(b *testing.B) {
+	fn := &ast.FuncDecl{Name: "indexed"}
+	for i := 0; i < 100; i++ {
+		pattern := &ast.MatchVariantPattern{EnumName: "Choice", Variant: "Some", Args: []ast.MatchPatternArg{{Name: "value", Pattern: &ast.MatchBindPattern{Name: "item"}}}}
+		pattern.ResolvedArgs = []*ast.MatchPatternArg{&pattern.Args[0]}
+		fn.Body = append(fn.Body, &ast.MatchStmt{Value: &ast.Ident{Name: "x"}, Arms: []ast.MatchArm{{Pattern: pattern}}})
+	}
+	source := &Analyzer{}
+	index := source.storeScanIndex(fn)
+	syntax := newSpecializationSyntax()
+	syntax.prepare(reflect.ValueOf(fn))
+	if err := syntax.validate(); err != nil {
+		b.Fatal(err)
+	}
+	private := syntax.copy(reflect.ValueOf(fn)).Interface().(*ast.FuncDecl)
+	for _, reuse := range []bool{false, true} {
+		name := "rebuild"
+		if reuse {
+			name = "reuse"
+		}
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				var result *storeScanDeclIndex
+				if reuse {
+					result = cloneStoreScanIndexForSyntax(index, syntax.nodes, syntax.pointers)
+				} else {
+					a := &Analyzer{}
+					result = a.storeScanIndex(private)
+				}
+				if result == nil || len(result.flat) != len(index.flat) {
+					b.Fatal("lost syntax index")
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkCanonicalStoreScanNodeSliceCopy(b *testing.B) {
+	nodes := make([]any, 512)
+	for i := range nodes {
+		nodes[i] = &ast.Ident{Name: "value"}
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		result, ok := remapStoreScanNodeSlice(nil, nodes)
+		if !ok || len(result) != len(nodes) {
+			b.Fatal("lost nodes")
+		}
 	}
 }
 

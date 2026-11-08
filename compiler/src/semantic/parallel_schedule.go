@@ -447,6 +447,9 @@ func (s *bodySchedule) finish(u int) {
 // its own dependencies: the caller already holds them (it ran or imported that unit
 // after importing the unit's closure), so each worker walks each unit once.
 func (s *bodySchedule) depClosure(u int, have func(int) bool) []int {
+	if len(s.deps[u]) == 0 {
+		return nil
+	}
 	var out []int
 	seen := map[int]bool{u: true}
 	var visit func(int)

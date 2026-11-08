@@ -429,7 +429,25 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 // body pass still checks statements and diagnostics. Unresolved, owning and
 // generic types remain conservative; a bounded recursion also rejects cycles.
 func (a *Analyzer) scalarReturnHasNoReferenceProvenance(fnType *FuncType) bool {
-	return a != nil && fnType != nil && fnType.ReturnRegion == "" && a.returnTypeHasNoReferences(fnType.Return, 0)
+	if a == nil || fnType == nil || fnType.ReturnRegion != "" {
+		return false
+	}
+	if result, ok := fnType.Return.(*ErrorUnionType); ok {
+		// A concrete error union carries only its value or an error payload.
+		// An opaque error-set parameter may add reference-carrying payloads.
+		if result == nil || result.Errors == nil || result.Errors.HasParams() || !a.returnTypeHasNoReferences(result.Value, 1) {
+			return false
+		}
+		for _, payloads := range result.Errors.Payloads {
+			for _, payload := range payloads {
+				if !a.returnTypeHasNoReferences(payload, 1) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	return a.returnTypeHasNoReferences(fnType.Return, 0)
 }
 
 func (a *Analyzer) returnTypeHasNoReferences(t Type, depth int) bool {

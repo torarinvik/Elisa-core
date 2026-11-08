@@ -74,7 +74,9 @@ func collectCFGBlockFactTransforms(cfg *CFG) []FactBlockTransforms {
 	if cfg == nil {
 		return nil
 	}
-	out := make([]FactBlockTransforms, 0, len(cfg.Blocks))
+	// Most blocks carry no transforms. Avoid retaining a graph-sized buffer in
+	// every function analysis when only a few blocks contribute facts.
+	out := []FactBlockTransforms{}
 	for _, block := range cfg.Blocks {
 		if len(block.FactTransforms) == 0 {
 			continue

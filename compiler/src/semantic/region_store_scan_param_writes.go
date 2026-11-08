@@ -324,7 +324,10 @@ func (a *Analyzer) storeScanAliasClosureFrom(decl *ast.FuncDecl, idx *storeScanD
 			}
 		}
 		bindValue := func(name string, value ast.Expr) {
-			if value == nil || !a.storeScanMayShare(decl, value) {
+			// An existing alias cannot become a holder, and scalars and empty
+			// names cannot enter either set. Avoid re-proving their values at
+			// every fixpoint iteration.
+			if name == "" || alias[name] || scalars[name] || value == nil || !a.storeScanMayShare(decl, value) {
 				return
 			}
 			switch {
@@ -364,9 +367,10 @@ func (a *Analyzer) storeScanAliasClosureFrom(decl *ast.FuncDecl, idx *storeScanD
 				}
 				if id, bare := stripParenExpr(n.Target).(*ast.Ident); bare && id != nil {
 					bindValue(id.Name, n.Value)
-				} else if carries(n.Value) {
+				} else {
 					// `local.f <- p` / `local[i] <- p`: the local now contains a part.
-					if root := rootIdentExpr(stripAddrAndParens(n.Target)); root != nil && !alias[root.Name] {
+					// A target that cannot enter the holder set needs no source proof.
+					if root := rootIdentExpr(stripAddrAndParens(n.Target)); root != nil && root.Name != "" && !alias[root.Name] && !scalars[root.Name] && carries(n.Value) {
 						hold(root.Name, storeScanFirstProjection(n.Target))
 					}
 				}
@@ -376,6 +380,12 @@ func (a *Analyzer) storeScanAliasClosureFrom(decl *ast.FuncDecl, idx *storeScanD
 					continue
 				}
 				if field, isMethod := n.Func.(*ast.FieldExpr); isMethod && field != nil {
+					root := rootIdentExpr(stripAddrAndParens(field.Object))
+					// hold cannot add an alias, scalar, or unnamed receiver.
+					// Check this before proving its arguments carry storage.
+					if root == nil || root.Name == "" || alias[root.Name] || scalars[root.Name] {
+						continue
+					}
 					if containerGrowthMethods[field.Field] && a.storeScanReceiverIsBuiltinDArray(decl, field.Object) && !a.storeScanContainerElemsMayShare(decl, field.Object) {
 						// `path.names.extend(xs)` into a `darray[sview]`: element copies that share
 						// no storage -- the receiver holds nothing of xs.
@@ -383,9 +393,7 @@ func (a *Analyzer) storeScanAliasClosureFrom(decl *ast.FuncDecl, idx *storeScanD
 					}
 					for _, arg := range n.Args {
 						if carries(arg) {
-							if root := rootIdentExpr(stripAddrAndParens(field.Object)); root != nil && !alias[root.Name] {
-								hold(root.Name, storeScanFirstProjection(field.Object))
-							}
+							hold(root.Name, storeScanFirstProjection(field.Object))
 							break
 						}
 					}
@@ -416,7 +424,11 @@ func (a *Analyzer) computeStoreScanParamFacts(key storeScanParamKey) storeScanPa
 	holds := hs.names
 	// reaches: an expression that mentions the storage or a holder of its parts.
 	reachesStorage := func(expr ast.Expr) bool {
-		return idx.mentions(expr, alias) || (len(holds) > 0 && idx.mentions(expr, holds))
+		if len(holds) == 0 {
+			return idx.mentions(expr, alias)
+		}
+		aliased, held := idx.mentionsTwo(expr, alias, holds)
+		return aliased || held
 	}
 	// throughHolder: a place / receiver at least depth deep under a holder (`h[0][0]`, `h[0]`).
 	throughHolder := hs.through
@@ -428,11 +440,9 @@ func (a *Analyzer) computeStoreScanParamFacts(key storeScanParamKey) storeScanPa
 			facts.reach = append(facts.reach, next)
 		}
 	}
-	// Locals of decl that are written or handed to a call (holders, write mode only).
+	// Locals of decl that are written or handed to a call. Most scans never
+	// need this set: defer the body walk until a sharing argument reaches a call.
 	var touched map[string]bool
-	if !share {
-		touched = storeScanTouchedLocals(idx)
-	}
 	// Share mode asks whether parameter from's storage may be stored into this one: a stored
 	// value must flow from an alias of that parameter (a fresh literal, a foreign handle, a
 	// scalar result or another parameter's storage stores none of it). An unknown source index
@@ -440,20 +450,26 @@ func (a *Analyzer) computeStoreScanParamFacts(key storeScanParamKey) storeScanPa
 	var outside map[string]bool
 	fromOutside := func(value ast.Expr) bool { return true }
 	if share {
-		start := map[string]bool{}
-		for k, p := range decl.Params {
-			if k != index && (from < 0 || from >= len(decl.Params) || k == from) {
-				start[p.Name] = true
-			}
-		}
 		var outsideHS storeScanHolds
-		outside, outsideHS = a.storeScanAliasClosure(decl, idx, start)
+		if from >= 0 && from < len(decl.Params) && from != index {
+			// This is the same single-parameter closure used by other write and
+			// share queries, so reuse it across target/source pairs.
+			outside, outsideHS = a.storeScanParamAliases(decl, idx, from, storeScanModeWrite)
+		} else {
+			start := map[string]bool{}
+			for k, p := range decl.Params {
+				if k != index && (from < 0 || from >= len(decl.Params) || k == from) {
+					start[p.Name] = true
+				}
+			}
+			outside, outsideHS = a.storeScanAliasClosure(decl, idx, start)
+		}
 		outsideHolds := outsideHS.names
 		fromOutside = func(value ast.Expr) bool {
 			return a.storeScanFlowsFrom(decl, idx, value, outside) || (len(outsideHolds) > 0 && a.storeScanFlowsFrom(decl, idx, value, outsideHolds))
 		}
 	}
-	for _, node := range idx.flat {
+	for _, node := range idx.paramWriteNodes() {
 		if assign, isAssign := node.(*ast.AssignStmt); isAssign && assign != nil {
 			if id, bare := stripParenExpr(assign.Target).(*ast.Ident); bare && id != nil && !storeScanNameIsRefParam(decl, id.Name, idx) {
 				continue // rebinding a local / by-value copy writes no shared storage
@@ -467,7 +483,7 @@ func (a *Analyzer) computeStoreScanParamFacts(key storeScanParamKey) storeScanPa
 				facts.at = node
 				return facts
 			}
-		} else if storeScanNodePlaceMentions(idx, node, alias) || (len(holds) > 0 && storeScanNodePlaceMentions(idx, node, holds)) {
+		} else if storeScanNodePlaceMentionsEither(idx, node, alias, holds) {
 			facts.writes = true
 			facts.why = "place"
 			facts.at = node
@@ -554,12 +570,23 @@ func (a *Analyzer) computeStoreScanParamFacts(key storeScanParamKey) storeScanPa
 			continue
 		}
 		// The callee may store the parameter's storage into a holder argument f then writes.
+		// Without local bindings there cannot be such a holder, so neither the
+		// sharing type queries nor the touched-local scan can add an edge.
+		if len(idx.locals) == 0 {
+			continue
+		}
 		sharing := false
 		for _, k := range mentioned {
-			sharing = sharing || a.storeScanMayShare(decl, args[k])
+			if a.storeScanMayShare(decl, args[k]) {
+				sharing = true
+				break
+			}
 		}
 		if !sharing {
 			continue
+		}
+		if touched == nil {
+			touched = storeScanTouchedLocals(idx)
 		}
 		for m, arg := range args {
 			root := rootIdentExpr(stripAddrAndParens(arg))
@@ -589,7 +616,7 @@ func storeScanTouchedLocals(idx *storeScanDeclIndex) map[string]bool {
 			touched[root.Name] = true
 		}
 	}
-	for _, node := range idx.flat {
+	for _, node := range idx.paramWriteNodes() {
 		switch n := node.(type) {
 		case *ast.AssignStmt:
 			if n != nil {
@@ -631,6 +658,10 @@ func storeScanTouchedLocals(idx *storeScanDeclIndex) map[string]bool {
 
 // storeScanNodePlaceMentions: node has a `Target` or `Store` place mentioning one of names.
 func storeScanNodePlaceMentions(idx *storeScanDeclIndex, node any, names map[string]bool) bool {
+	return storeScanNodePlaceMentionsEither(idx, node, names, nil)
+}
+
+func storeScanNodePlaceMentionsEither(idx *storeScanDeclIndex, node any, left, right map[string]bool) bool {
 	v := reflect.ValueOf(node)
 	if v.Kind() != reflect.Pointer || v.IsNil() {
 		return false
@@ -649,8 +680,14 @@ func storeScanNodePlaceMentions(idx *storeScanDeclIndex, node any, names map[str
 		if !f.CanInterface() {
 			continue
 		}
-		if expr, ok := f.Interface().(ast.Expr); ok && expr != nil && idx.mentions(expr, names) {
-			return true
+		if expr, ok := f.Interface().(ast.Expr); ok && expr != nil {
+			if len(right) == 0 {
+				if idx.mentions(expr, left) {
+					return true
+				}
+			} else if l, r := idx.mentionsTwo(expr, left, right); l || r {
+				return true
+			}
 		}
 	}
 	return false
@@ -854,6 +891,12 @@ var storeScanParamWriterOf = map[storeScanParamKey]string{}
 // storeScanIsEnumConstructor: storeFlowEnumVariantConstructor judged inside decl (it consults the
 // current declaration's binders and type parameters).
 func (a *Analyzer) storeScanIsEnumConstructor(decl *ast.FuncDecl, call *ast.CallExpr) bool {
+	if call == nil {
+		return false
+	}
+	if field, ok := call.Func.(*ast.FieldExpr); !ok || field == nil || field.Object == nil {
+		return false
+	}
 	decl = a.readDecl(decl)
 	saved := a.storeFlowCurrentDecl
 	a.storeFlowCurrentDecl = decl

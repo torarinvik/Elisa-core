@@ -28,12 +28,14 @@ func (a *Analyzer) computeFillMayAdopt() map[*ast.FuncDecl]bool {
 	byName := map[string][]*ast.FuncDecl{}
 	for decl := range a.funcDeclSymbols {
 		if decl != nil {
-			byName[fillMayAdoptLastSegment(decl.Name)] = append(byName[fillMayAdoptLastSegment(decl.Name)], decl)
+			name := fillMayAdoptLastSegment(decl.Name)
+			byName[name] = append(byName[name], decl)
 		}
 	}
 	structNames, funcFields := fillMayAdoptStructFacts(a.file)
 	result := map[*ast.FuncDecl]bool{}
 	callers := map[*ast.FuncDecl][]*ast.FuncDecl{}
+	firstParamHeads := map[*ast.FuncDecl]string{}
 	var work []*ast.FuncDecl
 	seed := func(decl *ast.FuncDecl) {
 		if !result[decl] {
@@ -80,6 +82,7 @@ func (a *Analyzer) computeFillMayAdopt() map[*ast.FuncDecl]bool {
 				visit(node)
 			}
 		}
+		hasLocalShadowCandidate := false
 		forEachBodyNode(func(v any) {
 			switch n := v.(type) {
 			case *ast.LambdaExpr:
@@ -89,6 +92,9 @@ func (a *Analyzer) computeFillMayAdopt() map[*ast.FuncDecl]bool {
 				}
 			case *ast.VarDeclStmt:
 				declare(n.Name, n.Type)
+				if len(byName[n.Name]) != 0 || a.fillMayAdoptNamedCallee(n.Name) {
+					hasLocalShadowCandidate = true
+				}
 			case *ast.ForStmt:
 				declare(n.Name, nil)
 			case *ast.IterForStmt:
@@ -106,36 +112,67 @@ func (a *Analyzer) computeFillMayAdopt() map[*ast.FuncDecl]bool {
 		// A match arm's payload binders shadow it within the arm's guard and body, a loop binder
 		// within the loop's filters and body, and a local within the statements after its
 		// declaration in the same block.
-		armShadowed := map[*ast.Ident]bool{}
+		var armShadowed map[*ast.Ident]bool
 		markScoped := func(binders map[string]bool, scopes ...any) {
 			if len(binders) == 0 {
 				return
 			}
-			for _, scope := range scopes {
-				fillMayAdoptWalk(reflect.ValueOf(scope), func(inner any) {
-					if ident, ok := inner.(*ast.Ident); ok && ident != nil && binders[ident.Name] {
-						armShadowed[ident] = true
+			// Shadowing can affect this graph only for a name that otherwise
+			// resolves to a known callee. Other call names are already unknown,
+			// and other identifiers cannot add a caller edge.
+			interesting := false
+			for name := range binders {
+				if len(byName[name]) != 0 || a.fillMayAdoptNamedCallee(name) {
+					interesting = true
+					break
+				}
+			}
+			if !interesting {
+				return
+			}
+			// A binder set applies to every scope in this call. Sharing the
+			// visited set avoids revisiting syntax shared between those scopes.
+			state := fillMayAdoptSeenPool.Get().(*fillWalkSeen)
+			visit := func(inner any) {
+				if ident, ok := inner.(*ast.Ident); ok && ident != nil && binders[ident.Name] {
+					if armShadowed == nil {
+						armShadowed = make(map[*ast.Ident]bool, min(len(bodyNodes)/8, 32))
 					}
-				})
+					armShadowed[ident] = true
+				}
+			}
+			for _, scope := range scopes {
+				fillMayAdoptWalkSeen(reflect.ValueOf(scope), visit, state.values)
+			}
+			if state.reset() {
+				fillMayAdoptSeenPool.Put(state)
 			}
 		}
 		// One pass per list: a statement's idents are shadowed by every local declared before it
 		// in the list. (Walking the remaining statements once per local was quadratic in block
 		// length: ~3% of compiling the stage1 driver.)
-		fillMayAdoptStmtLists(reflect.ValueOf(decl.Body), func(list []ast.Stmt) {
-			var declaredBefore map[string]bool
-			for _, stmt := range list {
-				if len(declaredBefore) != 0 {
-					markScoped(declaredBefore, stmt)
-				}
-				if local, ok := stmt.(*ast.VarDeclStmt); ok && local != nil {
-					if declaredBefore == nil {
-						declaredBefore = map[string]bool{}
+		if hasLocalShadowCandidate {
+			fillMayAdoptStmtLists(reflect.ValueOf(decl.Body), func(list []ast.Stmt) {
+				var declaredBefore map[string]bool
+				for _, stmt := range list {
+					if len(declaredBefore) != 0 {
+						markScoped(declaredBefore, stmt)
 					}
-					declaredBefore[local.Name] = true
+					if local, ok := stmt.(*ast.VarDeclStmt); ok && local != nil {
+						// Keep only names that can change callee classification. A
+						// declaration of any other name cannot create an edge or
+						// turn an already unknown call into a known one.
+						if len(byName[local.Name]) == 0 && !a.fillMayAdoptNamedCallee(local.Name) {
+							continue
+						}
+						if declaredBefore == nil {
+							declaredBefore = map[string]bool{}
+						}
+						declaredBefore[local.Name] = true
+					}
 				}
-			}
-		})
+			})
+		}
 		markMatchArm := func(arm *ast.MatchArm) {
 			binders := map[string]bool{}
 			switch pattern := arm.Pattern.(type) {
@@ -194,51 +231,54 @@ func (a *Analyzer) computeFillMayAdopt() map[*ast.FuncDecl]bool {
 				if root, ok := fillMayAdoptStripParens(n.Object).(*ast.Ident); ok && root != nil {
 					receiverHead = declaredHeads[root.Name]
 				}
+				builtinReceiver := fillMayAdoptBuiltinHeads[receiverHead]
 				for _, callee := range byName[n.Field] {
-					if fillMayAdoptBuiltinHeads[receiverHead] && len(callee.Params) > 0 {
-						if head := fillMayAdoptTypeHead(callee.Params[0].Type); head != receiverHead && structNames[head] {
+					if builtinReceiver && len(callee.Params) > 0 {
+						head, known := firstParamHeads[callee]
+						if !known {
+							head = fillMayAdoptTypeHead(callee.Params[0].Type)
+							firstParamHeads[callee] = head
+						}
+						if head != receiverHead && structNames[head] {
 							continue
 						}
 					}
 					callers[callee] = append(callers[callee], decl)
 				}
-			}
-		})
-		forEachBodyNode(func(v any) {
-			call, ok := v.(*ast.CallExpr)
-			if !ok || call == nil || unknown {
-				return
-			}
-			target := call.Func
-			if special, ok := target.(*ast.SpecializeExpr); ok && special != nil {
-				target = special.Operand
-			}
-			defer func() {
-			}()
-			switch callee := target.(type) {
-			case *ast.Ident:
-				if fillMayAdoptIntrinsics[callee.Name] {
-					break
+			case *ast.CallExpr:
+				call := n
+				if call == nil || unknown {
+					return
 				}
-				// A parser-lowered f-string: the `__fstr` builtin reads its parts and returns a
-				// fresh dstr. A user function of that name is not lowered and resolves normally.
-				if call.FStringLowering && callee.Name == "__fstr" {
-					break
+				target := call.Func
+				if special, ok := target.(*ast.SpecializeExpr); ok && special != nil {
+					target = special.Operand
 				}
-				// A parameter, local or pattern binder holds a function value, whatever global
-				// shares its name.
-				_, local := declaredHeads[callee.Name]
-				if valueParams[callee.Name] || local || armShadowed[callee] {
+				switch callee := target.(type) {
+				case *ast.Ident:
+					if fillMayAdoptIntrinsics[callee.Name] {
+						break
+					}
+					// A parser-lowered f-string: the `__fstr` builtin reads its parts and returns a
+					// fresh dstr. A user function of that name is not lowered and resolves normally.
+					if call.FStringLowering && callee.Name == "__fstr" {
+						break
+					}
+					// A parameter, local or pattern binder holds a function value, whatever global
+					// shares its name.
+					_, local := declaredHeads[callee.Name]
+					if valueParams[callee.Name] || local || armShadowed[callee] {
+						unknown = true
+					} else if len(byName[callee.Name]) == 0 && !a.fillMayAdoptNamedCallee(callee.Name) {
+						unknown = true
+					}
+				case *ast.FieldExpr:
+					if funcFields[callee.Field] {
+						unknown = true
+					}
+				default:
 					unknown = true
-				} else if len(byName[callee.Name]) == 0 && !a.fillMayAdoptNamedCallee(callee.Name) {
-					unknown = true
 				}
-			case *ast.FieldExpr:
-				if funcFields[callee.Field] {
-					unknown = true
-				}
-			default:
-				unknown = true
 			}
 		})
 		if unknown {

@@ -3,6 +3,7 @@ package semantic
 import (
 	"sort"
 	"strings"
+	"sync"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -451,8 +452,22 @@ func (a *Analyzer) protocolFieldContainsCarrier(t Type, seen map[string]bool) bo
 	if _, scalar := t.(*BuiltinType); scalar {
 		return false
 	}
-	return a.containsTrackedProtocolCarrierValues(t, mapsCloneBool(seen))
+	if seen == nil {
+		return a.containsTrackedProtocolCarrierValues(t, nil)
+	}
+	copySeen := protocolFieldSeenPool.Get().(map[string]bool)
+	for key, value := range seen {
+		copySeen[key] = value
+	}
+	result := a.containsTrackedProtocolCarrierValues(t, copySeen)
+	if len(copySeen) <= 8192 {
+		clear(copySeen)
+		protocolFieldSeenPool.Put(copySeen)
+	}
+	return result
 }
+
+var protocolFieldSeenPool = sync.Pool{New: func() any { return make(map[string]bool) }}
 
 func (a *Analyzer) protocolLiveLeafPaths(t Type, prefix string, seen map[string]bool) map[string]Type {
 	if t == nil {

@@ -110,3 +110,65 @@ func BenchmarkStoreScanTypedAggregateArguments(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkStoreScanAggregateHeader(b *testing.B) {
+	args := make([]ast.Expr, 128)
+	for i := range args {
+		args[i] = &ast.Ident{Name: "source"}
+	}
+	fn := &ast.FuncDecl{Params: []ast.ParamDecl{{Name: "target"}, {Name: "source"}}, Body: []ast.Stmt{&ast.AssignStmt{Target: &ast.Ident{Name: "target"}, Value: &ast.StructLitExpr{Args: args}}}}
+	a := &Analyzer{}
+	seen := map[storeScanKey]bool{}
+	if mode := a.calleeStoreModeIntoBody(fn, 1, 0, seen); mode != storeHeader {
+		b.Fatalf("got %v", mode)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if a.calleeStoreModeIntoBody(fn, 1, 0, seen) != storeHeader {
+			b.Fatal("incorrect mode")
+		}
+	}
+}
+
+func BenchmarkStoreScanGrowthHeader(b *testing.B) {
+	receiver := &ast.Ident{Name: "source"}
+	args := make([]ast.Expr, 128)
+	for i := range args {
+		args[i] = &ast.Ident{Name: "source"}
+	}
+	call := &ast.CallExpr{Func: &ast.FieldExpr{Object: receiver, Field: "push"}, Args: args}
+	fn := &ast.FuncDecl{Params: []ast.ParamDecl{{Name: "target"}, {Name: "source"}}, Body: []ast.Stmt{&ast.AssignStmt{Target: &ast.Ident{Name: "target"}, Value: call}}}
+	a := &Analyzer{exprTypes: map[ast.Expr]Type{receiver: &DArrayType{Elem: &BuiltinType{Name: "u32"}}}}
+	seen := map[storeScanKey]bool{}
+	if mode := a.calleeStoreModeIntoBody(fn, 1, 0, seen); mode != storeHeader {
+		b.Fatalf("got %v", mode)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if a.calleeStoreModeIntoBody(fn, 1, 0, seen) != storeHeader {
+			b.Fatal("incorrect mode")
+		}
+	}
+}
+
+func BenchmarkStoreScanManyReturns(b *testing.B) {
+	fn := &ast.FuncDecl{Params: []ast.ParamDecl{{Name: "source"}}}
+	for i := 0; i < 256; i++ {
+		fn.Body = append(fn.Body, &ast.ReturnStmt{Value: &ast.Ident{Name: "source"}})
+	}
+	a := &Analyzer{}
+	seen := map[storeScanKey]bool{}
+	if mode := a.calleeReturnModeOf(fn, 0, seen); mode != storeHeader {
+		b.Fatalf("got %v", mode)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		delete(a.storeScanCache, storeScanKey{fn, 0, -1})
+		if a.calleeReturnModeOf(fn, 0, seen) != storeHeader {
+			b.Fatal("incorrect mode")
+		}
+	}
+}

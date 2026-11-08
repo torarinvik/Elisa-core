@@ -35,6 +35,13 @@ func TestSMTFactPinsVisitMatchesNames(t *testing.T) {
 	}
 }
 
+func TestSMTFactPinsLiteralHasNoPins(t *testing.T) {
+	a := &Analyzer{}
+	if got := a.smtFactPinsWithDeps(NewScope(nil), &ast.BinaryExpr{}, nil); len(got) != 0 {
+		t.Fatalf("literal-only expression has pins: %#v", got)
+	}
+}
+
 func BenchmarkSMTFactPinsWalk(b *testing.B) {
 	scope := NewScope(nil)
 	expr := &ast.BinaryExpr{Left: &ast.Ident{Name: "x"}, Right: &ast.Ident{Name: "y"}}
@@ -52,6 +59,28 @@ func BenchmarkSMTFactPinsWalk(b *testing.B) {
 					_ = oldSMTFactPins(scope, expr, deps)
 				} else {
 					_ = a.smtFactPinsWithDeps(scope, expr, deps)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkSMTFactPinsNoNames(b *testing.B) {
+	scope := NewScope(nil)
+	expr := &ast.BinaryExpr{}
+	a := &Analyzer{}
+	for _, old := range []bool{true, false} {
+		name := "lazy"
+		if old {
+			name = "eager"
+		}
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if old {
+					_ = oldSMTFactPins(scope, expr, nil)
+				} else {
+					_ = a.smtFactPinsWithDeps(scope, expr, nil)
 				}
 			}
 		})

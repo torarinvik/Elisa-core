@@ -100,8 +100,9 @@ func constructCFG(fn *ast.FuncDecl, guardFacts func(ast.Expr, bool) GuardFactSet
 	if fn == nil {
 		return cfg
 	}
+	blockCapacity := estimateCFGBlockCapacity(fn.Body)
 	cfg.Entry = 0
-	cfg.Blocks = append(cfg.Blocks, CFGBlock{ID: 0})
+	cfg.Blocks = make([]CFGBlock, 1, blockCapacity)
 	cfg.ParamLocations = make([]string, 0, len(fn.Params))
 	for _, param := range fn.Params {
 		cfg.ParamLocations = append(cfg.ParamLocations, param.Name)
@@ -113,6 +114,91 @@ func constructCFG(fn *ast.FuncDecl, guardFacts func(ast.Expr, bool) GuardFactSet
 	}
 	cfg.ExitBlocks = dedupeCFGBlockIDs(append(cfg.ExitBlocks, exits...))
 	return cfg
+}
+
+// Reserve branch blocks before construction to avoid repeatedly copying the
+// growing block slice. Bound both the estimate and the traversal work.
+func estimateCFGBlockCapacity(body []ast.Stmt) int {
+	capacity, budget := 1, 256
+	var scan func([]ast.Stmt)
+	scan = func(stmts []ast.Stmt) {
+		for _, stmt := range stmts {
+			if budget == 0 || capacity >= 128 {
+				return
+			}
+			budget--
+			switch branch := stmt.(type) {
+			case *ast.IfStmt:
+				if branch == nil {
+					continue
+				}
+				capacity += 3 + 2*len(branch.Elifs)
+				scan(branch.Then)
+				for _, elif := range branch.Elifs {
+					scan(elif.Body)
+				}
+				scan(branch.Else)
+			case *ast.StaticIfStmt:
+				if branch == nil {
+					continue
+				}
+				capacity += 3 + 2*len(branch.Elifs)
+				scan(branch.Then)
+				for _, elif := range branch.Elifs {
+					scan(elif.Body)
+				}
+				scan(branch.Else)
+			case *ast.MatchStmt:
+				if branch != nil {
+					capacity += len(branch.Arms) + 1
+					for _, arm := range branch.Arms {
+						scan(arm.Body)
+					}
+				}
+			case *ast.WhileStmt:
+				if branch != nil {
+					capacity += 3
+					scan(branch.Body)
+				}
+			case *ast.ForStmt:
+				if branch != nil {
+					capacity += 2
+					scan(branch.Body)
+				}
+			case *ast.IterForStmt:
+				if branch != nil {
+					capacity += 2
+					if branch.WhereFilter != nil || branch.Filter != nil {
+						capacity += 2
+					}
+					scan(branch.Body)
+				}
+			case *ast.ParallelForStmt:
+				if branch != nil {
+					capacity += 2
+					scan(branch.Body)
+				}
+			case *ast.InStoreStmt:
+				if branch != nil {
+					scan(branch.Body)
+				}
+			case *ast.CanStmt:
+				if branch != nil {
+					scan(branch.Body)
+				}
+			case *ast.ScopeStmt:
+				if branch != nil {
+					scan(branch.Body)
+				}
+			case *ast.RegionStmt:
+				if branch != nil {
+					scan(branch.Body)
+				}
+			}
+		}
+	}
+	scan(body)
+	return min(capacity, 128)
 }
 
 // VerifyCFG checks structural invariants required by semantic analyses. It is
@@ -562,6 +648,14 @@ func flowStmtIsExplicitlyLinear(stmt ast.Stmt) bool {
 func dedupeCFGBlockIDs(ids []int) []int {
 	if len(ids) <= 1 {
 		return ids
+	}
+	// Branch joins normally have only two exits. Avoid constructing a map for
+	// this common case while keeping the returned slice independent of ids.
+	if len(ids) == 2 {
+		if ids[0] == ids[1] {
+			return []int{ids[0]}
+		}
+		return []int{ids[0], ids[1]}
 	}
 	seen := map[int]bool{}
 	out := make([]int, 0, len(ids))

@@ -243,6 +243,17 @@ func substitutePermissionRefs(declared []ast.PermissionRef, refs []ast.Permissio
 		if len(items) == 0 {
 			return nil
 		}
+		// Most effect rows have a single permission. Canonicalize the bound
+		// row directly, avoiding a temporary expanded slice on every signature.
+		if len(items) == 1 {
+			ref := items[0]
+			if ref.Member == "" {
+				if bound, ok := bindings[ref.Name]; ok {
+					return canonicalizePermissionRefs(bound)
+				}
+			}
+			return canonicalizePermissionRefs(items)
+		}
 		out := make([]ast.PermissionRef, 0, len(items))
 		for _, ref := range items {
 			if ref.Member == "" {

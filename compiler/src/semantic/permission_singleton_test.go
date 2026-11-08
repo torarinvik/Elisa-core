@@ -33,3 +33,11 @@ func BenchmarkCanonicalPermissionSingleton(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkPermissionFamiliesSingleton(b *testing.B) {
+	input := []ast.PermissionRef{{Name: "Memory", Member: "Read"}}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = permissionFamiliesFromRefs(input)
+	}
+}

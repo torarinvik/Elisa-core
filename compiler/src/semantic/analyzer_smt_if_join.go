@@ -71,8 +71,27 @@ func (a *Analyzer) joinIfSMTFacts(entry smtFactFrame, survivors []smtFactFrame, 
 		return
 	}
 	common := make([][]smtFact, len(entry.scopes))
-	extras := make([][]smtFact, len(survivors))
+	var extras [][]smtFact
+	if disjoin {
+		extras = make([][]smtFact, len(survivors))
+	}
 	for i := range entry.scopes {
+		// Branches commonly leave a parent scope's frozen facts untouched.
+		// In that case the shared list already is the intersection, with no
+		// branch-specific facts to collect or copy.
+		unchanged := true
+		for _, branch := range survivors {
+			facts := branch.facts[i]
+			original := entry.facts[i]
+			if len(facts) != len(original) || (len(facts) != 0 && &facts[0] != &original[0]) {
+				unchanged = false
+				break
+			}
+		}
+		if unchanged {
+			common[i] = entry.facts[i]
+			continue
+		}
 		for _, fact := range entry.facts[i] {
 			inAll := true
 			for _, branch := range survivors {
@@ -98,10 +117,12 @@ func (a *Analyzer) joinIfSMTFacts(entry smtFactFrame, survivors []smtFactFrame, 
 				common[i] = append(common[i], fact)
 			}
 		}
-		for b, branch := range survivors {
-			for _, fact := range branch.facts[i] {
-				if !smtFactListHas(common[i], fact) {
-					extras[b] = append(extras[b], fact)
+		if disjoin {
+			for b, branch := range survivors {
+				for _, fact := range branch.facts[i] {
+					if !smtFactListHas(common[i], fact) {
+						extras[b] = append(extras[b], fact)
+					}
 				}
 			}
 		}

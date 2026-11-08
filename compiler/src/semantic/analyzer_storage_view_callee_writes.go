@@ -230,7 +230,8 @@ func (a *Analyzer) storageViewCalleeWritesForDecl(decl *ast.FuncDecl, param int,
 		solve.bodies[decl] = body
 	}
 	nodes, locals := body.nodes, body.locals
-	handled := map[*ast.Ident]bool{}
+	handled := borrowStorageViewHandled()
+	defer releaseStorageViewHandled(handled)
 	markRooted := func(expr ast.Expr, asWrite bool) {
 		if expr == nil {
 			return
@@ -697,6 +698,20 @@ func storageViewDeclLocalNames(decl *ast.FuncDecl, nodes []any) map[string]bool 
 // Names still come from every visited node, including type and pattern nodes.
 var storageViewNodesPool sync.Pool
 
+var storageViewHandledPool = sync.Pool{New: func() any { return make(map[*ast.Ident]bool) }}
+
+func borrowStorageViewHandled() map[*ast.Ident]bool {
+	return storageViewHandledPool.Get().(map[*ast.Ident]bool)
+}
+
+func releaseStorageViewHandled(handled map[*ast.Ident]bool) {
+	if len(handled) > 8192 {
+		return
+	}
+	clear(handled)
+	storageViewHandledPool.Put(handled)
+}
+
 func borrowStorageViewNodes() []any {
 	if nodes := storageViewNodesPool.Get(); nodes != nil {
 		return nodes.([]any)[:0]
@@ -708,7 +723,7 @@ func releaseStorageViewNodes(nodes []any) {
 	if cap(nodes) == 0 || cap(nodes) > 1<<14 {
 		return
 	}
-	clear(nodes)
+	clear(nodes[:cap(nodes)])
 	storageViewNodesPool.Put(nodes[:0])
 }
 
@@ -721,10 +736,12 @@ func storageViewScanBodyWithNodes(decl *ast.FuncDecl, nodes []any) storageViewSo
 	// relevant expression. Cap the hint so unusually wide bodies do not reserve
 	// unbounded unused space; nested bodies still grow normally.
 	body := storageViewSolveBody{locals: make(map[string]bool, len(decl.Params))}
-	if nodes != nil {
+	hint := min(2*len(decl.Body), 2048)
+	if cap(nodes) < hint {
+		body.nodes = make([]any, len(nodes), hint)
+		copy(body.nodes, nodes)
+	} else {
 		body.nodes = nodes
-	} else if len(decl.Body) != 0 {
-		body.nodes = make([]any, 0, min(2*len(decl.Body), 2048))
 	}
 	for _, param := range decl.Params {
 		body.locals[param.Name] = true

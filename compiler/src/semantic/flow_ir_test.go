@@ -12,6 +12,37 @@ import (
 	"elisacore/src/ast"
 )
 
+func BenchmarkConstructCFGBranches(b *testing.B) {
+	fn := &ast.FuncDecl{}
+	for i := 0; i < 16; i++ {
+		fn.Body = append(fn.Body, &ast.IfStmt{Cond: &ast.Ident{Name: "cond"}})
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = ConstructCFG(fn)
+	}
+}
+
+func BenchmarkConstructCFGNestedBranches(b *testing.B) {
+	var body []ast.Stmt
+	for i := 0; i < 20; i++ {
+		body = []ast.Stmt{&ast.IfStmt{Cond: &ast.Ident{Name: "cond"}, Then: body}}
+	}
+	fn := &ast.FuncDecl{Body: body}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = ConstructCFG(fn)
+	}
+}
+
+func BenchmarkCollectEmptyCFGBlockFacts(b *testing.B) {
+	cfg := &CFG{Blocks: make([]CFGBlock, 64)}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = collectCFGBlockFactTransforms(cfg)
+	}
+}
+
 func TestConstructCFGModelsNestedBreakAndContinueTargets(t *testing.T) {
 	innerBreak := &ast.BreakStmt{}
 	deadReturn := &ast.ReturnStmt{}

@@ -47,6 +47,7 @@ func TestScalarReturnSummaryDoesNotClassifyReferenceOrGenericResults(t *testing.
 		&OptionalType{Value: &BuiltinType{Name: "i64"}},
 		plainEnum,
 		&AggregateStateType{Base: &BuiltinType{Name: "bool"}},
+		&ErrorUnionType{Value: &BuiltinType{Name: "i64"}, Errors: &ErrorSetType{Payloads: map[string][]Type{"Bad": {&BuiltinType{Name: "i64"}}}}},
 	} {
 		if !analyzer.scalarReturnHasNoReferenceProvenance(&FuncType{Return: typ}) {
 			t.Fatalf("reference-free result not recognized: %T", typ)
@@ -60,6 +61,10 @@ func TestScalarReturnSummaryDoesNotClassifyReferenceOrGenericResults(t *testing.
 		&EnumType{StoreBackedPlain: true},
 		refinedParent,
 		refinedChild,
+		&ErrorUnionType{Value: &BuiltinType{Name: "i64"}, Errors: &ErrorSetType{Payloads: map[string][]Type{"Bad": {&RefType{Elem: &BuiltinType{Name: "i64"}}}}}},
+		&ErrorUnionType{Value: &RefType{Elem: &BuiltinType{Name: "i64"}}, Errors: &ErrorSetType{}},
+		&ErrorUnionType{Value: &BuiltinType{Name: "i64"}, Errors: &ErrorSetType{Params: []string{"R"}}},
+		&ErrorUnionType{Value: &BuiltinType{Name: "i64"}},
 	} {
 		if analyzer.scalarReturnHasNoReferenceProvenance(&FuncType{Return: typ}) {
 			t.Fatalf("reference-carrying result accepted: %T", typ)

@@ -121,6 +121,13 @@ func (a *Analyzer) calleeStoreModeIntoSeen(decl *ast.FuncDecl, other, index int,
 	if mode, ok := a.storeScanReuseProvisional(key); ok {
 		return mode
 	}
+	// This is a complete proof independent of the flow summary and recursive
+	// body scan. Check it first for valid bodies so program-lived inputs do not
+	// build a summary that cannot change the answer.
+	if decl != nil && other >= 0 && index >= 0 && other < len(decl.Params) && index < len(decl.Params) && len(decl.Body) != 0 && a.declParamIsProgramLived(decl, other) {
+		a.cacheStoreScan(key, storeNone)
+		return storeNone
+	}
 	if a.storeScanSummaryNeverReaches(decl, other, index) && !a.declParamMayEncodeAddress(decl, other) {
 		// The (completed, least-fixpoint) store-flow summary proves no flow from other into
 		// index at all -- the same proof the call-site gate accepts. Final.
@@ -181,13 +188,99 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 		}
 	}
 	filled := a.lazyFilledLocals(decl, other, content, views, seen)
+	// A body often calls the same directly bound helper many times. Keep a
+	// small per-scan cache for those bindings; other resolution forms retain
+	// their ordinary per-call handling. Scope is part of the key because nested
+	// scans can temporarily change the active scope.
+	type directCallee struct {
+		name  string
+		scope *Scope
+		decl  *ast.FuncDecl
+	}
+	var directCallees [4]directCallee
+	directCount := 0
+	resolvePayloadCallee := func(call *ast.CallExpr) (*ast.FuncDecl, bool) {
+		if id, ok := call.Func.(*ast.Ident); ok && id != nil && a.currentScope != nil {
+			for i := 0; i < directCount; i++ {
+				cached := directCallees[i]
+				if cached.name == id.Name && cached.scope == a.currentScope {
+					a.addProofReportOrigin(cached.decl)
+					return cached.decl, true
+				}
+			}
+			callee, resolved := a.resolveReadOnlyScanCallee(call)
+			if resolved && callee != nil && directCount < len(directCallees) {
+				if sym, found := a.currentScope.Lookup(id.Name); found && sym != nil && sym.Kind == SymbolFunc && sym.Node == callee {
+					directCallees[directCount] = directCallee{id.Name, a.currentScope, callee}
+					directCount++
+				}
+			}
+			return callee, resolved
+		}
+		return a.resolveReadOnlyScanCallee(call)
+	}
+	// Parameter type properties are stable once type shapes freeze. Repeated
+	// calls to the same helper otherwise redo the same nested type predicates.
+	type paramProperty struct {
+		decl                                           *ast.FuncDecl
+		index                                          int
+		carries, carriesKnown, writable, writableKnown bool
+	}
+	var paramProperties [8]paramProperty
+	paramCount := 0
+	property := func(callee *ast.FuncDecl, index int) *paramProperty {
+		if !a.typeShapesFrozen {
+			return nil
+		}
+		callee = a.readDecl(callee)
+		for i := 0; i < paramCount; i++ {
+			if paramProperties[i].decl == callee && paramProperties[i].index == index {
+				return &paramProperties[i]
+			}
+		}
+		if paramCount == len(paramProperties) {
+			return nil
+		}
+		p := &paramProperties[paramCount]
+		paramCount++
+		p.decl, p.index = callee, index
+		return p
+	}
+	carriesStorage := func(callee *ast.FuncDecl, index int) bool {
+		p := property(callee, index)
+		if p != nil && p.carriesKnown {
+			return p.carries
+		}
+		hits := a.semanticLimitHits
+		value := a.declParamCarriesStorage(callee, index)
+		if p != nil && hits == a.semanticLimitHits {
+			p.carries, p.carriesKnown = value, true
+		}
+		return value
+	}
+	writableParam := func(callee *ast.FuncDecl, index int) bool {
+		p := property(callee, index)
+		if p != nil && p.writableKnown {
+			return p.writable
+		}
+		hits := a.semanticLimitHits
+		value := a.declParamIsWritableRef(callee, index)
+		if p != nil && hits == a.semanticLimitHits {
+			p.writable, p.writableKnown = value, true
+		}
+		return value
+	}
 	var valueMode func(value ast.Expr) storeMode
 	valueMode = func(value ast.Expr) storeMode {
 		inner := storeScanUnwrap(value)
 		// A conditional carries the selected branch value, never the condition's storage.
 		// Calls in the condition are visited separately and retain their own store effects.
 		if choice, ok := inner.(*ast.TernaryExpr); ok && choice != nil {
-			return maxStoreMode(valueMode(choice.Value), valueMode(choice.Alt))
+			first := valueMode(choice.Value)
+			if first == storeHeader {
+				return first
+			}
+			return maxStoreMode(first, valueMode(choice.Alt))
 		}
 		// Simple payloads must mention a tainted name to retain its storage.
 		// Compound literals and calls still check their component expressions,
@@ -260,9 +353,15 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 			mode := storeNone
 			for _, arg := range lit.Args {
 				mode = maxStoreMode(mode, valueMode(arg))
+				if mode == storeHeader {
+					return mode
+				}
 			}
 			for _, spread := range lit.Spreads {
 				mode = maxStoreMode(mode, valueMode(spread))
+				if mode == storeHeader {
+					return mode
+				}
 			}
 			if lit.CopyBase != nil {
 				mode = maxStoreMode(mode, valueMode(lit.CopyBase))
@@ -274,12 +373,18 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 		if call, isCall := inner.(*ast.CallExpr); isCall && call != nil && len(returnBorrowCallArgs(call)) == len(call.Args) {
 			if field, isMethod := call.Func.(*ast.FieldExpr); isMethod && field != nil && containerGrowthMethods[field.Field] && a.storeScanReceiverIsBuiltinDArray(decl, field.Object) {
 				mode := valueMode(field.Object)
+				if mode == storeHeader {
+					return mode
+				}
 				for _, arg := range call.Args {
 					argMode := valueMode(arg)
 					if field.Field == "extend" {
 						argMode = a.storeScanExtendArgMode(decl, arg, argMode)
 					}
 					mode = maxStoreMode(mode, argMode)
+					if mode == storeHeader {
+						return mode
+					}
 				}
 				return mode
 			}
@@ -290,21 +395,44 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 		// A nested call's result carries, from each argument, only what its callee may RETURN
 		// from that parameter (the rule-160 judgement, applied inside a stored value).
 		if call, isCall := inner.(*ast.CallExpr); isCall && call != nil {
-			if callee, ok := a.resolveReadOnlyScanCallee(call); ok && callee != nil && storeFlowCallFitsParams(callee, call) && !funcHasArenaParam(callee) && !a.declReturnsVoid(callee) {
+			if callee, ok := resolvePayloadCallee(call); ok && callee != nil && storeFlowCallFitsParams(callee, call) && !funcHasArenaParam(callee) && !a.declReturnsVoid(callee) {
 				mode := storeNone
 				for i, arg := range returnBorrowCallArgs(call) {
 					argMode := valueMode(arg)
-					if argMode == storeNone || (!a.declParamCarriesStorage(callee, i) && !a.declParamMayEncodeAddress(callee, i)) {
+					if argMode == storeNone || (!carriesStorage(callee, i) && !a.declParamMayEncodeAddress(callee, i)) {
 						continue
 					}
 					mode = maxStoreMode(mode, narrowStoreMode(argMode, a.calleeReturnModeOf(callee, i, seen)))
+					if mode == storeHeader {
+						return mode
+					}
 				}
 				return mode
 			}
 		}
 		// A view-only value derived from a byte-free source cannot point into the source's storage.
-		if views != nil && (a.storeScanValueIsView(decl, inner, views) || storeScanRootedAtFilled(inner, filled)) {
-			return storeViews
+		if views != nil {
+			isView := false
+			if typeKnown && knownType != nil {
+				// The value's analyzed type was already looked up above. Keep the
+				// declaration-read observation made by storeScanValueIsView, but
+				// avoid looking up the same expression type a second time.
+				a.readDecl(decl)
+				if id, ok := inner.(*ast.Ident); ok && id != nil && views[id.Name] {
+					isView = true
+				} else {
+					isView = a.storeScanViewOnlyCached(knownType)
+				}
+			} else {
+				isView = a.storeScanValueIsView(decl, inner, views)
+			}
+			// Filled-local candidates explicitly exclude parameter names. Avoid
+			// computing the body-wide filled-local fixpoint for a plain parameter.
+			id, isIdent := inner.(*ast.Ident)
+			isParam := isIdent && id != nil && params[id.Name]
+			if isView || (!isParam && storeScanRootedAtFilled(inner, filled)) {
+				return storeViews
+			}
 		}
 		if storeScanMentionsHeader(value, header) {
 			return storeHeader
@@ -334,7 +462,7 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 			// stores are scanned when the walk reaches it; its result carries a tainted argument
 			// only when the callee's summary connects that argument to its return.
 			if call, isCall := storeScanUnwrap(n.Value).(*ast.CallExpr); isCall && call != nil {
-				if callee, ok := a.resolveReadOnlyScanCallee(call); ok && callee != nil && storeFlowCallFitsParams(callee, call) && !funcHasArenaParam(callee) {
+				if callee, ok := resolvePayloadCallee(call); ok && callee != nil && storeFlowCallFitsParams(callee, call) && !funcHasArenaParam(callee) {
 					if a.declReturnsVoid(callee) {
 						// The lmut manifest `t <- f(.., t, ..)` of a void callee: the result IS
 						// the threaded argument; the call's own stores are scanned at the call.
@@ -344,7 +472,7 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 					// argument (a directed scan of its return statements).
 					for i, arg := range returnBorrowCallArgs(call) {
 						argMode := valueMode(arg)
-						if argMode == storeNone || (!a.declParamCarriesStorage(callee, i) && !a.declParamMayEncodeAddress(callee, i)) {
+						if argMode == storeNone || (!carriesStorage(callee, i) && !a.declParamMayEncodeAddress(callee, i)) {
 							continue
 						}
 						inner := narrowStoreMode(argMode, a.calleeReturnModeOf(callee, i, seen))
@@ -450,7 +578,7 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 			if len(targetArgs) == 0 || len(taintedArgs) == 0 {
 				return
 			}
-			callee, ok := a.resolveReadOnlyScanCallee(n)
+			callee, ok := resolvePayloadCallee(n)
 			if !ok || callee == nil || !storeFlowCallFitsParams(callee, n) || funcHasArenaParam(callee) {
 				for _, s := range taintedArgs {
 					mode = storeScanRaise(decl, 218, n, mode, s.mode)
@@ -461,13 +589,13 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 				return
 			}
 			for _, ti := range targetArgs {
-				if !a.declParamCarriesStorage(callee, ti) || !a.declParamIsWritableRef(callee, ti) {
+				if !carriesStorage(callee, ti) || !writableParam(callee, ti) {
 					// The target-side parameter cannot hold region storage, or is passed by
 					// value: the callee's writes land in its own copy, never the caller's place.
 					continue
 				}
 				for _, s := range taintedArgs {
-					if s.index != ti && !a.declParamCarriesStorage(callee, s.index) && !a.declParamMayEncodeAddress(callee, s.index) {
+					if s.index != ti && !carriesStorage(callee, s.index) && !a.declParamMayEncodeAddress(callee, s.index) {
 						continue // only plain non-address scalars (such as a size) are skipped
 					}
 					if ti == s.index {
@@ -789,7 +917,7 @@ func (a *Analyzer) storeScanStoredElementExprProgramLivedSeen(decl *ast.FuncDecl
 			if _, mutableType := decls[0].Type.(*ast.MutableType); mutableType {
 				return false
 			}
-			for _, node := range idx.flat {
+			for _, node := range idx.payloadNodeList() {
 				assign, ok := node.(*ast.AssignStmt)
 				if !ok || assign == nil {
 					continue
@@ -854,6 +982,11 @@ func (a *Analyzer) storeScanStoredElementExprProgramLivedSeen(decl *ast.FuncDecl
 func (a *Analyzer) storeScanTypeMayEncodeAddress(t Type, seen map[Type]bool) bool {
 	if t == nil || seen[t] {
 		return false
+	}
+	// Builtin scalars have no recursive components. This common case does not
+	// need a memo entry or a walk through the shared cycle-detection map.
+	if builtin, ok := t.(*BuiltinType); ok && builtin != nil {
+		return builtin.Name == "uintptr"
 	}
 	if len(seen) == 0 {
 		return a.memoTypePredicate(&a.storeScanAddressMemo, t, func() bool {
@@ -1054,6 +1187,37 @@ func storeScanMentionsHeader(node any, names map[string]bool) bool {
 				return expr != nil && (names[expr.Value] || names[expr.Suffix])
 			}
 			return storeScanMentionsHeaderPooled(node, names)
+		case *ast.FloatLit:
+			return expr != nil && (names[expr.Value] || names[expr.Suffix])
+		case *ast.StringLit:
+			return expr != nil && names[expr.Value]
+		case *ast.CharLit:
+			return expr != nil && names[expr.Value]
+		case *ast.BoolLit, *ast.NullLit, *ast.ZeroedLit:
+			return false
+		case *ast.ParenExpr:
+			if expr == nil {
+				return false
+			}
+			node = expr.Inner
+		case *ast.MoveExpr:
+			if expr == nil {
+				return false
+			}
+			node = expr.Operand
+		case *ast.AddrOfExpr:
+			if expr == nil {
+				return false
+			}
+			node = expr.Operand
+		case *ast.UnaryExpr:
+			if expr == nil {
+				return false
+			}
+			if expr.LoweredCall != nil {
+				return storeScanMentionsHeaderPooled(node, names)
+			}
+			node = expr.Operand
 		case *ast.Ident:
 			return expr != nil && (names[expr.Name] || names[rootNameOfDotted(expr.Name)])
 		case *ast.FieldExpr:
@@ -1724,6 +1888,19 @@ func (a *Analyzer) storeScanTaint(decl *ast.FuncDecl, other int, targetName stri
 	}()
 	idx := a.storeScanIndex(decl)
 	params = idx.parameters(decl)
+	if len(idx.bindingEffectNodes()) == 0 {
+		// With no binding effects, both taint sets remain the same immutable
+		// singleton and no fixpoint or local-scalar scan is needed.
+		header = map[string]bool{decl.Params[other].Name: true}
+		content = header
+		targets = map[string]bool{}
+		if targetName != "" {
+			targets[targetName] = true
+		}
+		views = a.storeScanViewLocalsCached(decl, other)
+		a.storeScanLastHolders = map[string]bool{}
+		return params, header, content, targets, views
+	}
 	header = map[string]bool{decl.Params[other].Name: true}
 	content = map[string]bool{decl.Params[other].Name: true}
 	targets = map[string]bool{}
@@ -1741,13 +1918,20 @@ func (a *Analyzer) storeScanTaint(decl *ast.FuncDecl, other int, targetName stri
 	views = a.storeScanViewLocalsCached(decl, other)
 	var taint func(string, ast.Expr) bool
 	taint = func(name string, value ast.Expr) bool {
-		if choice, ok := storeScanUnwrap(value).(*ast.TernaryExpr); ok && choice != nil {
+		// add never changes parameters or scalars. A local that already has
+		// all possible taint for its type is also at its fixpoint, so avoid
+		// rescanning the value and recursively proving its callee's return.
+		if name == "" || params[name] || scalars[name] || (content[name] && (header[name] || views[name])) {
+			return false
+		}
+		inner := storeScanUnwrap(value)
+		if choice, ok := inner.(*ast.TernaryExpr); ok && choice != nil {
 			changed := taint(name, choice.Value)
 			return taint(name, choice.Alt) || changed
 		}
 		// An assigned call result carries only what the callee returns. Its
 		// argument/condition side effects are scanned separately below.
-		if call, ok := storeScanUnwrap(value).(*ast.CallExpr); ok && call != nil {
+		if call, ok := inner.(*ast.CallExpr); ok && call != nil {
 			if callee, known := a.resolveReadOnlyScanCallee(call); known && callee != nil && storeFlowCallFitsParams(callee, call) && !funcHasArenaParam(callee) && !a.declReturnsVoid(callee) {
 				mode := storeNone
 				for i, arg := range returnBorrowCallArgs(call) {
@@ -1768,6 +1952,9 @@ func (a *Analyzer) storeScanTaint(decl *ast.FuncDecl, other int, targetName stri
 						returned = storeHeader
 					}
 					mode = maxStoreMode(mode, narrowStoreMode(argMode, returned))
+					if mode == storeHeader {
+						break
+					}
 				}
 				changed := false
 				if mode != storeNone {
@@ -1797,6 +1984,11 @@ func (a *Analyzer) storeScanTaint(decl *ast.FuncDecl, other int, targetName stri
 	holders := map[string]bool{}
 	bind := func(name string, value ast.Expr) bool {
 		changed := taint(name, value)
+		// None of the target/holder sets accepts parameters, scalar locals,
+		// or empty names, so their alias proofs cannot change the fixpoint.
+		if name == "" || params[name] || scalars[name] {
+			return changed
+		}
 		if storeScanMayAliasPlace(idx, value, targets) {
 			changed = add(targets, name) || changed
 		} else if storeScanMayAliasPlace(idx, value, holders) {
@@ -1869,7 +2061,7 @@ func (a *Analyzer) storeScanTaint(decl *ast.FuncDecl, other int, targetName stri
 				// argument (`push_list(merged, right.lists[row])`): taint it with each of them,
 				// unless the callee is resolved and the local's parameter is read-only. A builtin
 				// container method writes only its receiver (handled above).
-				if a.storeScanTaintCallWrites(decl, n, params, locals, taint, idx, targets, holders, func(name string) bool { return add(holders, name) }, content, func(name string) bool { return add(content, name) }) {
+				if a.storeScanTaintCallWrites(decl, n, params, locals, taint, idx, targets, holders, func(name string) bool { return add(holders, name) }, header, content, views, scalars, func(name string) bool { return add(content, name) }) {
 					changed = true
 				}
 			case *ast.IterForStmt:
@@ -2012,10 +2204,15 @@ func storeScanPlainScalarType(t Type) bool {
 
 // storeScanTaintCallWrites taints each body local passed to call with the call's other
 // arguments when the callee may write that local's parameter.
-func (a *Analyzer) storeScanTaintCallWrites(decl *ast.FuncDecl, call *ast.CallExpr, params, locals map[string]bool, taint func(string, ast.Expr) bool, idx *storeScanDeclIndex, targets, holders map[string]bool, addHolder func(string) bool, content map[string]bool, addContent func(string) bool) bool {
+func (a *Analyzer) storeScanTaintCallWrites(decl *ast.FuncDecl, call *ast.CallExpr, params, locals map[string]bool, taint func(string, ast.Expr) bool, idx *storeScanDeclIndex, targets, holders map[string]bool, addHolder func(string) bool, header, content, views, scalars map[string]bool, addContent func(string) bool) bool {
 	decl = a.readDecl(decl)
 	changed := false
 	for _, w := range a.storeScanCallWritePlan(decl, call, params, locals) {
+		// Neither holder discovery nor taint can add a parameter, scalar, or
+		// empty name. Avoid both recursive callee proofs for those entries.
+		if w.local == "" || params[w.local] || scalars[w.local] {
+			continue
+		}
 		shareChecked, shareReaches := false, false
 		shares := func() bool {
 			if w.callee == nil {
@@ -2029,12 +2226,23 @@ func (a *Analyzer) storeScanTaintCallWrites(decl *ast.FuncDecl, call *ast.CallEx
 		}
 		// A holder: the callee may store (part of) the target place it is given into the local
 		// (`stash(holder, table.deep.lists)`), whose stores then reach the target.
-		if !targets[w.local] && !holders[w.local] && (storeScanMayAliasPlace(idx, w.value, targets) || storeScanMayAliasPlace(idx, w.value, holders)) && a.storeScanHolderMayAlias(decl, w) &&
+		if (len(targets) != 0 || len(holders) != 0) && !targets[w.local] && !holders[w.local] && (storeScanMayAliasPlace(idx, w.value, targets) || storeScanMayAliasPlace(idx, w.value, holders)) && a.storeScanHolderMayAlias(decl, w) &&
 			shares() && addHolder(w.local) {
 			changed = true
 			if storeScanTrace {
 				fmt.Fprintf(os.Stderr, "TGTHOLD %s src=%s local=%s at %s writer=%s\n", decl.Name, storeScanTraceOther, w.local, call.Pos(), storeScanParamWriterOf[storeScanShareKey(w.callee, w.into, w.from)])
 			}
+		}
+		// Holder discovery above remains necessary, but no call summary can
+		// add taint to an excluded or already saturated local.
+		if content[w.local] && (header[w.local] || views[w.local]) {
+			continue
+		}
+		// Header taint is always also content taint. For simple names and
+		// projections, absence from content proves that neither taint path
+		// below can change the local, without scanning the callee's body.
+		if name, known := storeScanSimpleMentionName(w.value); known && !content[name] && !content[rootNameOfDotted(name)] {
+			continue
 		}
 		if w.callee != nil && !a.storeScanParamMayBeWritten(w.callee, w.into) {
 			continue // the resolved callee never writes through that parameter
@@ -2249,7 +2457,11 @@ func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[st
 		// selection. Store effects of calls in the predicate are scanned by
 		// calleeStoreModeIntoBody independently from this return summary.
 		if choice, ok := value.(*ast.TernaryExpr); ok && choice != nil {
-			return maxStoreMode(returnedMode(choice.Value), returnedMode(choice.Alt))
+			first := returnedMode(choice.Value)
+			if first == storeHeader {
+				return first
+			}
+			return maxStoreMode(first, returnedMode(choice.Alt))
 		}
 		if len(a.programRegions) != 0 {
 			t, known := a.lookupExprType(value)
@@ -2272,6 +2484,9 @@ func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[st
 					}
 					if argMode != storeNone {
 						callMode = maxStoreMode(callMode, narrowStoreMode(argMode, a.calleeReturnModeOf(callee, i, seen)))
+						if callMode == storeHeader {
+							return callMode
+						}
 					}
 				}
 				return callMode
@@ -2289,7 +2504,10 @@ func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[st
 		return storeElements
 	}
 	for _, ret := range scanIdx.returns {
-		if ret == nil || ret.Value == nil || mode == storeHeader {
+		if mode == storeHeader {
+			break
+		}
+		if ret == nil || ret.Value == nil {
 			continue
 		}
 		mode = maxStoreMode(mode, returnedMode(ret.Value))
@@ -2447,6 +2665,12 @@ func typeSharesIndirectStorage(t Type, seen map[Type]bool) bool {
 // choosing one, or a call that may return one. A fresh literal or comprehension that merely
 // reads the target (`Scope{names: [n for n in t.names]}`) owns new storage and is no alias.
 func storeScanMayAliasPlace(idx *storeScanDeclIndex, value ast.Expr, targets map[string]bool) bool {
+	// These value forms cannot be aliases under this proof. Check their direct
+	// form before building or consulting mention tokens.
+	switch value.(type) {
+	case *ast.StructLitExpr, *ast.ListLitExpr, *ast.ListComprehensionExpr, *ast.TupleExpr, *ast.StringLit, *ast.BinaryExpr:
+		return false
+	}
 	if value == nil || !idx.mentions(value, targets) {
 		return false
 	}
@@ -2862,22 +3086,19 @@ func storeScanTypeExprIsDArray(t ast.TypeExpr) bool {
 // `darray[ValueType]`, ...), no `sview`/`cstr` value can be or view the source's own backing --
 // only a byte darray yields a view into its storage (`as_sview`) -- so a view derived from the
 // source is (part of) an element value: content, never the header. Returns the locals whose every
-// declaration is spelled `sview`/`cstr` and that no other construct binds, or nil when the source
-// is not a non-byte darray (the caller then keeps its conservative header taint).
-func (a *Analyzer) storeScanViewLocals(decl *ast.FuncDecl, other int) map[string]bool {
+// declaration is spelled `sview`/`cstr` and that no other construct binds. Its caller checks
+// that the source holds no bytes before asking for these locals.
+func (a *Analyzer) storeScanViewLocals(decl *ast.FuncDecl) map[string]bool {
 	decl = a.readDecl(decl)
-	if !a.storeScanSourceHasNoBytes(decl, other) {
-		return nil
-	}
 	views, poisoned := map[string]bool{}, map[string]bool{}
 	for _, p := range decl.Params {
 		poisoned[p.Name] = true
 	}
-	a.storeScanEachNode(decl, func(node any) {
+	for _, node := range a.storeScanIndex(decl).viewLocalNodes() {
 		switch n := node.(type) {
 		case *ast.VarDeclStmt:
 			if n == nil {
-				return
+				continue
 			}
 			// Declared `sview`/`cstr`, or initialized from a value whose analyzed type is built only
 			// from scalars and plain views (no container, view[T], reference or pointer).
@@ -2891,7 +3112,7 @@ func (a *Analyzer) storeScanViewLocals(decl *ast.FuncDecl, other int) map[string
 				poisoned[name] = true
 			}
 		}
-	})
+	}
 	for name := range poisoned {
 		delete(views, name)
 	}
@@ -2914,11 +3135,11 @@ func (a *Analyzer) storeScanViewFilledLocals(decl *ast.FuncDecl) map[string]bool
 		poisoned[p.Name] = true
 	}
 	allowed := map[string]int{}
-	a.storeScanEachNode(decl, func(node any) {
+	for _, node := range idx.viewLocalNodes() {
 		switch n := node.(type) {
 		case *ast.VarDeclStmt:
 			if n == nil {
-				return
+				continue
 			}
 			if storeScanEmptyLiteral(n.Value) {
 				fresh[n.Name] = true
@@ -2934,19 +3155,21 @@ func (a *Analyzer) storeScanViewFilledLocals(decl *ast.FuncDecl) map[string]bool
 		case *ast.CallExpr:
 			field, isMethod := n.Func.(*ast.FieldExpr)
 			if n == nil || !isMethod || field == nil || (field.Field != "push" && field.Field != "extend") {
-				return
+				continue
 			}
 			root := rootIdentExpr(field.Object)
 			if root == nil || !a.storeScanReceiverIsBuiltinDArray(decl, field.Object) {
-				return
+				continue
 			}
+			valid := true
 			for _, arg := range n.Args {
 				t, known := a.lookupExprType(storeScanUnwrap(arg))
 				if !known || t == nil {
 					t, known = a.storeScanDeclTypeOf(decl, storeScanUnwrap(arg))
 				}
 				if !known || t == nil {
-					return
+					valid = false
+					break
 				}
 				if field.Field == "extend" {
 					switch c := stripRefForBounds(t).(type) {
@@ -2955,20 +3178,26 @@ func (a *Analyzer) storeScanViewFilledLocals(decl *ast.FuncDecl) map[string]bool
 					case *ArrayType:
 						t = c.Elem
 					default:
-						return
+						valid = false
+					}
+					if !valid {
+						break
 					}
 				}
 				if t == nil || !(a.storeScanViewOnlyCached(t) || storeScanPlainScalarType(t)) {
-					return
+					valid = false
+					break
 				}
 			}
-			allowed[root.Name] += idx.identCount(field.Object, root.Name)
+			if valid {
+				allowed[root.Name] += idx.identCount(field.Object, root.Name)
+			}
 		case ast.Stmt:
 			for _, name := range stmtBoundNames(n) {
 				poisoned[name] = true
 			}
 		}
-	})
+	}
 	filled := map[string]bool{}
 	for name := range fresh {
 		if !poisoned[name] && idx.bodyIdentCount(decl.Body, name) == allowed[name] {
@@ -3048,7 +3277,7 @@ func (a *Analyzer) storeScanViewLocalsCached(decl *ast.FuncDecl, other int) map[
 	if views, ok := a.storeScanViewCache[decl]; ok {
 		return views
 	}
-	views := a.storeScanViewLocals(decl, other)
+	views := a.storeScanViewLocals(decl)
 	if a.storeScanViewCache == nil {
 		a.storeScanViewCache = map[*ast.FuncDecl]map[string]bool{}
 	}

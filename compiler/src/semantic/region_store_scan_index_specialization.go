@@ -1,16 +1,26 @@
 package semantic
 
-import "elisacore/src/ast"
+import (
+	"elisacore/src/ast"
+	"maps"
+	"reflect"
+)
 
 // cloneStoreScanIndexForSyntax reuses syntax-derived scan facts for a private
 // specialization AST. The string/name tables are immutable, while pointer-bearing
 // slices and maps are rebound through the syntax copier's source-to-private map.
 // A missing mapping declines reuse and lets storeScanIndex do its ordinary walk.
-func cloneStoreScanIndexForSyntax(source *storeScanDeclIndex, nodes map[ast.Node]ast.Node) *storeScanDeclIndex {
+func cloneStoreScanIndexForSyntax(source *storeScanDeclIndex, nodes map[ast.Node]ast.Node, auxiliary ...map[specializationPointer]reflect.Value) *storeScanDeclIndex {
 	if source == nil {
 		return nil
 	}
-	flat, ok := remapStoreScanNodeSlice(nodes, source.flat)
+	var flat []any
+	var ok bool
+	if nodes != nil && len(auxiliary) != 0 {
+		flat, ok = remapStoreScanFlat(nodes, auxiliary[0], source.flat)
+	} else {
+		flat, ok = remapStoreScanNodeSlice(nodes, source.flat)
+	}
 	if !ok {
 		return nil
 	}
@@ -26,13 +36,18 @@ func cloneStoreScanIndexForSyntax(source *storeScanDeclIndex, nodes map[ast.Node
 	if !ok {
 		return nil
 	}
-	bound := make(map[ast.Stmt][]string, len(source.bound))
-	for stmt, names := range source.bound {
-		private, found := remapStoreScanNode(nodes, stmt)
-		if !found {
-			return nil
+	var bound map[ast.Stmt][]string
+	if nodes == nil {
+		bound = maps.Clone(source.bound)
+	} else {
+		bound = make(map[ast.Stmt][]string, len(source.bound))
+		for stmt, names := range source.bound {
+			private, found := remapStoreScanNode(nodes, stmt)
+			if !found {
+				return nil
+			}
+			bound[private] = names
 		}
-		bound[private] = names
 	}
 
 	index := &storeScanDeclIndex{
@@ -60,6 +75,24 @@ func cloneStoreScanIndexForSyntax(source *storeScanDeclIndex, nodes map[ast.Node
 		}
 		index.bindingNodesReady = true
 	}
+	if source.paramFactNodesReady {
+		if nodes != nil && len(auxiliary) != 0 {
+			index.paramFactNodes, ok = remapStoreScanFlat(nodes, auxiliary[0], source.paramFactNodes)
+		} else {
+			index.paramFactNodes, ok = remapStoreScanNodeSlice(nodes, source.paramFactNodes)
+		}
+		if !ok {
+			return nil
+		}
+		index.paramFactNodesReady = true
+	}
+	if source.viewNodesReady {
+		index.viewNodes, ok = remapStoreScanNodeSlice(nodes, source.viewNodes)
+		if !ok {
+			return nil
+		}
+		index.viewNodesReady = true
+	}
 	if source.bindingWritesReady {
 		index.bindingWrites = source.bindingWrites
 		index.bindingWritesReady = true
@@ -84,14 +117,47 @@ func cloneStoreScanIndexForSyntax(source *storeScanDeclIndex, nodes map[ast.Node
 	return index
 }
 
+// The syntax walker also visits auxiliary AST pointers which do not implement
+// ast.Node. The specialization copier already tracks these by type and
+// address; use the copied pointer instead of declining the entire index.
+func remapStoreScanFlat(nodes map[ast.Node]ast.Node, auxiliary map[specializationPointer]reflect.Value, source []any) ([]any, bool) {
+	if source == nil {
+		return nil, true
+	}
+	out := make([]any, len(source))
+	for i, item := range source {
+		if node, ok := item.(ast.Node); ok {
+			private, found := nodes[node]
+			if !found {
+				return nil, false
+			}
+			out[i] = private
+			continue
+		}
+		value := reflect.ValueOf(item)
+		if !value.IsValid() || value.Kind() != reflect.Pointer || value.IsNil() {
+			return nil, false
+		}
+		private, found := auxiliary[specializationPointer{value.Type(), value.Pointer()}]
+		if !found || !private.IsValid() || !private.CanInterface() {
+			return nil, false
+		}
+		out[i] = private.Interface()
+	}
+	return out, true
+}
+
 func remapStoreScanNode[T any](nodes map[ast.Node]ast.Node, source T) (T, bool) {
 	var zero T
+	// A canonical read-only callee keeps its original syntax. Its flat walk
+	// can include auxiliary pointers that are not ast.Node; no remapping is
+	// needed for any of them.
+	if nodes == nil {
+		return source, true
+	}
 	syntaxNode, ok := any(source).(ast.Node)
 	if !ok {
 		return zero, false
-	}
-	if nodes == nil {
-		return source, true
 	}
 	private, ok := nodes[syntaxNode]
 	if !ok {
@@ -109,6 +175,10 @@ func remapStoreScanNodeSlice[T any](nodes map[ast.Node]ast.Node, source []T) ([]
 		return nil, true
 	}
 	private := make([]T, len(source))
+	if nodes == nil {
+		copy(private, source)
+		return private, true
+	}
 	for i, node := range source {
 		value, ok := remapStoreScanNode(nodes, node)
 		if !ok {
@@ -138,6 +208,9 @@ func remapStoreScanExprTokens(nodes map[ast.Node]ast.Node, source map[ast.Expr][
 	if source == nil {
 		return nil, true
 	}
+	if nodes == nil {
+		return maps.Clone(source), true
+	}
 	private := make(map[ast.Expr][]string, len(source))
 	for expr, tokens := range source {
 		key, ok := remapStoreScanNode(nodes, expr)
@@ -152,6 +225,9 @@ func remapStoreScanExprTokens(nodes map[ast.Node]ast.Node, source map[ast.Expr][
 func remapStoreScanHeaderTokens(nodes map[ast.Node]ast.Node, source map[ast.Stmt][]string) (map[ast.Stmt][]string, bool) {
 	if source == nil {
 		return nil, true
+	}
+	if nodes == nil {
+		return maps.Clone(source), true
 	}
 	private := make(map[ast.Stmt][]string, len(source))
 	for stmt, tokens := range source {
@@ -168,6 +244,9 @@ func remapStoreScanExprBools(nodes map[ast.Node]ast.Node, source map[ast.Expr]bo
 	if source == nil {
 		return nil, true
 	}
+	if nodes == nil {
+		return maps.Clone(source), true
+	}
 	private := make(map[ast.Expr]bool, len(source))
 	for expr, value := range source {
 		key, ok := remapStoreScanNode(nodes, expr)
@@ -182,6 +261,9 @@ func remapStoreScanExprBools(nodes map[ast.Node]ast.Node, source map[ast.Expr]bo
 func remapStoreScanIdentCounts(nodes map[ast.Node]ast.Node, source map[ast.Expr]map[string]int) (map[ast.Expr]map[string]int, bool) {
 	if source == nil {
 		return nil, true
+	}
+	if nodes == nil {
+		return maps.Clone(source), true
 	}
 	private := make(map[ast.Expr]map[string]int, len(source))
 	for expr, counts := range source {

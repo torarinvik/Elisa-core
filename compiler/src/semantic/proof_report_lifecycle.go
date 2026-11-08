@@ -49,18 +49,23 @@ func (a *Analyzer) canonicalProofReportNode(node ast.Node) ast.Node {
 	if node == nil {
 		return nil
 	}
+	// Declaration reads are a hot path. Handle their typed nil and synthetic
+	// owner directly rather than reflecting over every declaration.
+	if fn, ok := node.(*ast.FuncDecl); ok {
+		if fn == nil {
+			return nil
+		}
+		if a.proofLifecycle.Synthetic == fn && a.proofLifecycle.SyntheticOwner != nil {
+			return a.proofLifecycle.SyntheticOwner
+		}
+		return a.canonicalFuncDecl(fn)
+	}
 	value := reflect.ValueOf(node)
 	if value.Kind() == reflect.Pointer && value.IsNil() {
 		return nil
 	}
 	if a.proofLifecycle.Synthetic != nil && node == a.proofLifecycle.Synthetic && a.proofLifecycle.SyntheticOwner != nil {
 		return a.proofLifecycle.SyntheticOwner
-	}
-	if fn, ok := node.(*ast.FuncDecl); ok {
-		if fn == nil {
-			return nil
-		}
-		return a.canonicalFuncDecl(fn)
 	}
 	return node
 }
@@ -129,16 +134,20 @@ func (a *Analyzer) beginFunctionProofContribution(fn *ast.FuncDecl, arguments []
 }
 
 func (a *Analyzer) addProofReportOrigin(origin ast.Node) {
-	if a.proofLifecycle.ProbeDepth != 0 {
+	current := a.proofLifecycle.Current
+	if a.proofLifecycle.ProbeDepth != 0 || current == nil || origin == nil {
 		return
 	}
 	origin = a.canonicalProofReportNode(origin)
-	if current := a.proofLifecycle.Current; current != nil && origin != nil {
+	if origin != nil {
 		if origin == current.Key.Owner {
 			return
 		} // installed once at commit
 		if current.Origins == nil {
 			current.Origins = map[ast.Node]bool{}
+		}
+		if current.Origins[origin] {
+			return
 		}
 		current.Origins[origin] = true
 	}

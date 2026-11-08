@@ -109,3 +109,17 @@ func TestStoreScanProgramLivedParamCarriesNothing(t *testing.T) {
 		t.Fatalf("neg: emit sc->structs = none, want a store")
 	}
 }
+
+func TestStoreScanProgramLivedParamAvoidsFlowSummary(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "store_scan_early_program.elisa", storeScanProgramLivedParamPos, AnalyzeOptions{})
+	a := result.analyzer
+	decl := storeScanFindFunc(t, result, "remember")
+	delete(a.storeScanCache, storeScanKey{decl, 0, 1})
+	delete(a.storeFlowSummaries, decl)
+	if got := a.calleeStoreModeIntoSeen(decl, 0, 1, map[storeScanKey]bool{}); got != storeNone {
+		t.Fatalf("program-lived parameter has store mode %v", got)
+	}
+	if a.storeFlowSummaries[decl] != nil {
+		t.Fatal("built a flow summary despite the complete program-lifetime proof")
+	}
+}

@@ -1,6 +1,11 @@
 package semantic
 
-import "testing"
+import (
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
+	"elisacore/src/parser"
+	"testing"
+)
 
 const storeScanShareFromSource = `struct Node:
     names: darray[sview] = []
@@ -85,6 +90,44 @@ func TestStoreScanShareIsPerSourceParameter(t *testing.T) {
 	}
 	if !a.storeScanParamWriteCache[keepHeader] {
 		t.Fatal("successful reachability path should cache its intermediate callee node")
+	}
+}
+
+func BenchmarkStoreScanShareAliases(b *testing.B) {
+	l := lexer.New("store_scan_share_bench.elisa", []byte(storeScanShareFromSource))
+	p := parser.New(l.Tokenize())
+	file := p.ParseFile("store_scan_share_bench.elisa")
+	if len(l.Errors())+len(p.Errors()) != 0 {
+		b.Fatal("invalid fixture")
+	}
+	result := AnalyzeWithOptions(file, AnalyzeOptions{})
+	a := result.analyzer
+	a.currentScope = a.globalScope
+	var decl *ast.FuncDecl
+	for fn := range a.funcDeclSymbols {
+		if fn.Name == "stage" {
+			decl = fn
+		}
+	}
+	if decl == nil {
+		b.Fatal("missing stage")
+	}
+	idx := a.storeScanIndex(decl)
+	for _, cached := range []bool{false, true} {
+		name := "cold_aliases"
+		if cached {
+			name = "shared_aliases"
+		}
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if !cached {
+					idx.paramAliases = nil
+				}
+				_ = a.computeStoreScanParamFacts(storeScanShareKey(decl, 2, 0))
+				_ = a.computeStoreScanParamFacts(storeScanShareKey(decl, 2, 1))
+			}
+		})
 	}
 }
 

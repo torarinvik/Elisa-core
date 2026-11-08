@@ -48,7 +48,16 @@ func BenchmarkStoreScanHeaderMentionsTwo(b *testing.B) {
 
 func TestStoreScanIndexedHeaderFastPath(t *testing.T) {
 	id := func(name string) *ast.Ident { return &ast.Ident{Name: name} }
+	cycle := &ast.ParenExpr{}
+	cycle.Inner = cycle
 	for _, expr := range []ast.Expr{
+		cycle,
+		&ast.AddrOfExpr{Operand: id("values")},
+		&ast.MoveExpr{Operand: id("values")},
+		&ast.UnaryExpr{Operand: id("other"), LoweredCall: &ast.CallExpr{Func: id("values")}},
+		&ast.UnaryExpr{Operand: id("values")},
+		&ast.ParenExpr{Inner: &ast.ParenExpr{Inner: id("values")}},
+		&ast.ParenExpr{Inner: &ast.FieldExpr{Object: id("values"), Field: "count"}},
 		&ast.IndexExpr{Object: id("values"), Index: id("i")},
 		&ast.IndexExpr{Object: id("values"), Index: id("values")},
 		&ast.IndexExpr{Object: &ast.FieldExpr{Object: id("values"), Field: "items"}, Index: id("i")},
@@ -63,6 +72,48 @@ func TestStoreScanIndexedHeaderFastPath(t *testing.T) {
 				t.Fatalf("%#v, %v: got %v want %v", expr, names, got, want)
 			}
 		}
+	}
+}
+
+func BenchmarkStoreScanHeaderUnary(b *testing.B) {
+	expr := &ast.UnaryExpr{Operand: &ast.Ident{Name: "values"}}
+	names := map[string]bool{"values": true}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		storeScanMentionsSink = storeScanMentionsHeader(expr, names)
+	}
+}
+
+func BenchmarkStoreScanHeaderAddress(b *testing.B) {
+	expr := &ast.AddrOfExpr{Operand: &ast.Ident{Name: "values"}}
+	names := map[string]bool{"values": true}
+	for _, direct := range []bool{false, true} {
+		name := "reflective"
+		if direct {
+			name = "direct"
+		}
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if direct {
+					storeScanMentionsSink = storeScanMentionsHeader(expr, names)
+				} else {
+					storeScanMentionsSink = storeScanMentionsHeaderPooled(expr, names)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkStoreScanHeaderParenthesized(b *testing.B) {
+	var expr ast.Expr = &ast.Ident{Name: "values"}
+	for i := 0; i < 4; i++ {
+		expr = &ast.ParenExpr{Inner: expr}
+	}
+	names := map[string]bool{"values": true}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		storeScanMentionsSink = storeScanMentionsHeader(expr, names)
 	}
 }
 
@@ -140,7 +191,10 @@ func BenchmarkStoreScanHeaderMapCapacity(b *testing.B) {
 
 func TestStoreScanHeaderLiteralFastPath(t *testing.T) {
 	var nilInt *ast.IntLit
-	cases := []any{nilInt, &ast.IntLit{Value: "source", Suffix: "u32"}, &ast.FloatLit{Value: "1.0", Suffix: "source"}, &ast.StringLit{Value: "source"}, &ast.CharLit{Value: "x"}, &ast.BoolLit{Value: true}, &ast.NullLit{}, &ast.ZeroedLit{}}
+	var nilFloat *ast.FloatLit
+	var nilString *ast.StringLit
+	var nilChar *ast.CharLit
+	cases := []any{nilInt, nilFloat, nilString, nilChar, &ast.IntLit{Value: "source", Suffix: "u32"}, &ast.FloatLit{Value: "1.0", Suffix: "source"}, &ast.StringLit{Value: "source"}, &ast.CharLit{Value: "x"}, &ast.BoolLit{Value: true}, &ast.NullLit{}, &ast.ZeroedLit{}}
 	for _, node := range cases {
 		for _, names := range []map[string]bool{{"source": true}, {"u32": true}, {"": true}, {"other": true}} {
 			got := storeScanMentionsHeader(node, names)
@@ -159,6 +213,17 @@ func BenchmarkStoreScanHeaderLiteral(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		if storeScanMentionsHeader(node, names) {
 			b.Fatal("unexpected match")
+		}
+	}
+}
+
+func BenchmarkStoreScanHeaderOtherLiterals(b *testing.B) {
+	nodes := []any{&ast.FloatLit{Value: "1.0"}, &ast.StringLit{Value: "text"}, &ast.CharLit{Value: "x"}, &ast.BoolLit{Value: true}, &ast.NullLit{}, &ast.ZeroedLit{}}
+	names := map[string]bool{"source": true}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		for _, node := range nodes {
+			storeScanMentionsSink = storeScanMentionsHeader(node, names)
 		}
 	}
 }

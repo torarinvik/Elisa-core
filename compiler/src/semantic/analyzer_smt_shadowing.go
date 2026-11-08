@@ -25,8 +25,11 @@ func (a *Analyzer) smtFactPins(scope *Scope, expr ast.Expr) map[string]*Symbol {
 // Callers that already computed dependencies can reuse them while still
 // including identifiers that are not free dependencies (such as binders).
 func (a *Analyzer) smtFactPinsWithDeps(scope *Scope, expr ast.Expr, names map[string]bool) map[string]*Symbol {
-	pins := make(map[string]*Symbol, len(names))
+	var pins map[string]*Symbol
 	add := func(name string) {
+		if pins == nil {
+			pins = make(map[string]*Symbol, len(names))
+		}
 		if _, done := pins[name]; done {
 			return
 		}

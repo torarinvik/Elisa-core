@@ -12,7 +12,7 @@ func BenchmarkStoreFlowStatementSeen(b *testing.B) {
 		decl.Body[i] = &ast.ReturnStmt{}
 	}
 	a := &Analyzer{}
-	unit := func(reflect.Value) []reflect.Value { return nil }
+	unit := func(_ reflect.Value, nested []reflect.Value) []reflect.Value { return nested }
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		a.storeFlowNodes2(decl, unit)

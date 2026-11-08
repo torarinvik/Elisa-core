@@ -348,7 +348,7 @@ func (c *specializationContext) copyDecl(fn *ast.FuncDecl) *ast.FuncDecl {
 	// to this private copy so specialized bodies can reuse the canonical walk and
 	// binder tables instead of rebuilding them for every instantiation.
 	if c.base != nil && c.base.analyzer != nil {
-		if index := c.base.cloneSpecializationStoreScanIndex(fn, syntax.nodes); index != nil {
+		if index := c.base.cloneSpecializationStoreScanIndex(fn, syntax.nodes, syntax.pointers); index != nil {
 			if c.worker.storeScanIndexCache == nil {
 				c.worker.storeScanIndexCache = make(map[*ast.FuncDecl]*storeScanDeclIndex)
 			}

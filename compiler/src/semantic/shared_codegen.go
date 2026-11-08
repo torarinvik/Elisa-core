@@ -39,7 +39,7 @@ type sharedCodegen struct {
 
 // Specialization indexes live outside the frozen canonical analyzer. The
 // session lock protects their creation and copying across codegen workers.
-func (r *Result) cloneSpecializationStoreScanIndex(decl *ast.FuncDecl, nodes map[ast.Node]ast.Node) *storeScanDeclIndex {
+func (r *Result) cloneSpecializationStoreScanIndex(decl *ast.FuncDecl, nodes map[ast.Node]ast.Node, auxiliary ...map[specializationPointer]reflect.Value) *storeScanDeclIndex {
 	if r == nil || r.analyzer == nil {
 		return nil
 	}
@@ -54,9 +54,9 @@ func (r *Result) cloneSpecializationStoreScanIndex(decl *ast.FuncDecl, nodes map
 			index = (&Analyzer{}).storeScanIndex(decl)
 			sh.storeScanIndexes[decl] = index
 		}
-		return cloneStoreScanIndexForSyntax(index, nodes)
+		return cloneStoreScanIndexForSyntax(index, nodes, auxiliary...)
 	}
-	return cloneStoreScanIndexForSyntax(r.analyzer.storeScanIndex(decl), nodes)
+	return cloneStoreScanIndexForSyntax(r.analyzer.storeScanIndex(decl), nodes, auxiliary...)
 }
 
 type specializationCall struct {

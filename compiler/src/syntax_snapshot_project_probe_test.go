@@ -6,6 +6,7 @@ import (
 	"elisacore/src/lexer"
 	"elisacore/src/parser"
 	"os"
+	"runtime"
 	"sort"
 	"testing"
 )
@@ -60,6 +61,34 @@ func TestLocalSyntaxSnapshotDeclines(t *testing.T) {
 		t.Logf("declined %d: %s", counts[key], key)
 	}
 	t.Logf("scanned %d function-bearing declarations", total)
+}
+
+func TestStage1ParserReleaseMemoryProbe(t *testing.T) {
+	path := os.Getenv("ELISA_SYNTAX_SNAPSHOT_PROBE")
+	if path == "" {
+		t.Skip("set ELISA_SYNTAX_SNAPSHOT_PROBE")
+	}
+	var errors bytes.Buffer
+	loaded, ok := loadProgramInput(path, &errors)
+	if !ok {
+		t.Fatal(errors.String())
+	}
+	runtime.GC()
+	var before, parsed, collected runtime.MemStats
+	runtime.ReadMemStats(&before)
+	l := lexer.New(path, loaded.source)
+	p := parser.New(l.Tokenize())
+	file := p.ParseFile(path)
+	if len(l.Errors()) != 0 || len(p.Errors()) != 0 {
+		t.Fatal("could not parse benchmark source")
+	}
+	l, p = nil, nil
+	runtime.ReadMemStats(&parsed)
+	runtime.GC()
+	runtime.ReadMemStats(&collected)
+	runtime.KeepAlive(file)
+	runtime.KeepAlive(loaded)
+	t.Logf("heap before=%d parsed=%d after_gc=%d bytes; reclaimed=%d", before.HeapAlloc, parsed.HeapAlloc, collected.HeapAlloc, int64(parsed.HeapAlloc)-int64(collected.HeapAlloc))
 }
 
 func BenchmarkStage1TransientSyntaxSnapshots(b *testing.B) {

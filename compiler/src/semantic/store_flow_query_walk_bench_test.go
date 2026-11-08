@@ -22,6 +22,34 @@ func BenchmarkStoreFlowStatementScans(b *testing.B) {
 	}
 }
 
+func BenchmarkStoreFlowUnitNames(b *testing.B) {
+	var expr ast.Expr = &ast.Ident{Name: "source"}
+	for i := 0; i < 64; i++ {
+		expr = &ast.BinaryExpr{Left: expr, Right: &ast.Ident{Name: "value"}}
+	}
+	stmt := reflect.ValueOf(&ast.ReturnStmt{Value: expr})
+	a := &Analyzer{}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		ctx := &storeFlowCtx{}
+		a.storeFlowUnit(stmt, ctx)
+	}
+}
+
+func TestStoreFlowUnitReusesNamesWithoutCrossContamination(t *testing.T) {
+	a := &Analyzer{}
+	first := &storeFlowCtx{}
+	a.storeFlowUnit(reflect.ValueOf(&ast.ReturnStmt{Value: &ast.Ident{Name: "first"}}), first)
+	if len(first.edges) != 1 || first.edges[0][0] != "first" {
+		t.Fatalf("unexpected first flow: %v", first.edges)
+	}
+	second := &storeFlowCtx{}
+	a.storeFlowUnit(reflect.ValueOf(&ast.ReturnStmt{Value: &ast.Ident{Name: "second"}}), second)
+	if len(second.edges) != 1 || second.edges[0][0] != "second" || first.edges[0][0] != "first" {
+		t.Fatalf("pooled names contaminated flows: %v / %v", first.edges, second.edges)
+	}
+}
+
 func BenchmarkStoreFlowPositions(b *testing.B) {
 	var expr ast.Expr = &ast.Ident{Name: "source"}
 	for i := 0; i < 64; i++ {
@@ -125,6 +153,21 @@ func BenchmarkStoreFlowQueryBinderPairsIdentifiers(b *testing.B) {
 				_ = a.storeFlowQueryBinderPairs(stmt)
 			}
 		})
+	}
+}
+
+func BenchmarkStoreFlowQueryBinderPairsIntegers(b *testing.B) {
+	args := make([]ast.Expr, 64)
+	for i := range args {
+		args[i] = &ast.IntLit{Value: "1"}
+	}
+	stmt := reflect.ValueOf(&ast.ReturnStmt{Value: &ast.CallExpr{Func: &ast.Ident{Name: "f"}, Args: args}})
+	a := &Analyzer{}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if len(a.storeFlowQueryBinderPairs(stmt)) != 0 {
+			b.Fatal("unexpected query")
+		}
 	}
 }
 

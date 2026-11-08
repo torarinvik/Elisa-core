@@ -17,7 +17,7 @@ import (
 func TestSpecializationParamCacheSourcePolicy(t *testing.T) {
 	_, filename, _, _ := runtime.Caller(0)
 	directory := filepath.Dir(filename)
-	golden := map[string]string{"region_store_scan_param_writes.go|storeScanParamLocalFacts": "16fc7cd91e8c4b043f8ef27107eae112aa33bed67c60b396781139a2860bc8d3", "region_store_scan_param_writes.go|computeStoreScanParamFacts": "78430f4f1d896d7a0f088816cc407dbe5a305f03e9679d85bfd9822979e5cf0b", "region_store_scan_param_writes.go|storeScanParamReaches": "a2c605669042249e014e1fbb9dbe888d0dc098ed017d907c86e4b46a9bb6d60d"}
+	golden := map[string]string{"region_store_scan_param_writes.go|storeScanParamLocalFacts": "16fc7cd91e8c4b043f8ef27107eae112aa33bed67c60b396781139a2860bc8d3", "region_store_scan_param_writes.go|computeStoreScanParamFacts": "3277b486be3da657baf4d8811113066fbc53261a444a2f815aa054294711e6f6", "region_store_scan_param_writes.go|storeScanParamReaches": "a2c605669042249e014e1fbb9dbe888d0dc098ed017d907c86e4b46a9bb6d60d"}
 	allowedCalls := map[string]bool{"storeScanParamLocalFacts": true, "storeScanParamReaches": true, "lookupStoreScanParamWriteCache": true, "setStoreScanParamWriteCache": true}
 	entries, err := os.ReadDir(directory)
 	if err != nil {

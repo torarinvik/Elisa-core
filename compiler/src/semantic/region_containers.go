@@ -2609,6 +2609,8 @@ func (a *Analyzer) checkCallArgumentRegionStoreEscape(call *ast.CallExpr) {
 // (a parameter, a global, a caller-owned struct) outlives every local region.
 func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, args []ast.Expr, index int) {
 	targetArg := args[index]
+	var storeDecl *ast.FuncDecl
+	calleeChecked := false
 	targetRegion := a.structLocalArgRegion(targetArg)
 	if targetRegion == "" {
 		if state, ok := a.regionRefStateForExpr(targetArg); ok {
@@ -2621,20 +2623,27 @@ func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, 
 		if other == index || !typeCarriesRegionStorage(a.exprType(arg)) {
 			continue
 		}
+		if a.storeCallRegionsSafeForTarget(arg, targetRegion) {
+			continue
+		}
 		if a.callArgNeverReaches(call, other, index) {
 			continue
 		}
 		// The store-flow summary is undirected between written params; refine it with the
 		// directed scan when the callee's body is visible.
 		mode := storeHeader
-		var storeDecl *ast.FuncDecl
-		if decl, ok := a.resolveReadOnlyScanCallee(call); ok && decl != nil && storeFlowCallFitsParams(decl, call) && !funcHasArenaParam(decl) {
-			storeDecl = decl
-			mode = a.calleeStoreModeInto(decl, other, index)
+		if !calleeChecked {
+			calleeChecked = true
+			if decl, ok := a.resolveReadOnlyScanCallee(call); ok && decl != nil && storeFlowCallFitsParams(decl, call) && !funcHasArenaParam(decl) {
+				storeDecl = decl
+			}
+		}
+		if storeDecl != nil {
+			mode = a.calleeStoreModeInto(storeDecl, other, index)
 			// The summary's edge kind bounds it too: an Elements edge stores only element
 			// values copied out of the argument, never its storage.
 			if mode == storeHeader {
-				if sum := a.storeFlowKindsFor(decl); sum != nil && a.storeFlowReachKind(sum, other, index) == storeFlowEdgeElements {
+				if sum := a.storeFlowKindsFor(storeDecl); sum != nil && a.storeFlowReachKind(sum, other, index) == storeFlowEdgeElements {
 					mode = storeElements
 				}
 			}
@@ -2685,6 +2694,45 @@ func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, 
 			}
 		}
 	}
+}
+
+// Complete view provenance means a view-only store cannot add regions beyond
+// the tracked state. If even the union of header and element provenance is
+// safe for the target, the directed callee scan cannot produce a diagnostic.
+func (a *Analyzer) storeCallRegionsSafeForTarget(arg ast.Expr, targetRegion string) bool {
+	if !a.storeViewsProvenanceComplete(arg) {
+		return false
+	}
+	safe := func(regions []string) bool {
+		for _, region := range regions {
+			if region == targetRegion || (targetRegion == "" && a.lookupRegionParam(region)) {
+				continue
+			}
+			if a.isCompilerGeneratedAutoRegion(region) && a.autoRegionAdoptsCallerArena(targetRegion) {
+				continue
+			}
+			if targetRegion == "" || a.regionStoreEscapes(targetRegion, region) {
+				return false
+			}
+		}
+		return true
+	}
+	// The two store modes share the tracked state and container backing. Read
+	// them once rather than recomputing provenance and type for each mode.
+	if state, ok := a.regionRefStateForExpr(arg); ok && !safe(liveLocalRegionDependencyNames(state)) {
+		return false
+	}
+	typ := a.exprType(arg)
+	if own := a.containerRegionOf(stripRefForBounds(typ)); own != "" && a.structLocalRegionIsLive(own) && !safe([]string{own}) {
+		return false
+	}
+	if own := a.structLocalArgRegion(arg); own != "" && a.structLocalRegionIsLive(own) && (storedValuesCarryRegionlessBacking(typ, storeHeader) || storedValuesCarryRegionlessBacking(typ, storeElements)) && !safe([]string{own}) {
+		return false
+	}
+	if elems, tracked := a.trackedElementStateOfLocal(arg); tracked && !safe(liveLocalRegionDependencyNames(elems)) {
+		return false
+	}
+	return true
 }
 
 // destinationPlaceRegion returns the caller-owned region a store target place lives in, when the
@@ -2911,6 +2959,9 @@ func (a *Analyzer) trackedElementStateOfLocal(arg ast.Expr) (regionRefState, boo
 // liveLocalRegionDependencyNames lists every live region a region-ref state depends on, including
 // through aggregate fields, in a deterministic order.
 func liveLocalRegionDependencyNames(state regionRefState) []string {
+	if len(state.Deps) == 0 && len(state.Fields) == 0 {
+		return []string{}
+	}
 	seen := map[string]bool{}
 	var collect func(regionRefState)
 	collect = func(s regionRefState) {

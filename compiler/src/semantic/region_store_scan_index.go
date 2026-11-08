@@ -21,6 +21,26 @@ func storeScanSimpleMentionName(expr ast.Expr) (string, bool) {
 				return "", false
 			}
 			expr = node.Object
+		case *ast.ParenExpr:
+			if node == nil {
+				return "", false
+			}
+			expr = node.Inner
+		case *ast.MoveExpr:
+			if node == nil {
+				return "", false
+			}
+			expr = node.Operand
+		case *ast.AddrOfExpr:
+			if node == nil {
+				return "", false
+			}
+			expr = node.Operand
+		case *ast.UnaryExpr:
+			if node == nil || node.LoweredCall != nil {
+				return "", false
+			}
+			expr = node.Operand
 		default:
 			return "", false
 		}
@@ -36,11 +56,33 @@ func storeScanSimpleMentionNames(expr ast.Expr) (name, root string, known bool) 
 	return name, rootNameOfDotted(name), true
 }
 
+// Literal tokens are their text fields; positions and non-string fields are
+// ignored by the general mention walk.
+func storeScanLiteralMention(expr ast.Expr, names map[string]bool) (bool, bool) {
+	switch n := expr.(type) {
+	case *ast.IntLit:
+		return n != nil && (names[n.Value] || names[n.Suffix]), true
+	case *ast.FloatLit:
+		return n != nil && (names[n.Value] || names[n.Suffix]), true
+	case *ast.StringLit:
+		return n != nil && names[n.Value], true
+	case *ast.CharLit:
+		return n != nil && names[n.Value], true
+	case *ast.BoolLit, *ast.NullLit, *ast.ZeroedLit:
+		return false, true
+	default:
+		return false, false
+	}
+}
+
 // mentions: storeScanMentions(expr, names), with expr's mention tokens memoized in the index
 // (fixpoints ask the same expressions again on every iteration).
 func (idx *storeScanDeclIndex) mentions(expr ast.Expr, names map[string]bool) bool {
 	if expr == nil || len(names) == 0 {
 		return false
+	}
+	if hit, literal := storeScanLiteralMention(expr, names); literal {
+		return hit
 	}
 	if name, known := storeScanSimpleMentionName(expr); known {
 		if names[name] {
@@ -66,6 +108,10 @@ func (idx *storeScanDeclIndex) mentions(expr ast.Expr, names map[string]bool) bo
 func (idx *storeScanDeclIndex) mentionsTwo(expr ast.Expr, left, right map[string]bool) (bool, bool) {
 	if expr == nil || (len(left) == 0 && len(right) == 0) {
 		return false, false
+	}
+	if hit, literal := storeScanLiteralMention(expr, left); literal {
+		rightHit, _ := storeScanLiteralMention(expr, right)
+		return hit, rightHit
 	}
 	if name, known := storeScanSimpleMentionName(expr); known {
 		leftHit, rightHit := left[name], right[name]
@@ -251,8 +297,12 @@ type storeScanDeclIndex struct {
 	payloadNodesReady bool
 	// Binding fixpoints only process declarations, assignments, calls, and
 	// statements with binders. They reuse this ordered subset.
-	bindingNodes      []any
-	bindingNodesReady bool
+	bindingNodes        []any
+	bindingNodesReady   bool
+	paramFactNodes      []any
+	paramFactNodesReady bool
+	viewNodes           []any
+	viewNodesReady      bool
 	// bindingWrites is populated on demand once per function. Pattern binder typing used to
 	// reflectively rescan the entire body for every binder name.
 	bindingWrites      map[string]int
@@ -270,6 +320,41 @@ type storeScanDeclIndex struct {
 	bodyIdentCounts map[string]int
 	kindScopes      *storeFlowKindScopes
 	paramAliases    map[storeScanAliasKey]storeScanAliasResult
+}
+
+// View-local scans inspect statements and calls, but never other expression
+// nodes. Preserve walk order while skipping those expressions on later scans.
+func (idx *storeScanDeclIndex) viewLocalNodes() []any {
+	if !idx.viewNodesReady {
+		for _, node := range idx.flat {
+			switch node.(type) {
+			case ast.Stmt, *ast.CallExpr:
+				idx.viewNodes = append(idx.viewNodes, node)
+			}
+		}
+		idx.viewNodesReady = true
+	}
+	return idx.viewNodes
+}
+
+// Parameter write proofs only inspect assignments, calls, and nodes with a
+// Target or Store expression. Preserve their original order across queries.
+func (idx *storeScanDeclIndex) paramWriteNodes() []any {
+	if !idx.paramFactNodesReady {
+		for _, node := range idx.flat {
+			switch node.(type) {
+			case *ast.AssignStmt, *ast.CallExpr:
+				idx.paramFactNodes = append(idx.paramFactNodes, node)
+				continue
+			}
+			v := reflect.ValueOf(node)
+			if v.Kind() == reflect.Pointer && !v.IsNil() && v.Elem().Kind() == reflect.Struct && len(reflectMetaOf(v.Elem().Type()).storeScanPlaceFields) != 0 {
+				idx.paramFactNodes = append(idx.paramFactNodes, node)
+			}
+		}
+		idx.paramFactNodesReady = true
+	}
+	return idx.paramFactNodes
 }
 
 func (a *Analyzer) invalidateStoreScanParamAliases() {
@@ -363,7 +448,7 @@ func (a *Analyzer) storeScanIndex(decl *ast.FuncDecl) *storeScanDeclIndex {
 			}
 		}
 	}
-	idx := &storeScanDeclIndex{decls: map[string][]*ast.VarDeclStmt{}, otherBound: map[string]bool{}, locals: map[string]bool{}, iterBinders: map[string][]*ast.IterForStmt{}, nonIterBinder: map[string]bool{}, bound: map[ast.Stmt][]string{}}
+	idx := &storeScanDeclIndex{otherBound: map[string]bool{}}
 	if len(decl.Body) > 0 {
 		// Top-level statements and their expressions are the minimum common
 		// case; nested syntax still grows normally beyond this bounded hint.
@@ -381,6 +466,12 @@ func (a *Analyzer) storeScanIndex(decl *ast.FuncDecl) *storeScanDeclIndex {
 			if n == nil {
 				return
 			}
+			if idx.decls == nil {
+				idx.decls = map[string][]*ast.VarDeclStmt{}
+			}
+			if idx.locals == nil {
+				idx.locals = map[string]bool{}
+			}
 			idx.locals[n.Name] = true
 			idx.decls[n.Name] = append(idx.decls[n.Name], n)
 		case *ast.AssignStmt, *ast.CallExpr:
@@ -389,14 +480,29 @@ func (a *Analyzer) storeScanIndex(decl *ast.FuncDecl) *storeScanDeclIndex {
 				return
 			}
 			bound := stmtBoundNames(n)
+			if idx.bound == nil {
+				idx.bound = map[ast.Stmt][]string{}
+			}
 			idx.bound[n] = bound
+			if len(bound) == 0 {
+				return
+			}
+			if idx.locals == nil {
+				idx.locals = map[string]bool{}
+			}
 			iter, isIter := n.(*ast.IterForStmt)
 			for _, name := range bound {
 				idx.otherBound[name] = true
 				idx.locals[name] = true
 				if isIter && iter != nil {
+					if idx.iterBinders == nil {
+						idx.iterBinders = map[string][]*ast.IterForStmt{}
+					}
 					idx.iterBinders[name] = append(idx.iterBinders[name], iter)
 				} else {
+					if idx.nonIterBinder == nil {
+						idx.nonIterBinder = map[string]bool{}
+					}
 					idx.nonIterBinder[name] = true
 				}
 			}

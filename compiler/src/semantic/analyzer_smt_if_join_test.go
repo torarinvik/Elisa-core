@@ -96,6 +96,24 @@ func TestSMTIfJoinKeepsCommonAndBranchFactInputsIsolated(t *testing.T) {
 	}
 }
 
+func TestSMTIfJoinUnchangedFactsStayFrozen(t *testing.T) {
+	common := smtFact{Expr: &ast.Ident{Name: "common"}, Deps: map[string]bool{"common": true}}
+	scope := &Scope{smtAssertFacts: []smtFact{common}}
+	a := &Analyzer{currentScope: scope}
+	entry := a.snapshotSMTFactFrame()
+	left := a.restoreSMTFactFrame(entry)
+	right := a.restoreSMTFactFrame(entry)
+	a.joinIfSMTFacts(entry, []smtFactFrame{left, right}, nil, false)
+	scope.smtAssertFacts = append(scope.smtAssertFacts, smtFact{Expr: &ast.Ident{Name: "new"}})
+	a.invalidateSMTAssertFactsForTarget(&ast.Ident{Name: "common"})
+	if len(entry.facts[0]) != 1 || entry.facts[0][0].Expr != common.Expr || len(left.facts[0]) != 1 || left.facts[0][0].Expr != common.Expr {
+		t.Fatal("join or later mutation changed a frozen branch frame")
+	}
+	if len(scope.smtAssertFacts) != 1 {
+		t.Fatal("invalidation did not remove the joined fact")
+	}
+}
+
 func BenchmarkSMTFactFrameRoundTrip(b *testing.B) {
 	var scope *Scope
 	for i := 0; i < 8; i++ {

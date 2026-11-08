@@ -42,6 +42,100 @@ func BenchmarkStoreScanTwoNameSets(b *testing.B) {
 	}
 }
 
+func BenchmarkStoreScanEitherNameSet(b *testing.B) {
+	expr := &ast.FieldExpr{Object: &ast.Ident{Name: "unrelated"}, Field: "value"}
+	left, right := map[string]bool{"left": true}, map[string]bool{"right": true}
+	for _, combined := range []bool{false, true} {
+		name := "separate"
+		if combined {
+			name = "combined"
+		}
+		b.Run(name, func(b *testing.B) {
+			idx := &storeScanDeclIndex{}
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if combined {
+					l, r := idx.mentionsTwo(expr, left, right)
+					storeScanMentionsSink = l || r
+				} else {
+					storeScanMentionsSink = idx.mentions(expr, left) || idx.mentions(expr, right)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkStoreScanParenthesizedMention(b *testing.B) {
+	var expr ast.Expr = &ast.FieldExpr{Object: &ast.Ident{Name: "source.item"}, Field: "value"}
+	for i := 0; i < 3; i++ {
+		expr = &ast.ParenExpr{Inner: expr}
+	}
+	idx := &storeScanDeclIndex{}
+	names := map[string]bool{"source": true}
+	idx.mentions(expr, names)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		storeScanMentionsSink = idx.mentions(expr, names)
+	}
+}
+
+func TestStoreScanParenthesizedMentionsMatchWalk(t *testing.T) {
+	cycle := &ast.ParenExpr{}
+	cycle.Inner = cycle
+	for _, expr := range []ast.Expr{cycle, &ast.ParenExpr{Inner: &ast.FieldExpr{Object: &ast.Ident{Name: "source.item"}, Field: "ignored"}}, &ast.ParenExpr{}, &ast.AddrOfExpr{Operand: &ast.Ident{Name: "source.item"}}, &ast.MoveExpr{Operand: &ast.Ident{Name: "source.item"}}, &ast.UnaryExpr{Operand: &ast.Ident{Name: "source.item"}}, &ast.UnaryExpr{Operand: &ast.Ident{Name: "other"}, LoweredCall: &ast.CallExpr{Func: &ast.Ident{Name: "source.item"}}}} {
+		for _, names := range []map[string]bool{{"source": true}, {"source.item": true}, {"ignored": true}, {"": true}} {
+			idx := &storeScanDeclIndex{}
+			if got, want := idx.mentions(expr, names), storeScanMentions(expr, names); got != want {
+				t.Fatalf("%T %v: got %v want %v", expr, names, got, want)
+			}
+		}
+	}
+}
+
+func BenchmarkStoreScanUnaryMention(b *testing.B) {
+	expr := &ast.UnaryExpr{Operand: &ast.Ident{Name: "source"}}
+	idx := &storeScanDeclIndex{}
+	names := map[string]bool{"source": true}
+	idx.mentions(expr, names)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		storeScanMentionsSink = idx.mentions(expr, names)
+	}
+}
+
+func TestStoreScanLiteralMentionsMatchWalk(t *testing.T) {
+	for _, expr := range []ast.Expr{&ast.IntLit{Value: "source", Suffix: "u32"}, &ast.FloatLit{Value: "1.0", Suffix: "source"}, &ast.StringLit{Value: "source"}, &ast.CharLit{Value: "x"}, &ast.BoolLit{}, &ast.NullLit{}, &ast.ZeroedLit{}} {
+		for _, names := range []map[string]bool{{"source": true}, {"u32": true}, {"": true}, {"other": true}} {
+			idx := &storeScanDeclIndex{}
+			if got, want := idx.mentions(expr, names), storeScanMentions(expr, names); got != want {
+				t.Fatalf("%T %v: got %v want %v", expr, names, got, want)
+			}
+		}
+	}
+}
+
+func BenchmarkStoreScanLiteralMention(b *testing.B) {
+	expr := &ast.IntLit{Value: "1", Suffix: "u32"}
+	idx := &storeScanDeclIndex{}
+	names := map[string]bool{"source": true}
+	idx.mentions(expr, names)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		storeScanMentionsSink = idx.mentions(expr, names)
+	}
+}
+
+func BenchmarkStoreScanFreshAggregateAlias(b *testing.B) {
+	expr := &ast.StructLitExpr{Args: []ast.Expr{&ast.Ident{Name: "target"}, &ast.Ident{Name: "other"}}}
+	idx := &storeScanDeclIndex{}
+	names := map[string]bool{"target": true}
+	idx.mentions(expr, names)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		storeScanMentionsSink = storeScanMayAliasPlace(idx, expr, names)
+	}
+}
+
 func TestStoreScanMentionTokensPreserveNameMembership(t *testing.T) {
 	expr := &ast.CallExpr{Func: &ast.Ident{Name: "pkg.func"}, Args: []ast.Expr{&ast.Ident{Name: "value"}, &ast.FieldExpr{Object: &ast.Ident{Name: "holder"}, Field: "ignored"}}}
 	tokens := storeScanMentionTokens(expr)

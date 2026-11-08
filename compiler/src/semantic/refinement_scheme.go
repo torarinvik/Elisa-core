@@ -317,11 +317,24 @@ func cloneSpecSignature(sig *SpecSignature) *SpecSignature {
 	if sig == nil {
 		return nil
 	}
-	out := &SpecSignature{
+	var out *SpecSignature
+	if sig.Result != nil {
+		// Keep the detached result binder and signature in one allocation.
+		owned := &struct {
+			signature SpecSignature
+			result    SpecBinder
+		}{result: *sig.Result}
+		out = &owned.signature
+		out.Result = &owned.result
+	} else {
+		out = &SpecSignature{}
+	}
+	result := out.Result
+	*out = SpecSignature{
 		Position:               sig.Position,
 		Name:                   sig.Name,
 		Params:                 append([]SpecBinder(nil), sig.Params...),
-		Result:                 cloneSpecBinderPtr(sig.Result),
+		Result:                 result,
 		ParamPredicates:        cloneRefinementPredicates(sig.ParamPredicates),
 		ResultPredicates:       cloneRefinementPredicates(sig.ResultPredicates),
 		Requires:               cloneRefinementPredicates(sig.Requires),

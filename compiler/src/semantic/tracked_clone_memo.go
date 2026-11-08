@@ -53,8 +53,11 @@ func (m *trackedCloneMemo) setNew(key, value Type) {
 		return
 	}
 	hint := m.spillHint
-	if hint < len(m.small) {
-		hint = len(m.small)
+	// The inline entries plus the triggering entry already exceed the inline
+	// capacity. Reserve room for the rest of a similarly sized graph so the
+	// freshly allocated map does not immediately grow again.
+	if hint < 2*len(m.small) {
+		hint = 2 * len(m.small)
 	}
 	m.large = make(map[Type]Type, hint)
 	for i := 0; i < m.count; i++ {

@@ -745,6 +745,43 @@ func (a *Analyzer) storeFlowSummaryFor(decl *ast.FuncDecl) *storeFlowSummary {
 			return nil
 		}
 	}
+	if len(members) == 1 {
+		m := members[0]
+		selfCall := false
+		for _, callee := range a.callEdgesOf(m) {
+			if callee == m {
+				selfCall = true
+				break
+			}
+		}
+		if !selfCall {
+			// A non-recursive component has no in-component caller to
+			// requeue. Preserve the in-progress assumption used by nested
+			// queries, then settle the same one-pass join without work maps.
+			a.storeFlowActive[m] = true
+			initial := newStoreFlowSummary(len(m.Params))
+			a.storeFlowInProgress[m] = initial
+			next := a.computeStoreFlow(m)
+			cur := a.storeFlowInProgress[m]
+			delete(a.storeFlowInProgress, m)
+			delete(a.storeFlowActive, m)
+			var result *storeFlowSummary
+			if next != nil && cur != nil {
+				// A computed summary already contains the identity edges in
+				// the initial bottom value. If that assumption was untouched,
+				// its union is next itself and needs no new matrices.
+				if cur == initial {
+					result = next
+				} else if storeFlowSummaryWithin(next, cur) {
+					result = cur
+				} else {
+					result = storeFlowSummaryJoin(cur, next)
+				}
+			}
+			a.storeFlowSummaries[m] = result
+			return a.storeFlowSummaries[decl]
+		}
+	}
 	inSCC := map[*ast.FuncDecl]bool{}
 	for _, m := range members {
 		inSCC[m] = true
@@ -894,15 +931,6 @@ func (a *Analyzer) storeFlowComponent(decl *ast.FuncDecl) []*ast.FuncDecl {
 	if a.storeFlowSCC == nil {
 		a.storeFlowSCC = map[*ast.FuncDecl][]*ast.FuncDecl{}
 	}
-	index := map[*ast.FuncDecl]int{}
-	low := map[*ast.FuncDecl]int{}
-	onStack := map[*ast.FuncDecl]bool{}
-	var stack []*ast.FuncDecl
-	type frame struct {
-		fn   *ast.FuncDecl
-		next int
-	}
-	counter := 0
 	edges := func(fn *ast.FuncDecl) []*ast.FuncDecl {
 		var out []*ast.FuncDecl
 		for _, c := range a.callEdgesOf(fn) {
@@ -915,6 +943,23 @@ func (a *Analyzer) storeFlowComponent(decl *ast.FuncDecl) []*ast.FuncDecl {
 		}
 		return out
 	}
+	initial := edges(decl)
+	if len(initial) == 0 {
+		// No unresolved outgoing edge can participate in a cycle. Avoid
+		// allocating Tarjan's maps for this common leaf component.
+		component := []*ast.FuncDecl{decl}
+		a.storeFlowSCC[decl] = component
+		return component
+	}
+	index := map[*ast.FuncDecl]int{}
+	low := map[*ast.FuncDecl]int{}
+	onStack := map[*ast.FuncDecl]bool{}
+	var stack []*ast.FuncDecl
+	type frame struct {
+		fn   *ast.FuncDecl
+		next int
+	}
+	counter := 0
 	push := func(fn *ast.FuncDecl) frame {
 		index[fn], low[fn] = counter, counter
 		counter++
@@ -922,7 +967,7 @@ func (a *Analyzer) storeFlowComponent(decl *ast.FuncDecl) []*ast.FuncDecl {
 		onStack[fn] = true
 		return frame{fn: fn}
 	}
-	succ := map[*ast.FuncDecl][]*ast.FuncDecl{decl: edges(decl)}
+	succ := map[*ast.FuncDecl][]*ast.FuncDecl{decl: initial}
 	frames := []frame{push(decl)}
 	for len(frames) > 0 {
 		top := &frames[len(frames)-1]
@@ -1338,19 +1383,27 @@ func storeFlowTypeInfoSlow(t reflect.Type) *storeFlowTypeInfo {
 }
 
 // storeFlowStmt applies unit to statement stmt and then to the statements nested in it.
-func (a *Analyzer) storeFlowStmt(stmt reflect.Value, seen map[uintptr]bool, unit func(stmt reflect.Value) []reflect.Value) {
+func (a *Analyzer) storeFlowStmt(stmt reflect.Value, seen map[uintptr]bool, unit func(stmt reflect.Value, nested []reflect.Value) []reflect.Value) {
 	a.storeFlowEnv = a.storeFlowStmtEnv[stmt.Pointer()]
-	nested := unit(stmt)
+	holder := storeFlowNestedPool.Get().(*[]reflect.Value)
+	nested := unit(stmt, (*holder)[:0])
 	a.storeFlowEnv = nil
 	for _, n := range nested {
 		seen[n.Pointer()] = true
 		a.storeFlowStmt(n, seen, unit)
 	}
+	if cap(nested) <= 4096 {
+		clear(nested[:cap(nested)])
+		*holder = nested[:0]
+		storeFlowNestedPool.Put(holder)
+	}
 }
+
+var storeFlowNestedPool = sync.Pool{New: func() any { values := make([]reflect.Value, 0, 8); return &values }}
 
 // storeFlowEach visits v; each statement is a unit whose direct (non-statement) content unit
 // handles, nested statements being units of their own.
-func (a *Analyzer) storeFlowEach(v reflect.Value, seen map[uintptr]bool, unit func(stmt reflect.Value) []reflect.Value) {
+func (a *Analyzer) storeFlowEach(v reflect.Value, seen map[uintptr]bool, unit func(stmt reflect.Value, nested []reflect.Value) []reflect.Value) {
 	if !v.IsValid() {
 		return
 	}
@@ -1384,24 +1437,42 @@ func (a *Analyzer) storeFlowEach(v reflect.Value, seen map[uintptr]bool, unit fu
 }
 
 func (a *Analyzer) storeFlowNodes(v reflect.Value, c *storeFlowCtx, seen map[uintptr]bool) {
-	a.storeFlowEach(v, seen, func(stmt reflect.Value) []reflect.Value { return a.storeFlowUnit(stmt, c) })
+	a.storeFlowEach(v, seen, func(stmt reflect.Value, nested []reflect.Value) []reflect.Value {
+		return a.storeFlowUnitWithNested(stmt, c, nested)
+	})
+}
+
+var storeFlowUnitNamesPool = sync.Pool{New: func() any { values := make([]string, 0, 16); return &values }}
+
+func releaseStoreFlowUnitNames(holder *[]string, names []string) {
+	if cap(names) > 4096 {
+		return
+	}
+	clear(names[:cap(names)])
+	*holder = names[:0]
+	storeFlowUnitNamesPool.Put(holder)
 }
 
 // storeFlowUnit links the names a statement mentions outside nested statements, applying call
 // summaries to the calls among them, and returns the nested statements.
 func (a *Analyzer) storeFlowUnit(stmt reflect.Value, c *storeFlowCtx) []reflect.Value {
-	var nested []reflect.Value
+	return a.storeFlowUnitWithNested(stmt, c, nil)
+}
+
+func (a *Analyzer) storeFlowUnitWithNested(stmt reflect.Value, c *storeFlowCtx, nested []reflect.Value) []reflect.Value {
 	var calls []*ast.CallExpr
 	// A scalar local's initializer carries nothing into it. Collect only
 	// its calls from the start, without first gathering unused name facts.
 	scalarDecl := a.storeFlowScalarDecl(stmt)
 	callsOnly := scalarDecl || a.storeFlowCondOnly(stmt)
 	queryScan := storeFlowQueryScan{}
-	names := a.storeFlowCollectMentionsWithQuery(stmt.Elem(), stmt.Pointer(), nil, &nested, &calls, callsOnly, true, &queryScan)
+	namesHolder := storeFlowUnitNamesPool.Get().(*[]string)
+	names := a.storeFlowCollectMentionsWithQueryInto(stmt.Elem(), stmt.Pointer(), nil, &nested, &calls, callsOnly, true, &queryScan, (*namesHolder)[:0])
+	defer releaseStoreFlowUnitNames(namesHolder, names)
 	binds := a.storeFlowBinds
 	if callsOnly && binds && !scalarDecl {
 		callsOnly = false
-		nested, calls = nil, nil
+		nested, calls = nested[:0], nil
 		queryScan = storeFlowQueryScan{}
 		names = a.storeFlowCollectMentionsWithQuery(stmt.Elem(), stmt.Pointer(), nil, &nested, &calls, false, true, &queryScan)
 	}
@@ -1771,6 +1842,9 @@ func storeFlowPatternBinders(pattern ast.MatchPattern) []string {
 			}
 		case reflect.String:
 			if storeFlowVariableName(v.String()) {
+				if binders == nil {
+					binders = make([]string, 0, 4)
+				}
 				binders = append(binders, v.String())
 			}
 		case reflect.Struct:
@@ -1869,7 +1943,10 @@ func (q *storeFlowQueryScan) result(a *Analyzer, stmt reflect.Value) [][]string 
 }
 
 func (a *Analyzer) storeFlowCollectMentionsWithQuery(root reflect.Value, self uintptr, handled map[*ast.CallExpr][]string, nested *[]reflect.Value, calls *[]*ast.CallExpr, callsOnly, collectNames bool, queryScan *storeFlowQueryScan) []string {
-	var names []string
+	return a.storeFlowCollectMentionsWithQueryInto(root, self, handled, nested, calls, callsOnly, collectNames, queryScan, nil)
+}
+
+func (a *Analyzer) storeFlowCollectMentionsWithQueryInto(root reflect.Value, self uintptr, handled map[*ast.CallExpr][]string, nested *[]reflect.Value, calls *[]*ast.CallExpr, callsOnly, collectNames bool, queryScan *storeFlowQueryScan, names []string) []string {
 	callDepth := 0
 	condDepth := 0 // inside a ternary condition: a bool, so its names reach no value
 	a.storeFlowBinds = false
@@ -2550,8 +2627,7 @@ func (a *Analyzer) storeFlowWritten(decl *ast.FuncDecl, scalars map[string]bool)
 	valueLocals := binders.valueNamedNames
 	var groups, elemGroups [][]string
 	grown := map[string]bool{}
-	a.storeFlowNodes2(decl, func(stmt reflect.Value) []reflect.Value {
-		var nested []reflect.Value
+	a.storeFlowNodes2(decl, func(stmt reflect.Value, nested []reflect.Value) []reflect.Value {
 		var calls []*ast.CallExpr
 		// These statements only need names for the binding-expression fallback
 		// below. Keep collecting calls and nested statement scopes as usual.
@@ -2641,6 +2717,11 @@ func (a *Analyzer) storeFlowWritten(decl *ast.FuncDecl, scalars map[string]bool)
 	storeFlowFilterScalarGroups(groups, scalars)
 	storeFlowFilterScalarGroups(elemGroups, scalars)
 	spread := func(set map[string]bool, gs [][]string) bool {
+		// An empty seed cannot reach any group. Avoid walking the entire body
+		// for the common case with no writes or no header growth.
+		if len(set) == 0 || len(gs) == 0 {
+			return false
+		}
 		changed := false
 		for _, g := range gs {
 			any := false
@@ -2665,9 +2746,12 @@ func (a *Analyzer) storeFlowWritten(decl *ast.FuncDecl, scalars map[string]bool)
 	// Element writes reach both alias groups and pushed elements; a header write (growth)
 	// reaches only alias groups. A grown parameter is the exception: the caller may write
 	// through the elements pushed into it, so its pushed elements count as written.
-	params := map[string]bool{}
-	for _, param := range decl.Params {
-		params[param.Name] = true
+	var params map[string]bool
+	if len(elemGroups) != 0 {
+		params = make(map[string]bool, len(decl.Params))
+		for _, param := range decl.Params {
+			params[param.Name] = true
+		}
 	}
 	iterations := 0
 	for changed := true; changed; {
@@ -2676,10 +2760,12 @@ func (a *Analyzer) storeFlowWritten(decl *ast.FuncDecl, scalars map[string]bool)
 		if spread(grown, groups) {
 			changed = true
 		}
-		for n := range grown {
-			if params[n] && !written[n] && storeFlowInGroups(n, elemGroups) {
-				written[n] = true
-				changed = true
+		if len(elemGroups) != 0 {
+			for n := range grown {
+				if params[n] && !written[n] && storeFlowInGroups(n, elemGroups) {
+					written[n] = true
+					changed = true
+				}
 			}
 		}
 		if spread(written, elemGroups) {
@@ -2802,7 +2888,7 @@ func storeFlowBaseName(name string) string {
 }
 
 // storeFlowNodes2 runs unit over every statement of decl.
-func (a *Analyzer) storeFlowNodes2(decl *ast.FuncDecl, unit func(stmt reflect.Value) []reflect.Value) {
+func (a *Analyzer) storeFlowNodes2(decl *ast.FuncDecl, unit func(stmt reflect.Value, nested []reflect.Value) []reflect.Value) {
 	decl = a.readDecl(decl)
 	seen := acquireStoreFlowSeen()
 	defer releaseStoreFlowSeen(seen)
@@ -2871,6 +2957,11 @@ func (a *Analyzer) storeFlowMarkCall(call *ast.CallExpr, written map[string]bool
 			mark(call.SafeReceiver)
 		}
 	case *ast.Ident:
+		// A plain call without arguments has no caller-owned argument to mark.
+		// Its own summary cannot affect this written-name set.
+		if len(args) == 0 {
+			return
+		}
 		if a.storeFlowRuntimeDictQuery(call) {
 			return
 		}
@@ -3536,6 +3627,13 @@ func (a *Analyzer) storeFlowQueryBinderPairs(stmt reflect.Value) [][]string {
 			// neither of which can contain a query expression.
 			if storeFlowIdentFast {
 				if _, ok := v.Interface().(*ast.Ident); ok {
+					return
+				}
+			}
+			// The schema-checked integer literal contains no nested expressions,
+			// so it cannot contain a query either.
+			if storeFlowIntLiteralFast && storeFlowIdentFast && storeFlowPositionFast {
+				if _, ok := v.Interface().(*ast.IntLit); ok {
 					return
 				}
 			}

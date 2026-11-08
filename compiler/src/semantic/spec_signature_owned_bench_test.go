@@ -41,6 +41,21 @@ func BenchmarkCloneSpecSignature(b *testing.B) {
 	}
 }
 
+func BenchmarkCloneSmallSpecSignature(b *testing.B) {
+	for _, count := range []int{1, 2, 4} {
+		b.Run(fmt.Sprint(count), func(b *testing.B) {
+			result := SpecBinder{SourceName: "result"}
+			sig := &SpecSignature{Params: make([]SpecBinder, count), Result: &result}
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if cloneSpecSignature(sig).Result == nil {
+					b.Fatal("missing result")
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkBuildSpecSignature(b *testing.B) {
 	params := make([]ast.ParamDecl, 12)
 	types := make([]Type, len(params))
