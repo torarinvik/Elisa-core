@@ -198,6 +198,14 @@ func isAmbiguousCancellation(reason string) bool {
 // to the scoped limit on exit, so exhaustion can equal (not exceed) the budget.
 // A recovered SAT/UNSAT is definitive; a failed certification remains retryable.
 func (s *procSolver) certifyCanceled(assertions string) (result Result, certified bool) {
+	return s.certifyCanceledFrom(assertions, 0, false)
+}
+
+// certifyCanceledFrom is certifyCanceled given the ORIGINAL check's post-check fuel total (since
+// its reset, parsing included). The replayed setup is deterministic, so its fuel is exactly the
+// original's parse cost: when the original's total minus that parse cost already reaches the
+// budget, the original check is certified without replaying the (expensive) search itself.
+func (s *procSolver) certifyCanceledFrom(assertions string, originalTotal uint64, originalOK bool) (result Result, certified bool) {
 	if !s.independent || s.warm || s.checkLimit <= 0 || s.broken {
 		return Unknown, false
 	}
@@ -215,6 +223,10 @@ func (s *procSolver) certifyCanceled(assertions string) (result Result, certifie
 	before, ok := s.resourceCount()
 	if !ok {
 		return Unknown, false
+	}
+	if originalOK && originalTotal >= before && originalTotal-before >= uint64(s.checkLimit) {
+		s.stats.Unknown++ // the original canceled check, certified by its own measured fuel
+		return Unknown, true
 	}
 	var checked time.Duration
 	var resources int64
@@ -589,7 +601,8 @@ func (s *procSolver) checkValuesLocked(assertions string, vars []string) (Result
 			if reason == `(:reason-unknown "max. resource limit exceeded")` {
 				certified = true
 			} else if isAmbiguousCancellation(reason) {
-				res, certified = s.certifyCanceled(assertions)
+				originalTotal, originalOK := s.resourceCount()
+				res, certified = s.certifyCanceledFrom(assertions, originalTotal, originalOK)
 			}
 		}
 		if res == Unknown {

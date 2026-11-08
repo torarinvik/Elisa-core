@@ -445,6 +445,8 @@ type Analyzer struct {
 	// `old(expr)` pseudo-call (the value of expr at function entry).
 	inEnsureContext bool
 	currentFuncDecl *ast.FuncDecl
+	// smtLogGoalLine is the source line of the goal being discharged (rlimit-log attribution only).
+	smtLogGoalLine int
 	// globalStorageAliasLocals marks by-value container locals that share a global's storage
 	// (see analyzer_global_storage_return.go).
 	globalStorageAliasLocals map[*Symbol]string

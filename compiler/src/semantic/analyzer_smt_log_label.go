@@ -54,6 +54,9 @@ func (a *Analyzer) smtSetLogLabelForQuery(solver smt.Solver, kind, obligation, q
 	if a.currentFuncDecl != nil {
 		where = a.currentFuncDecl.Position.File + ":" + strconv.Itoa(a.currentFuncDecl.Position.Line)
 	}
+	if a.smtLogGoalLine > 0 {
+		kind += " @" + strconv.Itoa(a.smtLogGoalLine)
+	}
 	if len(obligation) > 400 {
 		obligation = obligation[:400] + "..."
 	}

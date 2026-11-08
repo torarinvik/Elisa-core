@@ -600,7 +600,12 @@ func (a *Analyzer) smtCheckGoal(tr *smtTranslator, goalExpr ast.Expr, env map[st
 			return false, "", false
 		}
 	}
+	savedGoalLine := a.smtLogGoalLine
+	if goalExpr != nil {
+		a.smtLogGoalLine = goalExpr.Pos().Line
+	}
 	p, ce := a.smtDischargeFormula(tr, goal, extraHyps)
+	a.smtLogGoalLine = savedGoalLine
 	if !p {
 		if qce := a.quantifierCounterexampleAny(tr, goalExpr, env, extraHyps); qce != "" {
 			ce = qce

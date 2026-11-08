@@ -29,7 +29,7 @@ func TestUnknownCacheEpochRequiresExplicitResourceReason(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			replies := "unknown\nelisa-smt-frame-1\n" + tc.reply + "\nelisa-smt-frame-2\nunsat\nelisa-smt-frame-3\n"
 			if tc.name == "canceled" {
-				replies = "unknown\nelisa-smt-frame-1\n" + tc.reply + "\nelisa-smt-frame-2\n(error \"uncertifiable replay\")\nelisa-smt-frame-3\nunsat\nelisa-smt-frame-4\n"
+				replies = "unknown\nelisa-smt-frame-1\n" + tc.reply + "\nelisa-smt-frame-2\n(:rlimit-count 5)\nelisa-smt-frame-3\n(error \"uncertifiable replay\")\nelisa-smt-frame-4\nunsat\nelisa-smt-frame-5\n"
 			}
 			s := &procSolver{independent: true, checkLimit: 1000, stdin: discardWriteCloser{io.Discard}, out: bufio.NewReader(strings.NewReader(replies))}
 			if result, _ := s.Check("(assert false)"); result != Unknown {
@@ -156,7 +156,8 @@ func TestCanceledReplayPreservesWallTimerAndFullRelativeFuel(t *testing.T) {
 			if strings.HasPrefix(tc.name, "push-canceled-") {
 				firstReason = `(:reason-unknown "push canceled")`
 			}
-			replies := "unknown\nelisa-smt-frame-1\n" + firstReason + "\nelisa-smt-frame-2\nelisa-smt-frame-3\n(:rlimit-count 57)\nelisa-smt-frame-4\nunknown\nelisa-smt-frame-5\n(:rlimit-count " + tc.after + ")\nelisa-smt-frame-6\n" + tc.reason + "\nelisa-smt-frame-7\n"
+			// The original total (50) is below parse cost + budget, so certification needs the replay.
+			replies := "unknown\nelisa-smt-frame-1\n" + firstReason + "\nelisa-smt-frame-2\n(:rlimit-count 50)\nelisa-smt-frame-3\nelisa-smt-frame-4\n(:rlimit-count 57)\nelisa-smt-frame-5\nunknown\nelisa-smt-frame-6\n(:rlimit-count " + tc.after + ")\nelisa-smt-frame-7\n" + tc.reason + "\nelisa-smt-frame-8\n"
 			var commands strings.Builder
 			s := &procSolver{independent: true, checkLimit: 1000, preamble: "(set-option :timeout 120000)\n", stdin: discardWriteCloser{&commands}, out: bufio.NewReader(strings.NewReader(replies))}
 			if result, _ := s.Check("(assert true)"); result != Unknown {
@@ -180,9 +181,9 @@ func TestCanceledReplayPreservesWallTimerAndFullRelativeFuel(t *testing.T) {
 
 func TestCanceledReplayRecoversDefinitiveVerdictAndModel(t *testing.T) {
 	for _, verdict := range []string{"sat", "unsat"} {
-		replies := "unknown\nelisa-smt-frame-1\n(:reason-unknown \"canceled\")\nelisa-smt-frame-2\nelisa-smt-frame-3\n(:rlimit-count 57)\nelisa-smt-frame-4\n" + verdict + "\nelisa-smt-frame-5\n"
+		replies := "unknown\nelisa-smt-frame-1\n(:reason-unknown \"canceled\")\nelisa-smt-frame-2\n(:rlimit-count 50)\nelisa-smt-frame-3\nelisa-smt-frame-4\n(:rlimit-count 57)\nelisa-smt-frame-5\n" + verdict + "\nelisa-smt-frame-6\n"
 		if verdict == "sat" {
-			replies += "((x 7))\nelisa-smt-frame-6\n"
+			replies += "((x 7))\nelisa-smt-frame-7\n"
 		}
 		s := &procSolver{independent: true, checkLimit: 1000, stdin: discardWriteCloser{io.Discard}, out: bufio.NewReader(strings.NewReader(replies))}
 		result, model, _ := s.CheckValues("(declare-const x Int)(assert (= x 7))", []string{"x"})
@@ -217,7 +218,7 @@ func (w *timedCheckWriter) Write(p []byte) (int, error) {
 func (*timedCheckWriter) Close() error { return nil }
 
 func TestResourceCertificationLogsEachPhysicalCheckOnce(t *testing.T) {
-	replies := "unknown\nelisa-smt-frame-1\n(:rlimit-count 1057)\nelisa-smt-frame-2\n(:reason-unknown \"canceled\")\nelisa-smt-frame-3\nelisa-smt-frame-4\n(:rlimit-count 57)\nelisa-smt-frame-5\nunknown\nelisa-smt-frame-6\n(:rlimit-count 1057)\nelisa-smt-frame-7\n(:reason-unknown \"canceled\")\nelisa-smt-frame-8\n"
+	replies := "unknown\nelisa-smt-frame-1\n(:rlimit-count 1057)\nelisa-smt-frame-2\n(:reason-unknown \"canceled\")\nelisa-smt-frame-3\n(:rlimit-count 50)\nelisa-smt-frame-4\nelisa-smt-frame-5\n(:rlimit-count 57)\nelisa-smt-frame-6\nunknown\nelisa-smt-frame-7\n(:rlimit-count 1057)\nelisa-smt-frame-8\n(:reason-unknown \"canceled\")\nelisa-smt-frame-9\n"
 	writer := &timedCheckWriter{}
 	var log strings.Builder
 	s := &procSolver{independent: true, checkLimit: 1000, stdin: writer, out: bufio.NewReader(strings.NewReader(replies)), rlimitLog: &log, label: "fixture:1 | work | query | goal"}
@@ -262,7 +263,7 @@ func TestResourceCertificationLogsEachPhysicalCheckOnce(t *testing.T) {
 }
 
 func TestOriginalPhysicalLogSurvivesFailedCertification(t *testing.T) {
-	replies := "unknown\nelisa-smt-frame-1\n(:rlimit-count 1057)\nelisa-smt-frame-2\n(:reason-unknown \"canceled\")\nelisa-smt-frame-3\n(error \"replay setup failed\")\nelisa-smt-frame-4\n"
+	replies := "unknown\nelisa-smt-frame-1\n(:rlimit-count 1057)\nelisa-smt-frame-2\n(:reason-unknown \"canceled\")\nelisa-smt-frame-3\n(:rlimit-count 50)\nelisa-smt-frame-4\n(error \"replay setup failed\")\nelisa-smt-frame-5\n"
 	writer := &timedCheckWriter{}
 	var log strings.Builder
 	s := &procSolver{independent: true, checkLimit: 1000, stdin: writer, out: bufio.NewReader(strings.NewReader(replies)), rlimitLog: &log, label: "original"}
@@ -280,7 +281,7 @@ func TestOriginalPhysicalLogSurvivesFailedCertification(t *testing.T) {
 }
 
 func TestFailedPhysicalCertificationStillLogsBothAttempts(t *testing.T) {
-	replies := "unknown\nelisa-smt-frame-1\n(:rlimit-count 1057)\nelisa-smt-frame-2\n(:reason-unknown \"canceled\")\nelisa-smt-frame-3\nelisa-smt-frame-4\n(:rlimit-count 57)\nelisa-smt-frame-5\n(error \"check failed\")\nelisa-smt-frame-6\n"
+	replies := "unknown\nelisa-smt-frame-1\n(:rlimit-count 1057)\nelisa-smt-frame-2\n(:reason-unknown \"canceled\")\nelisa-smt-frame-3\n(:rlimit-count 50)\nelisa-smt-frame-4\nelisa-smt-frame-5\n(:rlimit-count 57)\nelisa-smt-frame-6\n(error \"check failed\")\nelisa-smt-frame-7\n"
 	writer := &timedCheckWriter{}
 	var log strings.Builder
 	s := &procSolver{independent: true, checkLimit: 1000, stdin: writer, out: bufio.NewReader(strings.NewReader(replies)), rlimitLog: &log, label: "original"}
@@ -521,5 +522,49 @@ func TestPushCanceledReplaySamplesFuelBeforeReason(t *testing.T) {
 	}
 	if !reasonCharged {
 		t.Fatal("replay reason was not checked")
+	}
+}
+
+// A canceled original whose own fuel (post-check total minus the replayed setup's parse
+// cost) reaches the budget is certified without replaying the search; a total that only
+// covers parse cost plus less than the budget still falls through to the full replay.
+func TestCanceledOriginalFuelCertifiesWithoutSearchReplay(t *testing.T) {
+	for _, tc := range []struct {
+		name, total string
+		certified   bool
+	}{
+		{"exhausted", "1057", true},
+		{"push-canceled-exhausted", "1057", true},
+		{"one-short", "1056", false},
+		{"parse-cost-alone", "57", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reason := `(:reason-unknown "canceled")`
+			if strings.HasPrefix(tc.name, "push-canceled") {
+				reason = `(:reason-unknown "push canceled")`
+			}
+			replies := "unknown\nelisa-smt-frame-1\n" + reason + "\nelisa-smt-frame-2\n(:rlimit-count " + tc.total + ")\nelisa-smt-frame-3\nelisa-smt-frame-4\n(:rlimit-count 57)\nelisa-smt-frame-5\n"
+			if !tc.certified {
+				replies += "unknown\nelisa-smt-frame-6\n(:rlimit-count 60)\nelisa-smt-frame-7\n" + reason + "\nelisa-smt-frame-8\n"
+			}
+			writer := &timedCheckWriter{}
+			s := &procSolver{independent: true, checkLimit: 1000, stdin: writer, out: bufio.NewReader(strings.NewReader(replies))}
+			if result, _ := s.Check("(assert true)"); result != Unknown {
+				t.Fatal(result)
+			}
+			resource, transient := s.UnknownCacheEpoch()
+			wantCalls := 2
+			if tc.certified {
+				wantCalls = 1
+				if resource != 1 || transient != 0 {
+					t.Fatalf("own fuel not certified: %d %d", resource, transient)
+				}
+			} else if resource != 0 || transient != 1 {
+				t.Fatalf("spurious certificate: %d %d", resource, transient)
+			}
+			if writer.calls != wantCalls {
+				t.Fatalf("check-sat calls = %d, want %d", writer.calls, wantCalls)
+			}
+		})
 	}
 }
