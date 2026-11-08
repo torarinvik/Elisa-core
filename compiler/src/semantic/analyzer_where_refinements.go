@@ -48,7 +48,7 @@ func (a *Analyzer) analyzeParamWhereRefinements(fn *ast.FuncDecl) {
 	if a == nil || fn == nil {
 		return
 	}
-	params := a.expandedFuncDeclParams(fn)
+	params := a.readOnlyExpandedFuncDeclParams(fn)
 	a.ghostReadAllowed++
 	defer func() { a.ghostReadAllowed-- }()
 	for i, param := range params {
@@ -132,16 +132,19 @@ func (a *Analyzer) checkCalleeParamWhereRefinements(call *ast.CallExpr, declName
 	if a == nil || call == nil {
 		return
 	}
-	subst := map[string]ast.Expr{}
-	for i, param := range params {
-		if i < len(args) && args[i] != nil {
-			subst[param.Name] = args[i]
-		}
-	}
+	var subst map[string]ast.Expr
 	for i, param := range params {
 		rt, ok := whereRefinementTypeExpr(param.Type)
 		if !ok || rt == nil || rt.Predicate == nil {
 			continue
+		}
+		if subst == nil {
+			subst = make(map[string]ast.Expr, len(params))
+			for j, p := range params {
+				if j < len(args) && args[j] != nil {
+					subst[p.Name] = args[j]
+				}
+			}
 		}
 		a.validateWhereParamReferences(rt.Predicate, param.Name, params[:i])
 		a.dischargeWherePredicate(rt.Predicate, subst, call.Pos(), "where precondition of "+declName)
@@ -339,15 +342,24 @@ func wherePredicateIsSideEffectFree(expr ast.Expr) bool {
 func exprIdentNames(expr ast.Expr) []string {
 	seen := map[string]bool{}
 	var out []string
+	visitExprIdentNames(expr, func(name string) {
+		if !seen[name] {
+			seen[name] = true
+			out = append(out, name)
+		}
+	})
+	return out
+}
+
+// visitExprIdentNames walks the same syntax as exprIdentNames without requiring
+// an intermediate deduplicated slice when the caller already has a set.
+func visitExprIdentNames(expr ast.Expr, visit func(string)) {
 	var walk func(ast.Expr)
 	walk = func(e ast.Expr) {
 		switch n := e.(type) {
 		case nil:
 		case *ast.Ident:
-			if !seen[n.Name] {
-				seen[n.Name] = true
-				out = append(out, n.Name)
-			}
+			visit(n.Name)
 		case *ast.ParenExpr:
 			walk(n.Inner)
 		case *ast.UnaryExpr:
@@ -417,7 +429,6 @@ func exprIdentNames(expr ast.Expr) []string {
 		}
 	}
 	walk(expr)
-	return out
 }
 
 // seedWhereRefinementFact records the where predicate of a local binding as an SMT assert-fact so

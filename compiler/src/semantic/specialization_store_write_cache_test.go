@@ -139,6 +139,59 @@ func TestSpecializationStoreScanCallWriteCacheImportsOnlyOwnedPlans(t *testing.T
 	}
 }
 
+func TestSpecializationReusesStoreScanIndexForPrivateSyntax(t *testing.T) {
+	decl := &ast.VarDeclStmt{Name: "local", Value: &ast.IntLit{Value: "1"}}
+	assign := &ast.AssignStmt{Target: &ast.Ident{Name: "local"}, Value: &ast.IntLit{Value: "2"}}
+	expr := &ast.ExprStmt{Expr: &ast.Ident{Name: "local"}}
+	ret := &ast.ReturnStmt{Value: &ast.Ident{Name: "local"}}
+	fn := &ast.FuncDecl{Name: "indexed", TypeParams: []string{"T"}, Body: []ast.Stmt{decl, assign, expr, ret}}
+	source := &Analyzer{}
+	sourceIndex := source.storeScanIndex(fn)
+	worker, context := specializationStoreWriteCacheContext(source)
+	foreignIndex := worker.storeScanIndex(fn)
+	private := worker.parallel.readShadows[fn]
+	if foreignIndex == nil || private == nil || worker.storeScanIndexCache[private] != foreignIndex || len(foreignIndex.flat) != len(sourceIndex.flat) {
+		t.Fatal("specialization did not clone and cache the source index for a private callee")
+	}
+	privateExprForCache := private.Body[2].(*ast.ExprStmt)
+	sourceBoundCount := len(sourceIndex.bound)
+	privateOldBound, privateHadBound := foreignIndex.bound[privateExprForCache]
+	foreignIndex.bound[privateExprForCache] = nil
+	if len(sourceIndex.bound) != sourceBoundCount {
+		t.Fatal("specialization shared its mutable statement cache map with the canonical index")
+	}
+	if privateHadBound {
+		foreignIndex.bound[privateExprForCache] = privateOldBound
+	} else {
+		delete(foreignIndex.bound, privateExprForCache)
+	}
+	private = context.copyDecl(fn)
+	if context.err != nil {
+		t.Fatal(context.err)
+	}
+	privateIndex := worker.storeScanIndexCache[private]
+	if privateIndex == nil {
+		t.Fatal("specialization rebuilt instead of reusing the source store-scan index")
+	}
+	if len(privateIndex.flat) != len(sourceIndex.flat) || len(privateIndex.returns) != len(sourceIndex.returns) {
+		t.Fatalf("copied index shape differs: private flat/returns=%d/%d source=%d/%d", len(privateIndex.flat), len(privateIndex.returns), len(sourceIndex.flat), len(sourceIndex.returns))
+	}
+	privateDecl := private.Body[0].(*ast.VarDeclStmt)
+	privateAssign := private.Body[1].(*ast.AssignStmt)
+	privateExpr := private.Body[2].(*ast.ExprStmt)
+	privateRet := private.Body[3].(*ast.ReturnStmt)
+	flatNodes := make(map[any]bool, len(privateIndex.flat))
+	for _, node := range privateIndex.flat {
+		flatNodes[node] = true
+	}
+	if privateIndex.decls["local"][0] != privateDecl || !flatNodes[privateDecl] || !flatNodes[privateAssign] || !flatNodes[privateExpr] || !flatNodes[privateRet] || flatNodes[decl] || flatNodes[assign] || flatNodes[expr] || flatNodes[ret] || privateIndex.returns[0] != privateRet {
+		t.Fatal("store-scan index retained source syntax identities")
+	}
+	if _, ok := privateIndex.bound[privateExpr]; !ok {
+		t.Fatal("private statement-to-binder index did not rebind its syntax key")
+	}
+}
+
 func TestSpecializationStorageViewCacheRecomputesAndMemoizesShadow(t *testing.T) {
 	field := &ast.FieldExpr{Object: &ast.Ident{Name: "pair"}, Field: "left"}
 	call := &ast.CallExpr{Func: &ast.FieldExpr{Object: field, Field: "clear"}}

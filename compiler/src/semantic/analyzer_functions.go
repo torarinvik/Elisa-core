@@ -229,8 +229,7 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 		a.currentReturn = fnType.Return
 		a.returnFreshShapeStatus = freshReturnTracker(fnType.Return)
 	}
-	explicitDecls := a.expandedFuncDeclParams(fn)
-	allParamDecls := append([]ast.ParamDecl(nil), explicitDecls...)
+	allParamDecls := a.expandedFuncDeclParams(fn)
 	// MONOMORPHIZATION: bind the signature to the concrete arguments before the parameter
 	// symbols are defined from it. Binding only the type-parameter SCOPE is not enough —
 	// parameter symbols take their types from fnType, so without this substitution the body
@@ -288,8 +287,8 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 					if bindings := a.implicitBindingsForCurrentFunction(fnType); len(bindings) != 0 {
 						a.currentImplicitScopes = pushExprBindingScope(savedBodyImplicitScopes, bindings)
 					}
-					a.seedParamRefinementFacts(a.expandedFuncDeclParams(fn))
-					a.seedParamWhereRefinementFacts(a.expandedFuncDeclParams(fn))
+					a.seedParamRefinementFacts(a.readOnlyExpandedFuncDeclParams(fn))
+					a.seedParamWhereRefinementFacts(a.readOnlyExpandedFuncDeclParams(fn))
 					a.seedRequiresAsAssertFacts(fn)
 					savedChangesPaths, savedHasChanges := a.currentChangesPaths, a.currentHasChanges
 					savedPreservesPaths, savedHasPreserves := a.currentPreservesPaths, a.currentHasPreserves
@@ -550,7 +549,7 @@ func (a *Analyzer) directParamReturnProvenance(fn *ast.FuncDecl, fnType *FuncTyp
 	if !ok {
 		return regionRefState{}, false
 	}
-	params := a.expandedFuncDeclParams(fn)
+	params := a.readOnlyExpandedFuncDeclParams(fn)
 	for i, param := range params {
 		if param.Name != ident.Name || i >= len(fnType.Params) || !SameType(fnType.Params[i], fnType.Return) {
 			continue
@@ -590,7 +589,7 @@ func (a *Analyzer) directParamFieldReturnProvenance(fn *ast.FuncDecl, fnType *Fu
 	if !ok {
 		return regionRefState{}, false
 	}
-	params := a.expandedFuncDeclParams(fn)
+	params := a.readOnlyExpandedFuncDeclParams(fn)
 	for i, param := range params {
 		if param.Name != ident.Name || i >= len(fnType.Params) {
 			continue
@@ -703,7 +702,8 @@ func (a *Analyzer) privateReturnInferenceDecl(fn *ast.FuncDecl) (*ast.FuncDecl, 
 
 func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType) {
 	a.addProofReportOrigin(fn)
-	defer a.beginProofReportProbe()()
+	proofProbe := a.beginProofReportProbe()
+	defer proofProbe.restore()
 	restoreProofOwner := a.enterIndexProofOwner(fn, false)
 	defer restoreProofOwner()
 	fn = a.readDecl(fn)
@@ -833,7 +833,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 		a.withSourceRegionParams(fn, fn.RegionParams, func() {
 			a.withSourcePermissionParams(fn, fn.PermissionParams, func() {
 				a.withSourceShapeParams(fn, fnType.ShapeParams, func() {
-					for i, param := range a.expandedFuncDeclParams(fn) {
+					for i, param := range a.readOnlyExpandedFuncDeclParams(fn) {
 						var ptype Type = invalidType
 						if i < len(fnType.Params) {
 							ptype = fnType.Params[i]
@@ -857,8 +857,8 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 						}
 					}
 					a.defineRegionParamValueSymbols(fn)
-					a.seedParamRefinementFacts(a.expandedFuncDeclParams(fn))
-					a.seedParamWhereRefinementFacts(a.expandedFuncDeclParams(fn))
+					a.seedParamRefinementFacts(a.readOnlyExpandedFuncDeclParams(fn))
+					a.seedParamWhereRefinementFacts(a.readOnlyExpandedFuncDeclParams(fn))
 					a.seedRequiresAsAssertFacts(fn)
 					savedChangesPaths, savedHasChanges := a.currentChangesPaths, a.currentHasChanges
 					savedPreservesPaths, savedHasPreserves := a.currentPreservesPaths, a.currentHasPreserves
@@ -941,7 +941,8 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 
 func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *FuncType) {
 	a.addProofReportOrigin(fn)
-	defer a.beginProofReportProbe()()
+	proofProbe := a.beginProofReportProbe()
+	defer proofProbe.restore()
 	restoreProofOwner := a.enterIndexProofOwner(fn, false)
 	defer restoreProofOwner()
 	fn = a.readDecl(fn)
@@ -1057,7 +1058,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 		a.withSourceRegionParams(fn, fn.RegionParams, func() {
 			a.withSourcePermissionParams(fn, fn.PermissionParams, func() {
 				a.withSourceShapeParams(fn, fnType.ShapeParams, func() {
-					for i, param := range a.expandedFuncDeclParams(fn) {
+					for i, param := range a.readOnlyExpandedFuncDeclParams(fn) {
 						var ptype Type = invalidType
 						if i < len(fnType.Params) {
 							ptype = fnType.Params[i]
@@ -1081,8 +1082,8 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 						}
 					}
 					a.defineRegionParamValueSymbols(fn)
-					a.seedParamRefinementFacts(a.expandedFuncDeclParams(fn))
-					a.seedParamWhereRefinementFacts(a.expandedFuncDeclParams(fn))
+					a.seedParamRefinementFacts(a.readOnlyExpandedFuncDeclParams(fn))
+					a.seedParamWhereRefinementFacts(a.readOnlyExpandedFuncDeclParams(fn))
 					a.seedRequiresAsAssertFacts(fn)
 					savedChangesPaths, savedHasChanges := a.currentChangesPaths, a.currentHasChanges
 					savedPreservesPaths, savedHasPreserves := a.currentPreservesPaths, a.currentHasPreserves

@@ -2,7 +2,6 @@ package semantic
 
 import (
 	"os"
-	"reflect"
 	"strconv"
 	"strings"
 
@@ -203,7 +202,7 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 		if fn == nil || len(fn.RegionParams) == 0 {
 			continue
 		}
-		params := a.expandedFuncDeclParams(fn)
+		params := a.readOnlyExpandedFuncDeclParams(fn)
 		rps := map[string]bool{}
 		for _, rp := range fn.RegionParams {
 			rps[rp] = true
@@ -431,11 +430,11 @@ func (a *Analyzer) calleeReturnTypeIsRegionValued(qualifiedName string, callee *
 		a.currentNamespace = qualifiedName[:idx]
 	}
 	restoreReportProbe1 := a.beginProofReportProbe()
-	defer restoreReportProbe1()
+	defer restoreReportProbe1.restore()
 	a.suppressDiagnostics = true
 	resolved := a.resolveType(callee.ReturnType)
 	a.suppressDiagnostics = savedSuppress
-	restoreReportProbe1()
+	restoreReportProbe1.restore()
 	a.currentNamespace = savedNamespace
 	return a.typeIsRegionValued(resolved)
 }
@@ -447,60 +446,67 @@ func (a *Analyzer) calleeReturnTypeIsRegionValued(qualifiedName string, callee *
 func collectRegionParamForwarding(cands []*ast.FuncDecl, funcByName map[string]*ast.FuncDecl) map[*ast.FuncDecl]regionParamForwarding {
 	byFunc := make(map[*ast.FuncDecl]regionParamForwarding, len(cands))
 	for _, fn := range cands {
-		if fn == nil || len(fn.Body) == 0 {
+		if fn == nil || len(fn.Body) == 0 || len(fn.Params) == 0 {
 			continue
 		}
 		forwarding := regionParamForwarding{
 			direct: map[string][]regionForwardTarget{},
 			fields: map[string][]regionForwardTarget{},
 		}
-		var rec func(reflect.Value)
-		rec = func(v reflect.Value) {
-			if !v.IsValid() || !v.CanInterface() {
+		walkStoreScanNodes(fn.Body, func(node any) {
+			// The walker also reaches the call inside any parenthesized
+			// expression, so inspect its underlying node only once.
+			var expr ast.Expr
+			switch n := node.(type) {
+			case *ast.CallExpr:
+				expr = n
+			case *ast.StructLitExpr:
+				expr = n
+			default:
 				return
 			}
-			switch v.Kind() {
-			case reflect.Pointer:
-				if v.IsNil() {
-					return
+			calleeName, args, isCall := ast.PrepassCallShape(expr)
+			callee := funcByName[calleeName]
+			if !isCall || callee == nil {
+				return
+			}
+			for argPos, arg := range args {
+				name, isField, ok := regionForwardedParamPath(arg)
+				if !ok {
+					continue
 				}
-				if expr, ok := v.Interface().(ast.Expr); ok {
-					calleeName, args, isCall := ast.PrepassCallShape(expr)
-					callee := funcByName[calleeName]
-					if isCall && callee != nil {
-						for argPos, arg := range args {
-							name, isField, ok := regionForwardedParamPath(arg)
-							if !ok {
-								continue
-							}
-							target := regionForwardTarget{callee: callee, argPos: argPos}
-							if isField {
-								forwarding.fields[name] = append(forwarding.fields[name], target)
-							} else {
-								forwarding.direct[name] = append(forwarding.direct[name], target)
-							}
-						}
+				// Only declared parameter names are queried by the inference
+				// fixpoint; local forwarding cannot affect those queries.
+				isParam := false
+				for _, param := range fn.Params {
+					if param.Name == name {
+						isParam = true
+						break
 					}
 				}
-				rec(v.Elem())
-			case reflect.Interface:
-				if !v.IsNil() {
-					rec(v.Elem())
+				if !isParam {
+					continue
 				}
-			case reflect.Struct:
-				for _, i := range syntaxWalkFields(v.Type()) {
-					rec(v.Field(i))
-				}
-			case reflect.Slice, reflect.Array:
-				for i := 0; i < v.Len(); i++ {
-					rec(v.Index(i))
+				target := regionForwardTarget{callee: callee, argPos: argPos}
+				if isField {
+					forwarding.fields[name] = appendUniqueRegionForwardTarget(forwarding.fields[name], target)
+				} else {
+					forwarding.direct[name] = appendUniqueRegionForwardTarget(forwarding.direct[name], target)
 				}
 			}
-		}
-		rec(reflect.ValueOf(fn.Body))
+		})
 		byFunc[fn] = forwarding
 	}
 	return byFunc
+}
+
+func appendUniqueRegionForwardTarget(targets []regionForwardTarget, target regionForwardTarget) []regionForwardTarget {
+	for _, existing := range targets {
+		if existing == target {
+			return targets
+		}
+	}
+	return append(targets, target)
 }
 
 // regionForwardedParamPath recognizes either a bare parameter forwarded through address-of/casts,
@@ -864,16 +870,24 @@ func (a *Analyzer) refParamIsPackedEnum(typ ast.TypeExpr) bool {
 			if ref == nil {
 				return false
 			}
+			// These builtin surface forms resolve to container types or invalid,
+			// never to an enum. Their elements cannot change that classification.
+			if builtin, ok := typ.(*ast.BuiltinTypeExpr); ok {
+				switch builtin.Name {
+				case "array", "darray", "dict", "set", "view", "cstr":
+					return false
+				}
+			}
 			// Resolve under diagnostic suppression: this runs at the pre-body classification pass where a
 			// generic type-param name (`T`/`K` from an enclosing `extend[T]`) is not yet in scope, so a
 			// bare resolveType would emit a spurious "unknown type" error. We only need the boolean.
 			savedSuppress := a.suppressDiagnostics
 			restoreReportProbe2 := a.beginProofReportProbe()
-			defer restoreReportProbe2()
+			defer restoreReportProbe2.restore()
 			a.suppressDiagnostics = true
 			resolved := a.resolveType(typ)
 			a.suppressDiagnostics = savedSuppress
-			restoreReportProbe2()
+			restoreReportProbe2.restore()
 			et, ok := resolved.(*EnumType)
 			return ok && et != nil && (et.Packed || et.Root().Packed)
 		}
@@ -1385,11 +1399,11 @@ func (a *Analyzer) regionValueTester(fn *ast.FuncDecl, funcByName map[string]*as
 			// body analysis reports the authoritative error later.
 			savedSuppress := a.suppressDiagnostics
 			restoreReportProbe3 := a.beginProofReportProbe()
-			defer restoreReportProbe3()
+			defer restoreReportProbe3.restore()
 			a.suppressDiagnostics = true
 			resolved := a.resolveType(callee.ReturnType)
 			a.suppressDiagnostics = savedSuppress
-			restoreReportProbe3()
+			restoreReportProbe3.restore()
 			return resolved
 		}
 		if scoped, ok := funcScopes[callee]; ok {
@@ -1667,11 +1681,11 @@ func (a *Analyzer) paramStructIsProgramLived(typ ast.TypeExpr) bool {
 	// inferred region (the conservative answer).
 	saved := a.suppressDiagnostics
 	restoreReportProbe4 := a.beginProofReportProbe()
-	defer restoreReportProbe4()
+	defer restoreReportProbe4.restore()
 	a.suppressDiagnostics = true
 	resolved := a.resolveType(typ)
 	a.suppressDiagnostics = saved
-	restoreReportProbe4()
+	restoreReportProbe4.restore()
 	if resolved == nil {
 		return false
 	}
@@ -1686,7 +1700,8 @@ func (a *Analyzer) paramStructIsProgramLived(typ ast.TypeExpr) bool {
 // lifetime to buffers that already name their own allocation region. Unknown or
 // indirect field shapes retain the existing conservative inference.
 func (a *Analyzer) paramStructHasExplicitBackingIn(scoped scopedDecl, fn *ast.FuncDecl, typ ast.TypeExpr) bool {
-	defer a.beginProofReportProbe()()
+	proofProbe := a.beginProofReportProbe()
+	defer proofProbe.restore()
 	if fn == nil || len(fn.TypeParams) != 0 || len(fn.PermissionParams) != 0 {
 		return false
 	}

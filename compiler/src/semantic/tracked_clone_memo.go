@@ -37,6 +37,15 @@ func (m *trackedCloneMemo) set(key, value Type) {
 			return
 		}
 	}
+	m.setNew(key, value)
+}
+
+// setNew follows a failed get, so no existing inline entry needs replacing.
+func (m *trackedCloneMemo) setNew(key, value Type) {
+	if m.large != nil {
+		m.large[key] = value
+		return
+	}
 	if m.count < len(m.small) {
 		m.small[m.count].key = key
 		m.small[m.count].value = value

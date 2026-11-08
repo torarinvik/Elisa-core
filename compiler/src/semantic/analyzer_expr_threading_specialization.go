@@ -1,6 +1,8 @@
 package semantic
 
 import (
+	"maps"
+
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
 )
@@ -612,11 +614,7 @@ func cloneStructFields(fields map[string]Field) map[string]Field {
 	if len(fields) == 0 {
 		return map[string]Field{}
 	}
-	cloned := make(map[string]Field, len(fields))
-	for name, field := range fields {
-		cloned[name] = field
-	}
-	return cloned
+	return maps.Clone(fields)
 }
 
 func (a *Analyzer) lookupResolvedFieldType(actual Type, name string) (Type, bool) {

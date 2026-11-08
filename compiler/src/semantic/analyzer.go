@@ -1316,7 +1316,15 @@ func analyzeWithBodyInvocation(file *ast.File, options AnalyzeOptions, bodies *i
 // The private solver seam permits complete-result differential tests against the
 // reference inference scheduler without changing public analysis options.
 func analyzeWithEffectInference(file *ast.File, options AnalyzeOptions, bodies *incrementalBodyInvocation, solver func(*Analyzer, []scopedDecl)) *Result {
-	return analyzeWithLookupRecorder(file, options, bodies, solver, nil)
+	return analyzeWithLookupRecorder(file, options, bodies, solver, nil, nil)
+}
+
+// Per-invocation setup prevents ordinary concurrent analyses from observing or
+// consuming a retained or pre-body analysis's private state.
+type analysisSetup struct {
+	retained *RetainedAnalysis
+	preBody  *preBodyState
+	build    *AnalysisBuild
 }
 
 var postTiming = os.Getenv("ELISA_POST_TIMING") != ""
@@ -1332,7 +1340,7 @@ func postTimed(name string, phase func()) {
 	fmt.Fprintf(os.Stderr, "[post-timing] %s %v\n", name, time.Since(start).Round(time.Millisecond))
 }
 
-func analyzeWithLookupRecorder(file *ast.File, options AnalyzeOptions, bodies *incrementalBodyInvocation, solver func(*Analyzer, []scopedDecl), recorder *lookupDependencyRecorder) *Result {
+func analyzeWithLookupRecorder(file *ast.File, options AnalyzeOptions, bodies *incrementalBodyInvocation, solver func(*Analyzer, []scopedDecl), recorder *lookupDependencyRecorder, setup *analysisSetup) *Result {
 	loweredFile := file
 	activeFile := loweredFile
 	// Fold recognized total char classifiers to static lookup tables (docs/125 §9.6 / C3)
@@ -1367,8 +1375,6 @@ func analyzeWithLookupRecorder(file *ast.File, options AnalyzeOptions, bodies *i
 	}
 	a := &Analyzer{
 		optimizationIdentityNext:          &atomic.Uint64{},
-		retained:                          takePendingRetained(),
-		preBody:                           takePendingPreBody(),
 		lookupTrace:                       recorder,
 		trustedRuntimeSourceFiles:         trustedRuntimeSourceFileSet(options.TrustedRuntimeSourceFiles),
 		file:                              file,
@@ -1391,8 +1397,8 @@ func analyzeWithLookupRecorder(file *ast.File, options AnalyzeOptions, bodies *i
 		compilerBuiltinHelperCalls:        make(map[*ast.CallExpr]string),
 		permGrowthOps:                     make(map[ast.Expr]bool),
 		rewriteDefaults:                   make(map[*ast.Ident]bool, exprCapacity/128+4),
-		optionalBindSourceTypes:           make(map[*ast.OptionalBindExpr]Type, exprCapacity/16+8),
-		interfaceMethodRefs:               make(map[*ast.FieldExpr]*InterfaceMethodRef, exprCapacity/16+8),
+		optionalBindSourceTypes:           make(map[*ast.OptionalBindExpr]Type, exprCapacity/128+8),
+		interfaceMethodRefs:               make(map[*ast.FieldExpr]*InterfaceMethodRef, exprCapacity/128+8),
 		safeCalls:                         make(map[*ast.CallExpr]*SafeCallInfo, exprCapacity/32+8),
 		exprFacts:                         make(map[ast.Expr]OptimizationFacts, exprFactsCapacity),
 		indexBoundsProven:                 make(map[*ast.IndexExpr]bool, exprCapacity/64+8),
@@ -1408,7 +1414,7 @@ func analyzeWithLookupRecorder(file *ast.File, options AnalyzeOptions, bodies *i
 		ambiguousDArrayBuilders:           make(map[*ast.VarDeclStmt]bool),
 		ambientGrownCalleeParamIndex:      make(map[string]int),
 		regionParamCalleeParamIndex:       make(map[string]map[int]bool),
-		treeConstructorCallees:            make(map[ast.Expr]bool, exprCapacity/16+8),
+		treeConstructorCallees:            make(map[ast.Expr]bool),
 		resolvedCastHooks:                 make(map[ast.Expr]*Symbol, resolvedCastHookCapacity),
 		unsafeLifetimeWidenCasts:          make(map[*ast.CastExpr]bool),
 		unsafeBufferReinterpretCasts:      make(map[*ast.CastExpr]bool),
@@ -1474,7 +1480,10 @@ func analyzeWithLookupRecorder(file *ast.File, options AnalyzeOptions, bodies *i
 		returnBorrowedOwnerLocalProgress:  map[*Symbol]bool{},
 		functionValueSummaryInProgress:    map[functionValueSummaryKey]bool{},
 		sinkParamInferenceInProgress:      map[*ast.FuncDecl]bool{},
-		conditionalCallPoststateOriginals: make(map[*ast.CallExpr]map[*Symbol]Type, exprCapacity/16+8),
+		conditionalCallPoststateOriginals: make(map[*ast.CallExpr]map[*Symbol]Type, exprCapacity/128+8),
+	}
+	if setup != nil {
+		a.retained, a.preBody = setup.retained, setup.preBody
 	}
 	if bodies != nil {
 		a.lexicalBinders = &lexicalBinderOwnership{}
@@ -1629,7 +1638,8 @@ func analyzeWithLookupRecorder(file *ast.File, options AnalyzeOptions, bodies *i
 	if a.retained != nil {
 		a.retained.perms.recordDeclared(a, activeDecls)
 	}
-	if build := pendingAnalysisBuild; build != nil && a.retained == build.retained {
+	if setup != nil && setup.build != nil && a.retained == setup.build.retained {
+		build := setup.build
 		build.file, build.loweredFile = file, loweredFile
 		a.retained.capture(a, activeDecls, nil)
 		a.closeSMT()

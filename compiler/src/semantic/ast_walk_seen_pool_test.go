@@ -19,7 +19,7 @@ func TestFillWalkSeenResetAfterDenseAndSparseWalks(t *testing.T) {
 	if state.peak > 1 {
 		t.Fatal("sustained sparse walks did not release oversized storage")
 	}
-	for key := uintptr(0); key <= 1<<14; key++ {
+	for key := uintptr(0); key <= fillWalkSeenMaxEntries; key++ {
 		state.values[key] = true
 	}
 	if state.reset() {

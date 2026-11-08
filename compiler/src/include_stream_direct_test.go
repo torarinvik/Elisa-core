@@ -30,6 +30,21 @@ func BenchmarkReadSourceNestedDirectIncludes(b *testing.B) {
 	}
 }
 
+// Opt in to measuring the real Stage1 include graph when the sibling source
+// tree is available, without making it a dependency of ordinary tests.
+func BenchmarkReadSourceExternalIncludes(b *testing.B) {
+	root := os.Getenv("ELISA_INCLUDE_BENCH_SOURCE")
+	if root == "" {
+		b.Skip("ELISA_INCLUDE_BENCH_SOURCE is unset")
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if _, err := readSourceWithIncludes(root, map[string]bool{}); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func TestDirectAndProjectIncludeStreamingAgree(t *testing.T) {
 	dir := t.TempDir()
 	files := map[string]string{

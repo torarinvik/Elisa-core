@@ -530,9 +530,9 @@ func (t *DArrayType) String() string {
 		return "dstr"
 	}
 	if isWildcardShape(t.Shape) {
-		return fmt.Sprintf("darray[%s]", t.Elem.String())
+		return "darray[" + t.Elem.String() + "]"
 	}
-	return fmt.Sprintf("darray[%s, %s]", t.Elem.String(), t.Shape.String())
+	return "darray[" + t.Elem.String() + ", " + t.Shape.String() + "]"
 }
 func (t *ViewType) String() string {
 	name := t.SurfaceName

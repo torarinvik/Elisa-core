@@ -293,9 +293,10 @@ func (p *Parser) finishVisitArmChildBinding(nameTok lexer.Token) ast.VisitArmChi
 func (p *Parser) parseCallArgs() ([]ast.Expr, []string, []bool, []ast.CallArgItem, bool, lexer.Pos) {
 	argCapacity := p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN)
 	args := make([]ast.Expr, 0, argCapacity)
-	argNames := make([]string, 0, argCapacity)
-	argShorthand := make([]bool, 0, argCapacity)
-	items := make([]ast.CallArgItem, 0, argCapacity)
+	var argNames []string
+	var argShorthand []bool
+	var items []ast.CallArgItem
+	hasNamed, hasPositional := false, false
 	hasArgForward := false
 	argForwardPos := lexer.Pos{}
 	if p.peek() == lexer.TOKEN_RPAREN {
@@ -339,28 +340,33 @@ func (p *Parser) parseCallArgs() ([]ast.Expr, []string, []bool, []ast.CallArgIte
 		} else {
 			arg = p.parseExpr()
 		}
+		if name != "" && !hasNamed {
+			// Positional-only calls do not retain named-argument metadata.
+			// Allocate it only when needed, backfilling earlier arguments.
+			hasNamed = true
+			argCapacity = max(argCapacity, len(args)+1)
+			argNames = make([]string, len(args), argCapacity)
+			argShorthand = make([]bool, len(args), argCapacity)
+			items = make([]ast.CallArgItem, len(args), argCapacity)
+			for i, prior := range args {
+				items[i] = ast.CallArgItem{Position: prior.Pos(), ArgIndex: i}
+			}
+		}
+		if name == "" {
+			hasPositional = true
+		}
 		args = append(args, arg)
-		argNames = append(argNames, name)
-		argShorthand = append(argShorthand, shorthand)
-		items = append(items, ast.CallArgItem{Position: arg.Pos(), ArgIndex: len(args) - 1})
+		if hasNamed {
+			argNames = append(argNames, name)
+			argShorthand = append(argShorthand, shorthand)
+			items = append(items, ast.CallArgItem{Position: arg.Pos(), ArgIndex: len(args) - 1})
+		}
 		if !p.match(lexer.TOKEN_COMMA) {
 			break
 		}
 	}
-	hasNamed := false
-	for _, name := range argNames {
-		if name != "" {
-			hasNamed = true
-			break
-		}
-	}
-	if hasArgForward {
-		for _, name := range argNames {
-			if name == "" {
-				p.errorf("call argument forwarding `..` only supports named arguments")
-				break
-			}
-		}
+	if hasArgForward && hasPositional {
+		p.errorf("call argument forwarding `..` only supports named arguments")
 	}
 	if !hasNamed {
 		return args, nil, nil, nil, hasArgForward, argForwardPos

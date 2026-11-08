@@ -840,7 +840,9 @@ func (p *Parser) parseStructLiteralTypeArgs() []ast.TypeExpr {
 func (p *Parser) parseStructLiteralBraceFields() ([]ast.Expr, []string, []ast.Expr, ast.Expr) {
 	args := make([]ast.Expr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACE))
 	argNames := make([]string, 0, cap(args))
-	spreads := make([]ast.Expr, 0, 1)
+	// Preserve the non-nil empty representation without allocating backing
+	// storage for the overwhelmingly common literal with no spread.
+	spreads := []ast.Expr{}
 	var copyBase ast.Expr
 	if p.peek() == lexer.TOKEN_RBRACE {
 		return args, argNames, nil, nil
@@ -885,9 +887,11 @@ func (p *Parser) parseStructLiteralBraceFields() ([]ast.Expr, []string, []ast.Ex
 		}
 		pos := p.cur().Pos
 		name := p.expect(lexer.TOKEN_IDENT).Text
-		value := ast.Expr(&ast.Ident{Position: pos, Name: name})
+		var value ast.Expr
 		if p.match(lexer.TOKEN_COLON) {
 			value = p.parseExpr()
+		} else {
+			value = &ast.Ident{Position: pos, Name: name}
 		}
 		args = append(args, value)
 		argNames = append(argNames, name)
@@ -935,9 +939,11 @@ func (p *Parser) parseRecordUpdateFields() ([]ast.Expr, []string) {
 	for {
 		pos := p.cur().Pos
 		name := p.expect(lexer.TOKEN_IDENT).Text
-		value := ast.Expr(&ast.Ident{Position: pos, Name: name})
+		var value ast.Expr
 		if p.match(lexer.TOKEN_ASSIGN) {
 			value = p.parseExpr()
+		} else {
+			value = &ast.Ident{Position: pos, Name: name}
 		}
 		args = append(args, value)
 		argNames = append(argNames, name)

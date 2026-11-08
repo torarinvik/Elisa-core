@@ -44,8 +44,25 @@ func (a *Analyzer) funcTypeFromDeclWithFrame(name string, typeParams []string, g
 			resolvedGenericParams[i].InterfaceBound = iface.Name
 		}
 	}
-	explicitSpecs := a.expandExplicitParamSpecs(params, name)
-	expandedExplicitParams := explicitParamDeclsFromSpecs(explicitSpecs)
+	// Ordinary parameters are only inspected while building the signature; its
+	// retained names, types, and binders have their own storage. Borrow the input
+	// here instead of copying a temporary list for every function declaration.
+	ordinary := ordinaryExplicitParams(params)
+	var expandedExplicitParams []ast.ParamDecl
+	if ordinary {
+		expandedExplicitParams = params
+		for _, param := range params {
+			if param.DefaultValue != nil {
+				ordinary = false
+				break
+			}
+		}
+	}
+	var explicitSpecs []explicitParamSpec
+	if !ordinary {
+		explicitSpecs = a.expandExplicitParamSpecs(params, name)
+		expandedExplicitParams = explicitParamDeclsFromSpecs(explicitSpecs)
+	}
 	allParams := expandedExplicitParams
 	explicitNames := make([]string, 0, len(expandedExplicitParams))
 	for _, p := range expandedExplicitParams {
@@ -60,20 +77,28 @@ func (a *Analyzer) funcTypeFromDeclWithFrame(name string, typeParams []string, g
 	var refinementEnsures []RefinementEnsure
 	var paramRefinementRanges map[int]numRange
 	var specSignature *SpecSignature
-	defaultExprs := make([]ast.Expr, len(expandedExplicitParams))
-	hasDefaults := make([]bool, len(expandedExplicitParams))
+	var defaultExprs []ast.Expr
+	var hasDefaults []bool
+	// Missing entries denote absent defaults. Ordinary declarations have no
+	// defaults, so do not allocate all-zero metadata for every signature.
 	a.withGenericParams(resolvedGenericParams, nil, func() {
 		a.withRegionParams(regionParams, func() {
 			a.withPermissionParams(permissionParams, func() {
 				resolvedPermissionRefs = a.resolvePermissionRefs(permissionRefs, true)
-				permissions = a.resolvePermissionFamilies(permissionRefs, true)
+				permissions = permissionFamiliesFromRefs(resolvedPermissionRefs)
 				a.withShapeParams(shapeParams, func() {
-					for _, spec := range explicitSpecs {
-						if spec.HasResolvedType {
-							ptypes = append(ptypes, spec.ResolvedType)
-							continue
+					if ordinary {
+						for _, param := range expandedExplicitParams {
+							ptypes = append(ptypes, a.resolveType(param.Type))
 						}
-						ptypes = append(ptypes, a.resolveType(spec.Decl.Type))
+					} else {
+						for _, spec := range explicitSpecs {
+							if spec.HasResolvedType {
+								ptypes = append(ptypes, spec.ResolvedType)
+								continue
+							}
+							ptypes = append(ptypes, a.resolveType(spec.Decl.Type))
+						}
 					}
 					if ret != nil {
 						retType = a.resolveType(ret)
@@ -82,20 +107,32 @@ func (a *Analyzer) funcTypeFromDeclWithFrame(name string, typeParams []string, g
 					poststates = a.resolveFuncPoststates(name, allParams, ptypes, retType, ensures)
 					refinementEnsures = a.resolveRefinementEnsures(name, allParams, ptypes, ensures)
 					specSignature = a.buildSpecSignature(name, allParams, ptypes, ret, retType, requires, ensureValues, refinementEnsures)
-					defaultExprs, hasDefaults = a.validateExpandedFuncParamDefaults(name, explicitSpecs, ptypes[:len(expandedExplicitParams)])
+					if !ordinary {
+						defaultExprs, hasDefaults = a.validateExpandedFuncParamDefaults(name, explicitSpecs, ptypes[:len(expandedExplicitParams)])
+					}
 				})
 			})
 		})
 	})
 	frameWrites, frameBounded := a.resolveFrameSummary(allParams, changes, fulfills)
+	// The defaults were produced solely for this signature. Transfer their
+	// storage instead of copying it a second time, retaining nil for empty lists.
+	if len(defaultExprs) == 0 {
+		defaultExprs = nil
+	}
+	if len(hasDefaults) == 0 {
+		hasDefaults = nil
+	}
 	ft := &FuncType{
-		Name:                      name,
-		FrameWrites:               frameWrites,
-		FrameBounded:              frameBounded,
-		TypeParams:                append([]string(nil), typeParams...),
-		RegionParams:              append([]string(nil), regionParams...),
-		PermissionParams:          append([]string(nil), permissionParams...),
-		GenericParams:             append([]ast.GenericParam(nil), resolvedGenericParams...),
+		Name:             name,
+		FrameWrites:      frameWrites,
+		FrameBounded:     frameBounded,
+		TypeParams:       append([]string(nil), typeParams...),
+		RegionParams:     append([]string(nil), regionParams...),
+		PermissionParams: append([]string(nil), permissionParams...),
+		// resolvedGenericParams is already detached from the declaration and is
+		// no longer used by the builder after the signature is constructed.
+		GenericParams:             resolvedGenericParams,
 		UsedPermissionParams:      append([]string(nil), a.permissionParamsInRefs(permissionRefs)...),
 		DeclaredPermissionRefs:    append([]ast.PermissionRef(nil), resolvedPermissionRefs...),
 		DeclaredPermissions:       append([]string(nil), permissions...),
@@ -113,8 +150,8 @@ func (a *Analyzer) funcTypeFromDeclWithFrame(name string, typeParams []string, g
 		Params:                    ptypes,
 		ExplicitParamCount:        len(expandedExplicitParams),
 		ExplicitParamNames:        explicitNames,
-		ExplicitParamDefaultExprs: append([]ast.Expr(nil), defaultExprs...),
-		ExplicitParamHasDefault:   append([]bool(nil), hasDefaults...),
+		ExplicitParamDefaultExprs: defaultExprs,
+		ExplicitParamHasDefault:   hasDefaults,
 		Return:                    retType,
 		Variadic:                  variadic,
 		IsNativeExtern:            isExtern && len(typeParams) == 0 && len(resolvedGenericParams) == 0 && !a.unitIsModuleInterface(),

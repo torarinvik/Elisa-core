@@ -27,10 +27,10 @@ func parallelBodyWorkers() int {
 		return n
 	}
 	// Body analysis is allocation-bound: workers on efficiency cores slow the
-	// performance-core workers down more than they add (seed, 4P+6E: 4-5 workers
-	// 30-31 s, 8 workers 32-35 s).
+	// performance-core workers down more than they add. Keep one worker per P core;
+	// the extra worker increased map-copy and GC pressure on the Stage1 seed workload.
 	if p := performanceCores(); p > 0 {
-		return min(p+1, runtime.NumCPU())
+		return min(p, runtime.NumCPU())
 	}
 	return min(runtime.NumCPU(), 8)
 }
@@ -123,7 +123,7 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 		slots[i].Store(-1)
 		// One snapshot per declaration: the capture budget is per graph, and a
 		// worker only ever needs a single declaration back.
-		if snap, err := ast.NewSyntaxSnapshot(&ast.File{Decls: []ast.Decl{scoped.Decl}}, 1<<40); err == nil {
+		if snap, err := ast.NewTransientSyntaxSnapshot(&ast.File{Decls: []ast.Decl{scoped.Decl}}, 1<<40); err == nil {
 			snapshots[i] = snap
 		} else {
 			frozen[i] = copyASTDecl(scoped.Decl)

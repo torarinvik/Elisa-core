@@ -94,7 +94,7 @@ func (a *Analyzer) requiresReportEntries() []RequiresReportEntry {
 // Mirrors dischargeCallArgRefinements (refinement-typed params); this covers arbitrary boolean
 // preconditions in the bounded-linear fragment.
 func (a *Analyzer) dischargeCallRequires(call *ast.CallExpr, args []ast.Expr) {
-	scheme, ok := a.callRefinementScheme(call)
+	scheme, ok := a.callRequiresScheme(call)
 	if !ok {
 		return
 	}
@@ -114,6 +114,22 @@ func (a *Analyzer) dischargeCallRequires(call *ast.CallExpr, args []ast.Expr) {
 	if ft, ok := a.callFuncType(call); ok && ft != nil && ft.SpecSignature != nil {
 		a.checkCalleeSpecSignatureWherePredicates(call, scheme.DeclName, ft.SpecSignature, scheme.Params, args)
 	}
+}
+
+// callRequiresScheme borrows declaration headers for the duration of
+// discharge. The checks below only read those headers; building the owned
+// multi-channel refinement scheme would copy every parameter on every call.
+func (a *Analyzer) callRequiresScheme(call *ast.CallExpr) (RefinementScheme, bool) {
+	if decl, ok := a.resolveDirectCallFuncDecl(call); ok && decl != nil {
+		return RefinementScheme{DeclName: decl.Name, Params: decl.Params, Requires: decl.Requires, IsLemma: decl.IsLemma}, true
+	}
+	if ext, ok := a.resolveDirectCallExternFuncDecl(call); ok && ext != nil {
+		return RefinementScheme{DeclName: ext.Name, Params: ext.Params, Requires: ext.Requires}, true
+	}
+	if ft, ok := a.callFuncType(call); ok && ft.SpecSignature != nil {
+		return a.refinementSchemeFromSpecSignature(ft.SpecSignature, ft.RefinementEnsures), true
+	}
+	return RefinementScheme{}, false
 }
 
 // resolveDirectCallExternFuncDecl resolves a direct `name(...)` call to its extern declaration.
@@ -145,6 +161,9 @@ func (a *Analyzer) resolveDirectCallExternFuncDeclForReport(call *ast.CallExpr) 
 // arguments — shared by ordinary and extern (FFI boundary) calls.
 func (a *Analyzer) checkCalleeRequires(call *ast.CallExpr, declName string, requires []ast.Expr, params []ast.ParamDecl, args []ast.Expr, callee *ast.FuncDecl) {
 	a.addProofReportOrigin(callee)
+	if len(requires) == 0 {
+		return
+	}
 	// Map each callee parameter name to the caller's argument expression. A param with no
 	// corresponding argument (variadic tail, defaulted) is simply absent — a clause that mentions it
 	// then leaves the fragment and declines.

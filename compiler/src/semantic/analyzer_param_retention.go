@@ -40,7 +40,8 @@ func (a *Analyzer) resolveCalleeFuncDecl(call *ast.CallExpr) (*ast.FuncDecl, boo
 	}
 	// Try the canonical (namespace/using/import-qualified) name recorded during analysis first, then
 	// the bare name — so qualified free-function calls resolve in this post-pass, not just unqualified.
-	names := []string{}
+	var nameStorage [2]string
+	names := nameStorage[:0]
 	if canon, ok := a.resolvedValueNames[ident]; ok && canon != "" {
 		names = append(names, canon)
 	}
@@ -68,13 +69,13 @@ func (a *Analyzer) paramStorageType(fn *ast.FuncDecl, i int) Type {
 // computeParamRetention runs the monotone fixpoint and returns per-function retention bit-vectors
 // over expanded parameters.
 func (a *Analyzer) computeParamRetention(funcs []*ast.FuncDecl) map[*ast.FuncDecl][]bool {
-	retained := map[*ast.FuncDecl][]bool{}
-	params := map[*ast.FuncDecl][]ast.ParamDecl{}
+	retained := make(map[*ast.FuncDecl][]bool, len(funcs))
+	params := make(map[*ast.FuncDecl][]ast.ParamDecl, len(funcs))
 	for _, fn := range funcs {
 		if fn == nil {
 			continue
 		}
-		p := a.expandedFuncDeclParams(fn)
+		p := a.readOnlyExpandedFuncDeclParams(fn)
 		params[fn] = p
 		retained[fn] = make([]bool, len(p))
 	}

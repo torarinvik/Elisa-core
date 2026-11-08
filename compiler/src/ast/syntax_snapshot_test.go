@@ -45,6 +45,105 @@ func TestSyntaxSnapshotOwnsGraphAndVisibility(t *testing.T) {
 	}
 }
 
+func TestTransientSyntaxSnapshotBorrowsTextButCopiesNodes(t *testing.T) {
+	name := strings.Clone("transient-function-name")
+	fn := &FuncDecl{Name: name, Body: []Stmt{&ReturnStmt{Value: &IntLit{Value: "21"}}}}
+	snapshot, err := NewTransientSyntaxSnapshot(&File{Decls: []Decl{fn}}, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fn.Body = nil
+	file, err := snapshot.CopyFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := file.Decls[0].(*FuncDecl)
+	if got == fn || len(got.Body) != 1 || got.Name != name || unsafe.StringData(got.Name) != unsafe.StringData(name) {
+		t.Fatal("transient snapshot did not isolate syntax and retain immutable text")
+	}
+}
+
+func TestTransientSyntaxSnapshotConcurrentCaptures(t *testing.T) {
+	file := &File{Decls: []Decl{&FuncDecl{Name: "f", Body: []Stmt{&ReturnStmt{Value: &IntLit{Value: "21"}}}}}}
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for repeat := 0; repeat < 64; repeat++ {
+				snapshot, err := NewTransientSyntaxSnapshot(file, 1<<20)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				copy, err := snapshot.CopyFile()
+				if err != nil || !reflect.DeepEqual(copy, file) {
+					t.Errorf("capture changed graph: %v", err)
+					return
+				}
+				copy.Decls[0].(*FuncDecl).Name = "changed"
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+func BenchmarkTransientSyntaxSnapshot(b *testing.B) {
+	args := make([]Expr, 200)
+	for i := range args {
+		args[i] = &CallExpr{Func: &Ident{Name: "x"}}
+	}
+	file := &File{Decls: []Decl{&ConstDecl{Value: &CallExpr{Args: args}}}}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := NewTransientSyntaxSnapshot(file, 1<<20); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func TestTransientSnapshotIdentifierSlabBudget(t *testing.T) {
+	args := make([]Expr, 20)
+	for i := range args {
+		args[i] = &CallExpr{Func: &Ident{Name: "x"}}
+	}
+	file := &File{Decls: []Decl{&ConstDecl{Value: &CallExpr{Args: args}}}}
+	snapshot, err := NewTransientSyntaxSnapshot(file, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewTransientSyntaxSnapshot(file, snapshot.RetainedBytes()); err != nil {
+		t.Fatalf("exact retained budget rejected: %v", err)
+	}
+	if _, err := NewTransientSyntaxSnapshot(file, snapshot.RetainedBytes()-1); err == nil {
+		t.Fatal("snapshot exceeded its retained budget")
+	}
+}
+
+func TestTransientSnapshotFieldSlabBudgetAndIsolation(t *testing.T) {
+	args := make([]Expr, 20)
+	for i := range args {
+		args[i] = &FieldExpr{Object: &Ident{Name: "x"}, Field: "value"}
+	}
+	file := &File{Decls: []Decl{&ConstDecl{Value: &CallExpr{Args: args}}}}
+	snapshot, err := NewTransientSyntaxSnapshot(file, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewTransientSyntaxSnapshot(file, snapshot.RetainedBytes()-1); err == nil {
+		t.Fatal("snapshot exceeded retained budget")
+	}
+	copy, err := snapshot.CopyFile()
+	if err != nil || !reflect.DeepEqual(copy, file) {
+		t.Fatalf("copy differs: %v", err)
+	}
+	copy.Decls[0].(*ConstDecl).Value.(*CallExpr).Args[0].(*FieldExpr).Field = "changed"
+	if args[0].(*FieldExpr).Field != "value" {
+		t.Fatal("snapshot shares mutable fields")
+	}
+}
+
 func TestSyntaxSnapshotCyclesAndContainerAliases(t *testing.T) {
 	call := &CallExpr{}
 	args := []Expr{call}
@@ -345,5 +444,25 @@ func BenchmarkSyntaxReplaySmallAndMixed(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+func BenchmarkTransientSyntaxSnapshotSmallBody(b *testing.B) {
+	file := &File{Decls: []Decl{&FuncDecl{Name: "f", Body: []Stmt{&ReturnStmt{Value: &Ident{Name: "x"}}}}}}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if _, err := NewTransientSyntaxSnapshot(file, 1<<20); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkTransientSyntaxSnapshotSingleCall(b *testing.B) {
+	file := &File{Decls: []Decl{&FuncDecl{Name: "f", Body: []Stmt{&ReturnStmt{Value: &CallExpr{Func: &Ident{Name: "x"}}}}}}}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if _, err := NewTransientSyntaxSnapshot(file, 1<<20); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

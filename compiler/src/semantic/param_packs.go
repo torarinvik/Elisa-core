@@ -51,7 +51,50 @@ func (a *Analyzer) expandedFuncDeclParams(fn *ast.FuncDecl) []ast.ParamDecl {
 	if fn == nil {
 		return nil
 	}
+	if params, ok := cloneOrdinaryExplicitParams(fn.Params); ok {
+		return params
+	}
 	return explicitParamDeclsFromSpecs(a.expandExplicitParamSpecs(fn.Params, fn.Name))
+}
+
+// Most declarations have a short list of named, unique parameters. Copy that
+// list directly without first allocating the larger intermediate spec list.
+// Malformed and unusually long lists retain the diagnostic-producing path.
+func cloneOrdinaryExplicitParams(params []ast.ParamDecl) ([]ast.ParamDecl, bool) {
+	if !ordinaryExplicitParams(params) {
+		return nil, false
+	}
+	return append([]ast.ParamDecl(nil), params...), true
+}
+
+func ordinaryExplicitParams(params []ast.ParamDecl) bool {
+	if len(params) > 16 {
+		return false
+	}
+	for i := range params {
+		if params[i].Name == "" {
+			return false
+		}
+		for j := 0; j < i; j++ {
+			if params[j].Name == params[i].Name {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// readOnlyExpandedFuncDeclParams borrows the declaration's parameters only
+// for immediate, read-only inspection. Malformed lists still use expansion so
+// duplicate diagnostics and filtering remain identical.
+func (a *Analyzer) readOnlyExpandedFuncDeclParams(fn *ast.FuncDecl) []ast.ParamDecl {
+	if fn == nil {
+		return nil
+	}
+	if ordinaryExplicitParams(fn.Params) {
+		return fn.Params
+	}
+	return a.expandedFuncDeclParams(fn)
 }
 
 // expandedFuncDeclParamAt is expandedFuncDeclParams(fn)[i] without copying the list
@@ -84,6 +127,9 @@ func (a *Analyzer) expandedFuncDeclParamAt(fn *ast.FuncDecl, i int) (ast.ParamDe
 func (a *Analyzer) expandedExternFuncDeclParams(fn *ast.ExternFuncDecl) []ast.ParamDecl {
 	if fn == nil {
 		return nil
+	}
+	if params, ok := cloneOrdinaryExplicitParams(fn.Params); ok {
+		return params
 	}
 	return explicitParamDeclsFromSpecs(a.expandExplicitParamSpecs(fn.Params, fn.Name))
 }

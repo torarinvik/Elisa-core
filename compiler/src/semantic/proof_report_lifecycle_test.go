@@ -140,7 +140,7 @@ func TestLiveProofReportProbeDoesNotReplaceCommittedOwner(t *testing.T) {
 	nested := a.beginProofContribution(fn, proofPhaseBody, nil, "")
 	a.recordProof(fn.Pos(), "speculative", "predicate", ProofRuntime)
 	nested()
-	restore()
+	restore.restore()
 	after := a.proofLifecycle.Segments[proofContributionKey{Owner: fn, Phase: proofPhaseBody}]
 	if !reflect.DeepEqual(before, after) || a.currentProofCategory != ProofCatReturnRefinement {
 		t.Fatal("probe changed committed authority/category")
@@ -325,13 +325,24 @@ func TestLiveProofReportProbeRestorationIsIdempotent(t *testing.T) {
 	fn := &ast.FuncDecl{Name: "owner"}
 	finish := a.beginProofContribution(fn, proofPhaseBody, nil, "")
 	restore := a.beginProofReportProbe()
-	restore()
+	restore.restore()
 	a.recordProof(fn.Pos(), "real after probe", "predicate", ProofProvenContract)
-	restore() // the deferred safety restore must not truncate later real facts
+	restore.restore() // the deferred safety restore must not truncate later real facts
 	finish()
 	segment := a.proofLifecycle.Segments[proofContributionKey{Owner: fn, Phase: proofPhaseBody}]
 	if len(segment.Facts) != 1 || segment.Facts[0].Subject != "real after probe" {
 		t.Fatal("idempotent probe restore erased real work")
+	}
+}
+
+func TestProofReportProbeDoesNotAllocate(t *testing.T) {
+	a := &Analyzer{}
+	allocs := testing.AllocsPerRun(100, func() {
+		probe := a.beginProofReportProbe()
+		probe.restore()
+	})
+	if allocs != 0 {
+		t.Fatalf("proof probe allocated %g times", allocs)
 	}
 }
 

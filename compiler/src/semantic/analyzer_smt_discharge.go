@@ -2002,7 +2002,7 @@ func (a *Analyzer) seedSelfStructInvariantsAsAssertFacts(fn *ast.FuncDecl) {
 	if a == nil || fn == nil {
 		return
 	}
-	for _, param := range a.expandedFuncDeclParams(fn) {
+	for _, param := range a.readOnlyExpandedFuncDeclParams(fn) {
 		if param.Name == "" || param.Type == nil {
 			continue
 		}
@@ -2113,11 +2113,41 @@ func (a *Analyzer) recordSMTAssertFactInScope(scope *Scope, expr ast.Expr) {
 		return
 	}
 	if bin, ok := stripOptimizationParens(expr).(*ast.BinaryExpr); ok && bin.Op == lexer.TOKEN_AND {
-		a.recordSMTAssertFactInScope(scope, bin.Left)
-		a.recordSMTAssertFactInScope(scope, bin.Right)
+		// Reserve once for the flattened conjunction rather than repeatedly
+		// growing and copying the scope's fact list for each leaf.
+		count := countSMTConjunctionFacts(expr)
+		scope.smtAssertFacts = slices.Grow(scope.smtAssertFacts, count)
+		a.appendSMTConjunctionFacts(scope, expr)
 		return
 	}
-	scope.smtAssertFacts = append(scope.smtAssertFacts, smtFact{Expr: expr, Deps: smtFactDeps(expr), Pins: a.smtFactPins(scope, expr)})
+	a.appendSMTFact(scope, expr)
+}
+
+func countSMTConjunctionFacts(expr ast.Expr) int {
+	if expr == nil {
+		return 0
+	}
+	if bin, ok := stripOptimizationParens(expr).(*ast.BinaryExpr); ok && bin.Op == lexer.TOKEN_AND {
+		return countSMTConjunctionFacts(bin.Left) + countSMTConjunctionFacts(bin.Right)
+	}
+	return 1
+}
+
+func (a *Analyzer) appendSMTConjunctionFacts(scope *Scope, expr ast.Expr) {
+	if expr == nil {
+		return
+	}
+	if bin, ok := stripOptimizationParens(expr).(*ast.BinaryExpr); ok && bin.Op == lexer.TOKEN_AND {
+		a.appendSMTConjunctionFacts(scope, bin.Left)
+		a.appendSMTConjunctionFacts(scope, bin.Right)
+		return
+	}
+	a.appendSMTFact(scope, expr)
+}
+
+func (a *Analyzer) appendSMTFact(scope *Scope, expr ast.Expr) {
+	deps := smtFactDeps(expr)
+	scope.smtAssertFacts = append(scope.smtAssertFacts, smtFact{Expr: expr, Deps: deps, Pins: a.smtFactPinsWithDeps(scope, expr, deps)})
 }
 
 func smtFactExprForCondition(expr ast.Expr, truthy bool) ast.Expr {
@@ -2187,8 +2217,9 @@ func (a *Analyzer) invalidateSMTAssertFactsForTargetPreservingNullness(target as
 			if preserve != "" && pointerNullnessFact(fact.Expr, preserve) {
 				return false
 			}
-			// Consult the fact's own deps() via the unified predicate, mirroring range-fact invalidation.
-			return factInvalidatedBy(assertHypothesisFact{fact: fact}, rootSet)
+			// assertHypothesisFact.deps returns this same map; avoid boxing
+			// every fact merely to test its dependencies.
+			return depsIntersect(fact.Deps, rootSet)
 		})
 	}
 }

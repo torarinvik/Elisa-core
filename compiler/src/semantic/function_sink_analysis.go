@@ -26,6 +26,9 @@ func (a *Analyzer) inferFuncSinkParams(fn *ast.FuncDecl, fnType *FuncType) {
 	if fn == nil || fnType == nil || fnType.SinkParamsKnown {
 		return
 	}
+	// CFG construction reads the callee body while other workers may be
+	// rewriting their own declarations. Use this worker's private read view.
+	fn = a.readDecl(fn)
 	if a.sinkParamInferenceInProgress[fn] {
 		return
 	}

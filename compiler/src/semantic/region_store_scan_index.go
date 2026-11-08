@@ -132,6 +132,31 @@ func (idx *storeScanDeclIndex) headerMentions(stmt ast.Stmt, names map[string]bo
 	return storeScanTokensHit(tokens, names)
 }
 
+// headerMentionsTwo resolves the cached header once when both taint sets are
+// queried for the same binder. Each answer still uses ordinary map semantics.
+func (idx *storeScanDeclIndex) headerMentionsTwo(stmt ast.Stmt, left, right map[string]bool) (bool, bool) {
+	if stmt == nil || (len(left) == 0 && len(right) == 0) {
+		return false, false
+	}
+	tokens, ok := idx.headerTokens[stmt]
+	if !ok {
+		tokens = storeScanHeaderTokens(stmt)
+		if idx.headerTokens == nil {
+			idx.headerTokens = map[ast.Stmt][]string{}
+		}
+		idx.headerTokens[stmt] = tokens
+	}
+	leftHit, rightHit := false, false
+	for _, token := range tokens {
+		leftHit = leftHit || left[token]
+		rightHit = rightHit || right[token]
+		if (leftHit || len(left) == 0) && (rightHit || len(right) == 0) {
+			break
+		}
+	}
+	return leftHit, rightHit
+}
+
 func storeScanTokensHit(tokens []string, names map[string]bool) bool {
 	for _, t := range tokens {
 		if names[t] {
@@ -244,6 +269,15 @@ type storeScanDeclIndex struct {
 	identCounts     map[ast.Expr]map[string]int
 	bodyIdentCounts map[string]int
 	kindScopes      *storeFlowKindScopes
+	paramAliases    map[storeScanAliasKey]storeScanAliasResult
+}
+
+func (a *Analyzer) invalidateStoreScanParamAliases() {
+	for _, idx := range a.storeScanIndexCache {
+		if idx != nil {
+			idx.paramAliases = nil
+		}
+	}
 }
 
 func (idx *storeScanDeclIndex) bindingEffectNodes() []any {
@@ -315,7 +349,26 @@ func (a *Analyzer) storeScanIndex(decl *ast.FuncDecl) *storeScanDeclIndex {
 	if idx, ok := a.storeScanIndexCache[decl]; ok {
 		return idx
 	}
+	// Specialization analyzers repeatedly inspect canonical callees while
+	// analyzing each generic body. Rebuild their mutable memo shell from the
+	// canonical syntax index instead of walking the same immutable body again.
+	if p := a.parallel; p != nil && p.specialization != nil && p.specialization.base != nil {
+		if base := p.specialization.base.analyzer; base != nil && base != a {
+			if cloned := p.specialization.base.cloneSpecializationStoreScanIndex(decl, nil); cloned != nil {
+				if a.storeScanIndexCache == nil {
+					a.storeScanIndexCache = make(map[*ast.FuncDecl]*storeScanDeclIndex)
+				}
+				a.storeScanIndexCache[decl] = cloned
+				return cloned
+			}
+		}
+	}
 	idx := &storeScanDeclIndex{decls: map[string][]*ast.VarDeclStmt{}, otherBound: map[string]bool{}, locals: map[string]bool{}, iterBinders: map[string][]*ast.IterForStmt{}, nonIterBinder: map[string]bool{}, bound: map[ast.Stmt][]string{}}
+	if len(decl.Body) > 0 {
+		// Top-level statements and their expressions are the minimum common
+		// case; nested syntax still grows normally beyond this bounded hint.
+		idx.flat = make([]any, 0, min(2*len(decl.Body), 2048))
+	}
 
 	walkStoreScanNodes(decl.Body, func(node any) {
 		idx.flat = append(idx.flat, node)

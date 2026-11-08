@@ -28,6 +28,12 @@ type syntaxFastCopier struct {
 	limit, bytes, depth, work int
 	text                      map[string]string
 	storage                   []syntaxStorage
+	identSlab                 []Ident
+	identSlabStarted          bool
+	callSlab                  []CallExpr
+	callSlabStarted           bool
+	fieldSlab                 []FieldExpr
+	fieldSlabStarted          bool
 }
 
 func copyFastSyntaxFile(file *File) (*File, error) {
@@ -78,6 +84,9 @@ func (c *syntaxFastCopier) syntaxFast3(in map[Decl]string) map[Decl]string {
 		return prior.(map[Decl]string)
 	}
 	out := make(map[Decl]string, len(in))
+	if c.maps == nil {
+		c.maps = make(map[syntaxFastMap]any)
+	}
 	c.maps[key] = out
 	for k, v := range in {
 		out[c.syntaxFast4(k)] = v
@@ -3244,6 +3253,9 @@ func (c *syntaxFastCopier) syntaxFast195(in map[string]Expr) map[string]Expr {
 		return prior.(map[string]Expr)
 	}
 	out := make(map[string]Expr, len(in))
+	if c.maps == nil {
+		c.maps = make(map[syntaxFastMap]any)
+	}
 	c.maps[key] = out
 	for k, v := range in {
 		out[k] = c.syntaxFast43(v)
@@ -5622,6 +5634,9 @@ func (c *syntaxFastCopier) syntaxCapture4(in map[Decl]string) map[Decl]string {
 		return nil
 	}
 	out := make(map[Decl]string, len(in))
+	if c.maps == nil {
+		c.maps = make(map[syntaxFastMap]any)
+	}
 	c.maps[key] = out
 	for k, v := range in {
 		if c.err != nil {
@@ -8744,10 +8759,13 @@ func (c *syntaxFastCopier) syntaxCapture114(in *CallExpr) *CallExpr {
 	if prior, ok := c.nodes[in]; ok {
 		return prior.(*CallExpr)
 	}
-	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+	if !c.captureCallStorage(in) {
 		return nil
 	}
-	out := new(CallExpr)
+	out := c.captureCall()
+	if out == nil {
+		return nil
+	}
 	c.nodes[in] = out
 	*out = *in
 	out.Position = c.syntaxCapture41(in.Position)
@@ -8945,10 +8963,13 @@ func (c *syntaxFastCopier) syntaxCapture122(in *FieldExpr) *FieldExpr {
 	if prior, ok := c.nodes[in]; ok {
 		return prior.(*FieldExpr)
 	}
-	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+	if !c.captureFieldStorage(in) {
 		return nil
 	}
-	out := new(FieldExpr)
+	out := c.captureField()
+	if out == nil {
+		return nil
+	}
 	c.nodes[in] = out
 	*out = *in
 	out.Position = c.syntaxCapture41(in.Position)
@@ -9045,10 +9066,13 @@ func (c *syntaxFastCopier) syntaxCapture126(in *Ident) *Ident {
 	if prior, ok := c.nodes[in]; ok {
 		return prior.(*Ident)
 	}
-	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+	if !c.captureIdentStorage(in) {
 		return nil
 	}
-	out := new(Ident)
+	out := c.captureIdent()
+	if out == nil {
+		return nil
+	}
 	c.nodes[in] = out
 	*out = *in
 	out.Position = c.syntaxCapture41(in.Position)
@@ -10777,6 +10801,9 @@ func (c *syntaxFastCopier) syntaxCapture204(in map[string]Expr) map[string]Expr 
 		return nil
 	}
 	out := make(map[string]Expr, len(in))
+	if c.maps == nil {
+		c.maps = make(map[syntaxFastMap]any)
+	}
 	c.maps[key] = out
 	for k, v := range in {
 		if c.err != nil {

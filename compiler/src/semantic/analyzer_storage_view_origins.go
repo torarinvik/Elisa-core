@@ -237,7 +237,7 @@ func (a *Analyzer) storageViewOriginCallee(call *ast.CallExpr) ([]*ast.FuncDecl,
 		args = call.ResolvedArgs
 	}
 	if field, isField := call.Func.(*ast.FieldExpr); isField && field != nil && field.Object != nil {
-		full := append([]ast.Expr{field.Object}, args...)
+		staticCall := false
 		var decls []*ast.FuncDecl
 		candidates := a.ufcsFunctionsByName[field.Field]
 		switch {
@@ -289,19 +289,24 @@ func (a *Analyzer) storageViewOriginCallee(call *ast.CallExpr) ([]*ast.FuncDecl,
 				// A generic `T.name(x)` (T: Named) or a receiver value: any impl may run.
 				decls = collect("")
 			}
-			if typeName != "" {
-				full = args
-			}
+			staticCall = typeName != ""
 		}
 		if len(decls) == 0 {
 			return nil, nil, false
 		}
+		fullLen := len(args)
+		if !staticCall {
+			fullLen++
+		}
 		for _, decl := range decls {
-			if len(full) != len(decl.Params) {
+			if fullLen != len(decl.Params) {
 				return nil, nil, false
 			}
 		}
-		return decls, full, true
+		if staticCall {
+			return decls, args, true
+		}
+		return decls, append([]ast.Expr{field.Object}, args...), true
 	}
 	if ident, isIdent := call.Func.(*ast.Ident); isIdent && ident != nil && len(a.ufcsFunctionsByName[ident.Name]) > 1 {
 		return nil, nil, false

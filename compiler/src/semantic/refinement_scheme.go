@@ -1,7 +1,7 @@
 package semantic
 
 import (
-	"fmt"
+	"strconv"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -106,8 +106,20 @@ func (a *Analyzer) buildSpecSignature(name string, params []ast.ParamDecl, param
 	} else if ret != nil {
 		pos = ret.Pos()
 	}
-	sig := NewSpecSignature(pos, name, binders, result)
-	nameRefs := specBinderRefsByName(binders, result)
+	// Both the binder slice and result were created for this signature and are
+	// not retained by the caller, so transfer their ownership instead of cloning.
+	// Preserve the public constructor's nil representation for zero parameters.
+	if len(binders) == 0 {
+		binders = nil
+	}
+	sig := &SpecSignature{Position: pos, Name: name, Params: binders, Result: result}
+	var nameRefs map[string]BinderRef
+	getNameRefs := func() map[string]BinderRef {
+		if nameRefs == nil {
+			nameRefs = specBinderRefsByName(binders, result)
+		}
+		return nameRefs
+	}
 	for i, param := range params {
 		rt, ok := a.paramRefinementTypeExpr(param.Type)
 		if !ok || rt == nil {
@@ -115,7 +127,7 @@ func (a *Analyzer) buildSpecSignature(name string, params []ast.ParamDecl, param
 		}
 		subject := binders[i].Ref()
 		for _, pred := range rt.Preds {
-			deps := specDependencies(pred.Args, nameRefs, subject)
+			deps := specDependencies(pred.Args, getNameRefs(), subject)
 			sig.ParamPredicates = append(sig.ParamPredicates, NewRefinementPredicate(RefinementPredicateType, subject, pred.Name, pred.Args, deps, nil, pred.Position))
 		}
 	}
@@ -126,20 +138,20 @@ func (a *Analyzer) buildSpecSignature(name string, params []ast.ParamDecl, param
 			continue
 		}
 		subject := binders[i].Ref()
-		deps := specDependencies([]ast.Expr{wt.Predicate}, nameRefs, subject)
+		deps := specDependencies([]ast.Expr{wt.Predicate}, getNameRefs(), subject)
 		sig.ParamPredicates = append(sig.ParamPredicates, NewRefinementPredicate(RefinementPredicateType, subject, "", nil, deps, wt.Predicate, wt.Position))
 	}
 	if rt, ok := a.paramRefinementTypeExpr(ret); ok && rt != nil && result != nil {
 		subject := result.Ref()
 		for _, pred := range rt.Preds {
-			deps := specDependencies(pred.Args, nameRefs, subject)
+			deps := specDependencies(pred.Args, getNameRefs(), subject)
 			sig.ResultPredicates = append(sig.ResultPredicates, NewRefinementPredicate(RefinementPredicateType, subject, pred.Name, pred.Args, deps, nil, pred.Position))
 		}
 	}
 	// anonymous `T where <bool-expr>` refinement on the return type
 	if wt, ok := whereRefinementTypeExpr(ret); ok && wt != nil && wt.Predicate != nil && result != nil {
 		subject := result.Ref()
-		deps := specDependencies([]ast.Expr{wt.Predicate}, nameRefs, subject)
+		deps := specDependencies([]ast.Expr{wt.Predicate}, getNameRefs(), subject)
 		sig.ResultPredicates = append(sig.ResultPredicates, NewRefinementPredicate(RefinementPredicateType, subject, "", nil, deps, wt.Predicate, wt.Position))
 	}
 	replaceSpecValueContracts(sig, requires, ensureValues)
@@ -148,7 +160,7 @@ func (a *Analyzer) buildSpecSignature(name string, params []ast.ParamDecl, param
 			continue
 		}
 		subject := binders[re.ParamIndex].Ref()
-		deps := specDependencies(re.Args, nameRefs, subject)
+		deps := specDependencies(re.Args, getNameRefs(), subject)
 		sig.ParamPostconditionLaws = append(sig.ParamPostconditionLaws, NewRefinementPredicate(RefinementPredicateLaw, subject, re.LawName, re.Args, deps, nil, re.Position))
 	}
 	return sig
@@ -347,7 +359,17 @@ func cloneRefinementPredicates(in []RefinementPredicate) []RefinementPredicate {
 }
 
 func paramSpecBinderID(index int) SpecBinderID {
-	return SpecBinderID(fmt.Sprintf("param:%d", index))
+	// Parameter identities repeat across signatures. Reuse the common immutable
+	// spellings instead of formatting and allocating each one on every analysis.
+	if index >= 0 && index < len(commonParamSpecBinderIDs) {
+		return commonParamSpecBinderIDs[index]
+	}
+	return SpecBinderID("param:" + strconv.Itoa(index))
+}
+
+var commonParamSpecBinderIDs = [...]SpecBinderID{
+	"param:0", "param:1", "param:2", "param:3", "param:4", "param:5", "param:6", "param:7",
+	"param:8", "param:9", "param:10", "param:11", "param:12", "param:13", "param:14", "param:15",
 }
 
 func resultSpecBinderID() SpecBinderID {

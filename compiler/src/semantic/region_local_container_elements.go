@@ -92,9 +92,40 @@ type localContainerElementRead struct {
 }
 
 var (
-	astNodeType = reflect.TypeOf((*ast.Node)(nil)).Elem()
-	astPkgPath  = reflect.TypeOf(ast.Ident{}).PkgPath()
+	astNodeType          = reflect.TypeOf((*ast.Node)(nil)).Elem()
+	astPkgPath           = reflect.TypeOf(ast.Ident{}).PkgPath()
+	elementScanSeenPool  = sync.Pool{New: func() any { return &fillWalkSeen{values: make(map[uintptr]bool)} }}
+	elementScanNamesPool = sync.Pool{New: func() any {
+		return &elementScanNames{ineligible: map[string]bool{}, multiDecl: map[string]bool{}, mentioned: map[string]bool{}}
+	}}
 )
+
+type elementScanNames struct {
+	ineligible, multiDecl, mentioned map[string]bool
+	peak, sparse                     int
+}
+
+func (n *elementScanNames) reset() bool {
+	used := max(len(n.ineligible), len(n.multiDecl), len(n.mentioned))
+	if used > 1<<14 {
+		return false
+	}
+	n.peak = max(n.peak, used)
+	if used < n.peak/8 {
+		n.sparse++
+	} else {
+		n.sparse = 0
+	}
+	if n.sparse >= 32 {
+		n.ineligible, n.multiDecl, n.mentioned = make(map[string]bool, used), make(map[string]bool, used), make(map[string]bool, used)
+		n.peak, n.sparse = used, 0
+	} else {
+		clear(n.ineligible)
+		clear(n.multiDecl)
+		clear(n.mentioned)
+	}
+	return true
+}
 
 // scanLocalContainerElementReads computes, for one function body, the index reads whose
 // element provenance may be used (see the file comment).
@@ -102,19 +133,29 @@ func (a *Analyzer) scanLocalContainerElementReads(body []ast.Stmt) (map[*ast.Ind
 	if invocation := a.incrementalBodies; invocation != nil && invocation.tracking && !a.suppressDiagnostics {
 		invocation.session.stats.PrimaryElementScans++
 	}
+	seen := elementScanSeenPool.Get().(*fillWalkSeen)
+	names := elementScanNamesPool.Get().(*elementScanNames)
+	defer func() {
+		if seen.reset() {
+			elementScanSeenPool.Put(seen)
+		}
+		if names.reset() {
+			elementScanNamesPool.Put(names)
+		}
+	}()
 	scan := &localContainerElementScan{
 		argReadOnly:       a.callArgBindsReadOnlyParam,
 		argFillable:       a.callArgFillsWritableParam,
 		argByValue:        a.callArgBindsByValueParam,
 		ufcsCall:          a.predictedUFCSScanCall(),
-		ineligible:        map[string]bool{},
+		ineligible:        names.ineligible,
 		pushedIn:          map[ast.Node]map[string]bool{},
 		declLoops:         map[string][]ast.Node{},
-		multiDecl:         map[string]bool{},
-		mentioned:         map[string]bool{},
+		multiDecl:         names.multiDecl,
+		mentioned:         names.mentioned,
 		acceptedReceivers: map[*ast.FieldExpr]bool{},
 		acceptedReads:     map[*ast.IndexExpr]bool{},
-		visited:           map[uintptr]bool{},
+		visited:           seen.values,
 		addrArgs:          map[*ast.AddrOfExpr]addrArgSite{},
 		modLoops:          map[ast.Node][]ast.Node{},
 		scalarUse:         map[*ast.IndexExpr]bool{},
@@ -1005,15 +1046,25 @@ func (a *Analyzer) callArgFillsWritableParam(call *ast.CallExpr, index int) bool
 	if !ok || decl == nil || index >= len(decl.Params) || funcHasArenaParam(decl) {
 		return false
 	}
-	if !functionHasOnlyInferredRegionParams(decl) {
-		return false
-	}
 	// Trusted only once the callee's body was checked and nothing it can put in the container was
 	// allocated in a caller's arena (a void grower adopts its container's; a forwarded parameter
 	// may reach one that does).
 	// A callee not analyzed yet (declared later, or recursive and in progress) is judged by
 	// whether it can reach a void grower at all.
 	if len(decl.TypeParams) != 0 || len(decl.GenericParams) != 0 {
+		return false
+	}
+	// Most arguments cannot be filled at all. Check the signature before requesting
+	// a provisional body analysis, which can recursively analyze many callees.
+	sym := a.funcDeclSymbols[decl]
+	if sym == nil {
+		return false
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok || fnType == nil || fnType.Variadic || fnType.RegionPolymorphic || index >= len(fnType.Params) || !a.returnBorrowWritableParam(fnType.Params[index]) {
+		return false
+	}
+	if !functionHasOnlyInferredRegionParams(decl) {
 		return false
 	}
 	a.ensureProvisionalSummaries(decl)
@@ -1024,20 +1075,15 @@ func (a *Analyzer) callArgFillsWritableParam(call *ast.CallExpr, index int) bool
 	} else if a.fillMayAdopt(decl) {
 		return false
 	}
-	sym := a.funcDeclSymbols[decl]
-	if sym == nil {
-		return false
-	}
-	fnType, ok := sym.Type.(*FuncType)
-	if !ok || fnType == nil || fnType.Variadic || fnType.RegionPolymorphic || index >= len(fnType.Params) {
-		return false
-	}
-	return a.returnBorrowWritableParam(fnType.Params[index])
+	return true
 }
 
 func functionHasOnlyInferredRegionParams(decl *ast.FuncDecl) bool {
 	if decl == nil {
 		return false
+	}
+	if len(decl.RegionParams) == 0 {
+		return true
 	}
 	inferred := make(map[string]bool, len(decl.InferredRegionParams))
 	for _, name := range decl.InferredRegionParams {
@@ -1445,9 +1491,9 @@ func (a *Analyzer) analyzeQuietly(decl *ast.FuncDecl) {
 	a.staticContextDepth = 0
 	a.addProofReportOrigin(target)
 	restoreProofReport := a.beginProofReportProbe()
-	defer restoreProofReport()
+	defer restoreProofReport.restore()
 	a.analyzeFuncWithTypeArgs(target, nil)
-	restoreProofReport()
+	restoreProofReport.restore()
 	a.currentNamespace, a.currentUsings = savedNamespace, savedUsings
 	a.suppressDiagnostics, a.suppressOptimizationFacts, a.provisionalSummaryFn = savedSuppress, savedOpt, savedProvisional
 	a.staticContextDepth = savedStatic

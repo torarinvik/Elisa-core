@@ -282,6 +282,18 @@ func substituteErrorSetParams(errors *ErrorSetType, bindings map[string]Type) *E
 	if errors == nil || !errors.HasParams() {
 		return errors
 	}
+	// An unbound symbolic set is already the final answer. Avoid building and
+	// unioning a temporary set only to discard it when no usable binding exists.
+	bound := false
+	for _, param := range errors.Params {
+		if set, ok := bindings[param].(*ErrorSetType); ok && set != nil {
+			bound = true
+			break
+		}
+	}
+	if !bound {
+		return errors
+	}
 	resolved := &ErrorSetType{
 		Name:     errors.Name,
 		Tags:     append([]string(nil), errors.Tags...),

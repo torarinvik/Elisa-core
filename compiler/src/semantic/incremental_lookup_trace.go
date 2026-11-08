@@ -181,7 +181,7 @@ func (r *lookupDependencyRecorder) snapshot() LookupDependencyTrace {
 // and full Result/live-analyzer hydration independently of these observations.
 func AnalyzeWithLookupTrace(file *ast.File, options AnalyzeOptions) (*Result, LookupDependencyTrace) {
 	recorder := &lookupDependencyRecorder{}
-	result := analyzeWithLookupRecorder(file, options, nil, nil, recorder)
+	result := analyzeWithLookupRecorder(file, options, nil, nil, recorder, nil)
 	return result, recorder.snapshot()
 }
 

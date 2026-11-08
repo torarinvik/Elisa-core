@@ -84,11 +84,15 @@ func TestAffineSnapshotPathsKeepParentAndSiblingsIndependent(t *testing.T) {
 			a.currentValueBindings = map[*Symbol]ast.Expr{sym: initial}
 			originalType := &BuiltinType{Name: "i32"}
 			a.currentSpecializedValueTypes = map[*Symbol]Type{sym: originalType}
+			a.currentFunctionValues = map[*Symbol]*FuncType{sym: {Name: "entry", Return: originalType}}
+			a.currentBorrowedOwnerRefs = map[*Symbol]borrowedOwnerRefState{sym: {Fields: map[string]borrowedOwnerRefState{"field": {HasDirect: true, Direct: key}}}}
 			first := path.run(a, NewScope(parent))
 			second := path.run(a, NewScope(parent))
 			first.Affine[key] = affineValueState{ConsumedBy: "edited"}
 			first.ValueBindings[sym] = &ast.IntLit{Value: "2"}
 			first.SpecializedValueTypes[sym] = &BuiltinType{Name: "bool"}
+			first.FunctionValues[sym].Name = "edited"
+			first.BorrowedOwnerRefs[sym].Fields["field"] = borrowedOwnerRefState{}
 			if a.currentAffineValues[key].ConsumedBy != "entry" || second.Affine[key].ConsumedBy != "entry" {
 				t.Fatal("affine state aliases another path")
 			}
@@ -97,6 +101,12 @@ func TestAffineSnapshotPathsKeepParentAndSiblingsIndependent(t *testing.T) {
 			}
 			if a.currentSpecializedValueTypes[sym] != originalType || second.SpecializedValueTypes[sym] != originalType {
 				t.Fatal("specialized type bindings alias another path")
+			}
+			if a.currentFunctionValues[sym].Name != "entry" || second.FunctionValues[sym].Name != "entry" {
+				t.Fatal("function values alias another path")
+			}
+			if !a.currentBorrowedOwnerRefs[sym].Fields["field"].HasDirect || !second.BorrowedOwnerRefs[sym].Fields["field"].HasDirect {
+				t.Fatal("borrowed owner references alias another path")
 			}
 		})
 	}
@@ -130,16 +140,22 @@ func TestBlockBranchSnapshotOwnsBorrowAndStorageViewFacts(t *testing.T) {
 	a.currentStorageViewDeps = map[*Symbol]storageViewDependencyState{
 		sym: {Sources: []string{"entry"}},
 	}
+	a.currentAliasCarriers = map[string][]string{"carrier": {"entry"}}
+	a.currentAliasCarrierFieldOverrides = map[string]map[string][]string{"carrier": {"field": {"entry"}}}
 	first := a.analyzeBlockWithAffineClonePrepared(nil, NewScope(parent), nil)
 	second := a.analyzeBlockWithAffineClonePrepared(nil, NewScope(parent), nil)
 	first.BorrowedOwnerRefs[sym].Fields["field"] = borrowedOwnerRefState{}
 	first.StorageViewDeps[sym].Sources[0] = "edited"
+	first.AliasCarriers["carrier"][0] = "edited"
+	first.AliasCarrierFieldOverrides["carrier"]["field"][0] = "edited"
 	for _, facts := range []affineFlowSnapshot{
 		second,
-		{BorrowedOwnerRefs: a.currentBorrowedOwnerRefs, StorageViewDeps: a.currentStorageViewDeps},
+		{BorrowedOwnerRefs: a.currentBorrowedOwnerRefs, StorageViewDeps: a.currentStorageViewDeps, AliasCarriers: a.currentAliasCarriers, AliasCarrierFieldOverrides: a.currentAliasCarrierFieldOverrides},
 	} {
 		if facts.BorrowedOwnerRefs[sym].Fields["field"].Direct != entry.Direct ||
-			facts.StorageViewDeps[sym].Sources[0] != "entry" {
+			facts.StorageViewDeps[sym].Sources[0] != "entry" ||
+			facts.AliasCarriers["carrier"][0] != "entry" ||
+			facts.AliasCarrierFieldOverrides["carrier"]["field"][0] != "entry" {
 			t.Fatal("branch snapshot aliases another path")
 		}
 	}

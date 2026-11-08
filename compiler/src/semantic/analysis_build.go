@@ -42,9 +42,6 @@ type AnalysisBuildStats struct {
 	PostFrames      int
 }
 
-// Access is serialized by pendingRetainedMu, as with AnalyzeRetained.
-var pendingAnalysisBuild *AnalysisBuild
-
 // BeginAnalysisBuild completes the declaration phase and stops before bodies.
 // The two ASTs must be independent parses of src. They become owned by the build.
 func BeginAnalysisBuild(file, pristine *ast.File, src []byte, options AnalyzeOptions) (*AnalysisBuild, error) {
@@ -55,9 +52,7 @@ func BeginAnalysisBuild(file, pristine *ast.File, src []byte, options AnalyzeOpt
 	build := &AnalysisBuild{retained: r}
 	pendingRetainedMu.Lock()
 	defer pendingRetainedMu.Unlock()
-	pendingRetained, pendingAnalysisBuild = r, build
-	defer func() { pendingRetained = nil; pendingAnalysisBuild = nil }()
-	AnalyzeWithOptions(file, options)
+	analyzeWithLookupRecorder(file, options, nil, nil, nil, &analysisSetup{retained: r, build: build})
 	if r.a == nil || build.file == nil {
 		return nil, fmt.Errorf("declaration phase did not create a resumable analysis")
 	}

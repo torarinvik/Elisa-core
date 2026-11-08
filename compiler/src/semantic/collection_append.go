@@ -14,7 +14,8 @@ func collectionAppendCall(n *ast.AugAssignStmt) *ast.CallExpr {
 // spelling for typed container updates so they reuse the existing caller-region
 // inference. Numeric updates remain untouched; full checking still owns validity.
 func (a *Analyzer) prepareCollectionAppends(fn *ast.FuncDecl) {
-	defer a.beginProofReportProbe()()
+	proofProbe := a.beginProofReportProbe()
+	defer proofProbe.restore()
 	saved := a.suppressDiagnostics
 	a.suppressDiagnostics = true
 	defer func() { a.suppressDiagnostics = saved }()
@@ -94,7 +95,13 @@ func (a *Analyzer) prepareCollectionAppends(fn *ast.FuncDecl) {
 			}
 			return
 		}
-		if list, ok := v.Interface().([]ast.Stmt); ok {
+		if dynamic == collectionAppendStmtListType {
+			var list []ast.Stmt
+			if v.Kind() == reflect.Slice && v.CanAddr() {
+				list = *v.Addr().Interface().(*[]ast.Stmt)
+			} else {
+				list = v.Interface().([]ast.Stmt)
+			}
 			start := len(shadowed)
 			for _, stmt := range list {
 				walk(reflect.ValueOf(stmt))

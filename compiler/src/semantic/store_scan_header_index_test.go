@@ -8,6 +8,44 @@ import (
 	"elisacore/src/ast"
 )
 
+func TestStoreScanHeaderMentionsTwo(t *testing.T) {
+	stmt := &ast.IfStmt{Cond: &ast.BinaryExpr{Left: &ast.Ident{Name: "left"}, Right: &ast.Ident{Name: "right"}}}
+	sets := []map[string]bool{nil, {"left": true}, {"right": true}, {"left": false}, {"other": true}}
+	for _, left := range sets {
+		for _, right := range sets {
+			idx := &storeScanDeclIndex{}
+			l, r := idx.headerMentionsTwo(stmt, left, right)
+			if l != idx.headerMentions(stmt, left) || r != idx.headerMentions(stmt, right) {
+				t.Fatalf("different results for %v and %v", left, right)
+			}
+		}
+	}
+}
+
+func BenchmarkStoreScanHeaderMentionsTwo(b *testing.B) {
+	stmt := &ast.IfStmt{Cond: &ast.BinaryExpr{Left: &ast.Ident{Name: "left"}, Right: &ast.Ident{Name: "right"}}}
+	left, right := map[string]bool{"left": true}, map[string]bool{"right": true}
+	for _, combined := range []bool{false, true} {
+		name := "separate"
+		if combined {
+			name = "combined"
+		}
+		b.Run(name, func(b *testing.B) {
+			idx := &storeScanDeclIndex{}
+			idx.headerMentionsTwo(stmt, left, right)
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if combined {
+					idx.headerMentionsTwo(stmt, left, right)
+				} else {
+					idx.headerMentions(stmt, left)
+					idx.headerMentions(stmt, right)
+				}
+			}
+		})
+	}
+}
+
 func TestStoreScanIndexedHeaderFastPath(t *testing.T) {
 	id := func(name string) *ast.Ident { return &ast.Ident{Name: name} }
 	for _, expr := range []ast.Expr{
@@ -97,5 +135,30 @@ func BenchmarkStoreScanHeaderMapCapacity(b *testing.B) {
 				clear(seen)
 			}
 		})
+	}
+}
+
+func TestStoreScanHeaderLiteralFastPath(t *testing.T) {
+	var nilInt *ast.IntLit
+	cases := []any{nilInt, &ast.IntLit{Value: "source", Suffix: "u32"}, &ast.FloatLit{Value: "1.0", Suffix: "source"}, &ast.StringLit{Value: "source"}, &ast.CharLit{Value: "x"}, &ast.BoolLit{Value: true}, &ast.NullLit{}, &ast.ZeroedLit{}}
+	for _, node := range cases {
+		for _, names := range []map[string]bool{{"source": true}, {"u32": true}, {"": true}, {"other": true}} {
+			got := storeScanMentionsHeader(node, names)
+			want := storeScanMentionsHeaderWalk(reflect.ValueOf(node), names, map[uintptr]bool{})
+			if got != want {
+				t.Fatalf("%T %v: got %v want %v", node, names, got, want)
+			}
+		}
+	}
+}
+
+func BenchmarkStoreScanHeaderLiteral(b *testing.B) {
+	node := &ast.IntLit{Value: "1", Suffix: "u32"}
+	names := map[string]bool{"source": true}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if storeScanMentionsHeader(node, names) {
+			b.Fatal("unexpected match")
+		}
 	}
 }

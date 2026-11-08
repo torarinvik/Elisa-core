@@ -124,16 +124,7 @@ type RetainedUpdateStats struct {
 	Invalidated int
 }
 
-var (
-	pendingRetainedMu sync.Mutex
-	pendingRetained   *RetainedAnalysis
-)
-
-func takePendingRetained() *RetainedAnalysis {
-	r := pendingRetained
-	pendingRetained = nil
-	return r
-}
+var pendingRetainedMu sync.Mutex
 
 // AnalyzeRetained runs a full analysis of file and keeps it for Update.
 // pristine must be a separate parse of the same source that analysis never
@@ -141,9 +132,7 @@ func takePendingRetained() *RetainedAnalysis {
 func AnalyzeRetained(file, pristine *ast.File, src []byte, options AnalyzeOptions) (*Result, *RetainedAnalysis) {
 	r := &RetainedAnalysis{options: options, pristine: pristine, src: src, windows: map[*ast.FuncDecl][2]int{}, rbDeps: map[*ast.FuncDecl]map[*ast.FuncDecl]bool{}, frameDiags: map[*ast.FuncDecl][]Diagnostic{}}
 	pendingRetainedMu.Lock()
-	pendingRetained = r
-	result := AnalyzeWithOptions(file, options)
-	pendingRetained = nil
+	result := analyzeWithLookupRecorder(file, options, nil, nil, nil, &analysisSetup{retained: r})
 	pendingRetainedMu.Unlock()
 	if r.a == nil {
 		return result, nil
@@ -2296,6 +2285,9 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	if !bodyEnvironmentUnchanged || len(splices) != 0 || len(removedLive) != 0 {
 		a.storeScanParamWriteCache = nil
 		a.storeScanParamFactsCache = nil
+		// Alias closures also depend on resolved callees and their types, even
+		// when the caller's syntax index itself remains valid.
+		a.invalidateStoreScanParamAliases()
 	}
 	if len(changed) != 0 || len(removedLive) != 0 {
 		// A body edit can change flow through every transitive caller and can

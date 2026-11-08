@@ -311,6 +311,15 @@ func (a *Analyzer) lawBodyContainsQuantifier(decl *ast.FuncDecl) bool {
 // discharge tiers as a var declaration. Runtime enforcement of an unproven arg at the call site is
 // a follow-up; under -strict an unproven arg is already a hard error.
 func (a *Analyzer) dischargeCallArgRefinements(call *ast.CallExpr, args []ast.Expr) {
+	// The canonical channel is authoritative even for a direct declaration.
+	// Avoid allocating a full scheme when it has no argument obligations, while
+	// retaining the declaration dependency used by incremental proof reports.
+	if ft, ok := a.callFuncType(call); ok && ft.SpecSignature != nil && len(ft.SpecSignature.ParamPredicates) == 0 {
+		if _, found := a.resolveDirectCallFuncDecl(call); !found {
+			a.resolveDirectCallExternFuncDecl(call)
+		}
+		return
+	}
 	scheme, ok := a.callRefinementScheme(call)
 	if !ok || len(scheme.ParamRefinements) == 0 {
 		return

@@ -616,11 +616,11 @@ func (a *Analyzer) rewriteIndexedElementCall(expr *ast.CallExpr) {
 		}
 		savedSuppress := a.suppressDiagnostics
 		restoreReportProbe1 := a.beginProofReportProbe()
-		defer restoreReportProbe1()
+		defer restoreReportProbe1.restore()
 		a.suppressDiagnostics = true
 		receiverType := a.analyzeExpr(operand.Object)
 		a.suppressDiagnostics = savedSuppress
-		restoreReportProbe1()
+		restoreReportProbe1.restore()
 		if receiverType == nil || IsInvalidType(receiverType) {
 			return
 		}

@@ -209,7 +209,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		retExpr := n.Return
 		permissionRefs := n.Permissions
 		resolvedPermissionRefs := a.resolvePermissionRefs(permissionRefs, true)
-		permissions := a.resolvePermissionFamilies(permissionRefs, true)
+		permissions := permissionFamiliesFromRefs(resolvedPermissionRefs)
 		retType := a.namedTypes["void"]
 		if retExpr != nil {
 			retType = a.resolveType(retExpr)

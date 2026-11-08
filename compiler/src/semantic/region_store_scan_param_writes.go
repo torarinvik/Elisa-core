@@ -71,27 +71,42 @@ func (a *Analyzer) storeScanParamReaches(start storeScanParamKey) bool {
 	if cached, ok := a.lookupStoreScanParamWriteCache(start); ok {
 		return cached
 	}
+	// A local writer or a node with no outgoing edges is already a
+	// complete answer. Avoid constructing a graph walk for this common case.
+	// Keep the ordinary path when tracing so it still records its explanation.
+	if !storeScanTrace {
+		if facts := a.storeScanParamLocalFacts(start); facts.writes || len(facts.reach) == 0 {
+			a.setStoreScanParamWriteCache(start, facts.writes)
+			return facts.writes
+		}
+	}
 	visited := map[storeScanParamKey]bool{start: true}
-	parent := map[storeScanParamKey]storeScanParamKey{}
-	queue := []storeScanParamKey{start}
+	type reachEntry struct {
+		key    storeScanParamKey
+		parent int
+	}
+	// The queue already owns every visited key. Parent indices avoid a second
+	// map for the path while keeping the breadth-first traversal unchanged.
+	var queueStorage [8]reachEntry
+	queueStorage[0] = reachEntry{key: start, parent: -1}
+	queue := queueStorage[:1]
 	result := false
-	var resultKey storeScanParamKey
-	for len(queue) > 0 && !result {
-		key := queue[0]
-		queue = queue[1:]
+	resultIndex := -1
+	for head := 0; head < len(queue) && !result; head++ {
+		key := queue[head].key
 		if cached, ok := a.lookupStoreScanParamWriteCache(key); ok {
 			if cached && storeScanTrace {
 				storeScanParamWriterOf[start] = storeScanParamWriterOf[key]
 			}
 			if cached {
-				resultKey = key
+				resultIndex = head
 			}
 			result = result || cached
 			continue // a cached false already covers everything it reaches
 		}
 		facts := a.storeScanParamLocalFacts(key)
 		if facts.writes {
-			resultKey = key
+			resultIndex = head
 			if storeScanTrace {
 				pos := ""
 				if n, ok := facts.at.(ast.Node); ok && n != nil {
@@ -99,7 +114,8 @@ func (a *Analyzer) storeScanParamReaches(start storeScanParamKey) bool {
 				}
 				storeScanParamWriterOf[start] = fmt.Sprintf("%s/%d/%d %s %s", key.decl.Name, key.index, key.mode, facts.why, pos)
 				path := ""
-				for k := key; k != start; k = parent[k] {
+				for i := head; queue[i].parent >= 0; i = queue[i].parent {
+					k := queue[i].key
 					path = fmt.Sprintf(" <- %s/%d/%d", k.decl.Name, k.index, k.mode) + path
 				}
 				fmt.Fprintf(os.Stderr, "PARAMW start=%s/%d/%d writer=%s/%d/%d why=%s at %s path=%s\n", start.decl.Name, start.index, start.mode, key.decl.Name, key.index, key.mode, facts.why, pos, path)
@@ -110,8 +126,7 @@ func (a *Analyzer) storeScanParamReaches(start storeScanParamKey) bool {
 		for _, next := range facts.reach {
 			if !visited[next] {
 				visited[next] = true
-				parent[next] = key
-				queue = append(queue, next)
+				queue = append(queue, reachEntry{key: next, parent: head})
 			}
 		}
 	}
@@ -119,13 +134,11 @@ func (a *Analyzer) storeScanParamReaches(start storeScanParamKey) bool {
 		// Every node on the discovered path reaches the same writer, not only
 		// the original query. Remember that path so callers that start from an
 		// intermediate callee parameter do not repeat the graph walk.
-		for key := resultKey; ; key = parent[key] {
+		for i := resultIndex; i >= 0; i = queue[i].parent {
+			key := queue[i].key
 			a.setStoreScanParamWriteCache(key, true)
 			if storeScanTrace {
 				storeScanParamWriterOf[key] = storeScanParamWriterOf[start]
-			}
-			if key == start {
-				break
 			}
 		}
 	} else {
@@ -153,6 +166,13 @@ func (a *Analyzer) storeScanMayShare(decl *ast.FuncDecl, value ast.Expr) bool {
 		return false
 	}
 	inner := storeScanUnwrap(value)
+	// Literal values cannot carry shared storage, regardless of whether a
+	// semantic type has already been recorded. Avoid resolving and inspecting
+	// their types on every pass of the alias fixpoint.
+	switch inner.(type) {
+	case *ast.IntLit, *ast.FloatLit, *ast.BoolLit, *ast.CharLit, *ast.StringLit:
+		return false
+	}
 	if t, ok := a.storeScanStaticType(decl, inner); ok && t != nil && !a.containsTypeParamCached(t) && !a.storeScanSharesCached(t) {
 		return false
 	}
@@ -179,8 +199,6 @@ func (a *Analyzer) storeScanMayShare(decl *ast.FuncDecl, value ast.Expr) bool {
 		// Only the selected branch is returned. Effects of evaluating the
 		// condition are scanned separately, not retained in the result.
 		return a.storeScanMayShare(decl, e.Value) || a.storeScanMayShare(decl, e.Alt)
-	case *ast.IntLit, *ast.FloatLit, *ast.BoolLit, *ast.CharLit, *ast.StringLit:
-		return false
 	}
 	return true
 }
@@ -210,15 +228,37 @@ func (a *Analyzer) storeScanCallReturnType(call *ast.CallExpr) Type {
 	return nil
 }
 
+type storeScanAliasKey struct {
+	index int
+	deep  bool
+}
+
+type storeScanAliasResult struct {
+	alias map[string]bool
+	holds storeScanHolds
+}
+
 // storeScanParamAliases: the names that ARE the parameter's storage (alias) and the locals that
 // CONTAIN parts of it (holds).
 func (a *Analyzer) storeScanParamAliases(decl *ast.FuncDecl, idx *storeScanDeclIndex, index, mode int) (map[string]bool, storeScanHolds) {
 	decl = a.readDecl(decl)
+	key := storeScanAliasKey{index: index, deep: mode == storeScanModeDeep}
+	if cached, ok := idx.paramAliases[key]; ok {
+		return cached.alias, cached.holds
+	}
+	var alias map[string]bool
+	var holds storeScanHolds
 	if mode == storeScanModeDeep {
 		// The parameter itself is only a holder: its parts are the storage.
-		return a.storeScanAliasClosureFrom(decl, idx, map[string]bool{}, map[string]bool{decl.Params[index].Name: true})
+		alias, holds = a.storeScanAliasClosureFrom(decl, idx, map[string]bool{}, map[string]bool{decl.Params[index].Name: true})
+	} else {
+		alias, holds = a.storeScanAliasClosure(decl, idx, map[string]bool{decl.Params[index].Name: true})
 	}
-	return a.storeScanAliasClosure(decl, idx, map[string]bool{decl.Params[index].Name: true})
+	if idx.paramAliases == nil {
+		idx.paramAliases = make(map[storeScanAliasKey]storeScanAliasResult)
+	}
+	idx.paramAliases[key] = storeScanAliasResult{alias: alias, holds: holds}
+	return alias, holds
 }
 
 // storeScanAliasClosure grows the starting names into:
@@ -237,11 +277,15 @@ func (a *Analyzer) storeScanAliasClosure(decl *ast.FuncDecl, idx *storeScanDeclI
 // (holding parts under any projection).
 func (a *Analyzer) storeScanAliasClosureFrom(decl *ast.FuncDecl, idx *storeScanDeclIndex, alias, startHolds map[string]bool) (map[string]bool, storeScanHolds) {
 	decl = a.readDecl(decl)
-	holds := map[string]bool{}
+	var holds map[string]bool
 	// fields: per holder, the first projections that lead to a part (`entry = E{target: p}`
 	// holds a part under `.target` only; "*" = any projection).
-	fields := map[string]map[string]bool{}
+	var fields map[string]map[string]bool
 	for name := range startHolds {
+		if holds == nil {
+			holds = map[string]bool{}
+			fields = map[string]map[string]bool{}
+		}
 		holds[name] = true
 		fields[name] = map[string]bool{"*": true}
 	}
@@ -259,10 +303,16 @@ func (a *Analyzer) storeScanAliasClosureFrom(decl *ast.FuncDecl, idx *storeScanD
 				changed = true
 			}
 		}
+		h := storeScanHolds{names: holds, fields: fields}
 		// hold: name contains a part under the first projection proj ("*" = any).
 		hold := func(name, proj string) {
 			if name == "" || alias[name] || scalars[name] {
 				return
+			}
+			if holds == nil {
+				holds = map[string]bool{}
+				fields = map[string]map[string]bool{}
+				h.names, h.fields = holds, fields
 			}
 			add(holds, name)
 			if fields[name] == nil {
@@ -273,7 +323,6 @@ func (a *Analyzer) storeScanAliasClosureFrom(decl *ast.FuncDecl, idx *storeScanD
 				changed = true
 			}
 		}
-		h := storeScanHolds{names: holds, fields: fields}
 		bindValue := func(name string, value ast.Expr) {
 			if value == nil || !a.storeScanMayShare(decl, value) {
 				return
@@ -453,7 +502,10 @@ func (a *Analyzer) computeStoreScanParamFacts(key storeScanParamKey) storeScanPa
 				continue
 			}
 		}
-		mentioned := []int{}
+		// Most calls have only a few operands; retain their indexes on the
+		// stack while preserving append growth for larger signatures.
+		var mentionedStorage [8]int
+		mentioned := mentionedStorage[:0]
 		for k, arg := range args {
 			if reachesStorage(arg) {
 				mentioned = append(mentioned, k)
@@ -558,9 +610,15 @@ func storeScanTouchedLocals(idx *storeScanDeclIndex) map[string]bool {
 			if v.Kind() != reflect.Pointer || v.IsNil() || v.Elem().Kind() != reflect.Struct {
 				continue
 			}
-			for _, field := range []string{"Target", "Store"} {
-				f := reflectFieldByName(v.Elem(), field)
-				if f.IsValid() && f.CanInterface() {
+			v = v.Elem()
+			for _, index := range reflectMetaOf(v.Type()).storeScanPlaceFields {
+				var f reflect.Value
+				if len(index) == 1 {
+					f = v.Field(index[0])
+				} else {
+					f = v.FieldByIndex(index)
+				}
+				if f.CanInterface() {
 					if expr, ok := f.Interface().(ast.Expr); ok && expr != nil {
 						mark(expr)
 					}
@@ -581,9 +639,14 @@ func storeScanNodePlaceMentions(idx *storeScanDeclIndex, node any, names map[str
 	if v.Kind() != reflect.Struct {
 		return false
 	}
-	for _, field := range []string{"Target", "Store"} {
-		f := reflectFieldByName(v, field)
-		if !f.IsValid() || !f.CanInterface() {
+	for _, index := range reflectMetaOf(v.Type()).storeScanPlaceFields {
+		var f reflect.Value
+		if len(index) == 1 {
+			f = v.Field(index[0])
+		} else {
+			f = v.FieldByIndex(index)
+		}
+		if !f.CanInterface() {
 			continue
 		}
 		if expr, ok := f.Interface().(ast.Expr); ok && expr != nil && idx.mentions(expr, names) {

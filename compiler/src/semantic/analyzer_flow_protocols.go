@@ -239,6 +239,12 @@ func (a *Analyzer) containsTrackedProtocolCarrierValues(t Type, seen map[string]
 	if t == nil {
 		return false
 	}
+	if scalar, ok := t.(*BuiltinType); ok {
+		// Builtins cannot carry protocol state. Preserve the same seen entry
+		// as the general path without running the protocol/type switches.
+		seen[scalar.Name] = true
+		return false
+	}
 	if isAffineHandleType(t) || directProtocolCarrierType(t) {
 		return true
 	}
@@ -439,6 +445,15 @@ func (a *Analyzer) protocolLeakDescription(t Type) string {
 	return "value containing " + joinProtocolLeakKinds(parts)
 }
 
+// Builtin scalar types cannot carry protocol state. In this caller the seen
+// map is a disposable copy, so they need no cycle-tracking work.
+func (a *Analyzer) protocolFieldContainsCarrier(t Type, seen map[string]bool) bool {
+	if _, scalar := t.(*BuiltinType); scalar {
+		return false
+	}
+	return a.containsTrackedProtocolCarrierValues(t, mapsCloneBool(seen))
+}
+
 func (a *Analyzer) protocolLiveLeafPaths(t Type, prefix string, seen map[string]bool) map[string]Type {
 	if t == nil {
 		return nil
@@ -458,7 +473,7 @@ func (a *Analyzer) protocolLiveLeafPaths(t Type, prefix string, seen map[string]
 	case *StructType:
 		paths := map[string]Type{}
 		for _, field := range tt.Fields {
-			if !a.containsTrackedProtocolCarrierValues(field.Type, mapsCloneBool(seen)) {
+			if !a.protocolFieldContainsCarrier(field.Type, seen) {
 				continue
 			}
 			for childPath, liveType := range a.protocolLiveLeafPaths(field.Type, field.Name, mapsCloneBool(seen)) {
@@ -469,7 +484,7 @@ func (a *Analyzer) protocolLiveLeafPaths(t Type, prefix string, seen map[string]
 	case *EnumType:
 		paths := map[string]Type{}
 		for _, field := range tt.Common {
-			if !a.containsTrackedProtocolCarrierValues(field.Type, mapsCloneBool(seen)) {
+			if !a.protocolFieldContainsCarrier(field.Type, seen) {
 				continue
 			}
 			for childPath, liveType := range a.protocolLiveLeafPaths(field.Type, field.Name, mapsCloneBool(seen)) {
@@ -479,7 +494,7 @@ func (a *Analyzer) protocolLiveLeafPaths(t Type, prefix string, seen map[string]
 		for _, variant := range tt.Variants {
 			for i, payloadType := range variant.Payload {
 				label := variant.PayloadLabel(i)
-				if label == "" || !a.containsTrackedProtocolCarrierValues(payloadType, mapsCloneBool(seen)) {
+				if label == "" || !a.protocolFieldContainsCarrier(payloadType, seen) {
 					continue
 				}
 				for childPath, liveType := range a.protocolLiveLeafPaths(payloadType, label, mapsCloneBool(seen)) {
@@ -504,7 +519,7 @@ func (a *Analyzer) protocolLiveLeafPaths(t Type, prefix string, seen map[string]
 				if len(bindings) != 0 {
 					fieldType = a.substituteType(fieldType, bindings, nil, nil, nil)
 				}
-				if !a.containsTrackedProtocolCarrierValues(fieldType, mapsCloneBool(seen)) {
+				if !a.protocolFieldContainsCarrier(fieldType, seen) {
 					continue
 				}
 				for childPath, liveType := range a.protocolLiveLeafPaths(fieldType, field.Name, mapsCloneBool(seen)) {

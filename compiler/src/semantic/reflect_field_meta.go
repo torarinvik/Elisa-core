@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"unsafe"
@@ -16,9 +17,11 @@ import (
 // returned metadata is exactly what reflect would return.
 
 type reflectTypeMeta struct {
-	fields          []reflect.StructField
-	exportedFields  []int
-	compositeFields []int
+	fields                []reflect.StructField
+	exportedFields        []int
+	compositeFields       []int
+	storageViewNameFields []int
+	storeScanPlaceFields  [][]int
 	// byName maps every name t.FieldByName resolves (direct or promoted, unambiguous) to its
 	// Index. Built eagerly from VisibleFields, so it is immutable once published.
 	byName map[string][]int
@@ -63,6 +66,9 @@ func reflectMetaSlow(t reflect.Type) *reflectTypeMeta {
 		f := meta.fields[i]
 		if f.IsExported() {
 			meta.exportedFields = append(meta.exportedFields, i)
+			if f.Name == "Names" || f.Name == "Binding" || f.Name == "Bindings" || strings.HasSuffix(f.Name, "Name") {
+				meta.storageViewNameFields = append(meta.storageViewNameFields, i)
+			}
 		}
 		if f.IsExported() && f.Type != syntaxWalkPositionType {
 			switch f.Type.Kind() {
@@ -74,6 +80,11 @@ func reflectMetaSlow(t reflect.Type) *reflectTypeMeta {
 	for _, vf := range reflect.VisibleFields(t) {
 		if f, ok := t.FieldByName(vf.Name); ok {
 			meta.byName[vf.Name] = f.Index
+		}
+	}
+	for _, name := range [...]string{"Target", "Store"} {
+		if index, ok := meta.byName[name]; ok {
+			meta.storeScanPlaceFields = append(meta.storeScanPlaceFields, index)
 		}
 	}
 	cached, _ := reflectTypeMetaCache.LoadOrStore(t, meta)

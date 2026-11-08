@@ -15,9 +15,7 @@ func (l *Lexer) NextToken() (result Token) {
 	}
 	// Drain pending tokens first (INDENT/DEDENT)
 	if len(l.pendingToks) > 0 {
-		tok := l.pendingToks[0]
-		l.pendingToks = l.pendingToks[1:]
-		return tok
+		return l.takePendingToken()
 	}
 
 	// Consume `#line <num> <path>` source-attribution directives (emitted by
@@ -37,9 +35,7 @@ func (l *Lexer) NextToken() (result Token) {
 			l.handleIndentation()
 			l.trimFinishedGroupedBlockContexts()
 			if len(l.pendingToks) > 0 {
-				tok := l.pendingToks[0]
-				l.pendingToks = l.pendingToks[1:]
-				return tok
+				return l.takePendingToken()
 			}
 		}
 	}

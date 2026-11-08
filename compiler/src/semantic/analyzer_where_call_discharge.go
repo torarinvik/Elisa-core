@@ -21,23 +21,7 @@ func (a *Analyzer) checkCalleeSpecSignatureWherePredicates(call *ast.CallExpr, d
 		return
 	}
 
-	// Build a substitution from binder position → actual call argument, mirroring
-	// checkCalleeParamWhereRefinements which builds subst from param name → arg.
-	// We key by binder.Position (param index) so we can substitute the binder's
-	// SourceName in the predicate expression.
-	paramNameByPos := make(map[int]string, len(sig.Params))
-	for _, binder := range sig.Params {
-		if binder.Kind == SpecBinderParam && binder.Position >= 0 {
-			paramNameByPos[binder.Position] = binder.SourceName
-		}
-	}
-
-	subst := map[string]ast.Expr{}
-	for pos, name := range paramNameByPos {
-		if pos < len(args) && args[pos] != nil {
-			subst[name] = args[pos]
-		}
-	}
+	var subst map[string]ast.Expr
 
 	for _, pred := range sig.ParamPredicates {
 		if pred.Kind != RefinementPredicateType {
@@ -66,6 +50,23 @@ func (a *Analyzer) checkCalleeSpecSignatureWherePredicates(call *ast.CallExpr, d
 		if paramIdx >= 0 && paramIdx < len(schemeParams) {
 			if rt, isWhere := whereRefinementTypeExpr(schemeParams[paramIdx].Type); isWhere && rt != nil && rt.Predicate != nil {
 				continue
+			}
+		}
+
+		if subst == nil {
+			// Resolve duplicate positions as before: the last binder for a position
+			// wins. Only allocate the maps when a predicate is actually discharged.
+			paramNameByPos := make(map[int]string, len(sig.Params))
+			for _, binder := range sig.Params {
+				if binder.Kind == SpecBinderParam && binder.Position >= 0 {
+					paramNameByPos[binder.Position] = binder.SourceName
+				}
+			}
+			subst = make(map[string]ast.Expr, len(paramNameByPos))
+			for pos, name := range paramNameByPos {
+				if pos < len(args) && args[pos] != nil {
+					subst[name] = args[pos]
+				}
 			}
 		}
 

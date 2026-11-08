@@ -92,6 +92,20 @@ func (l *Lexer) Errors() []string {
 	copy(out, l.errors)
 	return out
 }
+
+// Reuse the backing array after the final pending indentation token. Most
+// lines enqueue a single token, so advancing the slice on every drain used to
+// allocate a new array at the next indentation change.
+func (l *Lexer) takePendingToken() Token {
+	tok := l.pendingToks[0]
+	if len(l.pendingToks) == 1 {
+		l.pendingToks[0] = Token{}
+		l.pendingToks = l.pendingToks[:0]
+	} else {
+		l.pendingToks = l.pendingToks[1:]
+	}
+	return tok
+}
 func (l *Lexer) peek() byte {
 	if !l.sourceHas(l.pos) {
 		return 0

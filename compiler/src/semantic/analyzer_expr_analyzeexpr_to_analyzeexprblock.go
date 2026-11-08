@@ -567,11 +567,11 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 				// it does not, `recv.Name()` is the call `Name(recv)` instead.
 				savedSuppress := a.suppressDiagnostics
 				restoreReportProbe1 := a.beginProofReportProbe()
-				defer restoreReportProbe1()
+				defer restoreReportProbe1.restore()
 				a.suppressDiagnostics = true
 				probe := a.resolveType(named)
 				a.suppressDiagnostics = savedSuppress
-				restoreReportProbe1()
+				restoreReportProbe1.restore()
 				if IsInvalidType(probe) {
 					synth := &ast.CallExpr{
 						Position: n.Position,
@@ -608,7 +608,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			if hookSym, ok := a.lookupVisibleCastHook(src, dst); ok && !a.isSelfCastHook(hookSym) {
 				a.resolvedCastHooks[n] = hookSym
 				if fnType, ok := hookSym.Type.(*FuncType); ok {
-					a.recordFunctionPermissionRefs(functionPermissionRefs(fnType))
+					a.recordFunctionPermissionRefs(functionPermissionRefs(a.privateFuncType(nil, fnType)))
 				}
 				result = dst
 				return

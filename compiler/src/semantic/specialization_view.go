@@ -24,13 +24,15 @@ type SpecializedFunction struct {
 }
 
 type specializationContext struct {
-	base         *Result
-	worker       *Analyzer
-	syntax       *specializationSyntax
-	declarations map[*ast.FuncDecl]*ast.FuncDecl
-	storeTargets map[*ast.FuncDecl][]map[int]bool
-	inputReads   *specializationInputTrace
-	err          error
+	base               *Result
+	worker             *Analyzer
+	syntax             *specializationSyntax
+	declarations       map[*ast.FuncDecl]*ast.FuncDecl
+	targetDecl         *ast.FuncDecl
+	storeScanTargetHit bool
+	storeTargets       map[*ast.FuncDecl][]map[int]bool
+	inputReads         *specializationInputTrace
+	err                error
 }
 
 type specializationBuildOptions struct {
@@ -163,7 +165,7 @@ func (r *Result) specializePrivateFunction(fn *ast.FuncDecl, args []Type, option
 		targetExprs = map[ast.Expr]struct{}{}
 		collectSpecializedFunctionExprs(fn, targetExprs)
 	}
-	ctx := &specializationContext{base: r, worker: a, syntax: newSpecializationSyntax(), declarations: map[*ast.FuncDecl]*ast.FuncDecl{}, storeTargets: sharedStoreTargets}
+	ctx := &specializationContext{base: r, worker: a, syntax: newSpecializationSyntax(), declarations: map[*ast.FuncDecl]*ast.FuncDecl{}, targetDecl: fn, storeTargets: sharedStoreTargets}
 	if selected.inputAudit {
 		ctx.inputReads = &specializationInputTrace{}
 	}
@@ -340,6 +342,17 @@ func (c *specializationContext) copyDecl(fn *ast.FuncDecl) *ast.FuncDecl {
 			} else {
 				target.SetMapIndex(privateKey, ownedFact)
 			}
+		}
+	}
+	// The scan index depends only on function syntax. Rebind its node references
+	// to this private copy so specialized bodies can reuse the canonical walk and
+	// binder tables instead of rebuilding them for every instantiation.
+	if c.base != nil && c.base.analyzer != nil {
+		if index := c.base.cloneSpecializationStoreScanIndex(fn, syntax.nodes); index != nil {
+			if c.worker.storeScanIndexCache == nil {
+				c.worker.storeScanIndexCache = make(map[*ast.FuncDecl]*storeScanDeclIndex)
+			}
+			c.worker.storeScanIndexCache[copied] = index
 		}
 	}
 	return copied

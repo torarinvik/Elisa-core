@@ -230,6 +230,12 @@ func (a *Analyzer) callReturnRefinementScheme(value ast.Expr) (ValueRefinementSc
 	if !ok || call == nil {
 		return ValueRefinementScheme{}, false
 	}
+	// A canonical signature supplies the return predicates for all call
+	// resolution paths. Most calls have none; avoid building and copying an
+	// entire call contract merely to discover an empty return channel.
+	if ft, found := a.callFuncType(call); found && ft.SpecSignature != nil && len(ft.SpecSignature.ResultPredicates) == 0 {
+		return ValueRefinementScheme{}, false
+	}
 	scheme, ok := a.callRefinementScheme(call)
 	if !ok || len(scheme.ReturnRefinements) == 0 {
 		return ValueRefinementScheme{}, false

@@ -65,3 +65,46 @@ func BenchmarkStorageViewBodyScan(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkStorageViewBodyScanWide(b *testing.B) {
+	decl := &ast.FuncDecl{Body: make([]ast.Stmt, 128)}
+	for i := range decl.Body {
+		decl.Body[i] = &ast.ReturnStmt{Value: &ast.Ident{Name: "x"}}
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if len(storageViewScanBody(decl).nodes) != 256 {
+			b.Fatal("wrong node count")
+		}
+	}
+}
+
+func BenchmarkStorageViewBodyScanReusable(b *testing.B) {
+	decl := &ast.FuncDecl{Body: make([]ast.Stmt, 128)}
+	for i := range decl.Body {
+		decl.Body[i] = &ast.ReturnStmt{Value: &ast.Ident{Name: "x"}}
+	}
+	for _, reusable := range []bool{false, true} {
+		name := "fresh"
+		if reusable {
+			name = "reusable"
+		}
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				var body storageViewSolveBody
+				if reusable {
+					body = storageViewScanBodyWithNodes(decl, borrowStorageViewNodes())
+				} else {
+					body = storageViewScanBody(decl)
+				}
+				if len(body.nodes) != 256 {
+					b.Fatal("wrong node count")
+				}
+				if reusable {
+					releaseStorageViewNodes(body.nodes)
+				}
+			}
+		})
+	}
+}

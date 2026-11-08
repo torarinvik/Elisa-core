@@ -18,17 +18,63 @@ type SyntaxSnapshot struct {
 	nodes, slices, maps int
 }
 
-// RetainedBytes estimates retained graph payload, including container overhead; it is not an RSS bound.
+// RetainedBytes estimates owned graph payload, including container overhead; it
+// is not an RSS bound and excludes borrowed text in transient snapshots.
 func (s *SyntaxSnapshot) RetainedBytes() int { return s.bytes }
 
 func NewSyntaxSnapshot(file *File, limit int) (*SyntaxSnapshot, error) {
+	return newSyntaxSnapshot(file, limit, false)
+}
+
+// NewTransientSyntaxSnapshot borrows immutable string storage from the input.
+// The snapshot can therefore retain the input's backing strings; use it only
+// for short-lived work that already retains the input graph.
+func NewTransientSyntaxSnapshot(file *File, limit int) (*SyntaxSnapshot, error) {
+	return newSyntaxSnapshot(file, limit, true)
+}
+
+func newSyntaxSnapshot(file *File, limit int, borrowText bool) (*SyntaxSnapshot, error) {
 	if !syntaxFastSchemaValid {
 		return nil, fmt.Errorf("syntax replay schema requires regeneration")
 	}
 	if file == nil {
 		return nil, fmt.Errorf("missing syntax file")
 	}
-	c := &syntaxFastCopier{own: true, limit: limit, nodes: map[any]any{}, slices: map[syntaxFastSlice]any{}, maps: map[syntaxFastMap]any{}, text: map[string]string{}}
+	c := &syntaxFastCopier{own: true, limit: limit}
+	if borrowText {
+		if nodes := transientSyntaxNodePool.Get(); nodes != nil {
+			c.nodes = nodes.(map[any]any)
+		}
+		if slices := transientSyntaxSlicePool.Get(); slices != nil {
+			c.slices = slices.(map[syntaxFastSlice]any)
+		}
+		if storage := transientSyntaxStoragePool.Get(); storage != nil {
+			c.storage = storage.([]syntaxStorage)[:0]
+		}
+		defer func() {
+			if len(c.nodes) <= 1<<14 {
+				clear(c.nodes)
+				transientSyntaxNodePool.Put(c.nodes)
+			}
+			if len(c.slices) <= 1<<14 {
+				clear(c.slices)
+				transientSyntaxSlicePool.Put(c.slices)
+			}
+			// The overlap checker only keeps integer address ranges; it does not own
+			// any input or output objects. Avoid retaining exceptionally large buffers.
+			if cap(c.storage) > 0 && cap(c.storage) <= 1<<16 {
+				transientSyntaxStoragePool.Put(c.storage[:0])
+			}
+		}()
+	} else {
+		c.text = map[string]string{}
+	}
+	if c.nodes == nil {
+		c.nodes = map[any]any{}
+	}
+	if c.slices == nil {
+		c.slices = map[syntaxFastSlice]any{}
+	}
 	c.charge(int(reflect.TypeOf(SyntaxSnapshot{}).Size()))
 	value := captureSyntaxFile(c, file)
 	if c.err == nil {
@@ -40,6 +86,11 @@ func NewSyntaxSnapshot(file *File, limit int) (*SyntaxSnapshot, error) {
 	}
 	return &SyntaxSnapshot{file: value, bytes: c.bytes, nodes: len(c.nodes), slices: len(c.slices), maps: len(c.maps)}, nil
 }
+
+var transientSyntaxStoragePool sync.Pool
+var transientSyntaxNodePool sync.Pool
+var transientSyntaxSlicePool sync.Pool
+
 func (s *SyntaxSnapshot) CopyFile() (*File, error) {
 	if s == nil || s.file == nil {
 		return nil, fmt.Errorf("missing syntax snapshot")
@@ -123,7 +174,11 @@ func (s *SyntaxSnapshot) replayCopier(declarations int) (*syntaxFastCopier, int)
 		return int(capacity)
 	}
 	nodes, bucket := borrowSyntaxReplayNodes(estimate(s.nodes))
-	return &syntaxFastCopier{nodes: nodes, slices: make(map[syntaxFastSlice]any, estimate(s.slices)), maps: make(map[syntaxFastMap]any, estimate(s.maps))}, bucket
+	var maps map[syntaxFastMap]any
+	if capacity := estimate(s.maps); capacity > 0 {
+		maps = make(map[syntaxFastMap]any, capacity)
+	}
+	return &syntaxFastCopier{nodes: nodes, slices: make(map[syntaxFastSlice]any, estimate(s.slices)), maps: maps}, bucket
 }
 
 // CopyDeclaration returns a fresh pristine copy of declaration i. The snapshot is

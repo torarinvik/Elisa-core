@@ -1,7 +1,8 @@
 package semantic
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -32,6 +33,19 @@ func nodePos(node ast.Node) lexer.Pos {
 	return node.Pos()
 }
 
+func comparePosition(a, b lexer.Pos) int {
+	if order := cmp.Compare(a.File, b.File); order != 0 {
+		return order
+	}
+	if order := cmp.Compare(a.Offset, b.Offset); order != 0 {
+		return order
+	}
+	if order := cmp.Compare(a.Line, b.Line); order != 0 {
+		return order
+	}
+	return cmp.Compare(a.Col, b.Col)
+}
+
 // symbolLess orders symbols by name, then by declaration position.
 func symbolLess(a, b *Symbol) bool {
 	if a == nil || b == nil {
@@ -49,7 +63,21 @@ func sortedSymbolKeys[V any](m map[*Symbol]V) []*Symbol {
 	for sym := range m {
 		keys = append(keys, sym)
 	}
-	sort.Slice(keys, func(i, j int) bool { return symbolLess(keys[i], keys[j]) })
+	slices.SortFunc(keys, func(a, b *Symbol) int {
+		if a == nil || b == nil {
+			if a == b {
+				return 0
+			}
+			if a == nil {
+				return -1
+			}
+			return 1
+		}
+		if order := cmp.Compare(a.Name, b.Name); order != 0 {
+			return order
+		}
+		return comparePosition(nodePos(a.Node), nodePos(b.Node))
+	})
 	return keys
 }
 
@@ -59,15 +87,20 @@ func sortedFuncDeclKeys[V any](m map[*ast.FuncDecl]V) []*ast.FuncDecl {
 	for decl := range m {
 		keys = append(keys, decl)
 	}
-	sort.Slice(keys, func(i, j int) bool {
-		a, b := keys[i], keys[j]
+	slices.SortFunc(keys, func(a, b *ast.FuncDecl) int {
 		if a == nil || b == nil {
-			return a == nil && b != nil
+			if a == b {
+				return 0
+			}
+			if a == nil {
+				return -1
+			}
+			return 1
 		}
-		if a.Name != b.Name {
-			return a.Name < b.Name
+		if order := cmp.Compare(a.Name, b.Name); order != 0 {
+			return order
 		}
-		return posLess(a.Pos(), b.Pos())
+		return comparePosition(a.Pos(), b.Pos())
 	})
 	return keys
 }

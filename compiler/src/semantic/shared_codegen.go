@@ -21,10 +21,13 @@ import (
 type sharedCodegen struct {
 	analyzerMu                 sync.Mutex
 	memoMu                     sync.Mutex
+	storeScanModeMu            sync.RWMutex
 	unkeyedMu                  sync.Mutex
 	canonicalMu                sync.Mutex
 	bodies                     map[specializationKey]*SpecializedFunction
 	inFlight                   map[specializationKey]*specializationCall
+	storeScanModes             map[storeScanKey]storeMode
+	storeScanIndexes           map[*ast.FuncDecl]*storeScanDeclIndex
 	compilerBuiltinHelperCalls map[*ast.CallExpr]string
 	programRegions             map[string]bool
 	canonicalNodes             map[ast.Node]bool
@@ -32,6 +35,28 @@ type sharedCodegen struct {
 	canonicalScopes            map[*Scope]bool
 	// restore puts back the analyzer's own maps when the session ends.
 	restore []func()
+}
+
+// Specialization indexes live outside the frozen canonical analyzer. The
+// session lock protects their creation and copying across codegen workers.
+func (r *Result) cloneSpecializationStoreScanIndex(decl *ast.FuncDecl, nodes map[ast.Node]ast.Node) *storeScanDeclIndex {
+	if r == nil || r.analyzer == nil {
+		return nil
+	}
+	if sh := r.shared; sh != nil {
+		sh.storeScanModeMu.Lock()
+		defer sh.storeScanModeMu.Unlock()
+		if sh.storeScanIndexes == nil {
+			sh.storeScanIndexes = make(map[*ast.FuncDecl]*storeScanDeclIndex)
+		}
+		index := sh.storeScanIndexes[decl]
+		if index == nil {
+			index = (&Analyzer{}).storeScanIndex(decl)
+			sh.storeScanIndexes[decl] = index
+		}
+		return cloneStoreScanIndexForSyntax(index, nodes)
+	}
+	return cloneStoreScanIndexForSyntax(r.analyzer.storeScanIndex(decl), nodes)
 }
 
 type specializationCall struct {
@@ -50,7 +75,7 @@ type specializationKey struct {
 // must call EndSharedCodegen after every generator has finished, and nothing
 // else may use r in between.
 func (r *Result) BeginSharedCodegen() {
-	sh := &sharedCodegen{bodies: map[specializationKey]*SpecializedFunction{}}
+	sh := &sharedCodegen{bodies: map[specializationKey]*SpecializedFunction{}, storeScanModes: map[storeScanKey]storeMode{}}
 	if a := r.analyzer; a != nil {
 		// These codegen queries are frequent and immutable after analysis. Give
 		// the concurrent workers detached snapshots so they do not serialize on
@@ -60,6 +85,28 @@ func (r *Result) BeginSharedCodegen() {
 		sh.restore = privatizeSharedMaps(r, a)
 	}
 	r.shared = sh
+}
+
+func (sh *sharedCodegen) lookupStoreScanMode(key storeScanKey) (storeMode, bool) {
+	if sh == nil {
+		return storeNone, false
+	}
+	sh.storeScanModeMu.RLock()
+	mode, ok := sh.storeScanModes[key]
+	sh.storeScanModeMu.RUnlock()
+	return mode, ok
+}
+
+func (sh *sharedCodegen) cacheStoreScanMode(key storeScanKey, mode storeMode) {
+	if sh == nil {
+		return
+	}
+	sh.storeScanModeMu.Lock()
+	if sh.storeScanModes == nil {
+		sh.storeScanModes = make(map[storeScanKey]storeMode)
+	}
+	sh.storeScanModes[key] = mode
+	sh.storeScanModeMu.Unlock()
 }
 
 type sharedProofOwnerIndex struct {

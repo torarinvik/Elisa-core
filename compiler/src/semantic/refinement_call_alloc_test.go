@@ -75,6 +75,54 @@ func BenchmarkCallRefinementScheme(b *testing.B) {
 	}
 }
 
+func TestCallRequiresSchemeMatchesOwnedHeader(t *testing.T) {
+	for _, extern := range []bool{false, true} {
+		for _, canonical := range []bool{false, true} {
+			a, call, ft, _, _ := refinementCallFixture(extern)
+			if !canonical {
+				ft.SpecSignature = nil
+			}
+			want, wantOK := a.callRefinementScheme(call)
+			got, gotOK := a.callRequiresScheme(call)
+			if gotOK != wantOK || got.DeclName != want.DeclName || got.IsLemma != want.IsLemma || !reflect.DeepEqual(got.Params, want.Params) || !reflect.DeepEqual(got.Requires, want.Requires) {
+				t.Fatalf("extern=%v canonical=%v: header differs: got %+v want %+v", extern, canonical, got, want)
+			}
+		}
+	}
+}
+
+func BenchmarkCallRequiresScheme(b *testing.B) {
+	a, call, _, _, _ := refinementCallFixture(false)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if _, ok := a.callRequiresScheme(call); !ok {
+			b.Fatal("missing scheme")
+		}
+	}
+}
+
+func TestEmptyCallArgRefinementsRetainProofOrigin(t *testing.T) {
+	for _, extern := range []bool{false, true} {
+		a, call, ft, _, _ := refinementCallFixture(extern)
+		ft.SpecSignature.ParamPredicates = nil
+		a.proofLifecycle.Current = &proofContribution{}
+		a.dischargeCallArgRefinements(call, nil)
+		origin := a.currentScope.Symbols["callee"].Node
+		if !a.proofLifecycle.Current.Origins[origin] {
+			t.Fatalf("extern=%v: missing callee origin", extern)
+		}
+	}
+}
+
+func BenchmarkEmptyCallArgRefinements(b *testing.B) {
+	a, call, ft, _, _ := refinementCallFixture(false)
+	ft.SpecSignature.ParamPredicates = nil
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		a.dischargeCallArgRefinements(call, nil)
+	}
+}
+
 // Reference copy used by the pre-optimization call adapter.
 func cloneRefinementScheme(s RefinementScheme) RefinementScheme {
 	out := s
@@ -91,4 +139,39 @@ func cloneRefinementScheme(s RefinementScheme) RefinementScheme {
 		out.ParamRefinementEnsures[i].Args = append([]ast.Expr(nil), s.ParamRefinementEnsures[i].Args...)
 	}
 	return out
+}
+
+func TestCallReturnRefinementEmptyCanonical(t *testing.T) {
+	for _, extern := range []bool{false, true} {
+		a, call, ft, _, _ := refinementCallFixture(extern)
+		ft.SpecSignature.ResultPredicates = nil
+		if _, ok := a.callReturnRefinementScheme(call); ok {
+			t.Fatalf("extern=%v: empty canonical return reported a refinement", extern)
+		}
+		ft.SpecSignature.ResultPredicates = []RefinementPredicate{{Subject: BinderRef{Kind: SpecBinderResult}, LawName: "Positive"}}
+		if s, ok := a.callReturnRefinementScheme(call); !ok || len(s.Preds) != 1 || s.Preds[0].Name != "Positive" {
+			t.Fatalf("extern=%v: lost canonical return refinement: %+v", extern, s)
+		}
+	}
+}
+
+func BenchmarkCallReturnRefinementEmpty(b *testing.B) {
+	a, call, ft, _, _ := refinementCallFixture(false)
+	ft.SpecSignature.ResultPredicates = nil
+	for _, legacy := range []bool{true, false} {
+		name := "fast"
+		if legacy {
+			name = "full_scheme"
+		}
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if legacy {
+					_, _ = a.callRefinementScheme(call)
+				} else {
+					_, _ = a.callReturnRefinementScheme(call)
+				}
+			}
+		})
+	}
 }

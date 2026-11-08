@@ -62,15 +62,32 @@ func (a *Analyzer) calleeStoreModeInto(decl *ast.FuncDecl, other, index int) sto
 	if mode, ok := a.lookupStoreScanMode(key); ok {
 		return mode
 	}
+	var context *specializationContext
+	var previousTargetHit bool
+	if a.parallel != nil {
+		context = a.parallel.specialization
+	}
+	if context != nil {
+		previousTargetHit = context.storeScanTargetHit
+		context.storeScanTargetHit = false
+	}
 	saved := a.storeScanCycleHit
 	a.storeScanCycleHit = false
 	restore := a.storeScanBeginSearch()
 	mode := a.calleeStoreModeIntoSeen(decl, other, index, map[storeScanKey]bool{})
 	restore()
 	a.storeScanCycleHit = saved
+	targetHit := false
+	if context != nil {
+		targetHit = context.storeScanTargetHit
+		context.storeScanTargetHit = previousTargetHit || targetHit
+	}
 	// The top-level result of one DFS is the complete least fixpoint for its own key: every
 	// body on any cycle through it was scanned within this search.
 	a.cacheStoreScan(key, mode)
+	if !previousTargetHit && !targetHit {
+		a.publishSpecializationStoreScanMode(key, mode)
+	}
 	return mode
 }
 
@@ -91,6 +108,7 @@ func (a *Analyzer) cacheStoreScan(key storeScanKey, mode storeMode) {
 // final for the frames inside it.
 func (a *Analyzer) calleeStoreModeIntoSeen(decl *ast.FuncDecl, other, index int, seen map[storeScanKey]bool) storeMode {
 	decl = a.readDecl(decl)
+	a.noteSpecializationStoreScanTarget(decl)
 	key := storeScanKey{decl, other, index}
 	if mode, ok := a.lookupStoreScanMode(key); ok {
 		return mode
@@ -143,8 +161,13 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 		storeScanTraceOther, storeScanTraceTarget = decl.Params[other].Name, decl.Params[index].Name
 		defer func() { storeScanTraceOther, storeScanTraceTarget = savedOther, savedTarget }()
 	}
-	params, header, content, targets, views := a.storeScanTaint(decl, other, decl.Params[index].Name, seen)
 	scanIdx := a.storeScanIndex(decl)
+	// The directed result is raised only by assignments or calls. For bodies
+	// with neither, there is no reason to compute the taint fixpoint at all.
+	if len(scanIdx.payloadNodeList()) == 0 {
+		return storeNone
+	}
+	params, header, content, targets, views := a.storeScanTaint(decl, other, decl.Params[index].Name, seen)
 	holders := a.storeScanLastHolders
 	// targetsOrHolders: anything that mentions the target or a holder of its parts.
 	targetsOrHolders := targets
@@ -180,12 +203,13 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 		}
 		// A value whose (already analyzed) type cannot hold region storage carries none.
 		// Probe the cached storage property before walking generic enum payloads.
-		if t, known := a.lookupExprType(inner); known && a.storeScanTypeIsPlainValue(t) {
+		knownType, typeKnown := a.lookupExprType(inner)
+		if typeKnown && a.storeScanTypeIsPlainValue(knownType) {
 			return storeNone
 		}
 		// The callee may not be analyzed yet (no exprTypes): a parameter field chain still has a
 		// declared type (`scope.deferred.count` is a usize).
-		if _, known := a.lookupExprType(inner); !known {
+		if !typeKnown {
 			t, ok := a.storeScanDeclTypeOf(decl, inner)
 			if !ok || t == nil {
 				t, ok = a.storeScanParamProjectionType(decl, inner)
@@ -218,7 +242,12 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 		}
 		// docs/128: a value whose declared type is program-lived (a `darray[T] @source` field)
 		// reaches only program-region storage, whatever holds it.
-		if t, known := a.lookupExprType(inner); known && a.storeScanTypeIsProgramLivedForStoreProof(t) {
+		// Unknown-type resolution above can populate expression types, so only
+		// recheck in that case. Already-known types need no repeated map lookup.
+		if !typeKnown {
+			knownType, typeKnown = a.lookupExprType(inner)
+		}
+		if typeKnown && a.storeScanTypeIsProgramLivedForStoreProof(knownType) {
 			return storeNone
 		}
 		// A local declared `sview @source` (every declaration) views only program-region bytes.
@@ -336,12 +365,19 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 			field, isMethod := n.Func.(*ast.FieldExpr)
 			// A builtin darray's `extend(xs)` copies xs's ELEMENTS into the receiver; it never
 			// retains xs's own header.
-			copiesElements := isMethod && field != nil && field.Field == "extend" && a.storeScanReceiverIsBuiltinDArray(decl, field.Object)
+			copiesElements, copiesElementsKnown := false, false
+			copiesReceiverElements := func() bool {
+				if !copiesElementsKnown {
+					copiesElements = isMethod && field != nil && field.Field == "extend" && a.storeScanReceiverIsBuiltinDArray(decl, field.Object)
+					copiesElementsKnown = true
+				}
+				return copiesElements
+			}
 			if isMethod && field != nil {
 				if root := rootIdentExpr(field.Object); root != nil && (targets[root.Name] || (holders[root.Name] && storeScanPlaceDepth(field.Object) >= 1)) {
 					for _, arg := range n.Args {
 						argMode := valueMode(arg)
-						if copiesElements {
+						if copiesReceiverElements() {
 							argMode = a.storeScanExtendArgMode(decl, arg, argMode)
 						}
 						mode = storeScanRaise(decl, 177, n, mode, argMode)
@@ -355,7 +391,11 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 				index int
 				mode  storeMode
 			}
-			targetArgs, taintedArgs := []int{}, []side{}
+			// Most calls have only a few operands. Keep the per-call lists on the
+			// stack while allowing append to grow for larger signatures.
+			var targetStorage [8]int
+			var taintedStorage [8]side
+			targetArgs, taintedArgs := targetStorage[:0], taintedStorage[:0]
 			for i, arg := range args {
 				if scanIdx.mentions(arg, targetsOrHolders) {
 					targetArgs = append(targetArgs, i)
@@ -375,6 +415,12 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 			if len(targetArgs) == 0 && !recvTarget {
 				return
 			}
+			// A growth method only moves values into its receiver. When that
+			// receiver is not the target, argument provenance cannot affect this
+			// directed scan and need not be computed.
+			if unrewrittenMethod && containerGrowthMethods[field.Field] && !recvTarget {
+				return
+			}
 			for i, arg := range args {
 				if m := valueMode(arg); m != storeNone {
 					taintedArgs = append(taintedArgs, side{i, m})
@@ -384,13 +430,10 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 				// An unrewritten method call: the receiver is an operand too, and the callee is
 				// unresolved. A builtin growth method moves its arguments INTO the receiver only.
 				recvMode := valueMode(field.Object)
-				if containerGrowthMethods[field.Field] && !recvTarget {
-					return
-				}
 				if recvTarget {
 					for _, s := range taintedArgs {
 						argMode := s.mode
-						if copiesElements {
+						if copiesReceiverElements() {
 							argMode = a.storeScanExtendArgMode(decl, n.Args[s.index], argMode)
 						}
 						mode = storeScanRaise(decl, 204, n, mode, argMode)
@@ -1006,6 +1049,11 @@ func storeScanMentionsHeader(node any, names map[string]bool) bool {
 	// reflection and the visited set until we need to inspect a larger value.
 	for depth := 0; depth < 8; depth++ {
 		switch expr := node.(type) {
+		case *ast.IntLit:
+			if storeFlowIntLiteralFast {
+				return expr != nil && (names[expr.Value] || names[expr.Suffix])
+			}
+			return storeScanMentionsHeaderPooled(node, names)
 		case *ast.Ident:
 			return expr != nil && (names[expr.Name] || names[rootNameOfDotted(expr.Name)])
 		case *ast.FieldExpr:
@@ -1110,10 +1158,13 @@ func walkStoreScanNodes(stmts []ast.Stmt, visit func(any)) {
 	// (ast_scan_walk_gen.go) visits exactly what storeScanWalkReflect does, without reflection.
 	seen := borrowStoreScanSeen()
 	defer releaseStoreScanSeen(seen)
-	if storeScanWalkTyped(stmts, visit, seen) {
-		return
+	// This root is always a statement slice; dispatch directly to the same
+	// generated cases without boxing the slice into an interface.
+	for _, stmt := range stmts {
+		if stmt != nil {
+			astScanWalkIface_ast_Stmt(stmt, visit, seen)
+		}
 	}
-	storeScanWalkReflect(reflect.ValueOf(stmts), visit, seen)
 }
 
 // The pre-body passes walk every function body dozens of times; a fresh visited set
@@ -1965,10 +2016,21 @@ func (a *Analyzer) storeScanTaintCallWrites(decl *ast.FuncDecl, call *ast.CallEx
 	decl = a.readDecl(decl)
 	changed := false
 	for _, w := range a.storeScanCallWritePlan(decl, call, params, locals) {
+		shareChecked, shareReaches := false, false
+		shares := func() bool {
+			if w.callee == nil {
+				return true
+			}
+			if !shareChecked {
+				shareReaches = a.storeScanParamReaches(storeScanShareKey(w.callee, w.into, w.from))
+				shareChecked = true
+			}
+			return shareReaches
+		}
 		// A holder: the callee may store (part of) the target place it is given into the local
 		// (`stash(holder, table.deep.lists)`), whose stores then reach the target.
 		if !targets[w.local] && !holders[w.local] && (storeScanMayAliasPlace(idx, w.value, targets) || storeScanMayAliasPlace(idx, w.value, holders)) && a.storeScanHolderMayAlias(decl, w) &&
-			(w.callee == nil || a.storeScanParamReaches(storeScanShareKey(w.callee, w.into, w.from))) && addHolder(w.local) {
+			shares() && addHolder(w.local) {
 			changed = true
 			if storeScanTrace {
 				fmt.Fprintf(os.Stderr, "TGTHOLD %s src=%s local=%s at %s writer=%s\n", decl.Name, storeScanTraceOther, w.local, call.Pos(), storeScanParamWriterOf[storeScanShareKey(w.callee, w.into, w.from)])
@@ -1977,7 +2039,7 @@ func (a *Analyzer) storeScanTaintCallWrites(decl *ast.FuncDecl, call *ast.CallEx
 		if w.callee != nil && !a.storeScanParamMayBeWritten(w.callee, w.into) {
 			continue // the resolved callee never writes through that parameter
 		}
-		if w.callee != nil && !a.storeScanParamReaches(storeScanShareKey(w.callee, w.into, w.from)) {
+		if w.callee != nil && !shares() {
 			// The callee never stores a value sharing parameter from's storage into into's: the
 			// local receives at most what the callee reads out of the source (content), never
 			// its header. (Share facts are per (into, from) pair.)
@@ -2097,8 +2159,7 @@ func (a *Analyzer) storeScanTaintBinders(decl *ast.FuncDecl, idx *storeScanDeclI
 		return
 	}
 	bound := idx.boundNames(n)
-	readsContent := idx.headerMentions(n, content)
-	readsHeader := idx.headerMentions(n, header)
+	readsContent, readsHeader := idx.headerMentionsTwo(n, content, header)
 	if m, isMatch := n.(*ast.MatchStmt); isMatch && m != nil {
 		// A match's binders receive parts of its scrutinee only; its patterns NAME the binders
 		// (a tainted `then_body` in `St.If(cond, then_body, ..)` is being bound, not read) and

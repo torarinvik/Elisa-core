@@ -146,34 +146,48 @@ func (a *Analyzer) addProofReportOrigin(origin ast.Node) {
 
 // A probe suppresses only audited speculative semantic entrypoints. It restores
 // category/dependencies as well as payload, and never replaces a committed owner.
-func (a *Analyzer) beginProofReportProbe() func() {
-	priorDepth, category := a.proofLifecycle.ProbeDepth, a.currentProofCategory
-	priorUnknown, current := a.proofLifecycle.Unknown, a.proofLifecycle.Current
-	priorSynthetic, priorSyntheticOwner := a.proofLifecycle.Synthetic, a.proofLifecycle.SyntheticOwner
-	n := len(a.proofReport)
-	// All dependency mutations go through addProofReportOrigin, which is inert
-	// at probe depth. Preserve this immutable map identity instead of copying
-	// the growing body dependency set for every speculative typing operation.
-	var origins map[ast.Node]bool
-	if current != nil {
-		origins = current.Origins
+// proofReportProbe is kept by value at the call site so speculative checks do
+// not allocate a restoration closure. restore remains idempotent for callers
+// that restore early as well as deferring cleanup.
+type proofReportProbe struct {
+	a              *Analyzer
+	depth          int
+	category       ProofObligationCategory
+	unknown        string
+	current        *proofContribution
+	synthetic      *ast.FuncDecl
+	syntheticOwner ast.Node
+	length         int
+	origins        map[ast.Node]bool
+	restored       bool
+}
+
+func (a *Analyzer) beginProofReportProbe() proofReportProbe {
+	p := proofReportProbe{a: a, depth: a.proofLifecycle.ProbeDepth, category: a.currentProofCategory,
+		unknown: a.proofLifecycle.Unknown, current: a.proofLifecycle.Current,
+		synthetic: a.proofLifecycle.Synthetic, syntheticOwner: a.proofLifecycle.SyntheticOwner,
+		length: len(a.proofReport)}
+	if p.current != nil {
+		p.origins = p.current.Origins
 	}
 	a.proofLifecycle.ProbeDepth++
-	restored := false
-	return func() {
-		if restored {
-			return
-		}
-		restored = true
-		a.proofLifecycle.ProbeDepth = priorDepth
-		a.proofLifecycle.Current = current
-		a.proofLifecycle.Unknown = priorUnknown
-		a.proofLifecycle.Synthetic, a.proofLifecycle.SyntheticOwner = priorSynthetic, priorSyntheticOwner
-		a.currentProofCategory = category
-		a.proofReport = a.proofReport[:n]
-		if current != nil {
-			current.Origins = origins
-		}
+	return p
+}
+
+func (p *proofReportProbe) restore() {
+	if p.restored {
+		return
+	}
+	p.restored = true
+	a := p.a
+	a.proofLifecycle.ProbeDepth = p.depth
+	a.proofLifecycle.Current = p.current
+	a.proofLifecycle.Unknown = p.unknown
+	a.proofLifecycle.Synthetic, a.proofLifecycle.SyntheticOwner = p.synthetic, p.syntheticOwner
+	a.currentProofCategory = p.category
+	a.proofReport = a.proofReport[:p.length]
+	if p.current != nil {
+		p.current.Origins = p.origins
 	}
 }
 

@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"maps"
 )
 
 func (a *Analyzer) cloneBorrowedOwnerRefBindings() map[*Symbol]borrowedOwnerRefState {
@@ -64,6 +65,14 @@ func (a *Analyzer) cloneTrackedValueTypeWithMemoDepth(t Type, memo *trackedClone
 		a.reportSemanticDepthLimit("tracked-type clone", semanticCloneDepthLimit)
 		return invalidType
 	}
+	// Implicit memos never record immutable leaves. Explicit memos must still
+	// consult their caller-provided replacements before returning a leaf.
+	if memo.sharePointerFree {
+		switch t.(type) {
+		case *BuiltinType, *TypeParamType, *NeverType, *NullType, *InvalidType, *ErrorSetType, *EnumType, *OpaqueType:
+			return t
+		}
+	}
 	if cloned, ok := memo.get(t); ok {
 		return cloned
 	}
@@ -77,7 +86,7 @@ func (a *Analyzer) cloneTrackedValueTypeWithMemoDepth(t Type, memo *trackedClone
 		cloned := *tt
 		cloned.Fields = make(map[string]Field, len(tt.Fields))
 		clonedPtr := &cloned
-		memo.set(t, clonedPtr)
+		memo.setNew(t, clonedPtr)
 		for name, field := range tt.Fields {
 			field.Type = a.cloneTrackedValueTypeWithMemoDepth(field.Type, memo, depth+1)
 			if IsInvalidType(field.Type) {
@@ -90,7 +99,7 @@ func (a *Analyzer) cloneTrackedValueTypeWithMemoDepth(t Type, memo *trackedClone
 	case *GenericInstanceType:
 		cloned := *tt
 		cloned.Args = make([]Type, len(tt.Args))
-		memo.set(t, &cloned)
+		memo.setNew(t, &cloned)
 		for i, arg := range tt.Args {
 			cloned.Args[i] = a.cloneTrackedValueTypeWithMemoDepth(arg, memo, depth+1)
 			if IsInvalidType(cloned.Args[i]) {
@@ -106,7 +115,7 @@ func (a *Analyzer) cloneTrackedValueTypeWithMemoDepth(t Type, memo *trackedClone
 		return &cloned
 	case *RefType:
 		cloned := *tt
-		memo.set(t, &cloned)
+		memo.setNew(t, &cloned)
 		cloned.Elem = a.cloneTrackedValueTypeWithMemoDepth(tt.Elem, memo, depth+1)
 		if IsInvalidType(cloned.Elem) {
 			memo.set(t, invalidType)
@@ -115,7 +124,7 @@ func (a *Analyzer) cloneTrackedValueTypeWithMemoDepth(t Type, memo *trackedClone
 		return &cloned
 	case *ArrayType:
 		cloned := *tt
-		memo.set(t, &cloned)
+		memo.setNew(t, &cloned)
 		cloned.Elem = a.cloneTrackedValueTypeWithMemoDepth(tt.Elem, memo, depth+1)
 		if IsInvalidType(cloned.Elem) {
 			memo.set(t, invalidType)
@@ -124,7 +133,7 @@ func (a *Analyzer) cloneTrackedValueTypeWithMemoDepth(t Type, memo *trackedClone
 		return &cloned
 	case *DArrayType:
 		cloned := *tt
-		memo.set(t, &cloned)
+		memo.setNew(t, &cloned)
 		cloned.Elem = a.cloneTrackedValueTypeWithMemoDepth(tt.Elem, memo, depth+1)
 		if IsInvalidType(cloned.Elem) {
 			memo.set(t, invalidType)
@@ -133,7 +142,7 @@ func (a *Analyzer) cloneTrackedValueTypeWithMemoDepth(t Type, memo *trackedClone
 		return &cloned
 	case *OptionalType:
 		cloned := *tt
-		memo.set(t, &cloned)
+		memo.setNew(t, &cloned)
 		cloned.Value = a.cloneTrackedValueTypeWithMemoDepth(tt.Value, memo, depth+1)
 		if IsInvalidType(cloned.Value) {
 			memo.set(t, invalidType)
@@ -142,7 +151,7 @@ func (a *Analyzer) cloneTrackedValueTypeWithMemoDepth(t Type, memo *trackedClone
 		return &cloned
 	case *ViewType:
 		cloned := *tt
-		memo.set(t, &cloned)
+		memo.setNew(t, &cloned)
 		cloned.Elem = a.cloneTrackedValueTypeWithMemoDepth(tt.Elem, memo, depth+1)
 		if IsInvalidType(cloned.Elem) {
 			memo.set(t, invalidType)
@@ -151,7 +160,7 @@ func (a *Analyzer) cloneTrackedValueTypeWithMemoDepth(t Type, memo *trackedClone
 		return &cloned
 	case *DictType:
 		cloned := *tt
-		memo.set(t, &cloned)
+		memo.setNew(t, &cloned)
 		cloned.Key = a.cloneTrackedValueTypeWithMemoDepth(tt.Key, memo, depth+1)
 		if IsInvalidType(cloned.Key) {
 			memo.set(t, invalidType)
@@ -168,11 +177,11 @@ func (a *Analyzer) cloneTrackedValueTypeWithMemoDepth(t Type, memo *trackedClone
 		if cloned == nil {
 			return nil
 		}
-		memo.set(t, cloned)
+		memo.setNew(t, cloned)
 		return cloned
 	case *ErrorUnionType:
 		cloned := *tt
-		memo.set(t, &cloned)
+		memo.setNew(t, &cloned)
 		cloned.Value = a.cloneTrackedValueTypeWithMemoDepth(tt.Value, memo, depth+1)
 		if IsInvalidType(cloned.Value) {
 			memo.set(t, invalidType)
@@ -181,7 +190,7 @@ func (a *Analyzer) cloneTrackedValueTypeWithMemoDepth(t Type, memo *trackedClone
 		return &cloned
 	case *PackedEnumStoreType:
 		cloned := *tt
-		memo.set(t, &cloned)
+		memo.setNew(t, &cloned)
 		cloned.State = a.cloneTrackedValueTypeWithMemoDepth(tt.State, memo, depth+1)
 		if IsInvalidType(cloned.State) {
 			memo.set(t, invalidType)
@@ -190,11 +199,11 @@ func (a *Analyzer) cloneTrackedValueTypeWithMemoDepth(t Type, memo *trackedClone
 		return &cloned
 	case *CStrType:
 		cloned := *tt
-		memo.set(t, &cloned)
+		memo.setNew(t, &cloned)
 		return &cloned
 	case *SViewType:
 		cloned := *tt
-		memo.set(t, &cloned)
+		memo.setNew(t, &cloned)
 		return &cloned
 	case *BuiltinType, *TypeParamType, *NeverType, *NullType, *InvalidType, *ErrorSetType, *EnumType, *OpaqueType:
 		// These leaves retain identity and cannot recurse. Recording them in the
@@ -206,7 +215,7 @@ func (a *Analyzer) cloneTrackedValueTypeWithMemoDepth(t Type, memo *trackedClone
 			memo.set(t, invalidType)
 			return invalidType
 		}
-		memo.set(t, cloned)
+		memo.setNew(t, cloned)
 		return cloned
 	}
 }
@@ -364,6 +373,9 @@ func (a *Analyzer) snapshotSpecializedValueTypes(src map[*Symbol]Type) map[*Symb
 	if src == nil {
 		return nil
 	}
+	if !trackedShareCheck {
+		return maps.Clone(src)
+	}
 	cloned := make(map[*Symbol]Type, len(src))
 	for sym, typ := range src {
 		cloned[sym] = a.shareTrackedValueType(typ)
@@ -384,12 +396,5 @@ func (a *Analyzer) cloneTrackedValueTypeMapWithSeen(src map[*Symbol]Type, seen m
 }
 
 func (a *Analyzer) cloneValueBindings() map[*Symbol]ast.Expr {
-	if a.currentValueBindings == nil {
-		return nil
-	}
-	cloned := make(map[*Symbol]ast.Expr, len(a.currentValueBindings))
-	for sym, expr := range a.currentValueBindings {
-		cloned[sym] = expr
-	}
-	return cloned
+	return maps.Clone(a.currentValueBindings)
 }

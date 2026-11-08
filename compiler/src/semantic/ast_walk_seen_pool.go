@@ -12,10 +12,12 @@ type fillWalkSeen struct {
 	sparse int
 }
 
+const fillWalkSeenMaxEntries = 1 << 16
+
 func (s *fillWalkSeen) reset() bool {
 	used := len(s.values)
 	// Avoid retaining an exceptional whole-program walk in every worker's pool.
-	if used > 1<<14 {
+	if used > fillWalkSeenMaxEntries {
 		return false
 	}
 	s.peak = max(s.peak, used)

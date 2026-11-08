@@ -153,7 +153,8 @@ func (a *Analyzer) forgetEquationEligibility() {
 // (pristine pre-loop) scope — the same scope the loop variables and measure already resolve in. It is
 // purely a type-recording side effect: it never changes which substitutions exist or what they mean.
 func (a *Analyzer) typeLoopSubstCastsForSMT(subst map[string]ast.Expr) {
-	defer a.beginProofReportProbe()()
+	proofProbe := a.beginProofReportProbe()
+	defer proofProbe.restore()
 	if a == nil || len(subst) == 0 {
 		return
 	}
@@ -462,7 +463,8 @@ func (a *Analyzer) measureStrictlyDecreasesUnderPath(measure ast.Expr, subst map
 // translating machine arithmetic. It deliberately declines to type arbitrary call expressions here;
 // the ordinary body pass remains responsible for their full analysis.
 func (a *Analyzer) typePureTerminationExprsForSMT(exprs ...ast.Expr) {
-	defer a.beginProofReportProbe()()
+	proofProbe := a.beginProofReportProbe()
+	defer proofProbe.restore()
 	if a == nil {
 		return
 	}

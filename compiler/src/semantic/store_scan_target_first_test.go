@@ -9,6 +9,37 @@ import (
 	"testing"
 )
 
+func BenchmarkStoreScanBodyWithoutWrites(b *testing.B) {
+	source := "struct Table:\n    names: mutable darray[sview] = []\ndef scan(table: mutable Table&, names: darray[sview]&) -> i64:\n" + strings.Repeat("    if true:\n        pass\n", 128) + "    return 0\n"
+	l := lexer.New("no_writes.elisa", []byte(source))
+	p := parser.New(l.Tokenize())
+	file := p.ParseFile("no_writes.elisa")
+	if len(l.Errors()) != 0 || len(p.Errors()) != 0 {
+		b.Fatal("invalid benchmark fixture")
+	}
+	result := AnalyzeWithOptions(file, AnalyzeOptions{})
+	a := result.analyzer
+	var fn *ast.FuncDecl
+	for decl := range a.funcDeclSymbols {
+		if decl.Name == "scan" {
+			fn = decl
+		}
+	}
+	if fn == nil {
+		b.Fatal("missing scan declaration")
+	}
+	if a.calleeStoreModeIntoBody(fn, 1, 0, map[storeScanKey]bool{}) != storeNone {
+		b.Fatal("unexpected store")
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if a.calleeStoreModeIntoBody(fn, 1, 0, map[storeScanKey]bool{}) != storeNone {
+			b.Fatal("unexpected store")
+		}
+	}
+}
+
 func BenchmarkStoreScanCallsWithoutTarget(b *testing.B) {
 	source := "struct Table:\n    names: mutable darray[sview] = []\ndef observe(names: darray[sview]&):\n    pass\ndef scan(table: mutable Table&, names: darray[sview]&):\n" + strings.Repeat("    observe(names)\n", 128)
 	l := lexer.New("untargeted_calls.elisa", []byte(source))

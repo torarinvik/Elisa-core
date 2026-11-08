@@ -10,14 +10,7 @@ import (
 )
 
 func (a *Analyzer) cloneAffineValueStates() map[affineValueKey]affineValueState {
-	if a.currentAffineValues == nil {
-		return nil
-	}
-	cloned := make(map[affineValueKey]affineValueState, len(a.currentAffineValues))
-	for key, state := range a.currentAffineValues {
-		cloned[key] = state
-	}
-	return cloned
+	return maps.Clone(a.currentAffineValues)
 }
 
 func cloneBorrowedOwnerRefState(state borrowedOwnerRefState) borrowedOwnerRefState {

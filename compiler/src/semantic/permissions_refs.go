@@ -53,6 +53,16 @@ func canonicalizePermissionRefs(refs []ast.PermissionRef) []ast.PermissionRef {
 	if len(refs) == 1 && refs[0].Name != "" {
 		return []ast.PermissionRef{clonePermissionRef(refs[0])}
 	}
+	// Two different members of the same family are common in effect rows.
+	// Their order is the only normalization needed; keep owned output.
+	if len(refs) == 2 && refs[0].Name != "" && refs[0].Name == refs[1].Name &&
+		refs[0].Member != "" && refs[1].Member != "" && refs[0].Member != refs[1].Member {
+		first, second := refs[0], refs[1]
+		if second.Member < first.Member {
+			first, second = second, first
+		}
+		return []ast.PermissionRef{clonePermissionRef(first), clonePermissionRef(second)}
+	}
 	familyRefs := make(map[string]ast.PermissionRef)
 	memberRefs := make(map[string]ast.PermissionRef)
 	for _, ref := range refs {
@@ -92,6 +102,9 @@ func canonicalizePermissionRefs(refs []ast.PermissionRef) []ast.PermissionRef {
 func permissionFamiliesFromRefs(refs []ast.PermissionRef) []string {
 	if len(refs) == 0 {
 		return nil
+	}
+	if len(refs) == 2 && refs[0].Name != "" && refs[0].Name == refs[1].Name {
+		return []string{refs[0].Name}
 	}
 	seen := make(map[string]bool, len(refs))
 	out := make([]string, 0, len(refs))

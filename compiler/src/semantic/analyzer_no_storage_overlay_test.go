@@ -598,3 +598,43 @@ func TestStoreScanModeOverlayIsolation(t *testing.T) {
 		t.Fatal("nested private entry lost")
 	}
 }
+
+func TestSpecializationStoreScanCacheSharesOnlyForeignModes(t *testing.T) {
+	target := &ast.FuncDecl{Name: "specialized"}
+	foreign := &ast.FuncDecl{Name: "foreign"}
+	privateTarget := &ast.FuncDecl{Name: "specialized-private"}
+	privateForeign := &ast.FuncDecl{Name: "foreign-private"}
+	foreignKey := storeScanKey{decl: foreign, other: 0, index: 1}
+	targetKey := storeScanKey{decl: target, other: 0, index: 1}
+	shared := &sharedCodegen{storeScanModes: map[storeScanKey]storeMode{foreignKey: storeViews}}
+	context := &specializationContext{base: &Result{shared: shared}, targetDecl: target}
+	worker := &Analyzer{
+		noStorageOverlay: &analyzerNoStorageOverlay{storeModes: map[storeScanKey]storeMode{
+			foreignKey: storeElements,
+			targetKey:  storeHeader,
+		}},
+		parallel: &parallelWorkerState{
+			original:       map[*ast.FuncDecl]*ast.FuncDecl{privateTarget: target, privateForeign: foreign},
+			specialization: context,
+		},
+	}
+	if mode, ok := worker.lookupStoreScanMode(storeScanKey{decl: privateForeign, other: 0, index: 1}); !ok || mode != storeElements {
+		t.Fatalf("foreign canonical overlay lookup = %v, %v", mode, ok)
+	}
+	if _, ok := worker.lookupStoreScanMode(storeScanKey{decl: privateTarget, other: 0, index: 1}); ok {
+		t.Fatal("specialized root reused its canonical store mode")
+	}
+	newForeignKey := storeScanKey{decl: privateForeign, other: 1, index: 0}
+	worker.publishSpecializationStoreScanMode(newForeignKey, storeHeader)
+	if mode, ok := shared.lookupStoreScanMode(storeScanKey{decl: foreign, other: 1, index: 0}); !ok || mode != storeHeader {
+		t.Fatalf("foreign specialization result was not published canonically: %v, %v", mode, ok)
+	}
+	worker.publishSpecializationStoreScanMode(storeScanKey{decl: privateTarget, other: 1, index: 0}, storeNone)
+	if _, ok := shared.lookupStoreScanMode(storeScanKey{decl: target, other: 1, index: 0}); ok {
+		t.Fatal("specialized root result leaked into the shared canonical cache")
+	}
+	worker.noteSpecializationStoreScanTarget(privateTarget)
+	if !context.storeScanTargetHit {
+		t.Fatal("read-only foreign store proof did not record dependence on the specialized root")
+	}
+}

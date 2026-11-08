@@ -56,14 +56,6 @@ func (p *preBodyState) comparisonState() *preBodyState {
 	return &preBodyState{classification: p.classification, fingerprint: p.fingerprint, global: p.global, resolvedTypeNames: p.resolvedTypeNames, diags: p.diags, plainHeaders: p.plainHeaders, plainGlobal: p.plainGlobal, plainInputs: p.plainInputs, plainIdentities: p.plainIdentities, hasProofReport: p.hasProofReport}
 }
 
-var pendingPreBody *preBodyState
-
-func takePendingPreBody() *preBodyState {
-	p := pendingPreBody
-	pendingPreBody = nil
-	return p
-}
-
 func (p *preBodyState) capture(a *Analyzer, decls []scopedDecl) {
 	*p = *capturePreBody(a, decls)
 }
@@ -72,9 +64,7 @@ func (p *preBodyState) capture(a *Analyzer, decls []scopedDecl) {
 // The caller holds pendingRetainedMu.
 func scratchPreBody(file *ast.File, options AnalyzeOptions) *preBodyState {
 	probe := &preBodyState{}
-	pendingPreBody = probe
-	AnalyzeWithOptions(file, options)
-	pendingPreBody = nil
+	analyzeWithLookupRecorder(file, options, nil, nil, nil, &analysisSetup{preBody: probe})
 	if probe.fingerprint == nil {
 		return nil
 	}

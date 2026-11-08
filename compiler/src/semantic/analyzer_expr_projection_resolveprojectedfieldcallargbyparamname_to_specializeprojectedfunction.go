@@ -66,6 +66,9 @@ func (a *Analyzer) specializeProjectedFunctionFieldType(expr *ast.FieldExpr, dec
 	if !ok {
 		return declared
 	}
+	// The projected value can resolve to a function type published by another
+	// body worker. Infer and inspect its summaries on this worker's snapshot.
+	actualFunc = a.privateFuncType(nil, actualFunc)
 	if !actualFunc.ReturnProvenanceKnown {
 		a.inferFuncReturnProvenanceForExpr(fieldExpr, actualFunc)
 	}

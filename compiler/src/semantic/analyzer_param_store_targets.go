@@ -23,15 +23,13 @@ import (
 // handled by the separate return-borrow analysis. This scheduler preserves the
 // existing structural transfer rules; it does not establish alias completeness.
 func (a *Analyzer) computeParamStoreTargets(funcs []*ast.FuncDecl) map[*ast.FuncDecl][]map[int]bool {
-	out := map[*ast.FuncDecl][]map[int]bool{}
-	params := map[*ast.FuncDecl][]ast.ParamDecl{}
-	idx := map[*ast.FuncDecl]map[string]int{}
+	out := make(map[*ast.FuncDecl][]map[int]bool, len(funcs))
+	idx := make(map[*ast.FuncDecl]map[string]int, len(funcs))
 	for _, fn := range funcs {
 		if fn == nil {
 			continue
 		}
-		p := a.expandedFuncDeclParams(fn)
-		params[fn] = p
+		p := a.readOnlyExpandedFuncDeclParams(fn)
 		ts := make([]map[int]bool, len(p))
 		for i := range ts {
 			ts[i] = map[int]bool{}
@@ -52,7 +50,7 @@ func (a *Analyzer) computeParamStoreTargets(funcs []*ast.FuncDecl) map[*ast.Func
 		if fn == nil {
 			continue
 		}
-		for i := range params[fn] {
+		for i := range out[fn] {
 			if typeCarriesRegionStorage(a.paramStorageType(fn, i)) {
 				active = append(active, fn)
 				break
@@ -270,7 +268,13 @@ func (a *Analyzer) walkParamStores(body []ast.Stmt, pidx map[string]int, out map
 			}
 		case reflect.Slice, reflect.Array:
 			if v.Type() == storeScanStmtListType {
-				list(v.Interface().([]ast.Stmt), nil)
+				// Addressable statement slices can be borrowed without boxing and
+				// copying their slice header on every nested scope.
+				if v.CanAddr() {
+					list(*v.Addr().Interface().(*[]ast.Stmt), nil)
+				} else {
+					list(v.Interface().([]ast.Stmt), nil)
+				}
 				return
 			}
 			for i := 0; i < v.Len(); i++ {

@@ -1015,19 +1015,34 @@ func (a *Analyzer) transitiveRangeFact(name string) (numRange, bool) {
 
 func (a *Analyzer) visibleRangeFacts() map[string]numRange {
 	out := map[string]numRange{}
-	names := map[string]bool{}
+	hasFacts := false
 	for scope := a.currentScope; scope != nil; scope = scope.Parent {
-		for name := range scope.rangeFacts {
-			names[name] = true
+		if len(scope.rangeFacts) != 0 {
+			hasFacts = true
+			break
 		}
 		if scope.closedWorld {
 			break
 		}
 	}
-	for name := range names {
-		if r, ok := a.lookupRangeFact(name); ok {
-			out[name] = r
-		}
+	// No scope facts or bindings change during these lookups, so collect the
+	// relational graph once instead of walking it again for every name.
+	if hasFacts {
+		a.withPinnedRelationalEdges(func() {
+			for scope := a.currentScope; scope != nil; scope = scope.Parent {
+				for name := range scope.rangeFacts {
+					if _, recorded := out[name]; recorded {
+						continue
+					}
+					if r, ok := a.lookupRangeFact(name); ok {
+						out[name] = r
+					}
+				}
+				if scope.closedWorld {
+					break
+				}
+			}
+		})
 	}
 	return out
 }
@@ -1310,11 +1325,11 @@ func (a *Analyzer) recordWideningCastRangeFact(target ast.Expr, value ast.Expr, 
 		// the non-integer/invalid result simply bails below, fail-closed, with no error.
 		savedSuppress := a.suppressDiagnostics
 		restoreReportProbe1 := a.beginProofReportProbe()
-		defer restoreReportProbe1()
+		defer restoreReportProbe1.restore()
 		a.suppressDiagnostics = true
 		t := a.resolveType(ce.Target)
 		a.suppressDiagnostics = savedSuppress
-		restoreReportProbe1()
+		restoreReportProbe1.restore()
 		if _, _, isInt := BitIntInfo(t); !isInt {
 			return // non-integer intermediate — cannot reason about value preservation
 		}

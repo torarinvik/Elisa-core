@@ -881,7 +881,7 @@ func (a *Analyzer) functionAnnotationParamIndex(fn *ast.FuncDecl, name string) (
 	if a == nil || fn == nil || name == "" {
 		return 0, false
 	}
-	for i, param := range a.expandedFuncDeclParams(fn) {
+	for i, param := range a.readOnlyExpandedFuncDeclParams(fn) {
 		if param.Name == name {
 			return i, true
 		}

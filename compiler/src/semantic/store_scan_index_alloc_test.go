@@ -15,3 +15,17 @@ func BenchmarkStoreScanIndexConstruction(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkStoreScanIndexWide(b *testing.B) {
+	decl := &ast.FuncDecl{Body: make([]ast.Stmt, 256)}
+	for i := range decl.Body {
+		decl.Body[i] = &ast.ReturnStmt{Value: &ast.Ident{Name: "value"}}
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		a := &Analyzer{}
+		if len(a.storeScanIndex(decl).flat) != 512 {
+			b.Fatal("incorrect walk")
+		}
+	}
+}

@@ -556,24 +556,31 @@ func (c *storeFlowCtx) isPure(name string) bool {
 }
 
 func (c *storeFlowCtx) link(names []string) {
+	c.linkPair(names, nil)
+}
+
+// linkPair applies one link across both rows without constructing a combined slice.
+func (c *storeFlowCtx) linkPair(first, second []string) {
 	var sourceBuffer [8]string
 	sources := sourceBuffer[:0]
 	var firstSink string
 	hasSink := false
-	for _, n := range names {
-		if c.scalars[storeFlowBaseName(n)] {
-			continue // a scalar local neither holds nor aliases a region reference
-		}
-		if c.isPure(n) {
-			if len(sources) != 0 {
-				c.pu.union(sources[0], n)
+	for _, names := range [2][]string{first, second} {
+		for _, n := range names {
+			if c.scalars[storeFlowBaseName(n)] {
+				continue // a scalar local neither holds nor aliases a region reference
 			}
-			sources = append(sources, n)
-		} else {
-			if hasSink {
-				c.u.union(firstSink, n)
+			if c.isPure(n) {
+				if len(sources) != 0 {
+					c.pu.union(sources[0], n)
+				}
+				sources = append(sources, n)
 			} else {
-				firstSink, hasSink = n, true
+				if hasSink {
+					c.u.union(firstSink, n)
+				} else {
+					firstSink, hasSink = n, true
+				}
 			}
 		}
 	}
@@ -1058,7 +1065,9 @@ func (a *Analyzer) computeStoreFlow(decl *ast.FuncDecl) *storeFlowSummary {
 		c.u.find(param.Name)
 		c.pu.find(param.Name)
 	}
-	a.storeFlowNodes(reflect.ValueOf(decl.Body), c, map[uintptr]bool{})
+	seen := acquireStoreFlowSeen()
+	a.storeFlowNodes(reflect.ValueOf(decl.Body), c, seen)
+	releaseStoreFlowSeen(seen)
 	anchors := map[storeFlowClass][]storeFlowClass{}
 	for _, e := range c.edges {
 		root := c.storeFlowKey(e[0])
@@ -1901,7 +1910,9 @@ func (a *Analyzer) storeFlowCollectMentionsWithQuery(root reflect.Value, self ui
 			node := v.Interface()
 			if storeFlowIndexFast {
 				if index, ok := node.(*ast.IndexExpr); ok {
-					walk(reflect.ValueOf(&index.Position).Elem())
+					if !storeFlowPositionFast || (collectNames && condDepth == 0 && (!callsOnly || callDepth > 0)) {
+						walk(reflect.ValueOf(&index.Position).Elem())
+					}
 					walk(reflect.ValueOf(index.Object))
 					walk(reflect.ValueOf(index.Index))
 					walk(reflect.ValueOf(index.Index2))
@@ -1920,21 +1931,27 @@ func (a *Analyzer) storeFlowCollectMentionsWithQuery(root reflect.Value, self ui
 			}
 			if storeFlowParenFast {
 				if paren, ok := node.(*ast.ParenExpr); ok {
-					walk(reflect.ValueOf(&paren.Position).Elem())
+					if !storeFlowPositionFast || (collectNames && condDepth == 0 && (!callsOnly || callDepth > 0)) {
+						walk(reflect.ValueOf(&paren.Position).Elem())
+					}
 					walk(reflect.ValueOf(paren.Inner))
 					return
 				}
 			}
 			if storeFlowSimpleFieldQueryFast {
 				if field, ok := node.(*ast.FieldExpr); ok {
-					walk(reflect.ValueOf(&field.Position).Elem())
+					if !storeFlowPositionFast || (collectNames && condDepth == 0 && (!callsOnly || callDepth > 0)) {
+						walk(reflect.ValueOf(&field.Position).Elem())
+					}
 					walk(reflect.ValueOf(field.Object))
 					return
 				}
 			}
 			if storeFlowBinaryFast {
 				if binary, ok := node.(*ast.BinaryExpr); ok {
-					walk(reflect.ValueOf(&binary.Position).Elem())
+					if !storeFlowPositionFast || (collectNames && condDepth == 0 && (!callsOnly || callDepth > 0)) {
+						walk(reflect.ValueOf(&binary.Position).Elem())
+					}
 					walk(reflect.ValueOf(binary.Left))
 					walk(reflect.ValueOf(binary.Right))
 					if binary.LoweredCall != nil {
@@ -1976,7 +1993,11 @@ func (a *Analyzer) storeFlowCollectMentionsWithQuery(root reflect.Value, self ui
 					*nested = append(*nested, v)
 				}
 				if a.storeFlowStmtEnv != nil {
-					a.storeFlowStmtEnv[v.Pointer()] = rename
+					if len(rename) == 0 {
+						delete(a.storeFlowStmtEnv, v.Pointer())
+					} else {
+						a.storeFlowStmtEnv[v.Pointer()] = rename
+					}
 				}
 				return
 			}
@@ -2186,14 +2207,14 @@ func (a *Analyzer) storeFlowArgNames(expr ast.Expr, handled map[*ast.CallExpr][]
 	if names, ok := a.storeFlowSimpleExprNames(expr); ok {
 		return names
 	}
-	return a.storeFlowMentions(reflect.ValueOf(&expr).Elem(), 0, handled, nil, nil, false)
+	return a.storeFlowMentions(reflect.ValueOf(expr), 0, handled, nil, nil, false)
 }
 
 func (a *Analyzer) storeFlowExprNames(expr ast.Expr) []string {
 	if names, ok := a.storeFlowSimpleExprNames(expr); ok {
 		return names
 	}
-	return a.storeFlowMentions(reflect.ValueOf(&expr).Elem(), 0, nil, nil, nil, false)
+	return a.storeFlowMentions(reflect.ValueOf(expr), 0, nil, nil, nil, false)
 }
 
 // Identifier arguments are especially common in call summaries. Match the
@@ -2359,7 +2380,7 @@ func (a *Analyzer) applyCallStoreFlow(call *ast.CallExpr, c *storeFlowCtx, handl
 				// An element that SHARES indirect storage (a container header, a reference) makes
 				// the receiver an alias of the source's storage: writes through the receiver's
 				// elements (`holder[0][0] <- v` after `holder.push(t.lists)`) land in the source.
-				c.link(append(append([]string(nil), group...), receiver...))
+				c.linkPair(group, receiver)
 			} else {
 				c.flow(group, receiver)
 			}
@@ -2420,7 +2441,13 @@ func (a *Analyzer) applyCallStoreFlow(call *ast.CallExpr, c *storeFlowCtx, handl
 	if summary == nil {
 		return nil, false
 	}
-	groupNames := make([][]string, len(args))
+	var localGroups [8][]string
+	groupNames := localGroups[:]
+	if len(args) > len(localGroups) {
+		groupNames = make([][]string, len(args))
+	} else {
+		groupNames = groupNames[:len(args)]
+	}
 	for j, arg := range args {
 		groupNames[j] = a.storeFlowArgNames(arg, handled)
 		c.link(groupNames[j])
@@ -2441,7 +2468,7 @@ func (a *Analyzer) applyCallStoreFlow(call *ast.CallExpr, c *storeFlowCtx, handl
 			ji := summary.writtenParam(i) && summary.reaches(j, i)
 			switch {
 			case ij && ji:
-				c.link(append(append([]string{}, groupNames[i]...), groupNames[j]...))
+				c.linkPair(groupNames[i], groupNames[j])
 			case ij:
 				c.flow(groupNames[i], groupNames[j])
 			case ji:
@@ -2777,7 +2804,26 @@ func storeFlowBaseName(name string) string {
 // storeFlowNodes2 runs unit over every statement of decl.
 func (a *Analyzer) storeFlowNodes2(decl *ast.FuncDecl, unit func(stmt reflect.Value) []reflect.Value) {
 	decl = a.readDecl(decl)
-	a.storeFlowEach(reflect.ValueOf(decl.Body), map[uintptr]bool{}, unit)
+	seen := acquireStoreFlowSeen()
+	defer releaseStoreFlowSeen(seen)
+	a.storeFlowEach(reflect.ValueOf(decl.Body), seen, unit)
+}
+
+var storeFlowSeenPool sync.Pool
+
+func acquireStoreFlowSeen() map[uintptr]bool {
+	if seen := storeFlowSeenPool.Get(); seen != nil {
+		return seen.(map[uintptr]bool)
+	}
+	return make(map[uintptr]bool)
+}
+
+func releaseStoreFlowSeen(seen map[uintptr]bool) {
+	// Avoid retaining exceptionally large function graphs between analyses.
+	if len(seen) <= 8192 {
+		clear(seen)
+		storeFlowSeenPool.Put(seen)
+	}
 }
 
 // storeFlowMarkCall marks what a call may write: a mutated receiver, and the arguments bound to

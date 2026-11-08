@@ -639,8 +639,21 @@ func (a *Analyzer) abstractParamRegionRefStateForBinding(t Type, paramIndex int)
 	return a.abstractParamRegionRefState(t, paramIndex, nil)
 }
 
+// abstractRegionTypeCanContainRefs uses a private, empty traversal path. A
+// builtin never holds references, so it needs neither a path map nor a memo
+// lookup. Other types retain the regular traversal and caching behavior.
+func (a *Analyzer) abstractRegionTypeCanContainRefs(t Type) bool {
+	if t == nil {
+		return false
+	}
+	if _, builtin := t.(*BuiltinType); builtin {
+		return false
+	}
+	return a.typeCanContainRegionRefs(t, map[string]bool{})
+}
+
 func (a *Analyzer) abstractParamRegionRefStateWalk(t Type, paramIndex int, seen map[string]bool) (regionRefState, bool) {
-	if t == nil || !a.typeCanContainRegionRefs(t, map[string]bool{}) {
+	if !a.abstractRegionTypeCanContainRefs(t) {
 		return regionRefState{}, false
 	}
 	// Path-scoped, exactly as in abstractParamBorrowedOwnerRefState above: release the
@@ -680,7 +693,7 @@ func (a *Analyzer) abstractParamRegionRefStateWalk(t Type, paramIndex int, seen 
 			// over-allocates hundreds of megabytes while constructing parameter
 			// provenance for the large self-hosted compiler types.
 			for _, field := range tt.Fields {
-				if a.typeCanContainRegionRefs(field.Type, map[string]bool{}) {
+				if a.abstractRegionTypeCanContainRefs(field.Type) {
 					fieldCapacity++
 				}
 			}
@@ -716,6 +729,11 @@ func (a *Analyzer) abstractParamRegionRefStateWalk(t Type, paramIndex int, seen 
 			}
 			for _, field := range base.Fields {
 				fieldType := field.Type
+				// A builtin field is unaffected by generic substitution and can
+				// never contribute reference provenance.
+				if _, builtin := fieldType.(*BuiltinType); builtin {
+					continue
+				}
 				if len(bindings) != 0 {
 					fieldType = a.substituteType(fieldType, bindings, nil, nil, nil)
 				}

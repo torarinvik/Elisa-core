@@ -1793,7 +1793,8 @@ func guardedInvariantGoal(cond, inv ast.Expr) ast.Expr {
 }
 
 func (a *Analyzer) typeLoopInvariantsQuietly(invs []*ast.ContractStmt) {
-	defer a.beginProofReportProbe()()
+	proofProbe := a.beginProofReportProbe()
+	defer proofProbe.restore()
 	savedSuppress := a.suppressDiagnostics
 	a.suppressDiagnostics = true
 	a.ghostReadAllowed++

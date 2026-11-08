@@ -31,20 +31,7 @@ func (a *Analyzer) computeFillMayAdopt() map[*ast.FuncDecl]bool {
 			byName[fillMayAdoptLastSegment(decl.Name)] = append(byName[fillMayAdoptLastSegment(decl.Name)], decl)
 		}
 	}
-	funcFields := map[string]bool{}
-	structNames := map[string]bool{}
-	if a.file != nil {
-		fillMayAdoptWalk(reflect.ValueOf(a.file), func(v any) {
-			if s, ok := v.(*ast.StructDecl); ok && s != nil {
-				structNames[fillMayAdoptLastSegment(s.Name)] = true
-				for _, field := range s.Fields {
-					if fillMayAdoptHasFuncType(reflect.ValueOf(field)) {
-						funcFields[field.Name] = true
-					}
-				}
-			}
-		})
-	}
+	structNames, funcFields := fillMayAdoptStructFacts(a.file)
 	result := map[*ast.FuncDecl]bool{}
 	callers := map[*ast.FuncDecl][]*ast.FuncDecl{}
 	var work []*ast.FuncDecl
@@ -268,6 +255,52 @@ func (a *Analyzer) computeFillMayAdopt() map[*ast.FuncDecl]bool {
 	return result
 }
 
+// Struct declarations can occur in namespaces and static declaration branches,
+// but not inside expression or statement bodies. Inspect all branches as the
+// conservative census did, without walking every function body in the file.
+func fillMayAdoptStructFacts(file *ast.File) (map[string]bool, map[string]bool) {
+	structNames, funcFields := map[string]bool{}, map[string]bool{}
+	if file == nil {
+		return structNames, funcFields
+	}
+	seen := map[ast.Decl]bool{}
+	var walk func([]ast.Decl)
+	walk = func(decls []ast.Decl) {
+		for _, decl := range decls {
+			if decl == nil || seen[decl] {
+				continue
+			}
+			seen[decl] = true
+			switch n := decl.(type) {
+			case *ast.StructDecl:
+				if n == nil {
+					continue
+				}
+				structNames[fillMayAdoptLastSegment(n.Name)] = true
+				for _, field := range n.Fields {
+					if fillMayAdoptHasFuncType(reflect.ValueOf(field)) {
+						funcFields[field.Name] = true
+					}
+				}
+			case *ast.NamespaceDecl:
+				if n != nil {
+					walk(n.Decls)
+				}
+			case *ast.StaticIfDecl:
+				if n != nil {
+					walk(n.Then)
+					for _, branch := range n.Elifs {
+						walk(branch.Body)
+					}
+					walk(n.Else)
+				}
+			}
+		}
+	}
+	walk(file.Decls)
+	return structNames, funcFields
+}
+
 // fillMayAdoptNamedCallee reports whether a callee name that is no declared function still names
 // a fixed target — a builtin, extern or type — rather than a value holding a function.
 func (a *Analyzer) fillMayAdoptNamedCallee(name string) bool {
@@ -385,7 +418,11 @@ func fillMayAdoptStmtLists(v reflect.Value, visit func([]ast.Stmt)) {
 			}
 		case reflect.Slice, reflect.Array:
 			if v.Type() == stmtList && v.CanInterface() {
-				visit(v.Interface().([]ast.Stmt))
+				if v.CanAddr() {
+					visit(*v.Addr().Interface().(*[]ast.Stmt))
+				} else {
+					visit(v.Interface().([]ast.Stmt))
+				}
 			}
 			for i := 0; i < v.Len(); i++ {
 				walk(v.Index(i))

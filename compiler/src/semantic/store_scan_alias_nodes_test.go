@@ -18,3 +18,52 @@ func TestStoreScanAliasClosureNodes(t *testing.T) {
 		}
 	}
 }
+
+func TestStoreScanParamAliasCacheModes(t *testing.T) {
+	decl := &ast.FuncDecl{Params: []ast.ParamDecl{{Name: "source"}}, Body: []ast.Stmt{&ast.ReturnStmt{}}}
+	a := &Analyzer{}
+	idx := a.storeScanIndex(decl)
+	for _, mode := range []int{storeScanModeWrite, storeScanModeShareFrom, storeScanModeDeep} {
+		got, holds := a.storeScanParamAliases(decl, idx, 0, mode)
+		var want map[string]bool
+		var wantHolds storeScanHolds
+		if mode == storeScanModeDeep {
+			want, wantHolds = a.storeScanAliasClosureFrom(decl, idx, map[string]bool{}, map[string]bool{"source": true})
+		} else {
+			want, wantHolds = a.storeScanAliasClosure(decl, idx, map[string]bool{"source": true})
+		}
+		if !reflect.DeepEqual(got, want) || !reflect.DeepEqual(holds, wantHolds) {
+			t.Fatalf("mode %d: cached result differs", mode)
+		}
+	}
+	if len(idx.paramAliases) != 2 {
+		t.Fatalf("expected ordinary and deep caches, got %d", len(idx.paramAliases))
+	}
+	a.invalidateStoreScanParamAliases()
+	if len(idx.paramAliases) != 0 {
+		t.Fatal("alias cache survived environment invalidation")
+	}
+}
+
+func BenchmarkStoreScanParamAliases(b *testing.B) {
+	decl := &ast.FuncDecl{Params: []ast.ParamDecl{{Name: "source"}}, Body: []ast.Stmt{&ast.ReturnStmt{}}}
+	a := &Analyzer{}
+	idx := a.storeScanIndex(decl)
+	a.storeScanParamAliases(decl, idx, 0, storeScanModeWrite)
+	for _, cached := range []bool{false, true} {
+		name := "uncached"
+		if cached {
+			name = "cached"
+		}
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if cached {
+					a.storeScanParamAliases(decl, idx, 0, storeScanModeWrite)
+				} else {
+					a.storeScanAliasClosure(decl, idx, map[string]bool{"source": true})
+				}
+			}
+		})
+	}
+}

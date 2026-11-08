@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"maps"
 	"slices"
 	"strings"
 )
@@ -24,14 +25,7 @@ func (a *Analyzer) setCurrentRegionState(sym *Symbol, state regionState) {
 }
 
 func (a *Analyzer) cloneRegionStates() map[*Symbol]regionState {
-	if a.currentRegions == nil {
-		return nil
-	}
-	cloned := make(map[*Symbol]regionState, len(a.currentRegions))
-	for sym, state := range a.currentRegions {
-		cloned[sym] = state
-	}
-	return cloned
+	return maps.Clone(a.currentRegions)
 }
 
 // joinRegionStateBranches computes the state that is safe after a control-flow
@@ -82,14 +76,7 @@ func joinRegionStateBranches(entry map[*Symbol]regionState, branches []map[*Symb
 }
 
 func cloneRegionStateMap(src map[*Symbol]regionState) map[*Symbol]regionState {
-	if src == nil {
-		return nil
-	}
-	cloned := make(map[*Symbol]regionState, len(src))
-	for sym, state := range src {
-		cloned[sym] = state
-	}
-	return cloned
+	return maps.Clone(src)
 }
 
 func (a *Analyzer) cloneRegionMarkStates() map[*Symbol]regionMarkState {
@@ -166,11 +153,7 @@ func cloneRegionDependencyStates(src map[*Symbol]regionDependencyState) map[*Sym
 	if len(src) == 0 {
 		return nil
 	}
-	cloned := make(map[*Symbol]regionDependencyState, len(src))
-	for region, dep := range src {
-		cloned[region] = dep
-	}
-	return cloned
+	return maps.Clone(src)
 }
 
 func clonePackedStoreDependencyStates(src map[*Symbol]packedStoreDependencyState) map[*Symbol]packedStoreDependencyState {

@@ -26,3 +26,23 @@ func BenchmarkTrackedCloneScalarFields(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkTrackedCloneReferenceFields(b *testing.B) {
+	for _, width := range []int{8, 64} {
+		b.Run(fmt.Sprint(width), func(b *testing.B) {
+			root := &StructType{Name: "Record", Fields: map[string]Field{}}
+			for i := 0; i < width; i++ {
+				name := fmt.Sprint(i)
+				root.Fields[name] = Field{Name: name, Type: &RefType{Elem: &BuiltinType{Name: "i64"}}}
+			}
+			analyzer := &Analyzer{}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if analyzer.cloneTrackedValueType(root) == nil {
+					b.Fatal("missing clone")
+				}
+			}
+		})
+	}
+}

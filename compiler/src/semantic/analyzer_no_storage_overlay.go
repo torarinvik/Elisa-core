@@ -26,11 +26,61 @@ func (a *Analyzer) lookupStoreScanMode(key storeScanKey) (storeMode, bool) {
 	if mode, ok := a.storeScanCache[key]; ok {
 		return mode, true
 	}
+	canonicalKey, share, root := a.specializationStoreScanKey(key)
+	if root {
+		// The current function is being analyzed under concrete type arguments;
+		// its canonical store mode may not describe this specialization.
+		return storeNone, false
+	}
 	if a.noStorageOverlay != nil {
-		mode, ok := a.noStorageOverlay.storeModes[key]
-		return mode, ok
+		baseKey := key
+		if share {
+			baseKey = canonicalKey
+		}
+		if mode, ok := a.noStorageOverlay.storeModes[baseKey]; ok {
+			return mode, true
+		}
+	}
+	if share && a.parallel.specialization.base != nil && a.parallel.specialization.base.shared != nil {
+		return a.parallel.specialization.base.shared.lookupStoreScanMode(canonicalKey)
 	}
 	return storeNone, false
+}
+
+// specializationStoreScanKey maps read-only copied callees to their canonical
+// cache key. The specialization target is deliberately excluded because its
+// concrete argument types can change store behavior.
+func (a *Analyzer) specializationStoreScanKey(key storeScanKey) (canonical storeScanKey, share, root bool) {
+	canonical = key
+	if a == nil || a.parallel == nil || a.parallel.specialization == nil {
+		return canonical, false, false
+	}
+	context := a.parallel.specialization
+	if original := a.parallel.original[key.decl]; original != nil {
+		canonical.decl = original
+	}
+	if context.targetDecl != nil && canonical.decl == context.targetDecl {
+		return canonical, false, true
+	}
+	return canonical, true, false
+}
+
+func (a *Analyzer) noteSpecializationStoreScanTarget(decl *ast.FuncDecl) {
+	if a == nil || a.parallel == nil || a.parallel.specialization == nil {
+		return
+	}
+	_, _, root := a.specializationStoreScanKey(storeScanKey{decl: decl})
+	if root {
+		a.parallel.specialization.storeScanTargetHit = true
+	}
+}
+
+func (a *Analyzer) publishSpecializationStoreScanMode(key storeScanKey, mode storeMode) {
+	canonical, share, root := a.specializationStoreScanKey(key)
+	if !share || root || a.parallel.specialization.base == nil || a.parallel.specialization.base.shared == nil {
+		return
+	}
+	a.parallel.specialization.base.shared.cacheStoreScanMode(canonical, mode)
 }
 
 func (a *Analyzer) lookupStoreScanViewOnly(t Type) (bool, bool) {

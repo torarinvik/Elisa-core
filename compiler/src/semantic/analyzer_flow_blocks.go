@@ -1377,7 +1377,9 @@ func (a *Analyzer) analyzeBlockWithAffineClonePrepared(stmts []ast.Stmt, scope *
 		prepare()
 	}
 	branchRegions := a.analyzeBlockWithRegionCloneCapture(stmts, scope)
-	snapshot := affineFlowSnapshot{Regions: branchRegions, FunctionValues: a.cloneFunctionValueBindings(), SpecializedValueTypes: a.snapshotPrivateSpecializedValueTypes(), RangeFacts: a.visibleRangeFacts(), AliasCarriers: a.cloneAliasCarriers(), AliasCarrierFieldOverrides: a.cloneAliasCarrierFieldOverrides()}
+	// The function-value map and its values were cloned on entry; the branch
+	// result can take ownership without cloning them a second time.
+	snapshot := affineFlowSnapshot{Regions: branchRegions, FunctionValues: a.currentFunctionValues, SpecializedValueTypes: a.snapshotPrivateSpecializedValueTypes(), RangeFacts: a.visibleRangeFacts(), AliasCarriers: a.currentAliasCarriers, AliasCarrierFieldOverrides: a.currentAliasCarrierFieldOverrides}
 	blockEndRangeFacts(snapshot.RangeFacts, scope)
 	if scope != nil {
 		// Facts over branch-local immutable locals are rewritten through their initializers so they

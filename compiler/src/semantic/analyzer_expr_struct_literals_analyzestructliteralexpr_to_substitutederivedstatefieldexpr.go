@@ -796,11 +796,11 @@ func (a *Analyzer) structLiteralAsTypeConstructorCast(expr *ast.StructLitExpr, t
 	}
 	savedSuppress := a.suppressDiagnostics
 	restoreReportProbe1 := a.beginProofReportProbe()
-	defer restoreReportProbe1()
+	defer restoreReportProbe1.restore()
 	a.suppressDiagnostics = true
 	sourceType := a.analyzeExpr(expr.Args[0])
 	a.suppressDiagnostics = savedSuppress
-	restoreReportProbe1()
+	restoreReportProbe1.restore()
 	hookSym, ok := a.lookupVisibleCastHook(sourceType, targetType)
 	if !ok || a.isSelfCastHook(hookSym) {
 		return nil, false

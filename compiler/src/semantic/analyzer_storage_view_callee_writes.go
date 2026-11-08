@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 
 	"elisacore/src/ast"
 )
@@ -132,10 +133,15 @@ func (a *Analyzer) storageViewCalleeWritesFor(decls []*ast.FuncDecl, param int) 
 			}
 		}
 	}
-	solve := &storageViewWriteSolve{prov: map[storageViewCalleeWriteKey]storageViewCalleeWrites{}}
+	solve := &storageViewWriteSolve{prov: map[storageViewCalleeWriteKey]storageViewCalleeWrites{}, visited: map[storageViewCalleeWriteKey]bool{}}
+	defer func() {
+		for _, body := range solve.bodies {
+			releaseStorageViewNodes(body.nodes)
+		}
+	}()
 	var out storageViewCalleeWrites
 	for round := 0; ; round++ {
-		solve.visited = map[storageViewCalleeWriteKey]bool{}
+		clear(solve.visited)
 		solve.changed = false
 		out = storageViewCalleeWrites{}
 		for _, decl := range decls {
@@ -217,7 +223,7 @@ func (a *Analyzer) storageViewCalleeWritesForDecl(decl *ast.FuncDecl, param int,
 	// once per (parameter, round).
 	body, cached := solve.bodies[decl]
 	if !cached {
-		body = storageViewScanBody(decl)
+		body = storageViewScanBodyWithNodes(decl, borrowStorageViewNodes())
 		if solve.bodies == nil {
 			solve.bodies = map[*ast.FuncDecl]storageViewSolveBody{}
 		}
@@ -600,7 +606,8 @@ func (a *Analyzer) storageViewWriteCallees(call *ast.CallExpr, locals map[string
 	}
 	// A candidate whose arity cannot accept this call (counting defaulted trailing parameters)
 	// cannot be its target and is dropped; a call no candidate accepts is unresolved.
-	var out []storageViewWriteCallee
+	out := make([]storageViewWriteCallee, 0, len(candidates))
+	var methodArgs []ast.Expr
 	for _, decl := range candidates {
 		required := len(decl.Params)
 		for required > 0 && decl.Params[required-1].DefaultValue != nil {
@@ -608,7 +615,12 @@ func (a *Analyzer) storageViewWriteCallees(call *ast.CallExpr, locals map[string
 		}
 		fits := func(count int) bool { return count >= required && count <= len(decl.Params) }
 		if receiver != nil && fits(len(args)+1) {
-			out = append(out, storageViewWriteCallee{decl: decl, args: append([]ast.Expr{receiver}, args...)})
+			if methodArgs == nil {
+				methodArgs = make([]ast.Expr, 1, len(args)+1)
+				methodArgs[0] = receiver
+				methodArgs = append(methodArgs, args...)
+			}
+			out = append(out, storageViewWriteCallee{decl: decl, args: methodArgs})
 		}
 		if fits(len(args)) {
 			if receiver != nil {
@@ -683,8 +695,37 @@ func storageViewDeclLocalNames(decl *ast.FuncDecl, nodes []any) map[string]bool 
 
 // Keep only nodes inspected by the write and unhandled-identifier passes.
 // Names still come from every visited node, including type and pattern nodes.
+var storageViewNodesPool sync.Pool
+
+func borrowStorageViewNodes() []any {
+	if nodes := storageViewNodesPool.Get(); nodes != nil {
+		return nodes.([]any)[:0]
+	}
+	return nil
+}
+
+func releaseStorageViewNodes(nodes []any) {
+	if cap(nodes) == 0 || cap(nodes) > 1<<14 {
+		return
+	}
+	clear(nodes)
+	storageViewNodesPool.Put(nodes[:0])
+}
+
 func storageViewScanBody(decl *ast.FuncDecl) storageViewSolveBody {
-	body := storageViewSolveBody{locals: map[string]bool{}}
+	return storageViewScanBodyWithNodes(decl, nil)
+}
+
+func storageViewScanBodyWithNodes(decl *ast.FuncDecl, nodes []any) storageViewSolveBody {
+	// Each top-level statement contributes a node, often with at least one
+	// relevant expression. Cap the hint so unusually wide bodies do not reserve
+	// unbounded unused space; nested bodies still grow normally.
+	body := storageViewSolveBody{locals: make(map[string]bool, len(decl.Params))}
+	if nodes != nil {
+		body.nodes = nodes
+	} else if len(decl.Body) != 0 {
+		body.nodes = make([]any, 0, min(2*len(decl.Body), 2048))
+	}
 	for _, param := range decl.Params {
 		body.locals[param.Name] = true
 	}
@@ -713,15 +754,8 @@ func storageViewCollectLocalNames(node any, out map[string]bool) {
 	if v.Kind() != reflect.Struct {
 		return
 	}
-	rfs := reflectFields(v.Type())
-	for i := 0; i < v.NumField(); i++ {
-		info := &rfs[i]
-		if !info.IsExported() {
-			continue
-		}
-		if info.Name == "Names" || info.Name == "Binding" || info.Name == "Bindings" || strings.HasSuffix(info.Name, "Name") {
-			collectStorageViewStrings(v.Field(i), out)
-		}
+	for _, i := range reflectMetaOf(v.Type()).storageViewNameFields {
+		collectStorageViewStrings(v.Field(i), out)
 	}
 }
 

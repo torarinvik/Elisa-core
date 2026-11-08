@@ -154,15 +154,21 @@ func buildBodyGraph(bodies []scopedDecl) *bodyGraph {
 	}
 	g.functionDeps = make([][]int, len(g.functions))
 	g.funcRecursive = make([]bool, len(g.functions))
+	// Dependency targets are dense indices. Reuse generation-mark arrays rather
+	// than allocating a hash set for each body and function.
+	bodySeen := make([]int, len(bodies))
+	functionSeen := make([]int, len(g.functions))
+	functionGeneration := 0
 	for i, scoped := range bodies {
-		seen := map[int]bool{}
+		bodyGeneration := i + 1
 		for _, fn := range bodyFunctions(scoped.Decl) {
 			functionIndex := functionIndexByDecl[fn]
-			seenFunctions := map[int]bool{}
+			functionGeneration++
+			generation := functionGeneration
 			note := func(name string) {
 				for _, j := range definers[fillMayAdoptLastSegment(name)] {
-					if j != i && !seen[j] {
-						seen[j] = true
+					if j != i && bodySeen[j] != bodyGeneration {
+						bodySeen[j] = bodyGeneration
 						g.deps[i] = append(g.deps[i], j)
 					}
 				}
@@ -171,16 +177,16 @@ func buildBodyGraph(bodies []scopedDecl) *bodyGraph {
 						g.funcRecursive[functionIndex] = true
 						continue
 					}
-					if !seenFunctions[target] {
-						seenFunctions[target] = true
+					if functionSeen[target] != generation {
+						functionSeen[target] = generation
 						g.functionDeps[functionIndex] = append(g.functionDeps[functionIndex], target)
 					}
 				}
 			}
 			noteBodyDependency := func(name string) {
 				for _, j := range definers[fillMayAdoptLastSegment(name)] {
-					if j != i && !seen[j] {
-						seen[j] = true
+					if j != i && bodySeen[j] != bodyGeneration {
+						bodySeen[j] = bodyGeneration
 						g.deps[i] = append(g.deps[i], j)
 					}
 				}
@@ -493,19 +499,23 @@ func planBodySchedule(bodies []scopedDecl, workers int) *bodySchedule {
 	}
 	s.sccPublish = map[int][][2]*FuncType{}
 	weights := make([]int, len(units))
+	// A generation per unit avoids rebuilding a hash set for every body while
+	// retaining exactly the same dependency deduplication and ordering.
+	seenGeneration := make([]int, len(units))
 	for u, unit := range units {
 		s.done[u] = make(chan struct{})
 		w := 0
-		seen := map[int]bool{u: true}
+		generation := u + 1
+		seenGeneration[u] = generation
 		for _, b := range unit {
 			s.stmts[u] = append(s.stmts[u], bodyStmts(bodies[b].Decl)...)
 			w += g.weight[b] + 50
 			for _, d := range g.deps[b] {
-				if du := s.unitOf[d]; !seen[du] && sccOf[du] != sccOf[u] {
+				if du := s.unitOf[d]; seenGeneration[du] != generation && sccOf[du] != sccOf[u] {
 					// A cycle's function types publish when its last chunk ends.
 					for _, sibling := range s.sccUnits[sccOf[du]] {
-						if !seen[sibling] {
-							seen[sibling] = true
+						if seenGeneration[sibling] != generation {
+							seenGeneration[sibling] = generation
 							s.deps[u] = append(s.deps[u], sibling)
 						}
 					}
@@ -528,8 +538,26 @@ func planBodySchedule(bodies []scopedDecl, workers int) *bodySchedule {
 	s.rdeps = make([][]int, len(s.units))
 	s.pending = make([]int, len(s.units))
 	s.priority = make([]int, len(s.units))
+	// Count reverse edges first so all lists can use one exactly sized backing
+	// array instead of growing and copying a separate slice for each callee.
+	clear(seenGeneration)
+	edgeCount := 0
 	for u := range s.units {
 		s.pending[u] = len(s.deps[u])
+		for _, d := range s.deps[u] {
+			seenGeneration[d]++
+			edgeCount++
+		}
+	}
+	backing := make([]int, edgeCount)
+	offset := 0
+	for unit, count := range seenGeneration {
+		if count != 0 {
+			s.rdeps[unit] = backing[offset : offset : offset+count]
+			offset += count
+		}
+	}
+	for u := range s.units {
 		for _, d := range s.deps[u] {
 			s.rdeps[d] = append(s.rdeps[d], u)
 		}

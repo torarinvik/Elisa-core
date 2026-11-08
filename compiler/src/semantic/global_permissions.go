@@ -1,6 +1,10 @@
 package semantic
 
-import "elisacore/src/ast"
+import (
+	"reflect"
+
+	"elisacore/src/ast"
+)
 
 func isGlobalPermissionRef(ref ast.PermissionRef) bool {
 	return ref.Name == "Global" && (ref.Member == "" || ref.Member == "Read" || ref.Member == "Write")
@@ -337,22 +341,26 @@ func (a *Analyzer) mutableGlobalBorrowTransferRefs(value ast.Expr, destinationTy
 func mutableBorrowEmitValues(body []ast.Stmt) []ast.Expr {
 	var nestedFolds []*ast.FoldExpr
 	var nestedLambdas []*ast.LambdaExpr
-	fillMayAdoptWalkTyped(body, func(node any) {
+	var emits []*ast.EmitExpr
+	fillMayAdoptWalk(reflect.ValueOf(body), func(node any) {
 		if fold, ok := node.(*ast.FoldExpr); ok {
 			nestedFolds = append(nestedFolds, fold)
 		}
 		if lambda, ok := node.(*ast.LambdaExpr); ok {
 			nestedLambdas = append(nestedLambdas, lambda)
 		}
-	}, map[uintptr]bool{})
+		if emitted, ok := node.(*ast.EmitExpr); ok && emitted.Value != nil {
+			emits = append(emits, emitted)
+		}
+	})
 
 	nestedEmits := map[*ast.EmitExpr]bool{}
 	markNestedEmits := func(value any) {
-		fillMayAdoptWalkTyped(value, func(node any) {
+		fillMayAdoptWalk(reflect.ValueOf(value), func(node any) {
 			if emitted, ok := node.(*ast.EmitExpr); ok {
 				nestedEmits[emitted] = true
 			}
-		}, map[uintptr]bool{})
+		})
 	}
 	for _, fold := range nestedFolds {
 		for _, arm := range fold.Arms {
@@ -365,11 +373,11 @@ func mutableBorrowEmitValues(body []ast.Stmt) []ast.Expr {
 	}
 
 	var values []ast.Expr
-	fillMayAdoptWalkTyped(body, func(node any) {
-		if emitted, ok := node.(*ast.EmitExpr); ok && emitted.Value != nil && !nestedEmits[emitted] {
+	for _, emitted := range emits {
+		if !nestedEmits[emitted] {
 			values = append(values, emitted.Value)
 		}
-	}, map[uintptr]bool{})
+	}
 	return values
 }
 

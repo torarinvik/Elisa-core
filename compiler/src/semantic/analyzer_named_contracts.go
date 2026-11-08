@@ -496,7 +496,7 @@ func (a *Analyzer) usesContractApplicationScope(fn *ast.FuncDecl) *Scope {
 	if ft == nil {
 		return scope
 	}
-	params := a.expandedFuncDeclParams(fn)
+	params := a.readOnlyExpandedFuncDeclParams(fn)
 	for i, param := range params {
 		var ptype Type = invalidType
 		if i < len(ft.Params) {

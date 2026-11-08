@@ -151,8 +151,8 @@ unwrapped:
 			return regionRefState{}, false
 		}
 		args := n.LoweredArgs()
-		fieldStates := map[string]regionRefState{}
-		unionStates := make([]regionRefState, 0, len(fields))
+		var fieldStates map[string]regionRefState
+		var unionStates []regionRefState
 		for i, field := range fields {
 			if i >= len(args) {
 				break
@@ -163,6 +163,10 @@ unwrapped:
 			fieldState, ok := a.regionRefStateForExpr(args[i])
 			if !ok || !hasRegionProvenance(fieldState) {
 				continue
+			}
+			if fieldStates == nil {
+				fieldStates = make(map[string]regionRefState)
+				unionStates = make([]regionRefState, 0, len(fields))
 			}
 			fieldStates[field.Name] = fieldState
 			unionStates = append(unionStates, fieldState)
@@ -175,14 +179,20 @@ unwrapped:
 		// A tuple carries its elements' regions exactly like a struct literal carries its fields':
 		// `t <- (true, xs[0:2])` out of a region block must not erase the view's region.
 		tupleType, _ := a.exprType(n).(*TupleType)
-		fieldStates := map[string]regionRefState{}
-		unionStates := make([]regionRefState, 0, len(n.Elems))
+		var fieldStates map[string]regionRefState
+		var unionStates []regionRefState
 		for i, elem := range n.Elems {
 			elemState, ok := a.regionRefStateForExpr(elem)
 			if !ok || !hasRegionProvenance(elemState) {
 				continue
 			}
+			if unionStates == nil {
+				unionStates = make([]regionRefState, 0, len(n.Elems))
+			}
 			if tupleType != nil && i < len(tupleType.Fields) && tupleType.Fields[i].Name != "" {
+				if fieldStates == nil {
+					fieldStates = make(map[string]regionRefState)
+				}
 				fieldStates[tupleType.Fields[i].Name] = elemState
 			}
 			unionStates = append(unionStates, elemState)
@@ -199,8 +209,8 @@ unwrapped:
 		}
 		baseState, hasBaseState := a.regionRefStateForExpr(n.Base)
 		args := n.LoweredArgs()
-		fieldStates := map[string]regionRefState{}
-		unionStates := make([]regionRefState, 0, len(fields))
+		var fieldStates map[string]regionRefState
+		var unionStates []regionRefState
 		for i, field := range fields {
 			var (
 				fieldState regionRefState
@@ -214,6 +224,10 @@ unwrapped:
 			if !hasState || !hasRegionProvenance(fieldState) {
 				continue
 			}
+			if fieldStates == nil {
+				fieldStates = make(map[string]regionRefState)
+				unionStates = make([]regionRefState, 0, len(fields))
+			}
 			fieldStates[field.Name] = fieldState
 			unionStates = append(unionStates, fieldState)
 		}
@@ -222,10 +236,16 @@ unwrapped:
 		}
 		return mergeRegionRefStatesWithExplicitFields(unionStates, fieldStates)
 	case *ast.ListLitExpr:
-		elemStates := make([]regionRefState, 0, len(n.Elems))
-		fieldStates := map[string]regionRefState{}
+		var elemStates []regionRefState
+		var fieldStates map[string]regionRefState
 		for i, elem := range n.Elems {
 			if state, ok := a.regionRefStateForExpr(elem); ok && hasRegionProvenance(state) {
+				if fieldStates == nil {
+					fieldStates = make(map[string]regionRefState)
+				}
+				if elemStates == nil {
+					elemStates = make([]regionRefState, 0, len(n.Elems))
+				}
 				elemStates = append(elemStates, state)
 				fieldStates[regionIndexFieldKey(int64(i))] = state
 			}
@@ -235,6 +255,9 @@ unwrapped:
 		// wildcard element bucket) rather than a numbered slot (deep audit #16).
 		for _, keyExpr := range n.Keys {
 			if state, ok := a.regionRefStateForExpr(keyExpr); ok && hasRegionProvenance(state) {
+				if elemStates == nil {
+					elemStates = make([]regionRefState, 0, len(n.Keys))
+				}
 				elemStates = append(elemStates, state)
 			}
 		}
