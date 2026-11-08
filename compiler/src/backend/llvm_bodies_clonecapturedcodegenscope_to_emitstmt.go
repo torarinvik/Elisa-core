@@ -2008,6 +2008,15 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 		if _, ok := s.fnType.Return.(*semantic.RefType); ok {
 			returnExpected = s.fnType.Return
 		}
+		// A tuple literal returned from a tuple-typed function takes the declared field
+		// types: a `get … else return (null, x)` recovery is analyzed outside the return
+		// context, so its recorded type has a bare-null field that would lower to `ptr`
+		// instead of the declared Optional and fail the LLVM return-type check.
+		if _, isTupleLit := n.Value.(*ast.TupleExpr); isTupleLit {
+			if _, ok := semantic.StripAggregateStateType(s.fnType.Return).(*semantic.TupleType); ok {
+				returnExpected = s.fnType.Return
+			}
+		}
 		if err := s.emitReturnRefinementChecks(n); err != nil {
 			return err
 		}
