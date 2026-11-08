@@ -1201,12 +1201,31 @@ func (s *functionState) indexedStoreRangeComprehensionBlock(expr *ast.ListCompre
 	// start/end are reused 3x (the clamp ternary evaluates each twice, the loop once), so they
 	// must be side-effect-free and re-evaluable — otherwise we'd change evaluation count vs the
 	// single-evaluation push fallback. Restrict to plain identifiers and integer literals.
-	if !comprehensionRangeBoundReEvaluable(expr.Source) || !comprehensionRangeBoundReEvaluable(expr.RangeEnd) {
+	if !comprehensionRangeBoundReEvaluable(expr.Source) {
 		return nil, false
 	}
 	pos := expr.Position
 	start := expr.Source
 	end := expr.RangeEnd
+	// A computed end (`0..<(n + 1).usize()`) is bound once to a synthetic local ahead of the
+	// result, so it is still evaluated exactly once (after the re-evaluable start, as the push
+	// fallback orders them) and the presized fill applies to the common `n + 1` table shape.
+	var endDecl ast.Stmt
+	if !comprehensionRangeBoundReEvaluable(end) {
+		endType := s.exprType(end)
+		if endType == nil {
+			return nil, false
+		}
+		endName := s.g.nextSyntheticName("comp.range.end.")
+		endDecl = &ast.VarDeclStmt{Position: pos, Name: endName, Value: end}
+		endIdent := &ast.Ident{Position: pos, Name: endName}
+		if s.g != nil && s.g.result != nil && s.g.semanticReadView().HasOwnExprTypesMap() {
+			s.g.setResultExprType(endIdent, endType)
+		} else {
+			return nil, false
+		}
+		end = endIdent
+	}
 	// The index `loopName - start` references the loop variable, so it needs a real name. A `_`
 	// (discard) binder can't be read; substitute a synthetic name (the value never references `_`,
 	// so this is safe). Without this the synthesized `_ - start` reads an unbound discard.
@@ -1282,13 +1301,16 @@ func (s *functionState) indexedStoreRangeComprehensionBlock(expr *ast.ListCompre
 
 	return &ast.ExprBlock{
 		Position: pos,
-		Stmts: []ast.Stmt{
-			resultDecl,
-			&ast.ExprStmt{Position: pos, Expr: resizeCall},
-			loop,
-		},
+		Stmts: comprehensionRangeStmts(endDecl, resultDecl, &ast.ExprStmt{Position: pos, Expr: resizeCall}, loop),
 		Value: resultIdent,
 	}, true
+}
+
+func comprehensionRangeStmts(endDecl ast.Stmt, rest ...ast.Stmt) []ast.Stmt {
+	if endDecl == nil {
+		return rest
+	}
+	return append([]ast.Stmt{endDecl}, rest...)
 }
 
 // comprehensionLoopStmt builds the fused loop for a comprehension desugar: the per-element
