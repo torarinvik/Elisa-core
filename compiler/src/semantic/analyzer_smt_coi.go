@@ -527,6 +527,7 @@ func (a *Analyzer) smtCheckSlicedOnce(solver smt.Solver, query, goalAssert strin
 		res, model, _ := solver.CheckValues(q, vars)
 		return res, model
 	}
+	checkBudget := int64(0) // 0 = the session budget; mirrors which call `check` makes
 	if abstracted, ok := smtAbstractBitvectorReads(query); ok {
 		a.smtSetLogLabelForQuery(solver, "bv-abstract", goalAssert, abstracted)
 		res, _ := a.smtCheckTransformedVerdict(abstracted, true, func() (smt.Result, map[string]string) {
@@ -538,6 +539,7 @@ func (a *Analyzer) smtCheckSlicedOnce(solver smt.Solver, query, goalAssert strin
 		}
 		a.smtSetLogLabelForQuery(solver, "query", goalAssert, query)
 		if res == smt.Sat && canBudget && smtOnlyAndBitvectorOps(query) {
+			checkBudget = smtAfterSatAbstractionBudget
 			check = func(q string) (smt.Result, map[string]string) {
 				return budgeted.CheckBudgetValues(q, vars, smtAfterSatAbstractionBudget)
 			}
@@ -556,10 +558,48 @@ func (a *Analyzer) smtCheckSlicedOnce(solver smt.Solver, query, goalAssert strin
 	if !balanced {
 		return check(query)
 	}
+	// The ladder's next step is fixed by the query alone: the sliced query when the dropped
+	// part carries quantifiers, else the full query. When a weakening pre-check runs first,
+	// start that next check on a helper process now so a failed pre-check costs no latency.
+	// Independent checks reset first, so the helper's verdict and Unknown classification are
+	// exactly the ones a direct check would produce (smt.Prefetch); unused speculation is
+	// discarded without touching any cache or epoch.
+	sliced, dropped, ok := smtSliceQueryCommands(commands, goalAssert, true)
+	// Slice only when the dropped part carries quantifiers: quantifier instantiation is what burns
+	// the budget on irrelevant facts. A quantifier-free remainder is cheap inside the full query,
+	// and slicing it would only add a second solver round trip.
+	if ok && !strings.Contains(dropped, "(forall ") && !strings.Contains(dropped, "(exists ") {
+		ok = false
+	}
+	next := query
+	if ok {
+		next = sliced
+	}
+	weaker, weakenOK := smtWithoutQuantifiedHypothesesCommands(query, goalAssert, commands)
+	if prefetcher, canPrefetch := solver.(smt.Prefetcher); canPrefetch && weakenOK {
+		if pending := prefetcher.StartPrefetch(next, vars, checkBudget, a.smtLogLabelText("query", goalAssert, query)); pending != nil {
+			defer func() {
+				if pending != nil {
+					prefetcher.DiscardPrefetch(pending)
+				}
+			}()
+			direct := check
+			check = func(q string) (smt.Result, map[string]string) {
+				if pending != nil && q == next {
+					taken := pending
+					pending = nil
+					if res, model, ok := prefetcher.TakePrefetch(taken, q, vars, checkBudget); ok {
+						return res, model
+					}
+				}
+				return direct(q)
+			}
+		}
+	}
 	// Related quantified callee clauses can overwhelm an otherwise simple
 	// arithmetic proof. Try a bounded weakening first, accepting UNSAT only.
 	if canBudget {
-		if weaker, ok := smtWithoutQuantifiedHypothesesCommands(query, goalAssert, commands); ok {
+		if weakenOK {
 			weakening.query = weaker
 			a.smtSetLogLabelForQuery(solver, "quantifier-weakening", goalAssert, weaker)
 			budget := int64(smtDeadPathBudget)
@@ -580,13 +620,6 @@ func (a *Analyzer) smtCheckSlicedOnce(solver smt.Solver, query, goalAssert strin
 			}
 			a.smtSetLogLabelForQuery(solver, "query", goalAssert, query)
 		}
-	}
-	sliced, dropped, ok := smtSliceQueryCommands(commands, goalAssert, true)
-	// Slice only when the dropped part carries quantifiers: quantifier instantiation is what burns
-	// the budget on irrelevant facts. A quantifier-free remainder is cheap inside the full query,
-	// and slicing it would only add a second solver round trip.
-	if ok && !strings.Contains(dropped, "(forall ") && !strings.Contains(dropped, "(exists ") {
-		ok = false
 	}
 	if !ok || !canBudget {
 		return check(query)

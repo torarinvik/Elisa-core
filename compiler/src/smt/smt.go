@@ -108,6 +108,14 @@ type procSolver struct {
 	warmHistoryCertified              bool
 	resourceUnknown, transientUnknown uint64
 	snapshotUnknown                   uint64
+	// Speculative-check helpers (prefetch.go). opts re-opens a helper with this
+	// solver's configuration; hasOpts is false for hand-built test solvers.
+	opts             Options
+	hasOpts          bool
+	closed           bool
+	idleHelpers      []*procSolver
+	helperCount      int
+	prefetchInFlight sync.WaitGroup
 }
 
 // SnapshotUnknownEpoch counts resource-bounded declines that depend on the
@@ -378,6 +386,8 @@ func Open(opts Options) (Solver, error) {
 		independent:   opts.Independent,
 		z3:            isZ3(binary),
 		checkLimit:    opts.ResourceLimit,
+		opts:          opts,
+		hasOpts:       true,
 	}
 	s.stats.SpawnMillis = time.Since(start)
 	// Print success/error tokens so we can read a deterministic line per command, and keep models
@@ -861,6 +871,7 @@ func (s *procSolver) Stats() Stats {
 }
 
 func (s *procSolver) Close() error {
+	s.closeHelpers()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.broken || s.stdin == nil {

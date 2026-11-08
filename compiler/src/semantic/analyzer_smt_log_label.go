@@ -47,6 +47,11 @@ func (a *Analyzer) smtSetLogLabelForQuery(solver smt.Solver, kind, obligation, q
 	if !ok || !labeled.LogsRlimit() {
 		return
 	}
+	labeled.SetLogLabel(a.smtLogLabelText(kind, obligation, query))
+}
+
+// smtLogLabelText is the rlimit-log attribution label smtSetLogLabelForQuery would set.
+func (a *Analyzer) smtLogLabelText(kind, obligation, query string) string {
 	if query != "" {
 		kind += " [" + smtQueryFeatures(query) + "]"
 	}
@@ -60,5 +65,5 @@ func (a *Analyzer) smtSetLogLabelForQuery(solver smt.Solver, kind, obligation, q
 	if len(obligation) > 400 {
 		obligation = obligation[:400] + "..."
 	}
-	labeled.SetLogLabel(where + " | " + a.currentFuncName() + " | " + kind + " | " + obligation)
+	return where + " | " + a.currentFuncName() + " | " + kind + " | " + obligation
 }
