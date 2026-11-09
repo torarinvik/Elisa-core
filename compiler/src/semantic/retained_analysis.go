@@ -52,7 +52,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		return fail("%s", err)
 	}
 	splices, shadowEdits, movedSplices := comparison.splices, comparison.shadowEdits, comparison.movedSplices
-	pairedNew, pairedOld, replaced := comparison.pairedNew, comparison.pairedOld, comparison.replaced
+	pairedNew, replaced := comparison.pairedNew, comparison.replaced
 	shifted, shiftedOther := comparison.shifted, comparison.shiftedOther
 	structPairs, constPairs, constEnumPairs := comparison.structPairs, comparison.constPairs, comparison.constEnumPairs
 	enumPairs, hierarchyPairs := comparison.enumPairs, comparison.hierarchyPairs
@@ -62,86 +62,11 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	// Track the containers that receive declarations for later source-order sorting.
 	appendedInto := map[*ast.NamespaceDecl]bool{}
 	appendedTop := false
-	reportDeclarationImport := false
-	var relocateProofReport func(*Analyzer) string
-	if r.a != nil {
-		changedOwners := make([]*ast.FuncDecl, 0, len(splices))
-		for _, edit := range splices {
-			changedOwners = append(changedOwners, edit.live)
-		}
-		declarationChange := len(added)+len(removed)+len(addedConsts)+len(removedConsts)+len(addedStructs)+len(removedStructs)+len(structPairs)+len(constPairs)+len(constEnumPairs)+len(enumPairs)+len(hierarchyPairs)+usingsAdded+usingsRemoved != 0
-		onlyFunctionRemovals := len(removed) != 0 && len(added)+len(addedConsts)+len(removedConsts)+len(addedStructs)+len(removedStructs)+len(structPairs)+len(constPairs)+len(constEnumPairs)+len(enumPairs)+len(hierarchyPairs)+usingsAdded+usingsRemoved == 0
-		removedOwners := make([]*ast.FuncDecl, 0, len(removed))
-		if onlyFunctionRemovals {
-			for _, old := range removed {
-				candidates := liveFns[fnKey{retainedLineKey(old.Pos()), old.Name}]
-				if len(candidates) != 1 {
-					return fail("proof report removed owner cannot be paired")
-				}
-				removedOwners = append(removedOwners, candidates[0])
-			}
-			declarationChange = false
-		}
-		proofBodies, why := r.proofReportBodyReanalysisClosure(changedOwners, removedOwners)
-		if why != "" {
-			return fail("%s", why)
-		}
-		if len(proofBodies) != 0 {
-			// Traverse independently parsed declarations in source order, using
-			// ONLY the already-established exact live/fresh pairing. No source
-			// position, function spelling or fact-table key selects an owner.
-			liveOf := map[*ast.FuncDecl]*ast.FuncDecl{}
-			for live, fresh := range pairedNew {
-				liveOf[fresh] = live
-			}
-			for _, decl := range newDecls {
-				fresh, ok := decl.(*ast.FuncDecl)
-				if !ok {
-					continue
-				}
-				live := liveOf[fresh]
-				if !proofBodies[live] {
-					continue
-				}
-				old := pairedOld[live]
-				if old == nil {
-					return fail("proof report dependent body has no exact baseline parse")
-				}
-				if _, known := scoped[live]; !known {
-					return fail("proof report dependent body is not independently analyzable")
-				}
-				splices = append(splices, retainedSplice{live, fresh})
-				shadowEdits = append(shadowEdits, [3]*ast.FuncDecl{live, old, fresh})
-				newTexts[fresh] = retainedText(fresh)
-				changedOwners = append(changedOwners, live)
-				delete(proofBodies, live)
-			}
-			if len(proofBodies) != 0 {
-				return fail("proof report dependent body has no exact fresh source counterpart")
-			}
-		}
-		reportDeclarationImport = declarationChange
-		reportLocationsChanged := len(marks) != 0
-		for live, fresh := range pairedNew {
-			if fresh.Pos().Offset != live.Pos().Offset {
-				reportLocationsChanged = true
-			}
-		}
-		if reportLocationsChanged && len(r.a.proofReport) != 0 && r.DeferProofReportCoordinates {
-			r.proofCoordinatesDeferred = true
-		} else if reportLocationsChanged && len(r.a.proofReport) != 0 {
-			var why string
-			relocateProofReport, why = r.prepareProofReportCoordinates(file, marks)
-			if why != "" {
-				return fail("proof report source relocation: %s", why)
-			}
-		}
-		// A complete coordinate adapter replaces the location-only admission
-		// refusal. Dependency and source-journal admission remain authoritative.
-		if why := r.admitProofReportUpdate(changedOwners, removedOwners, false, declarationChange); why != "" {
-			return fail("%s", why)
-		}
+	reportDeclarationImport, relocateProofReport, err := r.prepareRetainedProofUpdate(file, newDecls, paired, &comparison, liveFns, scoped)
+	if err != nil {
+		return fail("%s", err)
 	}
+	splices, shadowEdits = comparison.splices, comparison.shadowEdits
 	// Bodies are analyzed in the form the declaration phase leaves them in, and
 	// that phase's body-dependent results must be what the retained state holds.
 	pairing := time.Since(start)
