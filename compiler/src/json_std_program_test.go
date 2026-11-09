@@ -32,7 +32,7 @@ func TestRunCLIExecutesJsonStdProgram(t *testing.T) {
 	// The runtime carries its own pre-existing warnings; hold only the
 	// program itself to a clean compile.
 	for _, line := range strings.Split(stderr.String(), "\n") {
-		if strings.Contains(line, "json_std.elisa:") {
+		if strings.Contains(line, "json_std.elisa:") || strings.Contains(line, "json_std_large_and_parity_cases.elisa:") {
 			t.Fatalf("expected no diagnostics against json_std.elisa, got:\n%s", stderr.String())
 		}
 	}
