@@ -19,7 +19,8 @@ func TestNoStorageOverlayClosedAccessPolicy(t *testing.T) {
 		"analyzer_no_storage_overlay.go": {"lookupStoreScanViewOnly": true, "setStoreScanViewOnly": true, "lookupStoreScanNoStorage": true, "setStoreScanNoStorage": true, "lookupStoreScanShares": true, "setStoreScanShares": true, "lookupStoreScanParamWriteCache": true, "setStoreScanParamWriteCache": true, "lookupCompilerBuiltinHelperCall": true, "setCompilerBuiltinHelperCall": true, "lookupReturnElementStmtUnknown": true, "setReturnElementStmtUnknown": true, "clearReturnElementStmtUnknown": true},
 		// analyzeDeclsParallel rejects every active construction overlay before
 		// clearing canonical per-return scratch maps for its next body pass.
-		"parallel_bodies.go":                {"cloneAnalyzerValueForParallelPolicy": true, "cloneSpecializationStoreScanBoolSetCache": true, "analyzeDeclsParallel": true},
+		"parallel_bodies.go":                {"analyzeDeclsParallel": true},
+		"parallel_body_worker_clone.go":     {"cloneAnalyzerValueForParallelPolicy": true, "cloneSpecializationStoreScanBoolSetCache": true},
 		"specialization_maps_generated.go":  {"cloneSpecializationOpaqueMap": true},
 		"shared_codegen.go":                 {"BeginSharedCodegen": true},
 		"optimization_result_api.go":        {"IsCompilerBuiltinHelperCall": true},
@@ -58,7 +59,7 @@ func TestNoStorageOverlayClosedAccessPolicy(t *testing.T) {
 			})
 		}
 	}
-	policy, err := os.ReadFile(filepath.Join(dir, "parallel_bodies.go"))
+	policy, err := os.ReadFile(filepath.Join(dir, "parallel_body_worker_clone.go"))
 	if err != nil {
 		t.Fatal(err)
 	}

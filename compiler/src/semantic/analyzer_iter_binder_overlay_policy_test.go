@@ -21,7 +21,7 @@ func TestIterBinderAccessUsesClosedOverlayAPI(t *testing.T) {
 	}
 	boundary := map[string]map[string]bool{
 		"analyzer_iter_binder_overlay.go": {"lookupIterBinderElementState": true, "setIterBinderElementState": true, "deleteIterBinderElementState": true},
-		"parallel_bodies.go":              {"cloneAnalyzerValueForParallelPolicy": true},
+		"parallel_body_worker_clone.go":   {"cloneAnalyzerValueForParallelPolicy": true},
 	}
 	for _, entry := range entries {
 		if !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
@@ -55,7 +55,7 @@ func TestIterBinderAccessUsesClosedOverlayAPI(t *testing.T) {
 			}
 			if literal, ok := node.(*goast.BasicLit); ok && literal.Kind == token.STRING {
 				value, _ := strconv.Unquote(literal.Value)
-				if value == "iterBinderElementStates" && !(entry.Name() == "parallel_bodies.go" && function == "cloneAnalyzerValueForParallelPolicy") {
+				if value == "iterBinderElementStates" && !(entry.Name() == "parallel_body_worker_clone.go" && function == "cloneAnalyzerValueForParallelPolicy") {
 					t.Errorf("named/reflection fact-table access needs explicit policy at %s", set.Position(literal.Pos()))
 				}
 			}

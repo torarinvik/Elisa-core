@@ -243,7 +243,7 @@ func TestStoreScanParamFactsOverlayResourceGuards(t *testing.T) {
 
 func TestStoreScanParamFactsOverlayConstructorKeepsClosedSchemaFallback(t *testing.T) {
 	_, filename, _, _ := runtime.Caller(0)
-	data, err := os.ReadFile(filepath.Join(filepath.Dir(filename), "parallel_bodies.go"))
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(filename), "parallel_body_worker_clone.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +252,7 @@ func TestStoreScanParamFactsOverlayConstructorKeepsClosedSchemaFallback(t *testi
 		t.Fatal("constructor bypasses exact value schema")
 	}
 
-	file, err := parser.ParseFile(token.NewFileSet(), "parallel_bodies.go", data, 0)
+	file, err := parser.ParseFile(token.NewFileSet(), "parallel_body_worker_clone.go", data, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

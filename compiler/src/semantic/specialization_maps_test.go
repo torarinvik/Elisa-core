@@ -273,7 +273,7 @@ func TestSpecializationOpaqueHookPreservesOrdinaryWorkersAndDeepFallback(t *test
 		t.Fatal("ordinary worker lost reflective deep fallback")
 	}
 	_, file, _, _ := runtime.Caller(0)
-	text, err := os.ReadFile(filepath.Join(filepath.Dir(file), "parallel_bodies.go"))
+	text, err := os.ReadFile(filepath.Join(filepath.Dir(file), "parallel_body_worker_clone.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +281,7 @@ func TestSpecializationOpaqueHookPreservesOrdinaryWorkersAndDeepFallback(t *test
 	if start < 0 {
 		t.Fatal("clone policy function missing")
 	}
-	end := strings.Index(string(text)[start:], "\nfunc parallelBodyWorkerRebuildMap(")
+	end := strings.Index(string(text)[start:], "\nfunc cloneSpecializationStoreScanBoolSetCache(")
 	if end < 0 {
 		t.Fatal("clone policy source boundary changed; review hook policy")
 	}

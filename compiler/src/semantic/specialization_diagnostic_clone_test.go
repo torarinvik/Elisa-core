@@ -58,7 +58,7 @@ func TestSpecializationDiagnosticClonePolicyIsPrivateBeforeMapCloning(t *testing
 		t.Fatal("ordinary worker shared a writable deduplication map")
 	}
 	_, filename, _, _ := runtime.Caller(0)
-	text, err := os.ReadFile(filepath.Join(filepath.Dir(filename), "parallel_bodies.go"))
+	text, err := os.ReadFile(filepath.Join(filepath.Dir(filename), "parallel_body_worker_clone.go"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -273,7 +273,7 @@ def foreign(values: i32[4]) -> i32[4]:
 func TestAnalyzerExprFactAccessUsesClosedOverlayAPI(t *testing.T) {
 	_, filename, _, _ := runtime.Caller(0)
 	directory := filepath.Dir(filename)
-	policy, err := os.ReadFile(filepath.Join(directory, "parallel_bodies.go"))
+	policy, err := os.ReadFile(filepath.Join(directory, "parallel_body_worker_clone.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +286,7 @@ func TestAnalyzerExprFactAccessUsesClosedOverlayAPI(t *testing.T) {
 	}
 	boundary := map[string]map[string]bool{
 		"analyzer_expr_facts_overlay.go": {"lookupExprFacts": true, "setExprFacts": true, "deleteExprFacts": true, "rangeExprFacts": true, "exprFactsLen": true, "hasExprFactsStorage": true},
-		"parallel_bodies.go":             {"cloneAnalyzerValueForParallelPolicy": true},
+		"parallel_body_worker_clone.go":  {"cloneAnalyzerValueForParallelPolicy": true},
 		"analyzer.go":                    {"finishProgramResult": true},
 	}
 	for _, entry := range entries {
@@ -376,7 +376,7 @@ func BenchmarkSpecializationExprFactsOverlayConstruction(b *testing.B) {
 // ownedRows only accounts for already captured immutable receipt labels.
 func exprFactsNamedAccessHasClosedPolicy(file, function string) bool {
 	switch file {
-	case "parallel_bodies.go":
+	case "parallel_body_worker_clone.go":
 		return function == "cloneAnalyzerValueForParallelPolicy"
 	case "specialization_accessors_gen.go":
 		return function == ""

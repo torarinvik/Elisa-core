@@ -21,7 +21,7 @@ func TestStoreScanBinderUsesClosedOwnedAndSourceAPI(t *testing.T) {
 	}
 	boundary := map[string]map[string]bool{
 		"analyzer_store_scan_binder_overlay.go": {"ownedStoreScanBinderRow": true, "installOwnedStoreScanBinderRow": true, "rekeyStoreScanBinderRow": true},
-		"parallel_bodies.go":                    {"cloneAnalyzerValueForParallelPolicy": true},
+		"parallel_body_worker_clone.go":         {"cloneAnalyzerValueForParallelPolicy": true},
 	}
 	for _, entry := range entries {
 		if !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
@@ -55,7 +55,7 @@ func TestStoreScanBinderUsesClosedOwnedAndSourceAPI(t *testing.T) {
 			}
 			if literal, ok := node.(*goast.BasicLit); ok && literal.Kind == token.STRING {
 				value, _ := strconv.Unquote(literal.Value)
-				if value == "storeScanBinderTypes" && !(entry.Name() == "parallel_bodies.go" && function == "cloneAnalyzerValueForParallelPolicy") && !(entry.Name() == "analyzer_store_scan_binder_overlay.go" && function == "storeScanBinderFieldNumber") {
+				if value == "storeScanBinderTypes" && !(entry.Name() == "parallel_body_worker_clone.go" && function == "cloneAnalyzerValueForParallelPolicy") && !(entry.Name() == "analyzer_store_scan_binder_overlay.go" && function == "storeScanBinderFieldNumber") {
 					t.Errorf("named/reflection fact-table access needs explicit policy at %s", set.Position(literal.Pos()))
 				}
 			}

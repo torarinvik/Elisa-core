@@ -15,7 +15,7 @@ import (
 
 func TestStoreFlowCloneKeepsOrdinaryCloneAndOwnedBoundary(t *testing.T) {
 	_, filename, _, _ := runtime.Caller(0)
-	path := filepath.Join(filepath.Dir(filename), "parallel_bodies.go")
+	path := filepath.Join(filepath.Dir(filename), "parallel_body_worker_clone.go")
 	source, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
