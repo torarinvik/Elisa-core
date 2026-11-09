@@ -1,0 +1,239 @@
+extend Json:
+    private:
+        def json_parse_string_ref(a: mutable Arena&, p: mutable JsonParser&) -> JsonStringRef:
+            can Abort.Panic, Atomics{Exchange,Load,Store}, Global{Read,Write}, Memory.Allocate, Unsafe{Alias,PointerArithmetic,PointerCast,RawExtern,UncheckedIndex}:
+                if json_peek(p) != JSON_CH_DQUOTE:
+                    return json_fail_string(p, JsonErrorCode.UNEXPECTED_CHAR, p.pos)
+                open_pos: i64 = p.pos
+                json_bump(p)
+                content_start: i64 = p.pos
+                raw_stop: mutable i64 = -1
+                has_escape: mutable bool = false
+                scanned: bool = json_string_scan(p, content_start, raw_stop, has_escape)
+                if scanned and not has_escape:
+                    p.pos <- raw_stop + 1
+                    raw: sview = string_view_slice(p.text, content_start, raw_stop)
+                    return JsonStringRef{data_bits: raw.data.cast[u8&].cast[uintptr], len: raw.len}
+                in a:
+                    out: mutable darray[u8] = []
+                    # A failed scan cannot tell a raw control byte from a bad escape
+                    # or a missing quote; the decoding loop below reports each at
+                    # its exact position, so it owns every malformed string.
+                    bound: i64 = raw_stop - content_start + 1 if scanned else 1
+                    _ = arena_da_reserve(a, &out, bound.usize())
+                    closed: mutable bool = false
+                    while not closed:
+                        ch: i64 = json_peek(p)
+                        if ch < 0:
+                            # Ran off the end before the closing quote.
+                            return json_fail_string(p, JsonErrorCode.INVALID_STRING, open_pos)
+                        if ch == JSON_CH_DQUOTE:
+                            json_bump(p)
+                            closed <- true
+                        elif ch < JSON_CH_SPACE:
+                            # An unescaped control character is not allowed in a string.
+                            return json_fail_string(p, JsonErrorCode.INVALID_STRING, p.pos)
+                        elif ch == JSON_CH_BSLASH:
+                            json_bump(p)
+                            codepoint: i64 = json_decode_escape(p)
+                            return json_fail_string(p, JsonErrorCode.INVALID_ESCAPE, p.pos) if codepoint < 0
+                            encoded: JsonUtf8 = json_encode_utf8(codepoint)
+                            out.push(encoded.b0)
+                            out.push(encoded.b1) if encoded.len > 1
+                            out.push(encoded.b2) if encoded.len > 2
+                            out.push(encoded.b3) if encoded.len > 3
+                        else:
+                            out.push(ch.u8())
+                            json_bump(p)
+                    length: i64 = out.count.i64()
+                    out.push(0)
+                    return JsonStringRef{data_bits: (&out[0]).cast[u8&].cast[uintptr], len: length}
+
+        # ------------------------------------------------------------
+        # Number parsing
+        # ------------------------------------------------------------
+
+        # Scan one JSON number, leaving the cursor just past it. Grammar (RFC 8259):
+        #   -? (0 | [1-9][0-9]*) (. [0-9]+)? ([eE] [+-]? [0-9]+)?
+        # so a leading `+`, a leading zero ("01"), a bare ".5", a trailing "5." and an
+        # exponent with no digits are all rejected.
+        def json_scan_number(p: mutable JsonParser&) -> bool:
+            can Unsafe.UncheckedIndex:
+                json_bump(p) if json_peek(p) == JSON_CH_MINUS
+
+                ch: mutable i64 = json_peek(p)
+                if ch == JSON_CH_0:
+                    json_bump(p)
+                elif json_is_digit(ch):
+                    while json_is_digit(json_peek(p)):
+                        json_bump(p)
+                else:
+                    return false
+
+                if json_peek(p) == JSON_CH_DOT:
+                    json_bump(p)
+                    return false if not json_is_digit(json_peek(p))
+                    while json_is_digit(json_peek(p)):
+                        json_bump(p)
+
+                ch <- json_peek(p)
+                if ch == JSON_CH_e or ch == JSON_CH_UPPER_E:
+                    json_bump(p)
+                    ch <- json_peek(p)
+                    json_bump(p) if ch == JSON_CH_PLUS or ch == JSON_CH_MINUS
+                    return false if not json_is_digit(json_peek(p))
+                    while json_is_digit(json_peek(p)):
+                        json_bump(p)
+
+                return true
+
+        # Convert the input slice [start, stop) with libc strtod. The lexeme is copied
+        # into NUL-terminated storage first: strtod on the raw input would happily read
+        # past the lexeme (hex, "inf", "nan"), and JSON allows none of that.
+        def json_lexeme_to_f64(a: mutable Arena&, text: sview, start: i64, stop: i64) -> f64:
+            can Abort.Panic, Memory.Allocate, Unsafe{PointerCast,RawExtern,UncheckedIndex}:
+                length: i64 = stop - start
+                if length < JSON_NUMBER_SCRATCH:
+                    scratch: mutable u8[512]
+                    for index in 0..<length:
+                        scratch[index.usize()] <- string_view_index(text, start + index).u8()
+                    scratch[length.usize()] <- 0
+                    return strtod(&scratch[0], null)
+                in a:
+                    digits: mutable darray[u8] = []
+                    for index in 0..<length:
+                        digits.push(string_view_index(text, start + index).u8())
+                    digits.push(0)
+                    return strtod(&digits[0], null)
+
+        # ------------------------------------------------------------
+        # Recursive descent
+        # ------------------------------------------------------------
+
+        # The whole grammar lives in ONE self-recursive function. The natural split
+        # (parse_value <-> parse_array/parse_object) needs a forward reference through
+        # a callee, and stage1 mis-resolves those when an error union is involved, so
+        # the two container loops are inlined here instead.
+        #
+        # On entry the cursor may sit on whitespace; on return it sits just past the
+        # value. `p.depth` bounds nesting so a hostile document cannot exhaust the host
+        # stack. On failure the parser's error code is set and the return value is a
+        # meaningless `JsonValue.Null` - always check `json_failed(p)` first.
+        def json_parse_value(a: mutable Arena&, p: mutable JsonParser&) -> JsonValue:
+            can Abort.Panic, Atomics{Exchange,Load,Store}, Global{Read,Write}, Memory.Allocate, Unsafe{Alias,PointerArithmetic,PointerCast,RawExtern,UncheckedIndex}:
+                json_skip_ws(p)
+                ch: i64 = json_peek(p)
+                if ch < 0:
+                    return json_fail_value(p, JsonErrorCode.UNEXPECTED_END, p.pos)
+
+                # --- array ---
+                if ch == JSON_CH_LBRACKET:
+                    json_bump(p)
+                    p.depth <- p.depth + 1
+                    if p.depth > JSON_MAX_DEPTH:
+                        return json_fail_value(p, JsonErrorCode.DEPTH_EXCEEDED, p.pos)
+
+                    json_skip_ws(p)
+                    if json_peek(p) == JSON_CH_RBRACKET:
+                        json_bump(p)
+                        p.depth <- p.depth - 1
+                        return JsonValue.Array(items_bits: 0.uintptr(), count: 0)
+
+                    in a:
+                        items: mutable darray[JsonValue] = []
+                        _ = arena_da_reserve(a, &items, json_container_item_count(p, JSON_CH_RBRACKET))
+                        items_done: mutable bool = false
+                        while not items_done:
+                            item: JsonValue = json_parse_value(a, p)
+                            return item if json_failed(p)
+                            items.push(item)
+                            json_skip_ws(p)
+                            after_item: i64 = json_peek(p)
+                            if after_item == JSON_CH_COMMA:
+                                json_bump(p)
+                            elif after_item == JSON_CH_RBRACKET:
+                                json_bump(p)
+                                items_done <- true
+                            elif after_item < 0:
+                                return json_fail_value(p, JsonErrorCode.UNEXPECTED_END, p.pos)
+                            else:
+                                return json_fail_value(p, JsonErrorCode.EXPECTED_COMMA_OR_END, p.pos)
+                        p.depth <- p.depth - 1
+                        return JsonValue.Array(items_bits: (&items[0]).cast[u8&].cast[uintptr], count: items.count.i64())
+
+                # --- object ---
+                if ch == JSON_CH_LBRACE:
+                    json_bump(p)
+                    p.depth <- p.depth + 1
+                    if p.depth > JSON_MAX_DEPTH:
+                        return json_fail_value(p, JsonErrorCode.DEPTH_EXCEEDED, p.pos)
+
+                    json_skip_ws(p)
+                    if json_peek(p) == JSON_CH_RBRACE:
+                        json_bump(p)
+                        p.depth <- p.depth - 1
+                        return JsonValue.Object(members_bits: 0.uintptr(), count: 0)
+
+                    in a:
+                        members: mutable darray[JsonMember] = []
+                        _ = arena_da_reserve(a, &members, json_container_item_count(p, JSON_CH_RBRACE))
+                        members_done: mutable bool = false
+                        while not members_done:
+                            json_skip_ws(p)
+                            if json_peek(p) != JSON_CH_DQUOTE:
+                                return json_fail_value(p, JsonErrorCode.UNEXPECTED_CHAR, p.pos)
+                            key: JsonStringRef = json_parse_string_ref(a, p)
+                            return JsonValue.Null if json_failed(p)
+
+                            json_skip_ws(p)
+                            if json_peek(p) != JSON_CH_COLON:
+                                return json_fail_value(p, JsonErrorCode.EXPECTED_COLON, p.pos)
+                            json_bump(p)
+
+                            member_value: JsonValue = json_parse_value(a, p)
+                            return member_value if json_failed(p)
+                            members.push(JsonMember{key_bits: key.data_bits, key_len: key.len, value: member_value})
+
+                            json_skip_ws(p)
+                            after_member: i64 = json_peek(p)
+                            if after_member == JSON_CH_COMMA:
+                                json_bump(p)
+                            elif after_member == JSON_CH_RBRACE:
+                                json_bump(p)
+                                members_done <- true
+                            elif after_member < 0:
+                                return json_fail_value(p, JsonErrorCode.UNEXPECTED_END, p.pos)
+                            else:
+                                return json_fail_value(p, JsonErrorCode.EXPECTED_COMMA_OR_END, p.pos)
+                        p.depth <- p.depth - 1
+                        return JsonValue.Object(members_bits: (&members[0]).cast[u8&].cast[uintptr], count: members.count.i64())
+
+                # --- scalars ---
+                if ch == JSON_CH_DQUOTE:
+                    text: JsonStringRef = json_parse_string_ref(a, p)
+                    return JsonValue.Null if json_failed(p)
+                    return JsonValue.String(data_bits: text.data_bits, len: text.len)
+                if ch == JSON_CH_t:
+                    if not json_match_literal(p, sview("true", 0, -1)):
+                        return json_fail_value(p, JsonErrorCode.INVALID_LITERAL, p.pos)
+                    return JsonValue.Bool(value: true)
+                if ch == JSON_CH_f:
+                    if not json_match_literal(p, sview("false", 0, -1)):
+                        return json_fail_value(p, JsonErrorCode.INVALID_LITERAL, p.pos)
+                    return JsonValue.Bool(value: false)
+                if ch == JSON_CH_n:
+                    if not json_match_literal(p, sview("null", 0, -1)):
+                        return json_fail_value(p, JsonErrorCode.INVALID_LITERAL, p.pos)
+                    return JsonValue.Null
+                if ch == JSON_CH_MINUS or json_is_digit(ch):
+                    start: i64 = p.pos
+                    if not json_scan_number(p):
+                        return json_fail_value(p, JsonErrorCode.INVALID_NUMBER, start)
+                    return JsonValue.Number(value: json_lexeme_to_f64(a, p.text, start, p.pos))
+
+                return json_fail_value(p, JsonErrorCode.UNEXPECTED_CHAR, p.pos)
+
+        # Parse one complete JSON document out of `text` into arena `a`, reporting
+        # failure as a code plus a position instead of raising. Leading and trailing
+        # whitespace is allowed; anything else after the top-level value is
+        # `TRAILING_DATA`, so a truncated or doubled document cannot slip through.

@@ -1,0 +1,302 @@
+extend Json:
+    public:
+        def json_parse_checked[@r](a: mutable Arena& @r, text: sview) -> JsonParseResult[r]:
+            can Abort.Panic, Atomics{Exchange,Store}, Global{Read,Write}, Memory.Allocate, Unsafe{Alias,PointerArithmetic,PointerCast,RawExtern,UncheckedIndex}:
+                p: mutable JsonParser = JsonParser{text: text, pos: 0, depth: 0, error_code: JsonErrorCode.OK, error_pos: 0}
+                value: JsonValue = json_parse_value(a, &p)
+                if p.error_code == JsonErrorCode.OK:
+                    json_skip_ws(&p)
+                    if p.pos < text.len:
+                        json_note(&p, JsonErrorCode.TRAILING_DATA, p.pos)
+                if p.error_code != JsonErrorCode.OK:
+                    return JsonParseResult{code: p.error_code, pos: p.error_pos, value: json_handle_null_value(a)}
+                return JsonParseResult{code: JsonErrorCode.OK, pos: 0, value: json_handle_in_arena(value, a)}
+
+        # ------------------------------------------------------------
+        # Constructors
+        # ------------------------------------------------------------
+
+    private:
+        # Raw-value constructors stay module-private: their representation can contain
+        # pointers into an Arena and therefore must only cross the public boundary inside
+        # a region-indexed JsonValueHandle.
+        def json_null() -> JsonValue:
+            return JsonValue.Null
+
+        def json_bool(value: bool) -> JsonValue:
+            return JsonValue.Bool(value: value)
+
+        def json_number(value: f64) -> JsonValue:
+            return JsonValue.Number(value: value)
+
+        # Copy `text` into the arena verbatim - the bytes are taken as already-decoded
+        # UTF-8, exactly what a parsed string holds - and wrap it as a JSON string.
+        def json_string(a: mutable Arena&, text: sview) -> JsonValue:
+            can Abort.Panic, Memory.Allocate, Unsafe{PointerCast,UncheckedIndex}:
+                in a:
+                    out: mutable darray[u8] = []
+                    for index in 0..<text.len:
+                        out.push(string_view_index(text, index).u8())
+                    length: i64 = out.count.i64()
+                    out.push(0)
+                    return JsonValue.String(data_bits: (&out[0]).cast[u8&].cast[uintptr], len: length)
+
+    private:
+        def json_member(a: mutable Arena&, key: sview, value: JsonValue) -> JsonMember:
+            can Abort.Panic, Memory.Allocate, Unsafe{PointerCast,UncheckedIndex}:
+                in a:
+                    out: mutable darray[u8] = []
+                    for index in 0..<key.len:
+                        out.push(string_view_index(key, index).u8())
+                    length: i64 = out.count.i64()
+                    out.push(0)
+                    return JsonMember{key_bits: (&out[0]).cast[u8&].cast[uintptr], key_len: length, value: value}
+
+        # Build an array node over a copy of `items` in the arena.
+        def json_array_from(a: mutable Arena&, items: darray[JsonValue]) -> JsonValue:
+            can Abort.Panic, Memory.Allocate, Unsafe{PointerCast,UncheckedIndex}:
+                return JsonValue.Array(items_bits: 0.uintptr(), count: 0) if items.count == 0
+                in a:
+                    copy: mutable darray[JsonValue] = []
+                    for index in 0..<items.count:
+                        copy.push(items[index])
+                    return JsonValue.Array(items_bits: (&copy[0]).cast[u8&].cast[uintptr], count: copy.count.i64())
+
+        # Build an object node over a copy of `members` in the arena; the given order is
+        # the order `json_write` will emit.
+        def json_object_from(a: mutable Arena&, members: darray[JsonMember]) -> JsonValue:
+            can Abort.Panic, Memory.Allocate, Unsafe{PointerCast,UncheckedIndex}:
+                return JsonValue.Object(members_bits: 0.uintptr(), count: 0) if members.count == 0
+                in a:
+                    copy: mutable darray[JsonMember] = []
+                    for index in 0..<members.count:
+                        copy.push(members[index])
+                    return JsonValue.Object(members_bits: (&copy[0]).cast[u8&].cast[uintptr], count: copy.count.i64())
+
+        # ------------------------------------------------------------
+        # Type tests
+        # ------------------------------------------------------------
+
+    private:
+        def json_kind(value: JsonValue) -> JsonKind:
+            match value:
+                JsonValue.Null:
+                    return JsonKind.NULL
+                JsonValue.Bool(flag):
+                    return JsonKind.BOOL
+                JsonValue.Number(number):
+                    return JsonKind.NUMBER
+                JsonValue.String(data_bits, len):
+                    return JsonKind.STRING
+                JsonValue.Array(items_bits, count):
+                    return JsonKind.ARRAY
+                JsonValue.Object(members_bits, count):
+                    return JsonKind.OBJECT
+
+        def json_is_null(value: JsonValue) -> bool:
+            return json_kind(value) == JsonKind.NULL
+
+        def json_is_bool(value: JsonValue) -> bool:
+            return json_kind(value) == JsonKind.BOOL
+
+        def json_is_number(value: JsonValue) -> bool:
+            return json_kind(value) == JsonKind.NUMBER
+
+        def json_is_string(value: JsonValue) -> bool:
+            return json_kind(value) == JsonKind.STRING
+
+        def json_is_array(value: JsonValue) -> bool:
+            return json_kind(value) == JsonKind.ARRAY
+
+        def json_is_object(value: JsonValue) -> bool:
+            return json_kind(value) == JsonKind.OBJECT
+
+        # ------------------------------------------------------------
+        # Scalar accessors
+        # ------------------------------------------------------------
+
+        def json_as_bool(value: JsonValue) -> bool error[JsonAccessError]:
+            match value:
+                JsonValue.Bool(flag):
+                    return flag
+                _:
+                    raise JsonAccessError.WrongType
+            raise JsonAccessError.WrongType
+
+        def json_as_number(value: JsonValue) -> f64 error[JsonAccessError]:
+            match value:
+                JsonValue.Number(number):
+                    return number
+                _:
+                    raise JsonAccessError.WrongType
+            raise JsonAccessError.WrongType
+
+        # The decoded bytes of a JSON string. The view borrows the arena, so it stays
+        # valid exactly as long as the parse does.
+        def json_as_string(value: JsonValue) -> sview error[JsonAccessError]:
+            can Unsafe{PointerArithmetic,RawExtern}:
+                trusted Unsafe.PointerCast:
+                    match value:
+                        JsonValue.String(data_bits, len):
+                            if len == JSON_EMPTY_STRING_LENGTH:
+                                return sview("", JSON_EMPTY_STRING_LENGTH, JSON_EMPTY_STRING_LENGTH)
+                            if len < JSON_EMPTY_STRING_LENGTH or data_bits == JSON_NULL_STRING_ADDRESS:
+                                raise JsonAccessError.WrongType
+                            trusted Unsafe.PointerCast:
+                                return StringView{data: data_bits.cast[u8&], len: len}
+                        _:
+                            raise JsonAccessError.WrongType
+                    raise JsonAccessError.WrongType
+
+        # The decoded bytes as a C string. Safe only when the value contains no
+        # a NUL byte: an embedded NUL truncates the logical string, exactly as it does
+        # for `read_entire_file_cstr`.
+        def json_as_cstr(value: JsonValue) -> cstr error[JsonAccessError]:
+            trusted Unsafe.PointerCast:
+                match value:
+                    JsonValue.String(data_bits, len):
+                        return data_bits.cast[u8&].cast[cstr]
+                    _:
+                        raise JsonAccessError.WrongType
+                raise JsonAccessError.WrongType
+
+        # ------------------------------------------------------------
+        # Array accessors
+        # ------------------------------------------------------------
+
+        # Element count, or -1 when `value` is not an array.
+        def json_array_len(value: JsonValue) -> i64:
+            match value:
+                JsonValue.Array(items_bits, count):
+                    return count
+                _:
+                    return -1
+            return -1
+
+        # Interior addresses inside the contiguous child runs.
+    private:
+        def json_value_ref(bits: uintptr, index: i64) -> JsonValue&:
+            can Unsafe.PointerArithmetic:
+                trusted Unsafe.PointerCast:
+                    return (bits.cast[u8&] + index.usize() * size_of(JsonValue)).cast[JsonValue&]
+
+        def json_member_ref(bits: uintptr, index: i64) -> JsonMember&:
+            can Unsafe.PointerArithmetic:
+                trusted Unsafe.PointerCast:
+                    return (bits.cast[u8&] + index.usize() * size_of(JsonMember)).cast[JsonMember&]
+
+        # Lift one child out of a run BY VALUE. The copy goes through `arena_memcpy`
+        # rather than the obvious `json_value_ref(bits, index)[0]`: dereferencing an
+        # enum reference into a return value is a shape the stage1 backend drops, and it
+        # drops the whole unit with it. Every by-value read in this module goes through
+        # these two helpers for that reason.
+        def json_value_copy(bits: uintptr, index: i64) -> JsonValue:
+            can Unsafe.PointerArithmetic:
+                trusted Unsafe.PointerCast:
+                    out: mutable JsonValue = zeroed
+                    arena_memcpy((&out).cast[void&], json_value_ref(bits, index).cast[void&], size_of(JsonValue))
+                    return move out
+
+        def json_member_copy(bits: uintptr, index: i64) -> JsonMember:
+            can Unsafe.PointerArithmetic:
+                trusted Unsafe.PointerCast:
+                    out: mutable JsonMember = zeroed
+                    arena_memcpy((&out).cast[void&], json_member_ref(bits, index).cast[void&], size_of(JsonMember))
+                    return move out
+
+        def json_member_key_view(member: JsonMember) -> sview:
+            can Unsafe{PointerArithmetic,RawExtern}:
+                if member.key_len <= JSON_EMPTY_STRING_LENGTH or member.key_bits == JSON_NULL_STRING_ADDRESS:
+                    return sview("", JSON_EMPTY_STRING_LENGTH, JSON_EMPTY_STRING_LENGTH)
+                trusted Unsafe.PointerCast:
+                    return StringView{data: member.key_bits.cast[u8&], len: member.key_len}
+
+    private:
+        def json_at(value: JsonValue, index: i64) -> JsonValue error[JsonAccessError]:
+            can Unsafe.PointerArithmetic:
+                match value:
+                    JsonValue.Array(items_bits, count):
+                        if index < 0 or index >= count:
+                            raise JsonAccessError.OutOfRange
+                        return json_value_copy(items_bits, index)
+                    _:
+                        raise JsonAccessError.WrongType
+                raise JsonAccessError.WrongType
+
+        # ------------------------------------------------------------
+        # Object accessors
+        # ------------------------------------------------------------
+
+        # Member count, or -1 when `value` is not an object.
+        def json_object_len(value: JsonValue) -> i64:
+            match value:
+                JsonValue.Object(members_bits, count):
+                    return count
+                _:
+                    return -1
+            return -1
+
+        def json_key_at(value: JsonValue, index: i64) -> sview error[JsonAccessError]:
+            can Unsafe{PointerArithmetic,RawExtern}:
+                match value:
+                    JsonValue.Object(members_bits, count):
+                        if index < 0 or index >= count:
+                            raise JsonAccessError.OutOfRange
+                        return json_member_key_view(json_member_copy(members_bits, index))
+                    _:
+                        raise JsonAccessError.WrongType
+                raise JsonAccessError.WrongType
+
+        def json_value_at(value: JsonValue, index: i64) -> JsonValue error[JsonAccessError]:
+            can Unsafe.PointerArithmetic:
+                match value:
+                    JsonValue.Object(members_bits, count):
+                        if index < 0 or index >= count:
+                            raise JsonAccessError.OutOfRange
+                        member: JsonMember = json_member_copy(members_bits, index)
+                        return member.value
+                    _:
+                        raise JsonAccessError.WrongType
+                raise JsonAccessError.WrongType
+
+        # Index of the FIRST member whose key equals `key`, or -1. Duplicate keys are
+        # legal JSON and all of them are kept; this answers with the earliest.
+        def json_index_of(value: JsonValue, key: sview) -> i64:
+            can Unsafe{PointerArithmetic,PointerCast,RawExtern}:
+                match value:
+                    JsonValue.Object(members_bits, count):
+                        for index in 0..<count:
+                            candidate: sview = json_member_key_view(json_member_copy(members_bits, index))
+                            return index if candidate == key
+                        return -1
+                    _:
+                        return -1
+                return -1
+
+        def json_has(value: JsonValue, key: sview) -> bool:
+            can Unsafe{PointerArithmetic,PointerCast,RawExtern}:
+                return json_index_of(value, key) >= 0
+
+        def json_get(value: JsonValue, key: sview) -> JsonValue error[JsonAccessError]:
+            can Unsafe{PointerArithmetic,PointerCast,RawExtern}:
+                if not json_is_object(value):
+                    raise JsonAccessError.WrongType
+                index: i64 = json_index_of(value, key)
+                if index < 0:
+                    raise JsonAccessError.MissingKey
+                found: JsonValue = try json_value_at(value, index)
+                return found
+
+        # Internal constructor and the checked document-to-handle boundary. Keeping
+        # the raw-value constructor private prevents clients from manufacturing a
+        # handle from arbitrary data.
+    private:
+        def json_handle_in_arena[@r](value: JsonValue, owner: mutable Arena& @r) -> JsonValueHandle[r]:
+            return JsonValueHandle{node: value}
+
+        def json_handle_null_value[@r](owner: mutable Arena& @r) -> JsonValueHandle[r]:
+            return JsonValueHandle{node: JsonValue.Null}
+
+        def json_handle_like[@r](value: JsonValue, owner: JsonValueHandle[r]) -> JsonValueHandle[r]:
+            return JsonValueHandle{node: value}
+

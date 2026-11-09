@@ -1,0 +1,251 @@
+extend Json:
+    private:
+        struct JsonStringRef:
+            data_bits: mutable uintptr
+            len: mutable i64
+
+        # One codepoint encoded as UTF-8, returned by value so the string loop can
+        # append it without handing a container reference around.
+        struct JsonUtf8:
+            len: mutable i64
+            b0: mutable u8
+            b1: mutable u8
+            b2: mutable u8
+            b3: mutable u8
+
+        # ------------------------------------------------------------
+        # Byte-level helpers
+        # ------------------------------------------------------------
+
+        # The byte at the cursor, or -1 at end of input. -1 (never 0) marks EOF so a
+        # literal NUL inside the input stays distinguishable from running out of it.
+        def json_peek(p: JsonParser&) -> i64:
+            can Unsafe.UncheckedIndex:
+                return -1 if p.pos >= p.text.len else string_view_index(p.text, p.pos)
+
+        def json_peek_at(p: JsonParser&, offset: i64) -> i64:
+            can Unsafe.UncheckedIndex:
+                index: i64 = p.pos + offset
+                return -1 if index >= p.text.len else string_view_index(p.text, index)
+
+        def json_bump(p: mutable JsonParser&):
+            p.pos <- p.pos + 1 if p.pos < p.text.len
+
+        def json_is_digit(ch: i64) -> bool:
+            return ch >= JSON_CH_0 and ch <= JSON_CH_9
+
+        def json_hex_value(ch: i64) -> i64:
+            return ch - JSON_CH_0 if json_is_digit(ch)
+            return ch - JSON_CH_UPPER_A + 10 if ch >= JSON_CH_UPPER_A and ch <= JSON_CH_UPPER_F
+            return ch - JSON_CH_a + 10 if ch >= JSON_CH_a and ch <= JSON_CH_f
+            return -1
+
+        def json_is_high_surrogate(codepoint: i64) -> bool:
+            return codepoint >= 55296 and codepoint <= 56319
+
+        def json_is_low_surrogate(codepoint: i64) -> bool:
+            return codepoint >= 56320 and codepoint <= 57343
+
+        # RFC 8259 whitespace is exactly these four bytes.
+        def json_skip_ws(p: mutable JsonParser&):
+            can Unsafe.UncheckedIndex:
+                scanning: mutable bool = true
+                while scanning:
+                    ch: i64 = json_peek(p)
+                    if ch == JSON_CH_SPACE or ch == JSON_CH_TAB or ch == JSON_CH_NL or ch == JSON_CH_CR:
+                        json_bump(p)
+                    else:
+                        scanning <- false
+
+        # Consume `literal` if the input matches it exactly; leave the cursor put
+        # otherwise.
+        def json_match_literal(p: mutable JsonParser&, literal: sview) -> bool:
+            can Unsafe.UncheckedIndex:
+                return false if p.pos + literal.len > p.text.len
+                for index in 0..<literal.len:
+                    return false if string_view_index(p.text, p.pos + index) != string_view_index(literal, index)
+                p.pos <- p.pos + literal.len
+                return true
+
+        # ------------------------------------------------------------
+        # UTF-8 encoding
+        # ------------------------------------------------------------
+
+        # Encode one codepoint. Surrogates and out-of-range values never reach here -
+        # `json_decode_escape` rejects them - so a zero-length result is impossible.
+        def json_encode_utf8(codepoint: i64) -> JsonUtf8:
+            out: mutable JsonUtf8 = zeroed
+            if codepoint <= 127:
+                out.len <- 1
+                out.b0 <- codepoint.u8()
+                return out
+            if codepoint <= 2047:
+                out.len <- 2
+                out.b0 <- (192 | (codepoint >> 6)).u8()
+                out.b1 <- (128 | (codepoint & 63)).u8()
+                return out
+            if codepoint <= 65535:
+                out.len <- 3
+                out.b0 <- (224 | (codepoint >> 12)).u8()
+                out.b1 <- (128 | ((codepoint >> 6) & 63)).u8()
+                out.b2 <- (128 | (codepoint & 63)).u8()
+                return out
+            out.len <- 4
+            out.b0 <- (240 | (codepoint >> 18)).u8()
+            out.b1 <- (128 | ((codepoint >> 12) & 63)).u8()
+            out.b2 <- (128 | ((codepoint >> 6) & 63)).u8()
+            out.b3 <- (128 | (codepoint & 63)).u8()
+            return out
+
+        # ------------------------------------------------------------
+        # Failure recording
+        # ------------------------------------------------------------
+        #
+        # The recursive descent below reports failures by stamping a code and a position
+        # into the parser and unwinding with a placeholder value, rather than by raising
+        # through an error union. Two reasons: it keeps the hot recursion free of `try`
+        # (stage1 declines a `try` in call-argument position and rejects `try` on a
+        # forward-declared callee, which is exactly the shape a two-function parser
+        # needs), and it gives `json_parse_checked` an error surface callers can inspect
+        # without variant-pattern `catch` arms.
+        #
+        # The FIRST failure wins: later notes are ignored while the stack unwinds, so
+        # the reported position is the innermost one that actually detected the problem.
+
+        def json_note(p: mutable JsonParser&, code: JsonErrorCode, pos: i64):
+            if p.error_code == JsonErrorCode.OK:
+                p.error_code <- code
+                p.error_pos <- pos
+
+        def json_failed(p: JsonParser&) -> bool:
+            return p.error_code != JsonErrorCode.OK
+
+        # Record a failure and hand back the placeholder the caller unwinds with.
+        def json_fail_value(p: mutable JsonParser&, code: JsonErrorCode, pos: i64) -> JsonValue:
+            json_note(p, code, pos)
+            return JsonValue.Null
+
+        def json_fail_string(p: mutable JsonParser&, code: JsonErrorCode, pos: i64) -> JsonStringRef:
+            json_note(p, code, pos)
+            return JsonStringRef{data_bits: 0.uintptr(), len: 0}
+
+        # ------------------------------------------------------------
+        # Escape decoding
+        # ------------------------------------------------------------
+
+        # Four hex digits as one value, or -1 when fewer than four are present.
+        def json_read_hex4(p: mutable JsonParser&) -> i64:
+            can Unsafe.UncheckedIndex:
+                value: mutable i64 = 0
+                for digits in 0..<4:
+                    digit: i64 = json_hex_value(json_peek(p))
+                    return -1 if digit < 0
+                    value <- value * 16 + digit
+                    json_bump(p)
+                return value
+
+        # Decode one escape sequence, or -1 (with the failure recorded) when it is not
+        # well formed. The cursor sits just past the backslash on entry and just past
+        # the escape on return. `\uXXXX` accepts the BMP directly and requires a
+        # well-formed high+low surrogate pair for anything above it; a lone surrogate on
+        # either side is rejected.
+        def json_decode_escape(p: mutable JsonParser&) -> i64:
+            can Unsafe.UncheckedIndex:
+                escape_pos: i64 = p.pos - 1
+                esc: i64 = json_peek(p)
+                if esc < 0:
+                    json_note(p, JsonErrorCode.INVALID_ESCAPE, escape_pos)
+                    return -1
+                json_bump(p)
+
+                return JSON_CH_DQUOTE if esc == JSON_CH_DQUOTE
+                return JSON_CH_BSLASH if esc == JSON_CH_BSLASH
+                return JSON_CH_SLASH if esc == JSON_CH_SLASH
+                return 8 if esc == JSON_CH_b
+                return 12 if esc == JSON_CH_f
+                return JSON_CH_NL if esc == JSON_CH_n
+                return JSON_CH_CR if esc == JSON_CH_r
+                return JSON_CH_TAB if esc == JSON_CH_t
+                if esc != JSON_CH_u:
+                    json_note(p, JsonErrorCode.INVALID_ESCAPE, escape_pos)
+                    return -1
+
+                first: i64 = json_read_hex4(p)
+                if first < 0 or json_is_low_surrogate(first):
+                    json_note(p, JsonErrorCode.INVALID_ESCAPE, escape_pos)
+                    return -1
+                return first if not json_is_high_surrogate(first)
+
+                if json_peek(p) != JSON_CH_BSLASH or json_peek_at(p, 1) != JSON_CH_u:
+                    json_note(p, JsonErrorCode.INVALID_ESCAPE, escape_pos)
+                    return -1
+                json_bump(p)
+                json_bump(p)
+
+                second: i64 = json_read_hex4(p)
+                if second < 0 or not json_is_low_surrogate(second):
+                    json_note(p, JsonErrorCode.INVALID_ESCAPE, escape_pos)
+                    return -1
+                return 65536 + ((first - 55296) << 10) + (second - 56320)
+
+        # ------------------------------------------------------------
+        # String parsing
+        # ------------------------------------------------------------
+
+        # Scan a string without changing the parser cursor. This gives the common
+        # unescaped case a zero-copy representation into the input buffer while still
+        # validating control bytes and finding the exact decoded-buffer upper bound for
+        # strings that contain escapes.
+        def json_string_scan(p: JsonParser&, start: i64, stop: mutable i64&, has_escape: mutable bool&) -> bool:
+            can Unsafe.UncheckedIndex:
+                cursor: mutable i64 = p.pos
+                cursor <- start
+                has_escape <- false
+                while cursor < p.text.len:
+                    ch: i64 = string_view_index(p.text, cursor)
+                    if ch == JSON_CH_DQUOTE:
+                        stop <- cursor
+                        return true
+                    return false if ch < JSON_CH_SPACE
+                    has_escape <- true if ch == JSON_CH_BSLASH
+                    cursor <- cursor + 1
+                return false
+
+        # Count immediate members/elements without changing the parser cursor. The
+        # scan understands nested containers and quoted strings, so reserving exactly
+        # here prevents arena_realloc from retaining obsolete backing arrays as a
+        # parent container grows around already-parsed children.
+        def json_container_item_count(p: JsonParser&, closing: i64) -> usize:
+            can Unsafe.UncheckedIndex:
+                cursor: mutable i64 = p.pos
+                depth: mutable i64 = 0
+                count: mutable usize = 1.usize()
+                in_string: mutable bool = false
+                escaped: mutable bool = false
+                while cursor < p.text.len:
+                    ch: i64 = string_view_index(p.text, cursor)
+                    if in_string:
+                        if escaped:
+                            escaped <- false
+                        elif ch == JSON_CH_BSLASH:
+                            escaped <- true
+                        elif ch == JSON_CH_DQUOTE:
+                            in_string <- false
+                    else:
+                        if ch == JSON_CH_DQUOTE:
+                            in_string <- true
+                        elif ch == JSON_CH_LBRACKET or ch == JSON_CH_LBRACE:
+                            depth <- depth + 1
+                        elif ch == JSON_CH_RBRACKET or ch == JSON_CH_RBRACE:
+                            if depth == 0:
+                                return count if ch == closing else count
+                            depth <- depth - 1
+                        elif ch == JSON_CH_COMMA and depth == 0:
+                            count <- count + 1.usize()
+                    cursor <- cursor + 1
+                return count
+
+        # Parse a quoted string into freshly arena-allocated, escape-decoded bytes.
+        # The cursor sits on the opening quote on entry and just past the closing quote
+        # on return. A NUL byte is always appended (not counted in `len`), so the result
+        # doubles as a C string whenever the value itself contains no NUL byte.

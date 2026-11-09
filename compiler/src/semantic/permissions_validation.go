@@ -172,6 +172,8 @@ var runtimeStdBaseNames = map[string]bool{
 	"elisacore_runtime_string_views.elisa": true, "elisacore_parse_float.elisa": true,
 	"elisacore_parse_float_algorithms.elisa": true, "elisacore_regex.elisa": true,
 	"elisacore_regex_automaton.elisa": true, "elisacore_regex_search.elisa": true,
+	"elisacore_json.elisa": true, "elisacore_json_lex.elisa": true,
+	"elisacore_json_parse.elisa": true, "elisacore_json_values.elisa": true, "elisacore_json_handles.elisa": true,
 	"elisacore_runtime_system_bridge.elisa": true, "heap.elisa": true, "names.elisa": true,
 	"native_runtime_support.elisa": true, "runtime.elisa": true, "stores.elisa": true,
 	"stores_core.elisa": true, "stores_packed_dense.elisa": true, "stores_packed_encoding.elisa": true,

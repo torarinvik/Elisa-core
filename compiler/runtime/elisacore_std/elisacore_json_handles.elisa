@@ -1,0 +1,276 @@
+extend Json:
+    public:
+        def json_handle_from_result[@r](result: JsonParseResult[r]) -> JsonValueHandle[r]:
+            return result.value
+
+        # Public operations over the opaque handle let external modules traverse
+        # documents without naming or pattern-matching the private JsonValue enum.
+        def json_handle_null[@r](owner: JsonValueHandle[r]) -> JsonValueHandle[r]:
+            return json_handle_like(JsonValue.Null, owner)
+
+        def json_handle_kind[@r](value: JsonValueHandle[r]) -> JsonKind:
+            return json_kind(value.node)
+
+        def json_handle_is_null[@r](value: JsonValueHandle[r]) -> bool:
+            return json_handle_kind(value) == JsonKind.NULL
+
+        def json_handle_is_bool[@r](value: JsonValueHandle[r]) -> bool:
+            return json_handle_kind(value) == JsonKind.BOOL
+
+        def json_handle_is_number[@r](value: JsonValueHandle[r]) -> bool:
+            return json_handle_kind(value) == JsonKind.NUMBER
+
+        def json_handle_is_string[@r](value: JsonValueHandle[r]) -> bool:
+            return json_handle_kind(value) == JsonKind.STRING
+
+        def json_handle_is_object[@r](value: JsonValueHandle[r]) -> bool:
+            return json_is_object(value.node)
+
+        def json_handle_is_array[@r](value: JsonValueHandle[r]) -> bool:
+            return json_is_array(value.node)
+
+        def json_handle_has[@r](value: JsonValueHandle[r], key: sview) -> bool:
+            can Unsafe{PointerArithmetic,PointerCast,RawExtern}:
+                return json_has(value.node, key)
+
+        def json_handle_get[@r](value: JsonValueHandle[r], key: sview) -> JsonValueHandle[r] error[JsonAccessError]:
+            can Unsafe{PointerArithmetic,PointerCast,RawExtern}:
+                found: JsonValue = try json_get(value.node, key)
+                return json_handle_like(found, value)
+
+        def json_handle_at[@r](value: JsonValueHandle[r], index: i64) -> JsonValueHandle[r] error[JsonAccessError]:
+            can Unsafe.PointerArithmetic:
+                found: JsonValue = try json_at(value.node, index)
+                return json_handle_like(found, value)
+
+        def json_handle_array_len[@r](value: JsonValueHandle[r]) -> i64:
+            return json_array_len(value.node)
+
+        def json_handle_as_bool[@r](value: JsonValueHandle[r]) -> bool error[JsonAccessError]:
+            return json_as_bool(value.node)
+
+        def json_handle_as_number[@r](value: JsonValueHandle[r]) -> f64 error[JsonAccessError]:
+            return json_as_number(value.node)
+
+        def json_handle_as_string[@r](value: JsonValueHandle[r]) -> sview @r error[JsonAccessError]:
+            can Unsafe{PointerArithmetic,RawExtern}:
+                return json_as_string(value.node)
+
+        def json_handle_object_len[@r](value: JsonValueHandle[r]) -> i64:
+            return json_object_len(value.node)
+
+        def json_handle_key_at[@r](value: JsonValueHandle[r], index: i64) -> sview @r error[JsonAccessError]:
+            can Unsafe{PointerArithmetic,RawExtern}:
+                return json_key_at(value.node, index)
+
+        def json_handle_value_at[@r](value: JsonValueHandle[r], index: i64) -> JsonValueHandle[r] error[JsonAccessError]:
+            can Unsafe.PointerArithmetic:
+                member_value: JsonValue = try json_value_at(value.node, index)
+                return json_handle_like(member_value, value)
+
+        def json_handle_index_of[@r](value: JsonValueHandle[r], key: sview) -> i64:
+            can Unsafe{PointerArithmetic,PointerCast,RawExtern}:
+                return json_index_of(value.node, key)
+
+        def json_handle_as_cstr[@r](value: JsonValueHandle[r]) -> cstr @r error[JsonAccessError]:
+            return json_as_cstr(value.node)
+
+        # Scalar leaves carry no arena address; `owner` only fixes the region the
+        # handle is indexed by, so it can sit beside parsed nodes of that arena.
+        def json_handle_bool[@r](owner: mutable Arena& @r, value: bool) -> JsonValueHandle[r]:
+            return json_handle_in_arena(json_bool(value), owner)
+
+        def json_handle_number[@r](owner: mutable Arena& @r, value: f64) -> JsonValueHandle[r]:
+            return json_handle_in_arena(json_number(value), owner)
+
+        def json_handle_string[@r](owner: mutable Arena& @r, text: sview) -> JsonValueHandle[r]:
+            can Abort.Panic, Memory.Allocate, Unsafe{PointerCast,UncheckedIndex}:
+                return json_handle_in_arena(json_string(owner, text), owner)
+
+        # ------------------------------------------------------------
+        # Serialisation
+        # ------------------------------------------------------------
+
+    private:
+        def json_emit_text(out: mutable darray[u8]&, text: sview):
+            can Abort.Panic, Memory.Allocate, Unsafe.UncheckedIndex:
+                for index in 0..<text.len:
+                    out.push(string_view_index(text, index).u8())
+
+        def json_hex_digit(value: i64) -> u8:
+            return (JSON_CH_0 + value).u8() if value < 10
+            return (JSON_CH_a + value - 10).u8()
+
+        # Escape one string body per RFC 8259: the two mandatory escapes plus the short
+        # forms for the five named control characters; every other C0 control goes out
+        # as `\u00XX`. Solidus is NOT escaped (the escape is optional and the raw byte
+        # is friendlier), and non-ASCII bytes pass through as the UTF-8 they already
+        # are, so output is UTF-8 rather than ASCII-only.
+        def json_emit_escaped(out: mutable darray[u8]&, text: sview):
+            can Abort.Panic, Memory.Allocate, Unsafe.UncheckedIndex:
+                out.push(JSON_CH_DQUOTE.u8())
+                for index in 0..<text.len:
+                    ch: i64 = string_view_index(text, index)
+                    if ch == JSON_CH_DQUOTE or ch == JSON_CH_BSLASH:
+                        out.push(JSON_CH_BSLASH.u8())
+                        out.push(ch.u8())
+                    elif ch == 8:
+                        out.push(JSON_CH_BSLASH.u8())
+                        out.push(JSON_CH_b.u8())
+                    elif ch == 12:
+                        out.push(JSON_CH_BSLASH.u8())
+                        out.push(JSON_CH_f.u8())
+                    elif ch == JSON_CH_NL:
+                        out.push(JSON_CH_BSLASH.u8())
+                        out.push(JSON_CH_n.u8())
+                    elif ch == JSON_CH_CR:
+                        out.push(JSON_CH_BSLASH.u8())
+                        out.push(JSON_CH_r.u8())
+                    elif ch == JSON_CH_TAB:
+                        out.push(JSON_CH_BSLASH.u8())
+                        out.push(JSON_CH_t.u8())
+                    elif ch < JSON_CH_SPACE:
+                        out.push(JSON_CH_BSLASH.u8())
+                        out.push(JSON_CH_u.u8())
+                        out.push(JSON_CH_0.u8())
+                        out.push(JSON_CH_0.u8())
+                        out.push(json_hex_digit((ch >> 4) & 15))
+                        out.push(json_hex_digit(ch & 15))
+                    else:
+                        out.push(ch.u8())
+                out.push(JSON_CH_DQUOTE.u8())
+
+        # True when `text` looks like a JSON number rather than one of libc's
+        # non-finite spellings ("inf", "-inf", "nan").
+        def json_formatted_is_number(text: u8&) -> bool:
+            can Unsafe.UncheckedIndex:
+                head: i64 = text[0.usize()].i64()
+                offset: usize = 1.usize() if head == JSON_CH_MINUS else 0.usize()
+                return json_is_digit(text[offset].i64())
+
+        # Emit a number as the shortest of the 15-, 16- and 17-significant-digit forms
+        # that converts back to the identical double, so `json_parse(json_write(v)) == v`
+        # holds bit-for-bit. Values JSON cannot express - NaN and the infinities - are
+        # emitted as `null`, matching JavaScript's JSON.stringify.
+        def json_emit_number(out: mutable darray[u8]&, value: f64):
+            can Abort.Panic, Console.Format, Memory.Allocate, Unsafe{BufferReinterpret,PointerArithmetic,PointerCast,RawExtern,UncheckedIndex}:
+                wide: mutable u8[64]
+                _ = snprintf((&wide[0]).cast[u8&?], 64.usize(), "%.17g", value)
+                if not json_formatted_is_number(&wide[0]):
+                    json_emit_text(out, sview("null", 0, -1))
+                    return
+
+                narrow: mutable u8[64]
+                _ = snprintf((&narrow[0]).cast[u8&?], 64.usize(), "%.15g", value)
+                if strtod(&narrow[0], null) == value:
+                    trusted Unsafe.PointerCast:
+                        json_emit_text(out, sview((&narrow[0]).cast[cstr], 0, -1))
+                    return
+
+                _ = snprintf((&narrow[0]).cast[u8&?], 64.usize(), "%.16g", value)
+                if strtod(&narrow[0], null) == value:
+                    trusted Unsafe.PointerCast:
+                        json_emit_text(out, sview((&narrow[0]).cast[cstr], 0, -1))
+                    return
+
+                trusted Unsafe.PointerCast:
+                    json_emit_text(out, sview((&wide[0]).cast[cstr], 0, -1))
+
+        def json_emit_value(out: mutable darray[u8]&, value: JsonValue):
+            can Abort.Panic, Console.Format, Memory.Allocate, Unsafe{BufferReinterpret,PointerArithmetic,PointerCast,RawExtern,UncheckedIndex}:
+                match value:
+                    JsonValue.Null:
+                        json_emit_text(out, sview("null", 0, -1))
+                    JsonValue.Bool(flag):
+                        json_emit_text(out, sview("true", 0, -1) if flag else sview("false", 0, -1))
+                    JsonValue.Number(number):
+                        json_emit_number(out, number)
+                    JsonValue.String(data_bits, len):
+                        if len <= JSON_EMPTY_STRING_LENGTH or data_bits == JSON_NULL_STRING_ADDRESS:
+                            json_emit_escaped(out, sview("", JSON_EMPTY_STRING_LENGTH, JSON_EMPTY_STRING_LENGTH))
+                        else:
+                            trusted Unsafe.PointerCast:
+                                json_emit_escaped(out, StringView{data: data_bits.cast[u8&], len: len})
+                    JsonValue.Array(items_bits, count):
+                        out.push(JSON_CH_LBRACKET.u8())
+                        for index in 0..<count:
+                            out.push(JSON_CH_COMMA.u8()) if index > 0
+                            json_emit_value(out, json_value_copy(items_bits, index))
+                        out.push(JSON_CH_RBRACKET.u8())
+                    JsonValue.Object(members_bits, count):
+                        out.push(JSON_CH_LBRACE.u8())
+                        for index in 0..<count:
+                            out.push(JSON_CH_COMMA.u8()) if index > 0
+                            member: JsonMember = json_member_copy(members_bits, index)
+                            json_emit_escaped(out, json_member_key_view(member))
+                            out.push(JSON_CH_COLON.u8())
+                            json_emit_value(out, member.value)
+                        out.push(JSON_CH_RBRACE.u8())
+
+        # Serialise `value` into fresh arena bytes. The output is compact (no spaces or
+        # newlines) and object keys keep INSERTION ORDER - the order they appeared in
+        # the parsed text, or the order they were handed to `json_object_from` - never
+        # a sorted or hashed order. Round-tripping a document therefore preserves key
+        # order exactly.
+    private:
+        def json_write(a: mutable Arena&, value: JsonValue) -> darray[u8]:
+            can Abort.Panic, Console.Format, Memory.Allocate, Unsafe{BufferReinterpret,PointerArithmetic,PointerCast,RawExtern,UncheckedIndex}:
+                in a:
+                    out: mutable darray[u8] = []
+                    json_emit_value(&out, value)
+                    return out
+
+        # `json_write` plus a NUL terminator, so the result can be handed to C. A JSON
+        # string containing a NUL byte truncates the logical C string; use `json_write`
+        # when that matters.
+        def json_to_cstr(a: mutable Arena&, value: JsonValue) -> cstr:
+            can Abort.Panic, Console.Format, Memory.Allocate, Unsafe{BufferReinterpret,PointerArithmetic,PointerCast,RawExtern,UncheckedIndex}:
+                bytes: mutable darray[u8] = json_write(a, value)
+                in a:
+                    bytes.push(0)
+                return bytes.items.cast[cstr]
+
+    public:
+        # Checked parsing with variant-style errors. The returned handle keeps the
+        # backing arena's region in its type, including all decoded strings and children.
+        def json_parse[@r](a: mutable Arena& @r, text: sview) -> JsonValueHandle[r] error[JsonError]:
+            can Abort.Panic, Atomics{Exchange,Store}, Global{Read,Write}, Memory.Allocate, Unsafe{Alias,PointerArithmetic,PointerCast,RawExtern,UncheckedIndex}:
+                outcome: JsonParseResult[r] = json_parse_checked(a, text)
+                code: JsonErrorCode = outcome.code
+                pos: i64 = outcome.pos
+                if code == JsonErrorCode.UNEXPECTED_END:
+                    raise JsonError.UnexpectedEnd(pos)
+                if code == JsonErrorCode.UNEXPECTED_CHAR:
+                    raise JsonError.UnexpectedChar(pos)
+                if code == JsonErrorCode.INVALID_LITERAL:
+                    raise JsonError.InvalidLiteral(pos)
+                if code == JsonErrorCode.INVALID_NUMBER:
+                    raise JsonError.InvalidNumber(pos)
+                if code == JsonErrorCode.INVALID_STRING:
+                    raise JsonError.InvalidString(pos)
+                if code == JsonErrorCode.INVALID_ESCAPE:
+                    raise JsonError.InvalidEscape(pos)
+                if code == JsonErrorCode.EXPECTED_COLON:
+                    raise JsonError.ExpectedColon(pos)
+                if code == JsonErrorCode.EXPECTED_COMMA_OR_END:
+                    raise JsonError.ExpectedCommaOrEnd(pos)
+                if code == JsonErrorCode.TRAILING_DATA:
+                    raise JsonError.TrailingData(pos)
+                if code == JsonErrorCode.DEPTH_EXCEEDED:
+                    raise JsonError.DepthExceeded(pos)
+                return outcome.value
+
+        def json_parse_cstr[@r](a: mutable Arena& @r, text: cstr) -> JsonValueHandle[r] error[JsonError]:
+            can Abort.Panic, Atomics{Exchange,Store}, Global{Read,Write}, Memory.Allocate, Unsafe{Alias,PointerArithmetic,PointerCast,RawExtern,UncheckedIndex}:
+                return try json_parse(a, sview(text, 0, -1))
+
+        # The writer borrows the JSON tree only for this call and copies output bytes
+        # into `a`, so only the returned buffer is tied to the output arena.
+        def json_handle_write[@j, @r](a: mutable Arena& @r, value: JsonValueHandle[j]) -> darray[u8] @r:
+            can Abort.Panic, Console.Format, Memory.Allocate, Unsafe{BufferReinterpret,PointerArithmetic,PointerCast,RawExtern,UncheckedIndex}:
+                return json_write(a, value.node)
+
+        def json_handle_to_cstr[@j, @r](a: mutable Arena& @r, value: JsonValueHandle[j]) -> cstr @r:
+            can Abort.Panic, Console.Format, Memory.Allocate, Unsafe{BufferReinterpret,PointerArithmetic,PointerCast,RawExtern,UncheckedIndex}:
+                return json_to_cstr(a, value.node)
+
