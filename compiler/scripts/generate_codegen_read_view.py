@@ -13,7 +13,15 @@ import sys
 
 def generate(directory: Path) -> dict[str, bytes]:
     fields = json.loads((directory / "generate_specialization_accessors.schema.json").read_text())["fields"]
-    parts = []
+    categories = {
+        "expressions": {"ExprTypes", "RewriteDefaults", "OptionalBindSourceTypes", "ExprFacts", "CastHooks", "IndexBoundsProven"},
+        "calls": {"InterfaceMethodRefs", "SafeCalls", "InitCalls", "PostfixShorthandCalls", "TaskGroupSubmits", "CallArgDisjoint"},
+        "types_and_regions": {"PermGrowthOps", "RegionStacks", "ResolvedTypeNames", "ContextualTypeBindings", "ResolvedValueNames", "DenseNodeKeys", "NodeTables"},
+        "control_flow": {"ParallelFor", "ReassignReclaims", "FuncDisjointParams", "Defer", "Fold", "Lambdas"},
+        "contracts": {"LawIsCalls", "LemmaCalls", "GhostDecls", "GhostContracts", "RefinementChecks", "CallArgRefinementChecks", "ReturnRefinementChecks"},
+        "function_analysis": {"FunctionAnalyses", "ProgressSummaries"},
+    }
+    parts = {category: [] for category in categories}
     names = set()
     for field in fields:
         if "analyzer" not in field:
@@ -65,10 +73,15 @@ func (v CodegenReadView) Own{name}Map() {typ} {{
  if v.Observe!=nil {{v.Observe(CodegenFactRead{{Result:v.Result,Table:"{name}",Operation:"own-map",Value:maps.Clone(own),Present:own!=nil}})}}
  return own
 }}''')
-        parts.append("\n\n".join(lines))
+        matches = [category for category, members in categories.items() if name in members]
+        if len(matches) != 1:
+            raise ValueError('read view field needs exactly one responsibility: ' + name)
+        parts[matches[0]].append("\n\n".join(lines))
+    if names != set().union(*categories.values()):
+        raise ValueError('read view responsibility groups do not match the schema')
     outputs = {}
-    for start in range(0, len(parts), 7):
-        chunk = "\n\n".join(parts[start:start + 7])
+    for category, chunks in parts.items():
+        chunk = "\n\n".join(chunks)
         imports = ['"maps"']
         for marker, path in (("ast.", "elisacore/src/ast"), ("easm.", "elisacore/src/easm")):
             if marker in chunk:
@@ -78,7 +91,7 @@ func (v CodegenReadView) Own{name}Map() {typ} {{
         data = subprocess.run(['gofmt'], input=source.encode(), stdout=subprocess.PIPE, check=True).stdout
         if len(data.splitlines()) > 600:
             raise ValueError('generated read view part exceeds 600 lines')
-        name = 'codegen_read_view_gen.go' if start == 0 else f'codegen_read_view_part{start // 7 + 1:02d}_gen.go'
+        name = f'codegen_read_view_{category}_gen.go'
         outputs[name] = data
     return outputs
 

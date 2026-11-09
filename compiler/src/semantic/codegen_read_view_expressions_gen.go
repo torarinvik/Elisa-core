@@ -75,75 +75,6 @@ func (v CodegenReadView) OwnExprTypesMap() map[ast.Expr]Type {
 	return own
 }
 
-func (v CodegenReadView) LookupPermGrowthOps(key ast.Expr) (bool, bool) {
-	value, present := v.Result.LookupPermGrowthOps(key)
-	if v.Observe != nil {
-		v.Observe(CodegenFactRead{Result: v.Result, Table: "PermGrowthOps", Operation: "lookup", Key: key, Value: value, Present: present})
-	}
-	return value, present
-}
-
-func (v CodegenReadView) ValuePermGrowthOps(key ast.Expr) bool {
-	value, present := v.Result.LookupPermGrowthOps(key)
-	if v.Observe != nil {
-		v.Observe(CodegenFactRead{Result: v.Result, Table: "PermGrowthOps", Operation: "value", Key: key, Value: value, Present: present})
-	}
-	return value
-}
-
-func (v CodegenReadView) RangePermGrowthOps(yield func(ast.Expr, bool) bool) {
-	if v.Observe == nil {
-		v.Result.RangePermGrowthOps(yield)
-		return
-	}
-	complete := false
-	defer func() {
-		v.Observe(CodegenFactRead{Result: v.Result, Table: "PermGrowthOps", Operation: "range-end", Complete: complete})
-	}()
-	if yield == nil {
-		return
-	}
-	stopped := false
-	v.Result.RangePermGrowthOps(func(key ast.Expr, value bool) bool {
-		v.Observe(CodegenFactRead{Result: v.Result, Table: "PermGrowthOps", Operation: "range-item", Key: key, Value: value, Present: true})
-		if !yield(key, value) {
-			stopped = true
-			return false
-		}
-		return true
-	})
-	complete = !stopped
-}
-func (v CodegenReadView) PermGrowthOpsLen() int {
-	count := v.Result.PermGrowthOpsLen()
-	if v.Observe != nil {
-		v.Observe(CodegenFactRead{Result: v.Result, Table: "PermGrowthOps", Operation: "len", Value: count, Present: true})
-	}
-	return count
-}
-
-// HasOwnPermGrowthOpsMap observes physical presence on this Result only.
-func (v CodegenReadView) HasOwnPermGrowthOpsMap() bool {
-	present := v.Result != nil && v.Result.PermGrowthOps != nil
-	if v.Observe != nil {
-		v.Observe(CodegenFactRead{Result: v.Result, Table: "PermGrowthOps", Operation: "own-map-presence", Value: present, Present: present})
-	}
-	return present
-}
-
-// OwnPermGrowthOpsMap returns the original current-Result map without logical fallback.
-// Only the diagnostic event owns a shallow membership snapshot; payloads remain opaque.
-func (v CodegenReadView) OwnPermGrowthOpsMap() map[ast.Expr]bool {
-	var own map[ast.Expr]bool
-	if v.Result != nil {
-		own = v.Result.PermGrowthOps
-	}
-	if v.Observe != nil {
-		v.Observe(CodegenFactRead{Result: v.Result, Table: "PermGrowthOps", Operation: "own-map", Value: maps.Clone(own), Present: own != nil})
-	}
-	return own
-}
-
 func (v CodegenReadView) LookupRewriteDefaults(key *ast.Ident) (bool, bool) {
 	value, present := v.Result.LookupRewriteDefaults(key)
 	if v.Observe != nil {
@@ -282,144 +213,6 @@ func (v CodegenReadView) OwnOptionalBindSourceTypesMap() map[*ast.OptionalBindEx
 	return own
 }
 
-func (v CodegenReadView) LookupInterfaceMethodRefs(key *ast.FieldExpr) (*InterfaceMethodRef, bool) {
-	value, present := v.Result.LookupInterfaceMethodRefs(key)
-	if v.Observe != nil {
-		v.Observe(CodegenFactRead{Result: v.Result, Table: "InterfaceMethodRefs", Operation: "lookup", Key: key, Value: value, Present: present})
-	}
-	return value, present
-}
-
-func (v CodegenReadView) ValueInterfaceMethodRefs(key *ast.FieldExpr) *InterfaceMethodRef {
-	value, present := v.Result.LookupInterfaceMethodRefs(key)
-	if v.Observe != nil {
-		v.Observe(CodegenFactRead{Result: v.Result, Table: "InterfaceMethodRefs", Operation: "value", Key: key, Value: value, Present: present})
-	}
-	return value
-}
-
-func (v CodegenReadView) RangeInterfaceMethodRefs(yield func(*ast.FieldExpr, *InterfaceMethodRef) bool) {
-	if v.Observe == nil {
-		v.Result.RangeInterfaceMethodRefs(yield)
-		return
-	}
-	complete := false
-	defer func() {
-		v.Observe(CodegenFactRead{Result: v.Result, Table: "InterfaceMethodRefs", Operation: "range-end", Complete: complete})
-	}()
-	if yield == nil {
-		return
-	}
-	stopped := false
-	v.Result.RangeInterfaceMethodRefs(func(key *ast.FieldExpr, value *InterfaceMethodRef) bool {
-		v.Observe(CodegenFactRead{Result: v.Result, Table: "InterfaceMethodRefs", Operation: "range-item", Key: key, Value: value, Present: true})
-		if !yield(key, value) {
-			stopped = true
-			return false
-		}
-		return true
-	})
-	complete = !stopped
-}
-func (v CodegenReadView) InterfaceMethodRefsLen() int {
-	count := v.Result.InterfaceMethodRefsLen()
-	if v.Observe != nil {
-		v.Observe(CodegenFactRead{Result: v.Result, Table: "InterfaceMethodRefs", Operation: "len", Value: count, Present: true})
-	}
-	return count
-}
-
-// HasOwnInterfaceMethodRefsMap observes physical presence on this Result only.
-func (v CodegenReadView) HasOwnInterfaceMethodRefsMap() bool {
-	present := v.Result != nil && v.Result.InterfaceMethodRefs != nil
-	if v.Observe != nil {
-		v.Observe(CodegenFactRead{Result: v.Result, Table: "InterfaceMethodRefs", Operation: "own-map-presence", Value: present, Present: present})
-	}
-	return present
-}
-
-// OwnInterfaceMethodRefsMap returns the original current-Result map without logical fallback.
-// Only the diagnostic event owns a shallow membership snapshot; payloads remain opaque.
-func (v CodegenReadView) OwnInterfaceMethodRefsMap() map[*ast.FieldExpr]*InterfaceMethodRef {
-	var own map[*ast.FieldExpr]*InterfaceMethodRef
-	if v.Result != nil {
-		own = v.Result.InterfaceMethodRefs
-	}
-	if v.Observe != nil {
-		v.Observe(CodegenFactRead{Result: v.Result, Table: "InterfaceMethodRefs", Operation: "own-map", Value: maps.Clone(own), Present: own != nil})
-	}
-	return own
-}
-
-func (v CodegenReadView) LookupSafeCalls(key *ast.CallExpr) (*SafeCallInfo, bool) {
-	value, present := v.Result.LookupSafeCalls(key)
-	if v.Observe != nil {
-		v.Observe(CodegenFactRead{Result: v.Result, Table: "SafeCalls", Operation: "lookup", Key: key, Value: value, Present: present})
-	}
-	return value, present
-}
-
-func (v CodegenReadView) ValueSafeCalls(key *ast.CallExpr) *SafeCallInfo {
-	value, present := v.Result.LookupSafeCalls(key)
-	if v.Observe != nil {
-		v.Observe(CodegenFactRead{Result: v.Result, Table: "SafeCalls", Operation: "value", Key: key, Value: value, Present: present})
-	}
-	return value
-}
-
-func (v CodegenReadView) RangeSafeCalls(yield func(*ast.CallExpr, *SafeCallInfo) bool) {
-	if v.Observe == nil {
-		v.Result.RangeSafeCalls(yield)
-		return
-	}
-	complete := false
-	defer func() {
-		v.Observe(CodegenFactRead{Result: v.Result, Table: "SafeCalls", Operation: "range-end", Complete: complete})
-	}()
-	if yield == nil {
-		return
-	}
-	stopped := false
-	v.Result.RangeSafeCalls(func(key *ast.CallExpr, value *SafeCallInfo) bool {
-		v.Observe(CodegenFactRead{Result: v.Result, Table: "SafeCalls", Operation: "range-item", Key: key, Value: value, Present: true})
-		if !yield(key, value) {
-			stopped = true
-			return false
-		}
-		return true
-	})
-	complete = !stopped
-}
-func (v CodegenReadView) SafeCallsLen() int {
-	count := v.Result.SafeCallsLen()
-	if v.Observe != nil {
-		v.Observe(CodegenFactRead{Result: v.Result, Table: "SafeCalls", Operation: "len", Value: count, Present: true})
-	}
-	return count
-}
-
-// HasOwnSafeCallsMap observes physical presence on this Result only.
-func (v CodegenReadView) HasOwnSafeCallsMap() bool {
-	present := v.Result != nil && v.Result.SafeCalls != nil
-	if v.Observe != nil {
-		v.Observe(CodegenFactRead{Result: v.Result, Table: "SafeCalls", Operation: "own-map-presence", Value: present, Present: present})
-	}
-	return present
-}
-
-// OwnSafeCallsMap returns the original current-Result map without logical fallback.
-// Only the diagnostic event owns a shallow membership snapshot; payloads remain opaque.
-func (v CodegenReadView) OwnSafeCallsMap() map[*ast.CallExpr]*SafeCallInfo {
-	var own map[*ast.CallExpr]*SafeCallInfo
-	if v.Result != nil {
-		own = v.Result.SafeCalls
-	}
-	if v.Observe != nil {
-		v.Observe(CodegenFactRead{Result: v.Result, Table: "SafeCalls", Operation: "own-map", Value: maps.Clone(own), Present: own != nil})
-	}
-	return own
-}
-
 func (v CodegenReadView) LookupExprFacts(key ast.Expr) (OptimizationFacts, bool) {
 	value, present := v.Result.LookupExprFacts(key)
 	if v.Observe != nil {
@@ -485,6 +278,144 @@ func (v CodegenReadView) OwnExprFactsMap() map[ast.Expr]OptimizationFacts {
 	}
 	if v.Observe != nil {
 		v.Observe(CodegenFactRead{Result: v.Result, Table: "ExprFacts", Operation: "own-map", Value: maps.Clone(own), Present: own != nil})
+	}
+	return own
+}
+
+func (v CodegenReadView) LookupCastHooks(key ast.Expr) (*Symbol, bool) {
+	value, present := v.Result.LookupCastHooks(key)
+	if v.Observe != nil {
+		v.Observe(CodegenFactRead{Result: v.Result, Table: "CastHooks", Operation: "lookup", Key: key, Value: value, Present: present})
+	}
+	return value, present
+}
+
+func (v CodegenReadView) ValueCastHooks(key ast.Expr) *Symbol {
+	value, present := v.Result.LookupCastHooks(key)
+	if v.Observe != nil {
+		v.Observe(CodegenFactRead{Result: v.Result, Table: "CastHooks", Operation: "value", Key: key, Value: value, Present: present})
+	}
+	return value
+}
+
+func (v CodegenReadView) RangeCastHooks(yield func(ast.Expr, *Symbol) bool) {
+	if v.Observe == nil {
+		v.Result.RangeCastHooks(yield)
+		return
+	}
+	complete := false
+	defer func() {
+		v.Observe(CodegenFactRead{Result: v.Result, Table: "CastHooks", Operation: "range-end", Complete: complete})
+	}()
+	if yield == nil {
+		return
+	}
+	stopped := false
+	v.Result.RangeCastHooks(func(key ast.Expr, value *Symbol) bool {
+		v.Observe(CodegenFactRead{Result: v.Result, Table: "CastHooks", Operation: "range-item", Key: key, Value: value, Present: true})
+		if !yield(key, value) {
+			stopped = true
+			return false
+		}
+		return true
+	})
+	complete = !stopped
+}
+func (v CodegenReadView) CastHooksLen() int {
+	count := v.Result.CastHooksLen()
+	if v.Observe != nil {
+		v.Observe(CodegenFactRead{Result: v.Result, Table: "CastHooks", Operation: "len", Value: count, Present: true})
+	}
+	return count
+}
+
+// HasOwnCastHooksMap observes physical presence on this Result only.
+func (v CodegenReadView) HasOwnCastHooksMap() bool {
+	present := v.Result != nil && v.Result.CastHooks != nil
+	if v.Observe != nil {
+		v.Observe(CodegenFactRead{Result: v.Result, Table: "CastHooks", Operation: "own-map-presence", Value: present, Present: present})
+	}
+	return present
+}
+
+// OwnCastHooksMap returns the original current-Result map without logical fallback.
+// Only the diagnostic event owns a shallow membership snapshot; payloads remain opaque.
+func (v CodegenReadView) OwnCastHooksMap() map[ast.Expr]*Symbol {
+	var own map[ast.Expr]*Symbol
+	if v.Result != nil {
+		own = v.Result.CastHooks
+	}
+	if v.Observe != nil {
+		v.Observe(CodegenFactRead{Result: v.Result, Table: "CastHooks", Operation: "own-map", Value: maps.Clone(own), Present: own != nil})
+	}
+	return own
+}
+
+func (v CodegenReadView) LookupIndexBoundsProven(key *ast.IndexExpr) (bool, bool) {
+	value, present := v.Result.LookupIndexBoundsProven(key)
+	if v.Observe != nil {
+		v.Observe(CodegenFactRead{Result: v.Result, Table: "IndexBoundsProven", Operation: "lookup", Key: key, Value: value, Present: present})
+	}
+	return value, present
+}
+
+func (v CodegenReadView) ValueIndexBoundsProven(key *ast.IndexExpr) bool {
+	value, present := v.Result.LookupIndexBoundsProven(key)
+	if v.Observe != nil {
+		v.Observe(CodegenFactRead{Result: v.Result, Table: "IndexBoundsProven", Operation: "value", Key: key, Value: value, Present: present})
+	}
+	return value
+}
+
+func (v CodegenReadView) RangeIndexBoundsProven(yield func(*ast.IndexExpr, bool) bool) {
+	if v.Observe == nil {
+		v.Result.RangeIndexBoundsProven(yield)
+		return
+	}
+	complete := false
+	defer func() {
+		v.Observe(CodegenFactRead{Result: v.Result, Table: "IndexBoundsProven", Operation: "range-end", Complete: complete})
+	}()
+	if yield == nil {
+		return
+	}
+	stopped := false
+	v.Result.RangeIndexBoundsProven(func(key *ast.IndexExpr, value bool) bool {
+		v.Observe(CodegenFactRead{Result: v.Result, Table: "IndexBoundsProven", Operation: "range-item", Key: key, Value: value, Present: true})
+		if !yield(key, value) {
+			stopped = true
+			return false
+		}
+		return true
+	})
+	complete = !stopped
+}
+func (v CodegenReadView) IndexBoundsProvenLen() int {
+	count := v.Result.IndexBoundsProvenLen()
+	if v.Observe != nil {
+		v.Observe(CodegenFactRead{Result: v.Result, Table: "IndexBoundsProven", Operation: "len", Value: count, Present: true})
+	}
+	return count
+}
+
+// HasOwnIndexBoundsProvenMap observes physical presence on this Result only.
+func (v CodegenReadView) HasOwnIndexBoundsProvenMap() bool {
+	present := v.Result != nil && v.Result.IndexBoundsProven != nil
+	if v.Observe != nil {
+		v.Observe(CodegenFactRead{Result: v.Result, Table: "IndexBoundsProven", Operation: "own-map-presence", Value: present, Present: present})
+	}
+	return present
+}
+
+// OwnIndexBoundsProvenMap returns the original current-Result map without logical fallback.
+// Only the diagnostic event owns a shallow membership snapshot; payloads remain opaque.
+func (v CodegenReadView) OwnIndexBoundsProvenMap() map[*ast.IndexExpr]bool {
+	var own map[*ast.IndexExpr]bool
+	if v.Result != nil {
+		own = v.Result.IndexBoundsProven
+	}
+	if v.Observe != nil {
+		v.Observe(CodegenFactRead{Result: v.Result, Table: "IndexBoundsProven", Operation: "own-map", Value: maps.Clone(own), Present: own != nil})
 	}
 	return own
 }
