@@ -15,6 +15,10 @@ import (
 )
 
 func TestO3MergedFunctionsPreserveAddressesAndABI(t *testing.T) {
+	t.Setenv("ELISACORE_TEST_NATIVE_WORKERS", "1")
+	previousWorkers := partitionWorkersAvailable
+	RunPartitionWorkerIfRequested()
+	t.Cleanup(func() { partitionWorkersAvailable = previousWorkers })
 	source := `struct Pair layout(c):
     left: i64
     right: i64
