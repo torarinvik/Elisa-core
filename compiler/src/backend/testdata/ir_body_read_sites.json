@@ -6,6 +6,11 @@
       "selectors": 1,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
+    "llvm_bodies_cleanup_and_regions.go": {
+      "sha256": "2b4b54ccc9050b2130d69d9e80c72bd45536f05c8004e48901345188a1748a56",
+      "selectors": 1,
+      "classification": "reviewed-statement-lambda-or-declaration-branch"
+    },
     "llvm_bodies_clonecapturedcodegenscope_to_emitstmt.go": {
       "sha256": "bc930ee808301e341ddda4c20296744879b42e680c794796e5f91c40ae9f8daa",
       "selectors": 8,
@@ -27,8 +32,8 @@
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
     "llvm_bodies_emitparallelforstmt_to_backendconditionoptionalbindtype.go": {
-      "sha256": "8aee190cc05a704c223cce7ff08d3022ad8afabccf05875498c2479645736c7f",
-      "selectors": 4,
+      "sha256": "2bfa81988744169feaad69ae85a021ca35ead2ac288caa656dd497196916e2f0",
+      "selectors": 3,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
     "llvm_bodies_emitstringmatchexpr_to_countmatchpatternexpectedlen.go": {
