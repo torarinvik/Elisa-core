@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"go/ast"
+	"go/format"
 	"go/parser"
 	"go/token"
 	"os"
@@ -32,6 +33,7 @@ func compactCases(source string) string {
 }
 
 type generatedDecl struct {
+	label   string
 	text    string
 	imports map[string]bool
 }
@@ -95,7 +97,19 @@ func generatedParts(m walkMode, source []byte) (map[string][]byte, error) {
 			}
 			return true
 		})
-		declarations = append(declarations, generatedDecl{text: text, imports: used})
+		label := "declaration"
+		if function, ok := decl.(*ast.FuncDecl); ok {
+			label = function.Name.Name
+			if function.Type.Params != nil && len(function.Type.Params.List) > 0 {
+				var typ bytes.Buffer
+				if err := format.Node(&typ, fset, function.Type.Params.List[0].Type); err != nil {
+					return nil, err
+				}
+				label = typ.String()
+			}
+		}
+		label = strings.NewReplacer("*", "ptr_", "[]", "slice_", ".", "_", "[", "_", "]", "_", " ", "_").Replace(label)
+		declarations = append(declarations, generatedDecl{label: strings.ToLower(label), text: text, imports: used})
 	}
 	parts := make(map[string][]byte)
 	stem := strings.TrimSuffix(m.File, "_gen.go")
@@ -104,7 +118,10 @@ func generatedParts(m walkMode, source []byte) (map[string][]byte, error) {
 	flush := func() {
 		name := m.File
 		if index > 0 {
-			name = fmt.Sprintf("%s_part_%03d_gen.go", stem, index)
+			name = fmt.Sprintf("%s_range_%s_through_%s_gen.go", stem, current[0].label, current[len(current)-1].label)
+		}
+		if _, duplicate := parts[name]; duplicate {
+			panic("duplicate generated declaration range: " + name)
 		}
 		parts[name] = renderGeneratedPart(current)
 		index++
@@ -133,9 +150,13 @@ func writeGeneratedParts(m walkMode, source []byte) error {
 		return err
 	}
 	stem := strings.TrimSuffix(m.File, "_gen.go")
-	old, err := filepath.Glob(stem + "_part_*_gen.go")
-	if err != nil {
-		return err
+	var old []string
+	for _, pattern := range []string{stem + "_part_*_gen.go", stem + "_range_*_gen.go"} {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			return err
+		}
+		old = append(old, matches...)
 	}
 	for _, path := range old {
 		if _, exists := parts[path]; exists {

@@ -41,9 +41,13 @@ func TestGeneratedWalkerIsCurrent(t *testing.T) {
 			}
 		}
 		stem := strings.TrimSuffix(m.File, "_gen.go")
-		existing, err := filepath.Glob(stem + "_part_*_gen.go")
-		if err != nil {
-			t.Fatal(err)
+		var existing []string
+		for _, pattern := range []string{stem + "_part_*_gen.go", stem + "_range_*_gen.go"} {
+			matches, err := filepath.Glob(pattern)
+			if err != nil {
+				t.Fatal(err)
+			}
+			existing = append(existing, matches...)
 		}
 		for _, name := range existing {
 			if _, ok := parts[name]; !ok {
