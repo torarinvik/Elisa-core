@@ -108,7 +108,23 @@ func splitGenerated(source []byte) ([]generatedPart, error) {
 		}
 		name := "src/ast/syntax_snapshot_gen.go"
 		if i != 0 {
-			name = fmt.Sprintf("src/ast/syntax_snapshot_part_%03d_gen.go", i)
+			label := func(decl ast.Decl) string {
+				function, ok := decl.(*ast.FuncDecl)
+				if !ok || function.Type.Params == nil || len(function.Type.Params.List) == 0 {
+					return "schema"
+				}
+				var typ bytes.Buffer
+				if err := format.Node(&typ, fset, function.Type.Params.List[0].Type); err != nil {
+					panic(err)
+				}
+				return strings.ToLower(strings.NewReplacer("*", "ptr_", "[]", "slice_", ".", "_").Replace(typ.String()))
+			}
+			name = fmt.Sprintf("src/ast/syntax_snapshot_%s_through_%s_gen.go", label(group[0]), label(group[len(group)-1]))
+		}
+		for _, previous := range parts {
+			if previous.name == name {
+				return nil, fmt.Errorf("duplicate syntax copier range %s", name)
+			}
 		}
 		parts = append(parts, generatedPart{name: name, data: formatted})
 	}

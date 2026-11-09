@@ -27,11 +27,14 @@ func TestGeneratedSyntaxCopierIsCurrent(t *testing.T) {
 			t.Fatalf("syntax copier part %s is stale; regenerate with go run ./internal/astclonegen", part.name)
 		}
 	}
-	existing, err := filepath.Glob("src/ast/syntax_snapshot_part_*_gen.go")
+	existing, err := filepath.Glob("src/ast/syntax_snapshot_*_gen.go")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, path := range existing {
+		if path == "src/ast/syntax_snapshot_gen.go" {
+			continue
+		}
 		if !wanted[path] {
 			t.Fatalf("unexpected stale syntax copier part %s", path)
 		}
