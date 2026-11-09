@@ -5,6 +5,8 @@ import (
 	"go/token"
 	"go/types"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -12,6 +14,11 @@ import (
 // that the walker does not visit would silently drop nodes from every region/store analysis.
 // Regenerate with: (cd compiler && go run ./internal/astwalkgen)
 func TestGeneratedWalkerIsCurrent(t *testing.T) {
+	original, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(original) })
 	if err := os.Chdir("../.."); err != nil {
 		t.Fatal(err)
 	}
@@ -20,12 +27,28 @@ func TestGeneratedWalkerIsCurrent(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		got, err := os.ReadFile(m.File)
+		parts, err := generatedParts(m, want)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !bytes.Equal(got, want) {
-			t.Fatalf("%s is stale; regenerate with go run ./internal/astwalkgen", m.File)
+		for name, expected := range parts {
+			got, err := os.ReadFile(name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(got, expected) {
+				t.Fatalf("%s is stale; regenerate with go run ./internal/astwalkgen", name)
+			}
+		}
+		stem := strings.TrimSuffix(m.File, "_gen.go")
+		existing, err := filepath.Glob(stem + "_part_*_gen.go")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range existing {
+			if _, ok := parts[name]; !ok {
+				t.Fatalf("unexpected generated part %s; regenerate with go run ./internal/astwalkgen", name)
+			}
 		}
 	}
 }

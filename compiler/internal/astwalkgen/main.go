@@ -338,7 +338,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "astwalkgen:", err)
 			os.Exit(1)
 		}
-		if err := os.WriteFile(m.File, src, 0o644); err != nil {
+		if err := writeGeneratedParts(m, src); err != nil {
 			fmt.Fprintln(os.Stderr, "astwalkgen:", err)
 			os.Exit(1)
 		}
