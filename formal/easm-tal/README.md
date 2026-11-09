@@ -8,7 +8,7 @@ instruction sequences, and **MERGE SOUNDNESS** (the dataflow join at control-flo
 merges), so the soundness of the EASM definite-init check — including its merge
 handling — is a machine-checked theorem rather than only a property-tested one.
 
-- `EasmTAL.v` — the entire development: model + all theorems, no `admit`/`Admitted`/`sorry`.
+- `EasmTALMachine.v` defines the machine and abstract states; `EasmTAL.v` proves their soundness, without `admit`/`Admitted`/`sorry`.
 
 ## Correspondence to the Go verifier (the source of truth)
 
@@ -101,8 +101,7 @@ definite-init RMW rule — is excluded from the fuzzer so the correspondence sta
 
 ```sh
 cd formal/easm-tal
-rocq compile EasmTAL.v   # succeeds silently with no warnings/errors if the proofs check
-# (equivalently, the compat binary: coqc EasmTAL.v)
+make check   # compiles the machine model and checks all soundness proofs
 ```
 
 The checker needs only the standard library (`Stdlib.Lists.List`, `Stdlib.Arith.PeanoNat`);

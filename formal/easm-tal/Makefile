@@ -5,7 +5,10 @@ ROCQ ?= rocq
 .PHONY: check clean
 check: EasmTAL.vo
 
-EasmTAL.vo: EasmTAL.v
+EasmTALMachine.vo: EasmTALMachine.v
+	$(ROCQ) compile $<
+
+EasmTAL.vo: EasmTAL.v EasmTALMachine.vo
 	$(ROCQ) compile $<
 
 clean:
