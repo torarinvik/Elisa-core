@@ -12,8 +12,8 @@
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
     "llvm_bodies_clonecapturedcodegenscope_to_emitstmt.go": {
-      "sha256": "bc930ee808301e341ddda4c20296744879b42e680c794796e5f91c40ae9f8daa",
-      "selectors": 8,
+      "sha256": "ab6900d0675300acf04e3a6c832dbe7cf3e7afa544ba8052b5ad9dbc44c82a99",
+      "selectors": 2,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
     "llvm_bodies_emitenummatch_to_emitmatchexpr.go": {
@@ -116,6 +116,11 @@
       "selectors": 1,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
+    "llvm_region_stack_codegen.go": {
+      "sha256": "9ffb665178a8eba1ff143a11ecf2891c0b7518ca49a7bb71f68a18ba2c8685e9",
+      "selectors": 1,
+      "classification": "reviewed-statement-lambda-or-declaration-branch"
+    },
     "llvm_sequence_rewrite.go": {
       "sha256": "24773e10b55b16bd976f22435c6e89f05bc5414ca7deabc1196123854330ff0e",
       "selectors": 1,
@@ -124,6 +129,16 @@
     "llvm_static_eval_control_flow.go": {
       "sha256": "4d8a7674bf059330f79dfcafc1f8ce52aef17d71c11edd6489811711fb68b293",
       "selectors": 3,
+      "classification": "reviewed-statement-lambda-or-declaration-branch"
+    },
+    "llvm_stmt_dispatch.go": {
+      "sha256": "f21a903df9a5075696c92db0da60373ded72edf8203c4f230c9a0a1e0aafb4e6",
+      "selectors": 4,
+      "classification": "reviewed-statement-lambda-or-declaration-branch"
+    },
+    "llvm_stmt_scope_codegen.go": {
+      "sha256": "bd242daba05f75387cfb33a43240504d034f2e92a01bd0b9614807e56aece0f2",
+      "selectors": 1,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     }
   }
