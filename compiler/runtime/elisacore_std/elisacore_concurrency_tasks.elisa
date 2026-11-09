@@ -1,0 +1,90 @@
+@internal
+def ctx_task_group_release_all(group: mutable TaskGroup&):
+	can Memory.Release, Atomics.Load, Atomics.CompareExchange:
+		return if group.cleanup == null
+		current: mutable heap PoolTaskRecord&? = group.cleanup.cast[heap PoolTaskRecord&?]
+		group.cleanup <- null
+		trusted Unsafe.AssumeProgress:
+			while current != null:
+				next: mutable heap PoolTaskRecord&? = current.group_next
+				ctx_concurrency_work1_release(current.group_state_bits)
+				free(current.cast[heap void&])
+				current <- next
+
+def spawn1[A, R, permission P](fn: fn(A) -> R can[P], arg: A) -> Thread[R, Joinable]:
+	can Thread.Spawn, Memory.Allocate, Abort.Panic, Atomics.Store:
+		from_raw: fn(Thread[void&?, Joinable]) -> Thread[R, Joinable] = ctx_thread_from_raw[R, Joinable]
+		state: heap ConcurrencyWorkStart1& = ctx_concurrency_work1_new(fn, arg) can P
+		raw: Thread[void&?, Joinable] = spawn_raw(
+			ctx_concurrency_work1_entry[A, R].cast[void&],
+			state.cast[void&]
+		)
+		raw.state <- state.cast[void&]
+		return from_raw(move raw)
+
+# An ownership-preserving, nonblocking completion query. Consuming the handle
+# avoids aliasing its linear state; the result returns that same handle for a
+# later poll or join. A missing state/handle fails closed as not complete.
+def poll_ready[R](thread: Thread[R, Joinable]) -> ThreadReadiness[R]:
+	can Atomics.Load:
+		is_complete: mutable bool = false
+		if thread.handle != 0 and thread.state != null:
+			state: heap ConcurrencyWorkStart1& = thread.state.cast[heap ConcurrencyWorkStart1&]
+			completed: i64 = load(&state.completed, MemoryOrder.Acquire)
+			is_complete <- completed == 1
+		return ThreadReadiness[R]{thread: move thread, complete: is_complete}
+
+def join[R](thread: Thread[R, Joinable]) -> R:
+	can Thread.Join, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
+		take_result = ctx_concurrency_work1_take_result[R]
+		state_bits: void&? = thread.state
+		raw: Thread[void&?, Joinable] = ctx_thread_to_raw(move thread)
+		_ = join_raw(move raw)
+		result: R = take_result(state_bits) can Unsafe.PointerCast
+		return result
+
+def detach[R](thread: Thread[R, Joinable]):
+	can Thread.Detach, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
+		state_bits: mutable void&? = thread.state
+		raw: Thread[void&?, Joinable] = ctx_thread_to_raw(move thread)
+		detach_raw(move raw)
+		ctx_concurrency_work1_release(state_bits)
+
+# spawn_daemon: a blessed detached, process-lifetime thread for a true daemon —
+# a fire-and-forget worker that outlives every lexical scope and is never joined.
+# Unlike `detach` (a raw escape hatch), spawn_daemon is a public, typed surface;
+# its SAFETY rests entirely on the captured argument: the analyzer requires `arg`
+# to be thread-shareable (static refs / atomics / Mutex / CondVar / frozen stores /
+# scalars), exactly as `spawn1` does — a thread-unsafe capture demands an explicit
+# `Unsafe.ThreadShare` vouch. That is the principled boundary for a thread no one
+# can reason about locally: it may only touch state that provably outlives it and
+# cannot be raced. Prefer `nursery:` / `pool` for anything that should shut down
+# cleanly; reach for spawn_daemon only for genuinely immortal background work.
+def spawn_daemon[A, permission P](fn: fn(A) -> void can[P], arg: A):
+	can P, Thread.Spawn, Thread.Detach, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.Store, Atomics.CompareExchange:
+		detach(spawn1(fn, arg))
+
+# ------------------------------------------------------------
+# task / future_get: ergonomic aliases for fork-join parallel results.
+#
+# `task(fn, arg)` spawns fn(arg) on a new OS thread and returns a joinable
+# handle. `future_get` blocks until that thread is done and returns its
+# result. Together they express structured fork-join without a pool:
+#
+#   t1 = task(compute_a, arg_a)           # both start immediately
+#   t2 = task(compute_b, arg_b)
+#   result = future_get(move t1) + future_get(move t2)
+#
+# The handle is linear (must be consumed by future_get or detach); the
+# type system enforces this so a forgotten task cannot silently leak.
+# For pool-based fan-out see `nursery:` / `each()` / `reduce()`.
+# ------------------------------------------------------------
+
+def task[A, R, permission P](fn: fn(A) -> R can[P], arg: A) -> Thread[R, Joinable]:
+	can Thread.Spawn, Memory.Allocate, Abort.Panic, Atomics.Store:
+		return spawn1(fn, arg) can P
+
+def future_get[R](handle: Thread[R, Joinable]) -> R:
+	can Thread.Join, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
+		return join(move handle)
+

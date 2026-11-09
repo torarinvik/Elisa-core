@@ -18,7 +18,7 @@ func actualConcurrencyOwnerRewrapSource(t *testing.T) string {
 	if !ok {
 		t.Fatal("missing test source path")
 	}
-	bytes, err := os.ReadFile(filepath.Join(filepath.Dir(file), "../../runtime/elisacore_std/elisacore_runtime_concurrency.elisa"))
+	bytes, err := os.ReadFile(filepath.Join(filepath.Dir(file), "../../runtime/elisacore_std/elisacore_concurrency_pool.elisa"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func actualConcurrencyOwnerRewrapSource(t *testing.T) string {
 		}
 		end := strings.Index(source[start+1:], "\ndef ")
 		if end < 0 {
-			t.Fatal("missing helper boundary", name)
+			end = len(source) - start - 1
 		}
 		out.WriteString(source[start : start+1+end])
 		out.WriteString("\n\n")

@@ -1,0 +1,10 @@
+def pool_await[R](task: Task[R, Pending]) -> R:
+	can Pool.Await, Thread.Join, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
+		take_result = ctx_concurrency_work1_take_result[R]
+		state_bits: void&? = task.state
+		raw: Task[void&?, Pending] = ctx_task_to_raw(move task)
+		can Sync{Lock,Wait,Unlock}:
+			_ = pool_await_raw(move raw)
+		result: R = take_result(state_bits) can Unsafe.PointerCast
+		return result
+

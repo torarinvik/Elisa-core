@@ -1,0 +1,220 @@
+def ctx_concurrency_alloc(size: usize) -> mutable heap void&:
+	can Memory.Allocate, Abort.Panic:
+		raw: mutable heap void&? = malloc(size)
+		panic("concurrency allocation failed") if raw == null
+		ptr: mutable heap void& = raw
+		return ptr
+
+def ctx_concurrency_box_new[T](value: T) -> mutable heap ConcurrencyBox[T]&:
+	raw: heap void& = ctx_concurrency_alloc(size_of(ConcurrencyBox[T])) can Memory.Allocate, Abort.Panic
+	box: mutable heap ConcurrencyBox[T]& = raw.cast[heap ConcurrencyBox[T]&]
+	box.value <- value
+	return box
+
+# Reserve result storage before spawning without fabricating an R value. The
+# worker writes exactly once, then join/pool_await synchronizes before reading.
+def ctx_concurrency_result_write[R](storage: mutable void&, value: R):
+	trusted Unsafe.PointerCast:
+		slot: mutable heap R& = storage.cast[mutable heap R&]
+		slot[0] <- value
+
+def ctx_concurrency_result_read[R](storage: void&) -> R:
+	trusted Unsafe.PointerCast:
+		slot: heap R& = storage.cast[heap R&]
+		return slot[0]
+
+def mutex() -> Mutex:
+	can Memory.Allocate, Memory.Release:
+		out: Mutex = zeroed
+		mutex_init((&out).cast[mutable Mutex&])
+		return move out
+
+def mutex_dispose(mu: mutable Mutex&):
+	can Memory.Release:
+		mutex_destroy(mu)
+
+def mutex_lock(mu: mutable Mutex&) -> MutexGuard[Held]:
+	can Sync.Lock, Abort.Panic:
+		panic("mutex_lock on uninitialized mutex") if mu.handle == null
+		status: int = ctx_platform_mutex_lock(mu.handle.cast[void&])
+		panic("mutex lock failed") if status != 0
+		guard: MutexGuard[Held] = zeroed
+		guard.handle <- mu.handle
+		return move guard
+
+def mutex_unlock(g: MutexGuard[Held]):
+	can Sync.Unlock, Abort.Panic:
+		handle: void&? = g.handle
+		_ = move g
+		panic("mutex_unlock on empty guard") if handle == null
+		status: int = ctx_platform_mutex_unlock(handle)
+		panic("mutex unlock failed") if status != 0
+
+def condvar() -> CondVar:
+	can Memory.Allocate, Memory.Release:
+		out: CondVar = zeroed
+		condvar_init((&out).cast[mutable CondVar&])
+		return move out
+
+def condvar_dispose(cv: mutable CondVar&):
+	can Memory.Release:
+		condvar_destroy(cv)
+
+def cond_wait(cv: mutable CondVar&, g: MutexGuard[Held]) -> MutexGuard[Held]:
+	can Sync.Wait, Abort.Panic:
+		cond_handle: void&? = cv.handle
+		mutex_handle: void&? = g.handle
+		panic("cond_wait on uninitialized condvar") if cond_handle == null
+		panic("cond_wait with empty mutex guard") if mutex_handle == null
+		status: int = ctx_platform_cond_wait(cond_handle, mutex_handle)
+		panic("cond wait failed") if status != 0
+		return move g
+
+def notify_one(cv: mutable CondVar&):
+	can Sync.Notify, Abort.Panic:
+		panic("notify_one on uninitialized condvar") if cv.handle == null
+		status: int = ctx_platform_cond_signal(cv.handle.cast[void&])
+		panic("cond signal failed") if status != 0
+
+def notify_all(cv: mutable CondVar&):
+	can Sync.Notify, Abort.Panic:
+		panic("notify_all on uninitialized condvar") if cv.handle == null
+		status: int = ctx_platform_cond_broadcast(cv.handle.cast[void&])
+		panic("cond broadcast failed") if status != 0
+
+# ------------------------------------------------------------
+# Predicate wait wrappers
+#
+# Raw condvar wait/notify is the low-level runtime surface. Strict user code
+# should use a predicate-shaped wrapper so spurious wakeups are handled in one
+# place and the condition being waited on is visible at the call boundary.
+# ------------------------------------------------------------
+
+def predicate_wait[permission P](cv: mutable CondVar&, guard: MutexGuard[Held], predicate: fn() -> bool can[P]) -> MutexGuard[Held]:
+	can P, Sync.Wait, Abort.Panic:
+		g: mutable MutexGuard[Held] = move guard
+		trusted Unsafe.AssumeProgress:
+			while not predicate():
+				g <- cond_wait(cv, move g)
+		return move g
+
+def predicate_notify_one(cv: mutable CondVar&):
+	can Sync.Notify, Abort.Panic:
+		notify_one(cv)
+
+def predicate_notify_all(cv: mutable CondVar&):
+	can Sync.Notify, Abort.Panic:
+		notify_all(cv)
+
+def yield_thread():
+	can Thread.Yield:
+		thread_yield()
+
+def sleep_usec(usec: u64):
+	can Thread.Sleep:
+		thread_sleep_usec(usec)
+
+def ctx_concurrency_join_handle(handle: uintptr):
+	can Thread.Join, Abort.Panic:
+		status: int = ctx_thread_join(handle)
+		panic("thread join failed") if status != 0
+
+def spawn_raw(entry: void&, arg: void&?) -> Thread[void&?, Joinable]:
+	can Thread.Spawn, Abort.Panic:
+		out: Thread[void&?, Joinable] = zeroed
+		status: int = ctx_thread_create(&out.handle, entry, arg)
+		panic("thread create failed") if status != 0
+		out.state <- arg
+		return move out
+
+def join_raw(thread: Thread[void&?, Joinable]) -> void&?:
+	can Thread.Join, Abort.Panic:
+		handle: uintptr = thread.handle
+		state_bits: void&? = thread.state
+		_ = move thread
+		ctx_concurrency_join_handle(handle)
+		return state_bits
+
+def native_callback_ptr(name: u8&) -> void&?:
+	return elisa_native_callback_ptr(name)
+
+def native_callback_call_u32_voidp(name: u8&, arg: void&?, fallback: u32) -> u32:
+	return elisa_native_callback_call_u32_voidp(name, arg, fallback)
+
+def native_callback_call_i32_voidp(name: u8&, arg: void&?, fallback: i32) -> i32:
+	return elisa_native_callback_call_i32_voidp(name, arg, fallback)
+
+def native_callback_call_usize_voidp(name: u8&, arg: void&?, fallback: usize) -> usize:
+	return elisa_native_callback_call_usize_voidp(name, arg, fallback)
+
+def native_callback_call_isize_voidp(name: u8&, arg: void&?, fallback: isize) -> isize:
+	return elisa_native_callback_call_isize_voidp(name, arg, fallback)
+
+def native_callback_spawn_join_u32_voidp(name: u8&, arg: void&?, fallback: u32) -> u32:
+	can Thread.Spawn, Thread.Join:
+		return elisa_native_callback_spawn_join_u32_voidp(name, arg, fallback)
+
+def native_callback_context_new_u32_voidp(name: u8&, arg: void&?, fallback: u32) -> mutable heap void&?:
+	can Memory.Allocate:
+		return elisa_native_callback_context_new_u32_voidp(name, arg, fallback)
+
+def native_callback_context_entry_u32_voidp() -> void&?:
+	return elisa_native_callback_context_entry_u32_voidp()
+
+def native_callback_context_start_u32_voidp(ctx: mutable heap void&?, thread: mutable uintptr&) -> int:
+	can Thread.Spawn:
+		return elisa_native_callback_context_start_u32_voidp(ctx, thread)
+
+def native_callback_context_join_u32_voidp(handle: uintptr, ctx: mutable heap void&?, fallback: u32) -> u32:
+	can Thread.Join:
+		return elisa_native_callback_context_join_u32_voidp(handle, ctx, fallback)
+
+def native_callback_context_spawn_join_u32_voidp(ctx: mutable heap void&?, fallback: u32) -> u32:
+	can Thread.Spawn, Thread.Join:
+		return elisa_native_callback_context_spawn_join_u32_voidp(ctx, fallback)
+
+def native_callback_context_result_u32(ctx: mutable heap void&?, fallback: u32) -> u32:
+	return elisa_native_callback_context_result_u32(ctx, fallback)
+
+def native_callback_context_free(ctx: mutable heap void&?):
+	can Memory.Release:
+		elisa_native_callback_context_free(ctx)
+
+def spawn_native_callback_u32_voidp(name: u8&, arg: void&?, fallback: u32) -> Thread[u32, Joinable]:
+	can Thread.Spawn, Memory.Allocate, Memory.Release, Abort.Panic:
+		ctx: mutable heap void&? = native_callback_context_new_u32_voidp(name, arg, fallback)
+		panic("native callback context allocation failed") if ctx == null
+		out: Thread[u32, Joinable] = zeroed
+		status: int = native_callback_context_start_u32_voidp(ctx, &out.handle)
+		if status != 0:
+			native_callback_context_free(ctx)
+			panic("native callback context start failed")
+		out.state <- ctx.cast[void&]
+		return move out
+
+def join_native_callback_u32(thread: Thread[u32, Joinable], fallback: u32) -> u32:
+	can Thread.Join, Memory.Release, Abort.Panic:
+		handle: uintptr = thread.handle
+		state_bits: void&? = thread.state
+		_ = move thread
+		result: u32 = (native_callback_context_join_u32_voidp(handle, state_bits.cast[mutable heap void&?], fallback) can Unsafe.PointerCast)
+		(native_callback_context_free(state_bits.cast[mutable heap void&?]) can Unsafe.PointerCast)
+		return result
+
+def detach_raw(thread: Thread[void&?, Joinable]):
+	can Thread.Detach, Abort.Panic:
+		handle: uintptr = thread.handle
+		_ = move thread
+		status: int = ctx_thread_detach(handle)
+		panic("thread detach failed") if status != 0
+
+# ------------------------------------------------------------
+# Persistent worker pool. pool_new spawns `threads` workers ONCE; each parks on
+# the work condvar until a task is enqueued (pool_submit_raw), runs it, and signals
+# the done condvar. The awaiter (pool_await_raw / task_group_wait_all_raw) waits on
+# the per-task completion record. This replaces the old one-OS-thread-per-task model,
+# so fine-grained data-parallel loops (each / parallel for, thousands of submits)
+# pay a single pthread_create per worker instead of one per task.
+# ------------------------------------------------------------
+
+# Narrow a stored (always-non-null after init) sync handle from void&? to void&.

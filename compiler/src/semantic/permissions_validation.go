@@ -168,6 +168,8 @@ var runtimeStdBaseNames = map[string]bool{
 	"collections_hashing.elisa": true, "collections_dict.elisa": true,
 	"collections_set.elisa": true, "collections_index_map.elisa": true,
 	"deque.elisa": true, "elisacore_runtime.elisa": true, "elisacore_runtime_concurrency.elisa": true,
+	"elisacore_concurrency_threads.elisa": true, "elisacore_concurrency_pool.elisa": true,
+	"elisacore_concurrency_tasks.elisa": true, "elisacore_concurrency_await.elisa": true,
 	"elisacore_runtime_prelude.elisa": true, "elisacore_runtime_strings.elisa": true,
 	"elisacore_runtime_string_views.elisa": true, "elisacore_parse_float.elisa": true,
 	"elisacore_parse_float_algorithms.elisa": true, "elisacore_regex.elisa": true,
