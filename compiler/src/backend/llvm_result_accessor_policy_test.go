@@ -80,7 +80,7 @@ func TestBackendResultNodeFactsUseViewAccessors(t *testing.T) {
 				}
 				// These two serial setters are the sole intentional raw writes;
 				// their shared-codegen paths already use generator-local overlays.
-				if name == "llvm_partition_ir.go" && selector.Sel.Name == "ExprTypes" {
+				if name == "llvm_partition_build.go" && selector.Sel.Name == "ExprTypes" {
 					if function == "setResultExprType" {
 						if index, ok := parent.(*goast.IndexExpr); ok && index.X == selector && len(stack) > 1 {
 							if assignment, ok := stack[len(stack)-2].(*goast.AssignStmt); ok {

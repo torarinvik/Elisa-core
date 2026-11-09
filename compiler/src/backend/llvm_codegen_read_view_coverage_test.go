@@ -208,7 +208,7 @@ func codegenASTReadDiagnostics(files map[string]*ast.File, tables, getterNames m
 	seenWrites := map[string]int{}
 	checkNode := func(filename, function string, node ast.Node, viewParams map[string]bool, functionDecl *ast.FuncDecl) {
 		allowedWrites := map[*ast.SelectorExpr]bool{}
-		if filename == "llvm_partition_ir.go" && functionDecl != nil {
+		if filename == "llvm_partition_build.go" && functionDecl != nil {
 			switch functionDecl.Name.Name {
 			case "setResultExprType":
 				ast.Inspect(functionDecl.Body, func(node ast.Node) bool {
