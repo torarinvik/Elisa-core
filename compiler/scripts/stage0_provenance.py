@@ -355,15 +355,20 @@ def build_manifest(
         raise RuntimeError(f"Stage0 compiler binary is missing or not executable: {binary}")
     if environment is None:
         environment = _validate_go_build_context(root)
+    binary_sha256 = sha256_file(binary)
+    go_build = go_build_metadata(binary)
+    # Verify the source after reading the binary and its metadata, so this final
+    # check also covers changes during those operations without a second Go
+    # dependency enumeration in the build path.
     current_source_sha256 = source_digest(root, environment)
     if source_sha256 is not None and current_source_sha256 != source_sha256:
         raise RuntimeError("Stage0 source inputs changed while the compiler was being built")
     return {
         "schema": SCHEMA,
-        "binary_sha256": sha256_file(binary),
+        "binary_sha256": binary_sha256,
         "source_sha256": current_source_sha256,
         "build_context": {key: environment.get(key, "") for key in GO_ENV_CONTEXT_KEYS},
-        "go_build": go_build_metadata(binary),
+        "go_build": go_build,
     }
 
 
@@ -452,8 +457,6 @@ def build(root: Path, binary: Path) -> Path:
             raise RuntimeError("Stage0 build returned success without producing a fresh executable")
 
         manifest = build_manifest(root, staged_binary, source_before, environment)
-        if source_digest(root, environment) != source_before:
-            raise RuntimeError("Stage0 source inputs changed before the provenance receipt was published")
         staged_receipt = _write_manifest(staged_binary, manifest)
         return _publish_pair(staged_binary, staged_receipt, binary)
 

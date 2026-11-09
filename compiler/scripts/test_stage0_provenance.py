@@ -237,6 +237,24 @@ class Stage0ProvenanceTests(unittest.TestCase):
         self.assertEqual(self.binary.read_bytes(), previous_binary)
         self.assertEqual(receipt.read_bytes(), previous_receipt)
 
+    def test_source_change_while_reading_binary_metadata_is_rejected(self) -> None:
+        receipt = self.build_current()
+        previous_binary = self.binary.read_bytes()
+        previous_receipt = receipt.read_bytes()
+        original_metadata = stage0_provenance.go_build_metadata
+
+        def mutate_during_metadata(binary):
+            result = original_metadata(binary)
+            (self.root / "src" / "main.go").write_text("package main\n// metadata race\n", encoding="utf-8")
+            return result
+
+        with patch.object(stage0_provenance.subprocess, "run", side_effect=self.fake_go):
+            with patch.object(stage0_provenance, "go_build_metadata", side_effect=mutate_during_metadata):
+                with self.assertRaisesRegex(RuntimeError, "changed while"):
+                    stage0_provenance.build(self.root, self.binary)
+        self.assertEqual(self.binary.read_bytes(), previous_binary)
+        self.assertEqual(receipt.read_bytes(), previous_receipt)
+
     def test_receipt_publish_failure_rolls_back_existing_pair(self) -> None:
         receipt = self.build_current()
         previous_binary = self.binary.read_bytes()
