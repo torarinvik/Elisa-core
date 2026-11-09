@@ -76,9 +76,14 @@
       "selectors": 1,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
+    "llvm_exprs_catch_unwrap.go": {
+      "sha256": "0921616830d52c9c7bd2cf20fe2e4864daa96a6d55b790a7a2974034ac822c42",
+      "selectors": 3,
+      "classification": "reviewed-statement-lambda-or-declaration-branch"
+    },
     "llvm_exprs_emiterrortagexpr_to_emitcharliteral.go": {
-      "sha256": "f48cb00e6d7de3df4dca4975c595390dd25cebee1dc5cf8623928ef7d7a058e0",
-      "selectors": 4,
+      "sha256": "3d0ce10857ab1207a08e2e8c0fc4b53779d23597976fb2bb1aa40a023827f28f",
+      "selectors": 1,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
     "llvm_ir_input_reads.go": {
