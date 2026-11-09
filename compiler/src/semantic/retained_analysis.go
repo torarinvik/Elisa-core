@@ -5,7 +5,6 @@ import (
 	"elisacore/src/unparse"
 	"fmt"
 	"os"
-	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -35,8 +34,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	// Index declaration scopes before pairing edits with the retained graph.
 	topLevel, memberOf, namespaceOf := retainedDeclarationScopes(file)
 	nameIndex := retainedIndexDeclarationNames(r.pristine, file, oldDecls, newDecls)
-	oldFunctionNames, newFunctionNames := nameIndex.oldFunctionNames, nameIndex.newFunctionNames
-	newFuncNameCount := nameIndex.newFuncNameCount
+	oldFunctionNames := nameIndex.oldFunctionNames
 	newDeclIndex := nameIndex.newDeclIndex
 	oldTop, oldRemovable := retainedRemovableDeclarations(r.pristine)
 	paired, err := retainedPairDeclarations(oldDecls, newDecls, nameIndex, topLevel, memberOf, oldRemovable)
@@ -49,165 +47,21 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	insertedBefore, overloadNames := paired.insertedBefore, paired.overloadNames
 	usingsAdded, usingsRemoved := paired.usingsAdded, paired.usingsRemoved
 	liveOther, liveFns, scoped := retainedIndexLiveDeclarations(a.file, r.decls)
-	type splice struct {
-		live *ast.FuncDecl
-		edit *ast.FuncDecl // the function in file, found again in the prepared scratch parse
+	comparison, err := r.compareRetainedDeclarations(oldDecls, newDecls, src, paired, nameIndex, topLevel, oldTop, memberOf, namespaceOf, liveOther, liveFns, scoped)
+	if err != nil {
+		return fail("%s", err)
 	}
-	var splices []splice
-	var shadowEdits [][3]*ast.FuncDecl             // live, old parse, new parse of each edited body (fast-prepare shadow)
-	var movedSplices []ast.Decl                    // edited functions that also moved: header shifts, body is replaced
-	pairedNew := map[*ast.FuncDecl]*ast.FuncDecl{} // live function -> its declaration in file
-	pairedOld := map[*ast.FuncDecl]*ast.FuncDecl{}
-	replaced := map[string]bool{} // fingerprint keys of functions whose signature changed
-	var shifted []ast.Decl
-	var shiftedOther []ast.Decl
-	// Lists an added declaration was appended to; sorted back into source order at the end.
+	splices, shadowEdits, movedSplices := comparison.splices, comparison.shadowEdits, comparison.movedSplices
+	pairedNew, pairedOld, replaced := comparison.pairedNew, comparison.pairedOld, comparison.replaced
+	shifted, shiftedOther := comparison.shifted, comparison.shiftedOther
+	structPairs, constPairs, constEnumPairs := comparison.structPairs, comparison.constPairs, comparison.constEnumPairs
+	enumPairs, hierarchyPairs := comparison.enumPairs, comparison.hierarchyPairs
+	newTexts, lineDelta, marks := comparison.newTexts, comparison.lineDelta, comparison.marks
+	oldSpans, newSpans := comparison.oldSpans, comparison.newSpans
+	removed, added = comparison.removed, comparison.added
+	// Track the containers that receive declarations for later source-order sorting.
 	appendedInto := map[*ast.NamespaceDecl]bool{}
 	appendedTop := false
-	var structPairs [][2]*ast.StructDecl // edited plain structs: (previous, edited)
-	var constPairs [][2]*ast.ConstDecl   // typed consts with a new value: (previous, edited)
-	var constEnumPairs [][2]*ast.ConstEnumDecl
-	var enumPairs [][2]*ast.EnumDecl      // edited plain enums: (previous, edited)
-	var hierarchyPairs [][2]*ast.EnumDecl // edited refinements of an enum hierarchy
-	newTexts := map[*ast.FuncDecl]funcComparisonText{}
-	lineDelta := map[string]int{}
-	marks := map[string][][2]int{} // per file: (old line, delta from that line on)
-	oldSpans := retainedSpans(oldDecls, r.src)
-	newSpans := retainedSpans(newDecls, src)
-	for k, pair := range pairs {
-		i, j := pair[0], pair[1]
-		od, nd := oldDecls[i], newDecls[j]
-		op, np := od.Pos(), nd.Pos()
-		if op.File != np.File || op.Col != np.Col {
-			return fail("declaration %d moved", i)
-		}
-		// Any line movement must come from a declaration whose text changed; the
-		// span compare below makes that declaration a splice. A span ends at the next
-		// `#line` directive, so the text above a file region's first declaration is in no
-		// span and holds no declaration: a movement there (comments, blank lines) is a
-		// plain shift.
-		if d := np.Line - op.Line; d != lineDelta[op.File] {
-			if !insertedBefore[k] && k > 0 && oldSpans[i-1] == newSpans[pairs[k-1][1]] && oldDecls[i-1].Pos().File == op.File {
-				return fail("lines moved after an unchanged declaration at %s", retainedLineKey(op))
-			}
-			lineDelta[op.File] = d
-			marks[op.File] = append(marks[op.File], [2]int{op.Line, d})
-		}
-		sameText := oldSpans[i] == newSpans[j]
-		ofn, isFn := od.(*ast.FuncDecl)
-		if !isFn {
-			// A container's span is its own header up to its first member. Comment and blank
-			// lines trailing a declaration move with an insertion after it; they are not part of
-			// what the declaration declares.
-			if sameText || retainedTrimTrailing(oldSpans[i]) == retainedTrimTrailing(newSpans[j]) {
-				if lineDelta[op.File] != 0 {
-					candidates := liveOther[declKey{retainedLineKey(op), reflect.TypeOf(od)}]
-					if len(candidates) != 1 {
-						return fail("%d analyzed candidates for %T at %s", len(candidates), od, retainedLineKey(op))
-					}
-					shiftedOther = append(shiftedOther, candidates[0])
-				}
-				continue
-			}
-			if !sameText {
-				if osd, ok := od.(*ast.StructDecl); ok {
-					if nsd, ok := nd.(*ast.StructDecl); ok && osd.Name == nsd.Name && retainedStructFieldEditAllowed(osd, nsd) {
-						structPairs = append(structPairs, [2]*ast.StructDecl{osd, nsd})
-						continue
-					}
-				}
-				if oed, ok := od.(*ast.EnumDecl); ok {
-					if ned, ok := nd.(*ast.EnumDecl); ok && oed.Name == ned.Name && retainedPlainEnum(oed) && retainedPlainEnum(ned) {
-						enumPairs = append(enumPairs, [2]*ast.EnumDecl{oed, ned})
-						continue
-					}
-					if ned, ok := nd.(*ast.EnumDecl); ok && oed.Name == ned.Name && oed.Parent == ned.Parent &&
-						retainedRefinementEnum(oed) && retainedRefinementEnum(ned) {
-						hierarchyPairs = append(hierarchyPairs, [2]*ast.EnumDecl{oed, ned})
-						continue
-					}
-				}
-				if oe, ok := od.(*ast.ConstEnumDecl); ok {
-					if ne, ok := nd.(*ast.ConstEnumDecl); ok && retainedConstEnumEditAllowed(oe, ne, oldSpans[i], newSpans[j]) {
-						constEnumPairs = append(constEnumPairs, [2]*ast.ConstEnumDecl{oe, ne})
-						continue
-					}
-				}
-				if ocd, ok := od.(*ast.ConstDecl); ok {
-					if ncd, ok := nd.(*ast.ConstDecl); ok && retainedConstValueEdit(ocd, ncd, oldSpans[i], newSpans[j]) {
-						constPairs = append(constPairs, [2]*ast.ConstDecl{ocd, ncd})
-						continue
-					}
-				}
-				if os.Getenv("ELISACORE_RETAINED_DEBUG_SPANS") != "" {
-					fmt.Fprintf(os.Stderr, "[span-old %T]\n%q\n[span-new]\n%q\n", od, oldSpans[i], newSpans[j])
-				}
-				return fail("declaration at %s changed", retainedLineKey(op))
-			}
-			continue
-		}
-		nfn, ok := nd.(*ast.FuncDecl)
-		if !ok {
-			return fail("declaration kind changed at %s", retainedLineKey(op))
-		}
-		cands := liveFns[fnKey{retainedLineKey(op), ofn.Name}]
-		if len(cands) != 1 {
-			return fail("%d analyzed candidates for %s at %s", len(cands), ofn.Name, retainedLineKey(op))
-		}
-		live := cands[0]
-		pairedNew[live] = nfn
-		pairedOld[live] = ofn
-		forceReplace := overloadNames[oldFunctionNames[ofn]] || overloadNames[newFunctionNames[nfn]]
-		if sameText && !forceReplace {
-			if lineDelta[op.File] != 0 {
-				shifted = append(shifted, live)
-			}
-			continue
-		}
-		oldText, newText := r.comparisonText(ofn), retainedText(nfn)
-		if oldText.header != newText.header || forceReplace {
-			// A new signature is a removal of the old declaration and an addition
-			// of the new one: callers are re-analyzed, the new one is checked
-			// against scratch.
-			// A member of a `module`/`extend` block is replaced in its block the same way.
-			sameScope := oldTop[ofn] && topLevel[nfn]
-			namespace := ""
-			if block := memberOf[nfn]; !sameScope && block != nil && !oldTop[ofn] && !topLevel[nfn] {
-				if sd, known := scoped[live]; known && sd.Namespace == namespaceOf[block] {
-					sameScope, namespace = true, sd.Namespace
-				}
-			}
-			genericRename := retainedGenericFunctionBinderRename(ofn, nfn)
-			if !sameScope || (!(retainedPlainFunction(ofn) && retainedPlainFunction(nfn)) && !genericRename) {
-				return fail("signature of %s changed", ofn.Name)
-			}
-			if genericRename && retainedGenericFunctionHasNonBodyUsers(oldDecls, ofn) {
-				return fail("generic function %s has non-body consumers", ofn.Name)
-			}
-			removed = append(removed, ofn)
-			added = append(added, nfn)
-			replaced[namespace+"::"+ofn.Name+"#0"] = true
-			if forceReplace {
-				// Every occurrence of an overloaded name is re-declared.
-				for k := 1; k < newFuncNameCount[newFunctionNames[nfn]]; k++ {
-					replaced[fmt.Sprintf("%s::%s#%d", namespace, ofn.Name, k)] = true
-				}
-			}
-			continue
-		}
-		if oldText.gensyms != newText.gensyms {
-			return fail("%s mentions renamed synthesized declarations", ofn.Name)
-		}
-		if _, known := scoped[live]; !known {
-			return fail("%s is not a top-level analyzed function", ofn.Name)
-		}
-		if np.Line != op.Line {
-			movedSplices = append(movedSplices, live)
-		}
-		splices = append(splices, splice{live, nfn})
-		shadowEdits = append(shadowEdits, [3]*ast.FuncDecl{live, ofn, nfn})
-		newTexts[nfn] = newText
-	}
 	reportDeclarationImport := false
 	var relocateProofReport func(*Analyzer) string
 	if r.a != nil {
@@ -256,7 +110,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 				if _, known := scoped[live]; !known {
 					return fail("proof report dependent body is not independently analyzable")
 				}
-				splices = append(splices, splice{live, fresh})
+				splices = append(splices, retainedSplice{live, fresh})
 				shadowEdits = append(shadowEdits, [3]*ast.FuncDecl{live, old, fresh})
 				newTexts[fresh] = retainedText(fresh)
 				changedOwners = append(changedOwners, live)
@@ -634,7 +488,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			if nfn == nil {
 				return fail("%s mentions a removed function but has no edited counterpart", fn.Name)
 			}
-			splices = append(splices, splice{fn, nfn})
+			splices = append(splices, retainedSplice{fn, nfn})
 			newTexts[nfn] = retainedText(nfn)
 		}
 	}
@@ -662,7 +516,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			if nfn == nil || !retainedPlainFunction(fn) {
 				return fail("%s mentions an added function but cannot be re-analyzed alone", fn.Name)
 			}
-			splices = append(splices, splice{fn, nfn})
+			splices = append(splices, retainedSplice{fn, nfn})
 			newTexts[nfn] = retainedText(nfn)
 		}
 	}
@@ -685,7 +539,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			if nfn == nil {
 				return fail("%s mentions a newly used name but has no edited counterpart", fn.Name)
 			}
-			splices = append(splices, splice{fn, nfn})
+			splices = append(splices, retainedSplice{fn, nfn})
 			newTexts[nfn] = retainedText(nfn)
 		}
 	}
@@ -757,7 +611,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			if nfn == nil {
 				return fail("%s uses an edited struct but has no edited counterpart", fn.Name)
 			}
-			splices = append(splices, splice{fn, nfn})
+			splices = append(splices, retainedSplice{fn, nfn})
 			newTexts[nfn] = retainedText(nfn)
 			spliced[fn] = true
 			if structOnly == nil {
@@ -969,7 +823,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			if nfn == nil || !retainedPlainFunction(fn) {
 				return fail("%s uses an added or edited name but cannot be re-analyzed alone", fn.Name)
 			}
-			splices = append(splices, splice{fn, nfn})
+			splices = append(splices, retainedSplice{fn, nfn})
 			newTexts[nfn] = retainedText(nfn)
 			spliced[fn] = true
 		}
@@ -1025,7 +879,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			if nfn == nil || !retainedPlainFunction(fn) {
 				return fail("%s uses an edited constant enum but cannot be re-analyzed alone", fn.Name)
 			}
-			splices = append(splices, splice{fn, nfn})
+			splices = append(splices, retainedSplice{fn, nfn})
 			newTexts[nfn] = retainedText(nfn)
 			spliced[fn] = true
 		}
@@ -1065,7 +919,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			if nfn == nil || !retainedPlainFunction(fn) {
 				return fail("%s uses an edited enum but cannot be re-analyzed alone", fn.Name)
 			}
-			splices = append(splices, splice{fn, nfn})
+			splices = append(splices, retainedSplice{fn, nfn})
 			newTexts[nfn] = retainedText(nfn)
 			spliced[fn] = true
 		}
@@ -1123,7 +977,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			if nfn == nil || !retainedPlainFunction(fn) {
 				return fail("%s uses an edited enum but cannot be re-analyzed alone", fn.Name)
 			}
-			splices = append(splices, splice{fn, nfn})
+			splices = append(splices, retainedSplice{fn, nfn})
 			newTexts[nfn] = retainedText(nfn)
 			spliced[fn] = true
 			users++
