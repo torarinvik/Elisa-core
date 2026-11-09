@@ -1,0 +1,408 @@
+package main
+
+import (
+	"bytes"
+	"elisacore/src/ast"
+	"elisacore/src/backend"
+	"elisacore/src/semantic"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"strconv"
+	"strings"
+	"time"
+)
+
+func buildTestRunnerSource(source []byte, cases []selectedTestCase, filter string) string {
+	runnable := runnableTests(cases)
+	skipped := countSkippedTests(cases)
+	permissionRefs := selectedTestPermissionRefs(runnable)
+	grant := permissionGrantString(permissionRefs)
+	bodyIndent := "\t"
+
+	var out strings.Builder
+	out.Write(source)
+	if len(source) == 0 || source[len(source)-1] != '\n' {
+		out.WriteByte('\n')
+	}
+	out.WriteByte('\n')
+	if !strings.Contains(string(source), "extern puts(") {
+		out.WriteString("extern puts(text: u8&) -> int can[Console.Write]\n\n")
+	}
+	out.WriteString("def ctx_test_main() -> int")
+	out.WriteString(semantic.PermissionRefsString(permissionRefs))
+	out.WriteString(":\n")
+	if grant != "" && len(cases) != 0 {
+		out.WriteString("\tcan ")
+		out.WriteString(grant)
+		out.WriteString(":\n")
+		bodyIndent = "\t\t"
+	}
+
+	if len(cases) == 0 {
+		message := elisacoreStringLiteral(fmt.Sprintf("[ NO TESTS ] no @test functions matched filter %q", strings.TrimSpace(filter)))
+		out.WriteString(bodyIndent)
+		out.WriteString("puts(")
+		out.WriteString(message)
+		out.WriteString(".cast[u8&]) can Console.Write\n")
+		out.WriteString(bodyIndent)
+		out.WriteString("return 1\n\n")
+		out.WriteString("export fn main() -> int = ctx_test_main\n")
+		return out.String()
+	}
+
+	for _, testCase := range cases {
+		if testCase.Func == nil {
+			continue
+		}
+		if testCase.skipped() {
+			skippedLine := elisacoreStringLiteral(formatTestLine("SKIPPED", testCase.Func.Name, fmt.Sprintf(" (%s)", testCase.SkipReason)))
+			out.WriteString("\tputs(")
+			out.WriteString(skippedLine)
+			out.WriteString(".cast[u8&])\n")
+			continue
+		}
+		runLine := elisacoreStringLiteral(formatTestLine("RUN", testCase.Func.Name, ""))
+		okLine := elisacoreStringLiteral(formatTestLine("OK", testCase.Func.Name, ""))
+		out.WriteString(bodyIndent)
+		out.WriteString("puts(")
+		out.WriteString(runLine)
+		out.WriteString(".cast[u8&])\n")
+		out.WriteString(bodyIndent)
+		out.WriteString(testCase.Func.Name)
+		out.WriteString("()\n")
+		out.WriteString(bodyIndent)
+		out.WriteString("puts(")
+		out.WriteString(okLine)
+		out.WriteString(".cast[u8&])\n")
+	}
+
+	summaryLine := elisacoreStringLiteral(fmt.Sprintf("[ SUMMARY  ] %d test(s) selected; runnable=%d skipped=%d failed=0", len(cases), len(runnable), skipped))
+	out.WriteString(bodyIndent)
+	out.WriteString("puts(")
+	out.WriteString(summaryLine)
+	out.WriteString(".cast[u8&])\n")
+	out.WriteString(bodyIndent)
+	out.WriteString("return 0\n\n")
+	out.WriteString("export fn main() -> int = ctx_test_main\n")
+	return out.String()
+}
+func buildIsolatedTestRunnerSource(source []byte, testCase selectedTestCase) string {
+	permissionRefs := testCasePermissionRefs(testCase.Func)
+	grant := permissionGrantString(permissionRefs)
+
+	var out strings.Builder
+	out.Write(source)
+	if len(source) == 0 || source[len(source)-1] != '\n' {
+		out.WriteByte('\n')
+	}
+	out.WriteByte('\n')
+	out.WriteString("def ctx_test_main() -> int")
+	out.WriteString(semantic.PermissionRefsString(permissionRefs))
+	out.WriteString(":\n")
+	if testCase.Func != nil {
+		out.WriteString("\t")
+		out.WriteString(testCase.Func.Name)
+		out.WriteString("()")
+		if grant != "" {
+			out.WriteString(" can ")
+			out.WriteString(grant)
+		}
+		out.WriteString("\n")
+	}
+	out.WriteString("\t")
+	out.WriteString("return 0\n\n")
+	out.WriteString("export fn main() -> int = ctx_test_main\n")
+	return out.String()
+}
+func testCaseExportName(index int) string {
+	return fmt.Sprintf("ctx_test_case_%d", index)
+}
+func testCaseInternalName(index int) string {
+	return fmt.Sprintf("ctx_test_case_impl_%d", index)
+}
+func testCasePermissionRefs(testFn *semantic.AnnotatedFunc) []ast.PermissionRef {
+	if testFn == nil || testFn.Signature == nil {
+		return nil
+	}
+	if len(testFn.Signature.PermissionRefs) != 0 {
+		return testFn.Signature.PermissionRefs
+	}
+	refs := make([]ast.PermissionRef, 0, len(testFn.Signature.Permissions))
+	for _, family := range testFn.Signature.Permissions {
+		refs = append(refs, ast.PermissionRef{Name: family})
+	}
+	return refs
+}
+func buildDispatchTestRunnerSource(source []byte, cases []selectedTestCase) string {
+	var out strings.Builder
+	out.Write(source)
+	if len(source) == 0 || source[len(source)-1] != '\n' {
+		out.WriteByte('\n')
+	}
+	out.WriteByte('\n')
+	for index, testCase := range cases {
+		if testCase.Func == nil || testCase.skipped() {
+			continue
+		}
+		exportName := testCaseExportName(index)
+		internalName := testCaseInternalName(index)
+		permissionRefs := testCasePermissionRefs(testCase.Func)
+		grant := permissionGrantString(permissionRefs)
+		out.WriteString("def ")
+		out.WriteString(internalName)
+		out.WriteString("() -> int")
+		out.WriteString(semantic.PermissionRefsString(permissionRefs))
+		out.WriteString(":\n")
+		out.WriteString("\t")
+		out.WriteString(testCase.Func.Name)
+		out.WriteString("()")
+		if grant != "" {
+			out.WriteString(" can ")
+			out.WriteString(grant)
+		}
+		out.WriteString("\n")
+		out.WriteString("\t")
+		out.WriteString("return 0\n\n")
+		out.WriteString("export fn ")
+		out.WriteString(exportName)
+		out.WriteString("() -> int = ")
+		out.WriteString(internalName)
+		out.WriteString("\n\n")
+	}
+	return out.String()
+}
+func testRunnerDispatchShimSource(cases []selectedTestCase) string {
+	var out strings.Builder
+	out.WriteString(testRunnerRuntimeShimSource())
+	out.WriteString("\n#include <stdio.h>\n\nextern int strcmp(const char* lhs, const char* rhs);\n\n")
+	for index, testCase := range cases {
+		if testCase.Func == nil || testCase.skipped() {
+			continue
+		}
+		out.WriteString("long long ")
+		out.WriteString(testCaseExportName(index))
+		out.WriteString("(void);\n")
+	}
+	out.WriteString("\nint main(int argc, char **argv) {\n")
+	out.WriteString("    if (argc < 2) {\n")
+	out.WriteString("        return 2;\n")
+	out.WriteString("    }\n")
+	out.WriteString("    const char *test_name = argv[1];\n")
+	out.WriteString("    fprintf(stderr, \"[ ACTIVE   ] %s\\n\", test_name);\n")
+	out.WriteString("    fflush(stderr);\n")
+	for index, testCase := range cases {
+		if testCase.Func == nil || testCase.skipped() {
+			continue
+		}
+		out.WriteString("    if (strcmp(test_name, ")
+		out.WriteString(strconv.Quote(testCase.Func.Name))
+		out.WriteString(") == 0) {\n")
+		out.WriteString("        return (int)")
+		out.WriteString(testCaseExportName(index))
+		out.WriteString("();\n")
+		out.WriteString("    }\n")
+	}
+	out.WriteString("    return 2;\n")
+	out.WriteString("}\n")
+	return out.String()
+}
+func runnableTestCases(cases []selectedTestCase) []selectedTestCase {
+	out := make([]selectedTestCase, 0, len(cases))
+	for _, testCase := range cases {
+		if testCase.Func == nil || testCase.skipped() {
+			continue
+		}
+		out = append(out, testCase)
+	}
+	return out
+}
+func toCachedTestCases(cases []selectedTestCase) []cachedTestCase {
+	out := make([]cachedTestCase, 0, len(cases))
+	for _, tc := range cases {
+		if tc.Func == nil {
+			continue
+		}
+		out = append(out, cachedTestCase{Name: tc.Func.Name, SkipReason: tc.SkipReason})
+	}
+	return out
+}
+
+// runTestExecutableCases runs each non-skipped case against the (already built or
+// cached) test executable and reports pass/skip/fail. Shared by the normal build
+// path and the early-cache hit path, so both emit identical [ RUN ]/[ OK ]/... lines.
+func runTestExecutableCases(exePath string, cases []cachedTestCase, targetTriple string, stdout io.Writer, stderr io.Writer) (passed int, skipped int, failed int, runTotal time.Duration) {
+	writeTestPhaseLine(stderr, "selected_tests", "run_cases")
+	for _, tc := range cases {
+		if strings.TrimSpace(tc.SkipReason) != "" {
+			skipped++
+			fmt.Fprintln(stdout, formatTestLine("SKIPPED", tc.Name, fmt.Sprintf(" (%s)", tc.SkipReason)))
+			continue
+		}
+		fmt.Fprintln(stdout, formatTestLine("RUN", tc.Name, ""))
+		testStart := time.Now()
+		var testStdout bytes.Buffer
+		var testStderr bytes.Buffer
+		runCmd := nativeExecCommand(exePath, targetTriple, tc.Name)
+		runCmd.Stdout = &testStdout
+		runCmd.Stderr = &testStderr
+		runStart := time.Now()
+		runErr := runCmd.Run()
+		runDur := time.Since(runStart)
+		runTotal += runDur
+		writeTestTimingLine(stderr, tc.Name,
+			durationTimingField("total", time.Since(testStart)),
+			durationTimingField("run", runDur),
+		)
+		if runErr == nil {
+			passed++
+			fmt.Fprintln(stdout, formatTestLine("OK", tc.Name, ""))
+			continue
+		}
+		failed++
+		status, detail := classifyTestExecutionError(runErr)
+		fmt.Fprintln(stdout, formatTestLine(status, tc.Name, detail))
+		writeCapturedTestOutput(stdout, tc.Name, testStdout.String(), testStderr.String())
+	}
+	return passed, skipped, failed, runTotal
+}
+
+func executeSelectedTests(program *loadedProgram, result *semantic.Result, filter string, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, debugInfo bool, traceInfo bool, stdout io.Writer, stderr io.Writer, enableSMT bool) int {
+	suiteStart := time.Now()
+	if program == nil {
+		fmt.Fprintln(stderr, "error: missing loaded test program")
+		return 1
+	}
+	// Analysis, selection, generated source and publication share one snapshot.
+	// Harness construction owns a copy so append operations cannot mutate it.
+	writeTestPhaseLine(stderr, "selected_tests", "read_source")
+	source := append([]byte(nil), program.source...)
+	writeTestPhaseLine(stderr, "selected_tests", "select_cases")
+	source = appendLawFuzzHarnessSource(source, result)
+	testCases := selectTestCases(result, filter)
+	driverSource, propertyCases := buildPropertyDrivers(result, filter)
+	if driverSource != "" {
+		if len(source) != 0 && source[len(source)-1] != '\n' {
+			source = append(source, '\n')
+		}
+		source = append(source, []byte(driverSource)...)
+		testCases = append(testCases, propertyCases...)
+	}
+	if len(testCases) == 0 {
+		fmt.Fprintf(stdout, "[ NO TESTS ] no @test functions matched filter %q\n", strings.TrimSpace(filter))
+		return 1
+	}
+	runnableCases := runnableTestCases(testCases)
+
+	clangPath, err := exec.LookPath("clang")
+	if err != nil {
+		fmt.Fprintf(stderr, "error: clang is required to execute tests: %s\n", err)
+		return 1
+	}
+
+	passed := 0
+	skipped := 0
+	failed := 0
+	var compileTotal time.Duration
+	var runTotal time.Duration
+	var analyzeTotal time.Duration
+	var nativeObjectTotal time.Duration
+	var nativeHeaderGenTotal time.Duration
+	var nativeHeaderWriteTotal time.Duration
+	var nativeLinkTotal time.Duration
+	var cacheLookupTotal time.Duration
+	var cachePublishTotal time.Duration
+	cacheHit := false
+	compileStarted := false
+	var exePath string
+	runnerCacheIneligible := result.HasUncacheableSMTOutcome()
+	cleanup := func() {}
+	if len(runnableCases) > 0 {
+		compileStarted = true
+		writeTestPhaseLine(stderr, "selected_tests", "compile_dispatch")
+		runnerSourceStart := time.Now()
+		runnerSource := buildDispatchTestRunnerSource(source, runnableCases)
+		runnerSourceElapsed := time.Since(runnerSourceStart)
+		compileStart := time.Now()
+		dispatchShim := testRunnerDispatchShimSource(runnableCases)
+		var nativeTiming nativeBuildTiming
+		var analyzeTime time.Duration
+		var shimWriteTime time.Duration
+		exePath, cleanup, nativeTiming, analyzeTime, shimWriteTime, err = compileTestRunnerExecutableWithShim(clangPath, runnerSource, dispatchShim, result.EASMModules, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple, debugInfo, traceInfo, stderr, enableSMT, runnerCacheIneligible)
+		compileTotal = time.Since(compileStart)
+		analyzeTotal = analyzeTime
+		nativeObjectTotal = nativeTiming.ObjectWrite
+		nativeHeaderGenTotal = nativeTiming.HeaderGen
+		nativeHeaderWriteTotal = nativeTiming.HeaderWrite
+		nativeLinkTotal = nativeTiming.Link
+		cacheLookupTotal = nativeTiming.CacheLookup
+		cachePublishTotal = nativeTiming.CachePublish
+		cacheHit = nativeTiming.CacheHit
+		runnerCacheIneligible = nativeTiming.UncacheableSMTOutcome
+		if err != nil {
+			cleanup()
+			fmt.Fprintf(stderr, "error: %s\n", err)
+			return 1
+		}
+		// ELISA_KEEP_TEST_BINARY keeps the built test binary (and its .dSYM) instead of
+		// deleting it, and prints the path -- so it can be debugged under lldb (e.g. to
+		// inspect a fault that the test harness otherwise just reports as a panic).
+		if os.Getenv("ELISA_KEEP_TEST_BINARY") != "" {
+			fmt.Fprintf(stderr, "[ keep     ] test binary: %s\n", exePath)
+			cleanup = func() {}
+		}
+		writeTestTimingLine(stderr, "compile",
+			durationTimingField("build_runner", runnerSourceElapsed),
+			durationTimingField("compile", compileTotal),
+			durationTimingField("analyze", analyzeTime),
+			durationTimingField("shim", shimWriteTime),
+			durationTimingField("obj", nativeTiming.ObjectWrite),
+			durationTimingField("header_gen", nativeTiming.HeaderGen),
+			durationTimingField("header_write", nativeTiming.HeaderWrite),
+			durationTimingField("link", nativeTiming.Link),
+			durationTimingField("cache_lookup", nativeTiming.CacheLookup),
+			durationTimingField("cache_publish", nativeTiming.CachePublish),
+			boolTimingField("cache_hit", nativeTiming.CacheHit),
+		)
+		defer cleanup()
+	}
+	cachedCases := toCachedTestCases(testCases)
+	// Publish the early (source-level) cache so the next unchanged run skips the
+	// whole front-end (parse+analyze) and jumps straight to running this binary.
+	if exePath != "" && earlyTestCacheEnabled() && !runnerCacheIneligible && !result.HasUncacheableSMTOutcome() {
+		if key, keyErr := earlyTestCacheKeyForProgram(program, filter, result.EASMModules, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple, debugInfo, traceInfo, enableSMT); keyErr == nil {
+			publishEarlyTestCache(key, exePath, cachedCases)
+		}
+	}
+	passed, skipped, failed, runTotal = runTestExecutableCases(exePath, cachedCases, targetTriple, stdout, stderr)
+	fmt.Fprintf(stdout, "[ SUMMARY  ] %d test(s) selected; passed=%d skipped=%d failed=%d\n", len(testCases), passed, skipped, failed)
+	writeTestTimingLine(stderr, "suite",
+		durationTimingField("total", time.Since(suiteStart)),
+		durationTimingField("compile", compileTotal),
+		durationTimingField("run", runTotal),
+		durationTimingField("analyze", analyzeTotal),
+		durationTimingField("obj", nativeObjectTotal),
+		durationTimingField("header_gen", nativeHeaderGenTotal),
+		durationTimingField("header_write", nativeHeaderWriteTotal),
+		durationTimingField("link", nativeLinkTotal),
+		durationTimingField("cache_lookup", cacheLookupTotal),
+		durationTimingField("cache_publish", cachePublishTotal),
+		boolTimingField("cache_hit", cacheHit),
+		boolTimingField("compiled", compileStarted),
+	)
+	if failed > 0 {
+		return 1
+	}
+	return 0
+}
+func runnableTests(cases []selectedTestCase) []*semantic.AnnotatedFunc {
+	runnable := make([]*semantic.AnnotatedFunc, 0, len(cases))
+	for _, testCase := range cases {
+		if testCase.Func == nil || testCase.skipped() {
+			continue
+		}
+		runnable = append(runnable, testCase.Func)
+	}
+	return runnable
+}
