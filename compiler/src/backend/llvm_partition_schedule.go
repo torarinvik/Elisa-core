@@ -153,7 +153,7 @@ func (s *IncrementalObjectSession) recordDeclinedPartitionSchedule(unitID, targe
 // partitionNativeNameReserved is used only by the opt-in submit experiment.
 // Every source/link/export spelling may be deliberately chosen to collide.
 func (g *llvmGenerator) partitionNativeNameReserved(name string) bool {
-	if g == nil || g.result == nil || g.result.GlobalScope == nil || len(g.result.EASMModules) != 0 {
+	if g == nil || g.result == nil || !newIRCodegenReadView(g.result, nil).HasGlobalScope() || len(g.result.EASMModules) != 0 {
 		return true
 	}
 	for source, symbol := range g.codegenReadView().GlobalSymbolsMap("partition-synthetic-specialization-reservations") {
@@ -179,9 +179,9 @@ func (g *llvmGenerator) partitionNativeNameReserved(name string) bool {
 // that are not represented in GlobalScope, so it must use whole-module IR.
 func partitionHelperNamespaceConflicts(result *semantic.Result, unitID [32]byte, reads *irInputReadRecorder) bool {
 	if os.Getenv("ELISACORE_PARTITION_DECLINE_DEBUG") == "1" && result != nil {
-		fmt.Fprintf(os.Stderr, "[partition-decline] namespace check: globalScope=%v easmModules=%d\n", result.GlobalScope != nil, len(result.EASMModules))
+		fmt.Fprintf(os.Stderr, "[partition-decline] namespace check: globalScope=%v easmModules=%d\n", newIRCodegenReadView(result, nil).HasGlobalScope(), len(result.EASMModules))
 	}
-	if result == nil || result.GlobalScope == nil || len(result.EASMModules) != 0 {
+	if result == nil || !newIRCodegenReadView(result, nil).HasGlobalScope() || len(result.EASMModules) != 0 {
 		return true
 	}
 	prefix := fmt.Sprintf("elisa.partition.%x.", unitID)
