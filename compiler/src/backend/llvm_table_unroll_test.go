@@ -4,7 +4,6 @@ package backend
 
 import (
 	"fmt"
-	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -73,7 +72,7 @@ func TestConstantTableUnrollSafety(t *testing.T) {
 }
 
 func TestConstantTableUnrollAdversarial(t *testing.T) {
-	data, err := os.ReadFile("testdata/table_unroll.ll")
+	data, err := tableUnrollAdversarialCases()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +129,7 @@ func TestConstantTableUnrollAdversarial(t *testing.T) {
 func TestConstantTableUnrollDeclinesAdversarialModules(t *testing.T) {
 	for _, name := range []string{"table_unroll_attempts.ll", "table_unroll_graph_budget.ll"} {
 		t.Run(name, func(t *testing.T) {
-			data, err := os.ReadFile("testdata/" + name)
+			data, err := tableUnrollDeclineCases(name)
 			if err != nil {
 				t.Fatal(err)
 			}
