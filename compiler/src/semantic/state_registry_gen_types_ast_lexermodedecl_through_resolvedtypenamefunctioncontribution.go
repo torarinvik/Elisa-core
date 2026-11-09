@@ -8,7 +8,7 @@ import (
 	"reflect"
 )
 
-func semanticStateTypesPart1() []reflect.Type {
+func semanticStateTypes_ast_LexerModeDecl_through_resolvedTypeNameFunctionContribution() []reflect.Type {
 	return []reflect.Type{
 		reflect.TypeFor[ast.LexerModeDecl](),
 		reflect.TypeFor[ast.ListComprehensionExpr](),
@@ -178,6 +178,7 @@ func semanticStateTypesPart1() []reflect.Type {
 		reflect.TypeFor[conservativeCallWidening](),
 		reflect.TypeFor[darrayBuilderKnownTypes](),
 		reflect.TypeFor[deathTimeAlloc](),
+		reflect.TypeFor[declKey](),
 		reflect.TypeFor[deferCaptureCollector](),
 		reflect.TypeFor[deferredAliasRefinement](),
 		reflect.TypeFor[derivedLoopCandidate](),
@@ -225,6 +226,7 @@ func semanticStateTypesPart1() []reflect.Type {
 		reflect.TypeFor[flowArm](),
 		reflect.TypeFor[flowExit](),
 		reflect.TypeFor[flowExitKind](),
+		reflect.TypeFor[fnKey](),
 		reflect.TypeFor[framePath](),
 		reflect.TypeFor[freshReturnStatus](),
 		reflect.TypeFor[freshShapeIdentity](),
@@ -408,7 +410,5 @@ func semanticStateTypesPart1() []reflect.Type {
 		reflect.TypeFor[reserveBoundLinear](),
 		reflect.TypeFor[resolvedTypeNameContributions](),
 		reflect.TypeFor[resolvedTypeNameFunctionContribution](),
-		reflect.TypeFor[resolvedTypeNameLocation](),
-		reflect.TypeFor[resolvedTypeNamePointer](),
 	}
 }

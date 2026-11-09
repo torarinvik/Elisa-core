@@ -6,7 +6,7 @@ import (
 	"reflect"
 )
 
-func semanticStateTypesPart0() []reflect.Type {
+func semanticStateTypes_AddressSpaceType_through_ast_LexerLiteralEntry() []reflect.Type {
 	return []reflect.Type{
 		reflect.TypeFor[AddressSpaceType](),
 		reflect.TypeFor[AggregateStateType](),

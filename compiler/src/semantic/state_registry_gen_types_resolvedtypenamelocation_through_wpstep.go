@@ -5,18 +5,29 @@ import (
 	"reflect"
 )
 
-func semanticStateTypesPart2() []reflect.Type {
+func semanticStateTypes_resolvedTypeNameLocation_through_wpStep() []reflect.Type {
 	return []reflect.Type{
+		reflect.TypeFor[resolvedTypeNameLocation](),
+		reflect.TypeFor[resolvedTypeNamePointer](),
 		reflect.TypeFor[resolvedTypeNameRetirementPlan](),
 		reflect.TypeFor[resolvedTypeNameSourceOwner](),
+		reflect.TypeFor[retainedAdditionResult](),
 		reflect.TypeFor[retainedAppendOnlyState](),
+		reflect.TypeFor[retainedBindingPlan](),
+		reflect.TypeFor[retainedBodyDependencyPlan](),
+		reflect.TypeFor[retainedBodyReplayInput](),
 		reflect.TypeFor[retainedBodyUses](),
 		reflect.TypeFor[retainedClassifyPreparation](),
 		reflect.TypeFor[retainedClassifyState](),
+		reflect.TypeFor[retainedComparison](),
 		reflect.TypeFor[retainedConstEnumEdit](),
 		reflect.TypeFor[retainedDeclPosition](),
+		reflect.TypeFor[retainedDeclarationNameIndex](),
+		reflect.TypeFor[retainedDeclarationPairing](),
+		reflect.TypeFor[retainedEnumDependencyPlan](),
 		reflect.TypeFor[retainedEnumEdit](),
 		reflect.TypeFor[retainedFactTables](),
+		reflect.TypeFor[retainedFastBodies](),
 		reflect.TypeFor[retainedGrowth](),
 		reflect.TypeFor[retainedInferredFunctionSummary](),
 		reflect.TypeFor[retainedOwnerIndex](),
@@ -31,8 +42,10 @@ func semanticStateTypesPart2() []reflect.Type {
 		reflect.TypeFor[retainedPlainIdentityEntry](),
 		reflect.TypeFor[retainedPlainIdentityLedger](),
 		reflect.TypeFor[retainedPlainOwnerBaseline](),
+		reflect.TypeFor[retainedSplice](),
 		reflect.TypeFor[retainedStructEdit](),
 		reflect.TypeFor[retainedUsingChange](),
+		reflect.TypeFor[retainedValueDependencyPlan](),
 		reflect.TypeFor[returnBorrowAliasFrame](),
 		reflect.TypeFor[returnBorrowAliasJournalEntry](),
 		reflect.TypeFor[returnBorrowBinderKey](),

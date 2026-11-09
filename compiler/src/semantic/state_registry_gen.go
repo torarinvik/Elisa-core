@@ -5,8 +5,8 @@ import "reflect"
 
 func semanticStateTypes() []reflect.Type {
 	var types []reflect.Type
-	types = append(types, semanticStateTypesPart0()...)
-	types = append(types, semanticStateTypesPart1()...)
-	types = append(types, semanticStateTypesPart2()...)
+	types = append(types, semanticStateTypes_AddressSpaceType_through_ast_LexerLiteralEntry()...)
+	types = append(types, semanticStateTypes_ast_LexerModeDecl_through_resolvedTypeNameFunctionContribution()...)
+	types = append(types, semanticStateTypes_resolvedTypeNameLocation_through_wpStep()...)
 	return types
 }
