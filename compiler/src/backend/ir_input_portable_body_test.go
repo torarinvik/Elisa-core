@@ -158,7 +158,11 @@ def main() -> i64:
 		session.minWeight = 0
 		var mu sync.Mutex
 		var summaries []string
+		seenPartitions := map[int]bool{}
 		session.irInputAudit = func(part int, report irInputReadReport) {
+			mu.Lock()
+			seenPartitions[part] = true
+			mu.Unlock()
 			for _, body := range report.Bodies {
 				rows, err := (irInputReadReport{Bodies: []irFunctionBodyRead{body}}).portableBodyObservations(result.ActiveFile())
 				var value string
@@ -184,7 +188,8 @@ def main() -> i64:
 		if err := session.WriteObject(result, filepath.Join(t.TempDir(), "out.o"), LLVMObjectEmitOptions{OptLevel: OptimizationLevel0}); err != nil {
 			t.Fatal(err)
 		}
-		if stats := session.Stats(); stats.PartitionsEmitted != 2 {
+		// Generic specialization can add supplemental partition modules.
+		if stats := session.Stats(); stats.PartitionsEmitted < 2 || !seenPartitions[0] || !seenPartitions[1] {
 			t.Fatalf("partitions not exercised: %+v", stats)
 		}
 		sort.Strings(summaries)
