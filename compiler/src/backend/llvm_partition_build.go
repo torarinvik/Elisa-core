@@ -83,7 +83,12 @@ func (s *IncrementalObjectSession) buildIRPartitionWithMode(result *semantic.Res
 	if err != nil {
 		return nil, nil, fmt.Errorf("partition %d: %w", part, err)
 	}
-	defer g.disposeInBackground(mode.disposalScope)
+	disposed := false
+	defer func() {
+		if !disposed {
+			g.disposeInBackground(mode.disposalScope)
+		}
+	}()
 	// These workers synthesize types that can flow into generic symbol names.
 	// Until their cross-module identity is qualified, use whole-module lowering.
 	if g.partUnsafeHelpers {
@@ -202,6 +207,11 @@ func (s *IncrementalObjectSession) buildIRPartitionWithMode(result *semantic.Res
 	defer C.LLVMDisposeMessage(features)
 	nativeStart := time.Now()
 	if options.OptLevel != OptimizationLevel0 {
+		// The worker consumes the independently owned bitcode buffer and the
+		// copied target strings, not this LLVM module or its context. Release
+		// them while the worker runs rather than retaining a module per child.
+		g.disposeInBackground(mode.disposalScope)
+		disposed = true
 		var err error
 		var fragment *nativeFragmentContext
 		if s.diskCodegenFlag("ELISACORE_NATIVE_FRAGMENTS") && s.disk != nil {
