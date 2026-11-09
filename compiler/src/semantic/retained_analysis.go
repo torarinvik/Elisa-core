@@ -39,7 +39,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	if err != nil {
 		return fail("%s", err)
 	}
-	removed, pairs, added := paired.removed, paired.pairs, paired.added
+	removed, added := paired.removed, paired.added
 	addedConsts, removedConsts := paired.addedConsts, paired.removedConsts
 	addedStructs, removedStructs := paired.addedStructs, paired.removedStructs
 	insertedBefore, overloadNames := paired.insertedBefore, paired.overloadNames
@@ -55,7 +55,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	structPairs, constPairs, constEnumPairs := comparison.structPairs, comparison.constPairs, comparison.constEnumPairs
 	enumPairs, hierarchyPairs := comparison.enumPairs, comparison.hierarchyPairs
 	newTexts, lineDelta, marks := comparison.newTexts, comparison.lineDelta, comparison.marks
-	oldSpans, newSpans := comparison.oldSpans, comparison.newSpans
+	newSpans := comparison.newSpans
 	removed, added = comparison.removed, comparison.added
 	// Track the containers that receive declarations for later source-order sorting.
 	appendedInto := map[*ast.NamespaceDecl]bool{}
@@ -85,8 +85,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	// touched instead of rescanning the whole program.
 	funcNameUsageIncremental := usingsAdded+usingsRemoved == 0 && len(removed)+len(replaced) == 0 // owners added or replaced are reconciled below
 	fast := r.prepareRetainedFastBodies(a, shadowEdits, scoped, oldDecls, marks, len(splices), bodyEnvironmentUnchanged, fastBodyEnvironmentUnchanged)
-	fastBodies, fastResolvedTypeNameRows := fast.bodies, fast.rows
-	fastResolvedTypeNameContributions, fastResolvedTypeNameSourceOwners := fast.contributions, fast.owners
+	fastBodies := fast.bodies
 	// A pure addition of fresh closed functions: see retained_fresh_function.go.
 	if retainedFastPrepareMode == "on" && len(added) != 0 && len(splices)+len(shadowEdits)+len(removed)+len(addedConsts)+len(removedConsts)+len(addedStructs)+len(removedStructs) == 0 &&
 		len(structPairs)+len(constPairs)+len(constEnumPairs)+len(enumPairs)+len(hierarchyPairs)+len(replaced)+len(overloadNames)+usingsAdded+usingsRemoved == 0 &&
@@ -156,49 +155,9 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			r.LastStats.FastDeclined = why
 		}
 	}
-	if pre != nil {
-		// Prepared above: nothing to wait for.
-	} else if fastBodies != nil {
-		// The edit leaves every declaration-level result as the retained baseline holds it.
-		// The new prefix is independently relocated; mutating/aliasing the old
-		// baseline would invalidate preBodyDifference and later disk revisions.
-		resolvedTypeNames := r.pre.resolvedTypeNames
-		if len(fastResolvedTypeNameContributions) != 0 {
-			resolvedTypeNames = cloneResolvedTypeNameContributions(resolvedTypeNames)
-			for key, body := range fastResolvedTypeNameContributions {
-				contribution := resolvedTypeNames.functions[key]
-				contribution.body = body
-				resolvedTypeNames.functions[key] = contribution
-			}
-		}
-		diags := r.retainedShiftedPreBodyDiagnostics(pairedNew, marks)
-		pre = &preBodyState{classification: r.pre.classification, fingerprint: r.pre.fingerprint, global: r.pre.global, resolvedTypeNames: resolvedTypeNames, resolvedTypeNameSourceOwners: fastResolvedTypeNameSourceOwners, resolvedTypeNameRows: fastResolvedTypeNameRows, diags: diags, plainHeaders: r.pre.plainHeaders, plainGlobal: r.pre.plainGlobal, plainInputs: r.pre.plainInputs, plainIdentities: r.pre.plainIdentities, hasProofReport: r.pre.hasProofReport}
-		r.LastStats.FastPrepared = true
-	} else if prepared.AcceptsScratch(scratch) {
-		if err := prepared.materialize(); err != nil {
-			return fail("scratch parse failed: %v", err)
-		}
-		if prepared.file == nil || prepared.file == file {
-			prepared.reject(fmt.Errorf("scratch parse must be independent of the primary file"))
-			return fail("scratch parse must be independent of the primary file")
-		}
-		scratch = prepared.file
-		prepared.Wait()
-		if prepared.parseErr != nil || prepared.pre == nil {
-			return fail("scratch preparation failed: %v", prepared.parseErr)
-		}
-		pre = prepared.pre
-		r.LastStats.ScratchPrepared = true
-		r.LastStats.Scratch = prepared.elapsed
-	} else {
-		if scratch == nil || scratch == file {
-			return fail("missing independent scratch parse")
-		}
-		pendingRetainedMu.Lock()
-		scratchStart := time.Now()
-		pre = scratchPreBody(scratch, r.options)
-		r.LastStats.Scratch = time.Since(scratchStart)
-		pendingRetainedMu.Unlock()
+	pre, scratch, prepareErr := r.selectRetainedScratch(pre, scratch, file, prepared, fast, pairedNew, marks)
+	if prepareErr != nil {
+		return fail("%s", prepareErr)
 	}
 	compareStart := time.Now()
 	if reportDeclarationImport && pre != nil && pre.proofPrefixError != "" {
@@ -209,64 +168,13 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	if growthErr != nil {
 		return fail("%s", growthErr)
 	}
-	// Build the declaration pairing and using-dependent reanalysis plan before
-	// comparing resolved type-name rows. Those planned owners are the only
-	// unchanged bodies whose rows a using edit may legitimately change.
-	keyOf := func(d ast.Decl) string { return fmt.Sprintf("%s|%T", retainedLineKey(d.Pos()), d) }
-	newOfOld := make(map[string]int, len(pairs))
-	for _, pair := range pairs {
-		newOfOld[keyOf(oldDecls[pair[0]])] = pair[0]<<32 | pair[1]
+	bindings, bindingErr := r.planRetainedBindings(file, oldDecls, newDecls, paired, comparison, added, splices)
+	if bindingErr != nil {
+		return fail("%s", bindingErr)
 	}
-	lookup := func(d ast.Decl) (int, int, bool) {
-		v, ok := newOfOld[keyOf(d)]
-		return v >> 32, v & (1<<32 - 1), ok
-	}
-	newOf := func(d ast.Decl) ast.Decl {
-		if _, j, ok := lookup(d); ok {
-			return newDecls[j]
-		}
-		return nil
-	}
-	spanOf := func(d ast.Decl) (string, string) {
-		if i, j, ok := lookup(d); ok {
-			return oldSpans[i], newSpans[j]
-		}
-		return "", ""
-	}
-	var usingChanges []retainedUsingChange
-	if usingsAdded+usingsRemoved != 0 {
-		var extra []string
-		for _, nf := range added {
-			extra = append(extra, nf.Name)
-		}
-		for _, d := range addedConsts {
-			extra = append(extra, retainedValueDeclName(d))
-		}
-		for _, st := range addedStructs {
-			extra = append(extra, st.Name)
-		}
-		var why string
-		if usingChanges, why = r.findUsingChanges(file, newOf, spanOf, extra); why != "" {
-			return fail("%s", why)
-		}
-	}
+	newOf, spanOf, usingChanges := bindings.newOf, bindings.spanOf, bindings.usingChanges
+	functionKeysBeforeReplay, reanalyzedBodyKeys := bindings.functionKeys, bindings.reanalyzedBodyKeys
 	warningsChanged := false
-	functionKeysBeforeReplay := retainedPreBodyFunctionKeys(r.decls)
-	reanalyzedBodyKeys := make(map[string]bool, len(splices))
-	for _, splice := range splices {
-		if key := functionKeysBeforeReplay[splice.live]; key != "" {
-			reanalyzedBodyKeys[key] = true
-		}
-	}
-	for _, change := range usingChanges {
-		fn, ok := r.decls[change.index].Decl.(*ast.FuncDecl)
-		if !ok || !change.mention {
-			continue
-		}
-		if key := functionKeysBeforeReplay[fn]; key != "" {
-			reanalyzedBodyKeys[key] = true
-		}
-	}
 	// The owner certificate is authoritative for body-only and function-set
 	// updates. Existing struct/enum/const edit protocols have their own
 	// declaration-fact import rules; retain the legacy table-size proof there.
@@ -389,29 +297,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			}
 		}
 	}
-	// Preserve the old permission-equation numbering before changing the set.
-	var permissionBefore []scopedDecl
-	var permissionBeforeTypes []*FuncType
-	var permissionKnownTypes map[*FuncType]bool
-	if len(added) > 0 || len(removed) > 0 {
-		permissionBefore = permissionFunctionDecls(r.decls)
-		for _, sd := range permissionBefore {
-			permissionBeforeTypes = append(permissionBeforeTypes, permissionDeclType(a, sd))
-		}
-		permissionKnownTypes = map[*FuncType]bool{}
-		for _, ft := range a.functionTypes {
-			if ft != nil {
-				permissionKnownTypes[ft] = true
-			}
-		}
-		for _, sym := range a.globalScope.Symbols {
-			if sym != nil {
-				if ft, ok := sym.Type.(*FuncType); ok && ft != nil {
-					permissionKnownTypes[ft] = true
-				}
-			}
-		}
-	}
+	permissionBefore, permissionBeforeTypes, permissionKnownTypes := r.retainedPermissionSnapshot(a, len(added) != 0 || len(removed) != 0)
 	var retirePlainGlobalFacts func() error
 	var plainCoordinates *plainCoordinatePlan
 	var plainRemoved []*retainedPlainDefaultProduct
@@ -668,20 +554,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	r.result.FuncDisjointParams = a.funcDisjointParams
 	// file is the next comparison base. Its spliced bodies now belong to the
 	// analyzed AST and get rewritten there, so keep their text from before.
-	// Code generation emits declarations in list order; a fresh analysis lists them as written.
-	if len(appendedInto) != 0 || appendedTop {
-		currentOffsets := make(map[retainedDeclPosition]int, len(newDecls))
-		for _, decl := range newDecls {
-			pos := decl.Pos()
-			currentOffsets[retainedDeclPosition{pos.File, pos.Line, pos.Col}] = pos.Offset
-		}
-		for ns := range appendedInto {
-			retainedSortDeclsBySource(ns.Decls, currentOffsets)
-		}
-		if appendedTop {
-			retainedSortDeclsBySource(a.file.Decls, currentOffsets)
-		}
-	}
+	r.sortRetainedAddedDeclarations(a, newDecls, appendedInto, appendedTop)
 	if retainedFastPrepareMode != "" && !bodyEnvironmentUnchanged {
 		r.invalidateFastPrepareBaseline("declaration environment changed; fresh retained baseline required")
 	}
@@ -710,25 +583,9 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	r.LastStats.Added = len(added)
 	r.LastStats.Removed = len(removed)
 	r.LastStats.Shifted = len(shifted)
-	if plainManaged {
-		r.prunePlainDefaultRetainedOwners(plainRemoved)
-		identityProducts := append([]*retainedPlainDefaultProduct(nil), plainRemoved...)
-		for _, retirement := range plainBodies {
-			identityProducts = append(identityProducts, retirement.Product)
-		}
-		if err := r.prunePlainDeadIdentities(identityProducts); err != nil {
-			return fail("plain identity commit: %v", err)
-		}
-		if err := r.verifyPlainDefaultRemoval(plainRemoved); err != nil {
-			return fail("plain default commit: %v", err)
-		}
+	if err := r.commitRetainedPlainDefaults(plainManaged, plainRemoved, plainBodies, plainRebound); err != nil {
+		return fail("%s", err)
 	}
-	for _, retirement := range plainBodies {
-		if err := r.verifyPlainBodyRetirement(retirement); err != nil {
-			return fail("plain retired body commit: %v", err)
-		}
-	}
-	r.refreshPlainDefaultProductsAfterBodyCleanup(plainRebound)
 	if plainManaged {
 		plainCommitted = true
 	}
