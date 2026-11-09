@@ -6,7 +6,10 @@ import (
 )
 
 func BenchmarkStoreFlowStructNamed(b *testing.B) {
-	a := &Analyzer{namedTypes: make(map[string]Type), storeFlowStructLookup: make(map[string]Type)}
+	a := &Analyzer{namedTypes: make(map[string]Type),
+		analyzerFunctionRegionState: analyzerFunctionRegionState{
+			storeFlowStructLookup: make(map[string]Type),
+		}}
 	for i := 0; i < 1024; i++ {
 		name := fmt.Sprintf("Module%d.Struct%d", i, i)
 		a.namedTypes[name] = &StructType{Name: name}
@@ -61,7 +64,14 @@ func BenchmarkStoreFlowStructRepeatedSummaries(b *testing.B) {
 			label = "worker-index"
 		}
 		b.Run(label, func(b *testing.B) {
-			a := &Analyzer{namedTypes: named, storeFlowNamedTypes: locals, typeShapesFrozen: frozen}
+			a := &Analyzer{namedTypes: named,
+				analyzerFunctionRegionState: analyzerFunctionRegionState{
+					storeFlowNamedTypes: locals,
+				},
+
+				analyzerTypeMemoState: analyzerTypeMemoState{
+					typeShapesFrozen: frozen,
+				}}
 			if frozen {
 				a.parallel = &parallelWorkerState{}
 				a.storeFlowStructNamed(names[0])

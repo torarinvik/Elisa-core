@@ -5,8 +5,13 @@ import (
 	"reflect"
 )
 
-func semanticStateTypes_resolvedTypeNameLocation_through_wpStep() []reflect.Type {
+func semanticStateTypes_requiresReportKey_through_wpStep() []reflect.Type {
 	return []reflect.Type{
+		reflect.TypeFor[requiresReportKey](),
+		reflect.TypeFor[requiresVerdict](),
+		reflect.TypeFor[reserveBoundLinear](),
+		reflect.TypeFor[resolvedTypeNameContributions](),
+		reflect.TypeFor[resolvedTypeNameFunctionContribution](),
 		reflect.TypeFor[resolvedTypeNameLocation](),
 		reflect.TypeFor[resolvedTypeNamePointer](),
 		reflect.TypeFor[resolvedTypeNameRetirementPlan](),

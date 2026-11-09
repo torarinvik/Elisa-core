@@ -15,16 +15,18 @@ type retryUnknownSolver struct {
 
 type snapshotUnknownSolver struct {
 	fixedSMTSolver
-	snapshot uint64
-	transient uint64
+	snapshot      uint64
+	transient     uint64
 	alsoTransient bool
 }
 
 func (s *snapshotUnknownSolver) UnknownCacheEpoch() (uint64, uint64) { return 0, s.transient }
-func (s *snapshotUnknownSolver) SnapshotUnknownEpoch() uint64 { return s.snapshot }
+func (s *snapshotUnknownSolver) SnapshotUnknownEpoch() uint64        { return s.snapshot }
 func (s *snapshotUnknownSolver) CheckValues(string, []string) (smt.Result, map[string]string, time.Duration) {
 	s.snapshot++
-	if s.alsoTransient { s.transient++ }
+	if s.alsoTransient {
+		s.transient++
+	}
 	return smt.Unknown, nil, 0
 }
 
@@ -33,7 +35,9 @@ func TestHistoryCertificateCannotHideTransientFailure(t *testing.T) {
 	smtIndependent = true
 	defer func() { smtIndependent = prior }()
 	solver := &snapshotUnknownSolver{alsoTransient: true}
-	a := &Analyzer{smtEnabled: true, smtSolver: solver, smtProofCacheInitialized: true}
+	a := &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
+		smtEnabled: true, smtSolver: solver, smtProofCacheInitialized: true,
+	}}
 	tr, _ := smtQueryForCacheTest(a, "", "true")
 	a.smtCheckQuery(tr, "", "true")
 	if !a.smtSnapshotTainted {
@@ -47,7 +51,9 @@ func TestHistoryCertifiedUnknownDoesNotEnterQueryCache(t *testing.T) {
 	defer func() { smtIndependent, smtDeclineCacheEnabled = priorIndependent, priorDecline }()
 	solver := &snapshotUnknownSolver{}
 	cache := &smtProofCache{directory: t.TempDir(), identity: "snapshot-only"}
-	a := &Analyzer{smtEnabled: true, smtSolver: solver, smtProofCacheInitialized: true, smtProofCache: cache}
+	a := &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
+		smtEnabled: true, smtSolver: solver, smtProofCacheInitialized: true, smtProofCache: cache,
+	}}
 	tr, query := smtQueryForCacheTest(a, "", "true")
 	if proven, _ := a.smtCheckQuery(tr, "", "true"); proven {
 		t.Fatal("unknown became a proof")
@@ -84,7 +90,9 @@ func TestUnknownTransientRetriesButCertifiedResourceDeclineCaches(t *testing.T) 
 	for _, certified := range []bool{false, true} {
 		solver := &retryUnknownSolver{certified: certified}
 		cache := &smtProofCache{directory: t.TempDir(), identity: "unknown-certificate"}
-		a := &Analyzer{smtEnabled: true, smtSolver: solver, smtProofCacheInitialized: true, smtProofCache: cache}
+		a := &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
+			smtEnabled: true, smtSolver: solver, smtProofCacheInitialized: true, smtProofCache: cache,
+		}}
 		tr, query := smtQueryForCacheTest(a, "", "true")
 		if proven, _ := a.smtCheckQuery(tr, "", "true"); proven {
 			t.Fatal("unknown became proof")
@@ -124,7 +132,9 @@ func TestInvocationCertificateLatchesTransientFailure(t *testing.T) {
 	if !CacheInvocationCertifiable() {
 		t.Fatal("fresh invocation should be certifiable")
 	}
-	a := &Analyzer{smtEnabled: true, smtSolver: &fixedSMTSolver{result: smt.Unknown}}
+	a := &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
+		smtEnabled: true, smtSolver: &fixedSMTSolver{result: smt.Unknown},
+	}}
 	a.smtCheckRawQueryWithLogLabel("(assert true)\n", "raw", "true")
 	if CacheInvocationCertifiable() {
 		t.Fatal("transient unknown allowed invocation certificate")
@@ -165,7 +175,9 @@ func TestUnknownLaterResourceFailureCannotConcealTransientWeakening(t *testing.T
 	smtIndependent = true
 	defer func() { smtIndependent = prior }()
 	solver := &compoundUnknownSolver{}
-	a := &Analyzer{smtEnabled: true, smtSolver: solver, smtProofCacheInitialized: true}
+	a := &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
+		smtEnabled: true, smtSolver: solver, smtProofCacheInitialized: true,
+	}}
 	hyps := "(assert (forall ((i Int)) (= i i)))\n"
 	tr, query := smtQueryForCacheTest(a, hyps, "true")
 	a.smtCheckQuery(tr, hyps, "true")
@@ -189,9 +201,10 @@ func TestUnknownLaterResourceFailureCannotConcealTransientWeakening(t *testing.T
 }
 
 func TestRawSMTUnknownTaintsSnapshot(t *testing.T) {
-	a := &Analyzer{
+	a := &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
 		smtEnabled: true,
 		smtSolver:  &fixedSMTSolver{result: smt.Unknown},
+	},
 	}
 	if proven, _ := a.smtCheckRawQueryWithLogLabel("(assert true)\n", "raw", "true"); proven {
 		t.Fatal("Unknown raw query became proven")

@@ -110,7 +110,7 @@ func TestParallelWorkerKeepsStorageViewWriteSummariesLocal(t *testing.T) {
 	}
 
 	for pathIndex, path := range exportDeclMapPaths() {
-		name := reflect.TypeOf(Analyzer{}).Field(path[0]).Name
+		name := analyzerStorageFieldName(path)
 		if name == "storageViewCalleeWriteCache" {
 			t.Errorf("composite-key worker-local cache is included in unit exports (path %d)", pathIndex)
 		}

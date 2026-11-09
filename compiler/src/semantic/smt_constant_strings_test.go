@@ -83,7 +83,9 @@ func TestSMTStringSelectorClassifierMultipleReturns(t *testing.T) {
 
 func TestClassifierStringFrameStableRejectsInferredWrite(t *testing.T) {
 	decl := &ast.FuncDecl{Permissions: []ast.PermissionRef{{Name: "Abort", Member: "Panic"}}}
-	a := &Analyzer{currentFunctionUsedPermissionRefs: []ast.PermissionRef{{Name: "Memory", Member: "Write"}}}
+	a := &Analyzer{analyzerControlFlowState: analyzerControlFlowState{
+		currentFunctionUsedPermissionRefs: []ast.PermissionRef{{Name: "Memory", Member: "Write"}},
+	}}
 	if classifierStringFrameStable(a, decl) {
 		t.Fatal("classifier string read should be rejected after an inferred memory write")
 	}

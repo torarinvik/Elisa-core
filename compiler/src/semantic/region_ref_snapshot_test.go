@@ -20,7 +20,9 @@ func TestBorrowedRegionRefMapCopiesOnlyOnWrite(t *testing.T) {
 	originalState := regionRefStateFromDependency(region, 1)
 	nextState := regionRefStateFromDependency(region, 2)
 	original := map[*Symbol]regionRefState{sym: originalState}
-	a := &Analyzer{currentRegionRefs: original}
+	a := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
+		currentRegionRefs: original,
+	}}
 
 	a.borrowRegionRefStates()
 	if !a.currentRegionRefsBorrowed || regionRefMapIdentity(a.currentRegionRefs) != regionRefMapIdentity(original) {
@@ -48,7 +50,9 @@ func TestBorrowedRegionRefDeleteCopiesOnlyWhenPresent(t *testing.T) {
 	sym := &Symbol{Name: "value", Kind: SymbolLocal}
 	state := regionRefStateFromDependency(&Symbol{Name: "arena", Kind: SymbolLocal}, 1)
 	original := map[*Symbol]regionRefState{sym: state}
-	a := &Analyzer{currentRegionRefs: original}
+	a := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
+		currentRegionRefs: original,
+	}}
 
 	a.borrowRegionRefStates()
 	a.deleteCurrentRegionRefState(&Symbol{Name: "missing", Kind: SymbolLocal})

@@ -48,3 +48,23 @@ func TestGenerateDeclinesUnknownSchema(t *testing.T) {
 		}
 	}
 }
+
+func TestGenerateIncludesEmbeddedAnalyzerState(t *testing.T) {
+	source := []byte(`package semantic; type Analyzer struct { analyzerBorrowState; direct map[int]int }`)
+	state := []byte(`package semantic; type analyzerBorrowState struct { borrowed map[string]int; exprTypes map[int]int }`)
+	out, err := generate(source, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"borrowed", "direct"} {
+		if !strings.Contains(string(out), "dst."+name+" = maps.Clone(src."+name+")") {
+			t.Fatalf("map %s omitted", name)
+		}
+	}
+	if strings.Contains(string(out), "dst.exprTypes") {
+		t.Fatal("special field was cloned")
+	}
+	if _, err := generate(source); err == nil {
+		t.Fatal("missing embedded state accepted")
+	}
+}

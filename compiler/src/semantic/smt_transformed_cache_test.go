@@ -31,7 +31,9 @@ func TestSMTTransformedProofSurvivesNewSolverAndChangedOuterQuery(t *testing.T) 
 			cache := &smtProofCache{directory: t.TempDir(), identity: "transformed-test"}
 			query := "(declare-const x Int)\n(declare-fun p (Int) Bool)\n(assert (= x 3))\n(assert (forall ((i Int)) (p (+ i 0))))\n" + goal + "\n"
 			first := &transformedCountingSolver{Solver: openCOISolver(t, 500000)}
-			a := &Analyzer{smtProofCache: cache}
+			a := &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
+				smtProofCache: cache,
+			}}
 			if result, _ := a.smtCheckSliced(first, query, goal, nil); result != smt.Unsat {
 				t.Fatalf("first proof: %v", result)
 			}
@@ -43,7 +45,9 @@ func TestSMTTransformedProofSurvivesNewSolverAndChangedOuterQuery(t *testing.T) 
 				t.Fatal("outer query should not have been published")
 			}
 			second := &transformedCountingSolver{Solver: openCOISolver(t, 500000)}
-			b := &Analyzer{smtProofCache: &smtProofCache{directory: cache.directory, identity: cache.identity}}
+			b := &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
+				smtProofCache: &smtProofCache{directory: cache.directory, identity: cache.identity},
+			}}
 			if result, _ := b.smtCheckSliced(second, changed, goal, nil); result != smt.Unsat {
 				t.Fatalf("reused proof: %v", result)
 			}
@@ -56,7 +60,9 @@ func TestSMTTransformedProofSurvivesNewSolverAndChangedOuterQuery(t *testing.T) 
 
 func TestSMTTransformedCacheOnlyReusesUnsatAndSeparatesIdentity(t *testing.T) {
 	cache := &smtProofCache{directory: t.TempDir(), identity: "one"}
-	a := &Analyzer{smtProofCache: cache}
+	a := &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
+		smtProofCache: cache,
+	}}
 	for _, result := range []smt.Result{smt.Sat, smt.Unknown} {
 		calls := 0
 		for i := 0; i < 2; i++ {
@@ -71,7 +77,9 @@ func TestSMTTransformedCacheOnlyReusesUnsatAndSeparatesIdentity(t *testing.T) {
 	}
 	cache.publish("(assert false)")
 	for _, other := range []*smtProofCache{cache, {directory: cache.directory, identity: "two"}} {
-		b := &Analyzer{smtProofCache: other}
+		b := &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
+			smtProofCache: other,
+		}}
 		calls := 0
 		query := "(assert true)"
 		if other.identity == "two" {

@@ -14,7 +14,10 @@ func TestStoreCallRegionsSafeForTarget(t *testing.T) {
 	value := &Symbol{Name: "value", Kind: SymbolParam, Type: &SViewType{}}
 	scope := NewScope(nil)
 	scope.Define(value)
-	a := &Analyzer{currentScope: scope, currentRegionRefs: map[*Symbol]regionRefState{value: {}}}
+	a := &Analyzer{currentScope: scope,
+		analyzerFunctionRegionState: analyzerFunctionRegionState{
+			currentRegionRefs: map[*Symbol]regionRefState{value: {}},
+		}}
 	if !a.storeCallRegionsSafeForTarget(arg, "") {
 		t.Fatal("region-free parameter should be safe")
 	}

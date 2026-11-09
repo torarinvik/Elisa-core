@@ -10,7 +10,9 @@ var affineCloneBenchSink map[affineValueKey]affineValueState
 func BenchmarkCloneAffineValueStates(b *testing.B) {
 	for _, n := range []int{4, 16, 64} {
 		b.Run(fmt.Sprint(n), func(b *testing.B) {
-			a := &Analyzer{currentAffineValues: make(map[affineValueKey]affineValueState, n)}
+			a := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
+				currentAffineValues: make(map[affineValueKey]affineValueState, n),
+			}}
 			for i := 0; i < n; i++ {
 				a.currentAffineValues[affineValueKey{Root: &Symbol{Name: fmt.Sprint(i)}}] = affineValueState{ConsumedBy: "moved"}
 			}

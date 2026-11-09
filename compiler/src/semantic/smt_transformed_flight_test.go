@@ -12,7 +12,10 @@ func TestSMTTransformedFlightSharesOnlyProofs(t *testing.T) {
 	shared := &sync.Map{}
 	dir := t.TempDir()
 	makeAnalyzer := func(identity string) *Analyzer {
-		return &Analyzer{smtProofCache: &smtProofCache{directory: dir, identity: identity}, parallel: &parallelWorkerState{smtFlights: shared}}
+		return &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
+			smtProofCache: &smtProofCache{directory: dir, identity: identity},
+		},
+			parallel: &parallelWorkerState{smtFlights: shared}}
 	}
 	leader, follower := makeAnalyzer("same"), makeAnalyzer("same")
 	entered, release := make(chan struct{}), make(chan struct{})
@@ -79,7 +82,10 @@ func TestSMTTransformedFlightSharesOnlyProofs(t *testing.T) {
 }
 
 func TestSMTTransformedReentrantCallDoesNotReleaseOwner(t *testing.T) {
-	a := &Analyzer{smtProofCache: &smtProofCache{directory: t.TempDir(), identity: "same"}, parallel: &parallelWorkerState{smtFlights: &sync.Map{}}}
+	a := &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
+		smtProofCache: &smtProofCache{directory: t.TempDir(), identity: "same"},
+	},
+		parallel: &parallelWorkerState{smtFlights: &sync.Map{}}}
 	query := "(assert false)"
 	_, _ = a.smtCheckTransformedProof(query, func() (smt.Result, map[string]string) {
 		key := "\x00transformed-unsat\x00" + a.smtProofCache.key(query)
@@ -101,8 +107,14 @@ func TestSMTTransformedFlightSharesAlphaEquivalentProof(t *testing.T) {
 	shared := &sync.Map{}
 	dir := t.TempDir()
 	cache := func() *smtProofCache { return &smtProofCache{directory: dir, identity: "same"} }
-	first := &Analyzer{smtProofCache: cache(), parallel: &parallelWorkerState{smtFlights: shared}}
-	second := &Analyzer{smtProofCache: cache(), parallel: &parallelWorkerState{smtFlights: shared}}
+	first := &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
+		smtProofCache: cache(),
+	},
+		parallel: &parallelWorkerState{smtFlights: shared}}
+	second := &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
+		smtProofCache: cache(),
+	},
+		parallel: &parallelWorkerState{smtFlights: shared}}
 	q1 := "(declare-const v_old Int)\n(assert (< v_old v_old))\n"
 	q2 := "(declare-const v_new Int)\n(assert (< v_new v_new))\n"
 	k1, ok1 := first.smtProofCache.alphaKey(q1)
@@ -150,7 +162,10 @@ func TestSMTWeakeningFlightSharesSATWithoutModels(t *testing.T) {
 	shared := &sync.Map{}
 	dir := t.TempDir()
 	makeAnalyzer := func() *Analyzer {
-		return &Analyzer{smtProofCache: &smtProofCache{directory: dir, identity: "same"}, parallel: &parallelWorkerState{smtFlights: shared}}
+		return &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
+			smtProofCache: &smtProofCache{directory: dir, identity: "same"},
+		},
+			parallel: &parallelWorkerState{smtFlights: shared}}
 	}
 	first, second := makeAnalyzer(), makeAnalyzer()
 	q1 := "(declare-const v_old Int)\n(assert (> v_old 0))\n"

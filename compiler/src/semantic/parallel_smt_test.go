@@ -24,7 +24,9 @@ func (s *parallelSMTStatsSolver) Close() error     { s.closes++; return nil }
 
 func TestParallelSMTWorkerOwnsSolverAndProfile(t *testing.T) {
 	parentSolver := &parallelSMTStatsSolver{stats: smt.Stats{Total: 5 * time.Millisecond, Slowest: 4 * time.Millisecond}}
-	parent := &Analyzer{smtEnabled: true, smtSolver: parentSolver, smtStats: SMTStats{Enabled: true, Attempts: 7, Proven: 7, SpawnTime: time.Millisecond}}
+	parent := &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
+		smtEnabled: true, smtSolver: parentSolver, smtStats: SMTStats{Enabled: true, Attempts: 7, Proven: 7, SpawnTime: time.Millisecond},
+	}}
 	worker := cloneAnalyzerValueForBodyWorker(parent).Addr().Interface().(*Analyzer)
 	if worker.smtSolver != nil || worker.smtStats != (SMTStats{}) {
 		t.Fatal("worker inherited live solver or parent counters")
@@ -64,7 +66,9 @@ func TestParallelSMTIndependentSessions(t *testing.T) {
 	if _, err := exec.LookPath(smt.ResolveBinary("")); err != nil {
 		t.Skip("solver unavailable")
 	}
-	parent := &Analyzer{smtEnabled: true}
+	parent := &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
+		smtEnabled: true,
+	}}
 	root := parent.openSMT()
 	if root == nil {
 		t.Fatal("missing parent solver")

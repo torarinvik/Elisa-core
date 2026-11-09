@@ -24,7 +24,10 @@ func TestStoreFlowPatternSelectorsAreNotBindings(t *testing.T) {
 	}
 	variant := &EnumVariant{Name: "Ident", Payload: []Type{&SViewType{}}}
 	enum := &EnumType{Name: "Expr", Variants: []*EnumVariant{variant}, VariantMap: map[string]*EnumVariant{"Ident": variant}}
-	a := &Analyzer{namedTypes: map[string]Type{"Expr": enum}, storeFlowCurrentDecl: decl}
+	a := &Analyzer{namedTypes: map[string]Type{"Expr": enum},
+		analyzerFunctionRegionState: analyzerFunctionRegionState{
+			storeFlowCurrentDecl: decl,
+		}}
 	call := &ast.CallExpr{Func: &ast.FieldExpr{Object: &ast.Ident{Name: "Expr"}, Field: "Ident"}, Args: []ast.Expr{&ast.Ident{Name: "name"}}}
 	if !a.storeFlowEnumVariantConstructor(call) {
 		t.Fatal("matching another variant must not shadow its enum constructor")

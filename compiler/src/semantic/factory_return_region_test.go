@@ -47,7 +47,9 @@ def escape() -> Table:
 
 func TestFactoryReturnRegionReanalysisClearsBinding(t *testing.T) {
 	call := &ast.CallExpr{}
-	a := &Analyzer{declaredCallReturnRegions: map[*ast.CallExpr]string{call: "previous_owner"}}
+	a := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
+		declaredCallReturnRegions: map[*ast.CallExpr]string{call: "previous_owner"},
+	}}
 	a.analyzeResolvedCallExprWithExpected(call, nil, nil, nil)
 	if _, exists := a.declaredCallReturnRegions[call]; exists {
 		t.Fatal("unresolved reanalysis kept prior return-region provenance")

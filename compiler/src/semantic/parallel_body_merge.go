@@ -281,17 +281,25 @@ func mergeValue(dst, w, base reflect.Value, p *parallelWorkerState) {
 	}
 	switch w.Kind() {
 	case reflect.Struct:
-		for i := 0; i < w.NumField(); i++ {
-			if w.Type() == reflect.TypeOf(Analyzer{}) && (w.Type().Field(i).Name == "proofLifecycle" || w.Type().Field(i).Name == "proofReport") {
+		fields := make([]reflect.StructField, w.NumField())
+		if w.Type() == reflect.TypeFor[Analyzer]() {
+			fields = analyzerStorageFields
+		} else {
+			for i := range fields {
+				fields[i] = w.Type().Field(i)
+			}
+		}
+		for _, field := range fields {
+			if w.Type() == reflect.TypeOf(Analyzer{}) && (field.Name == "proofLifecycle" || field.Name == "proofReport") {
 				continue
 			}
 			if p != nil {
-				name := w.Type().Field(i).Name
+				name := field.Name
 				if name == "exprTypeOverlay" || name == "exprFactsOverlay" || name == "iterBinderElementOverlay" || name == "noStorageOverlay" || name == "optimizationSymbolIdentityOverlay" || name == "storeScanBinderOverlay" || name == "storeScanParamFactsOverlay" || parallelBodyWorkerLocalOnlyMap(name) || name == "smtSolver" || name == "smtStats" || name == "smtUnavailable" {
 					continue
 				}
 			}
-			mergeValue(settable(dst.Field(i)), settable(w.Field(i)), settable(base.Field(i)), p)
+			mergeValue(settable(dst.FieldByIndex(field.Index)), settable(w.FieldByIndex(field.Index)), settable(base.FieldByIndex(field.Index)), p)
 		}
 	case reflect.Map:
 		if w.IsNil() {

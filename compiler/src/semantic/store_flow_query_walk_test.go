@@ -60,7 +60,9 @@ func TestStoreFlowDeclaredCallQueryScan(t *testing.T) {
 		{"implicit", &ast.CallExpr{Func: &ast.Ident{Name: "f"}, ResolvedImplicitArgs: []ast.Expr{query("implicit")}}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			a := &Analyzer{declaredFuncNames: map[string]bool{"f": true}}
+			a := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
+				declaredFuncNames: map[string]bool{"f": true},
+			}}
 			stmt := reflect.ValueOf(&ast.ReturnStmt{Value: tc.call})
 			scan := storeFlowQueryScan{}
 			a.storeFlowCollectMentionsWithQuery(stmt.Elem(), stmt.Pointer(), nil, nil, nil, false, true, &scan)

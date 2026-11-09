@@ -10,7 +10,7 @@ func TestStoreFlowSummaryCachesStayOutOfParallelUnitExports(t *testing.T) {
 		t.Fatal("store-flow summaries must remain lazy-cache values while they contain mutable edge-kind slices")
 	}
 	for _, path := range exportDeclMapPaths() {
-		name := reflect.TypeOf(Analyzer{}).Field(path[0]).Name
+		name := analyzerStorageFieldName(path)
 		if name == "storeFlowSummaries" || name == "storeFlowInProgress" {
 			t.Errorf("mutable store-flow cache %s must not be published between body units", name)
 		}

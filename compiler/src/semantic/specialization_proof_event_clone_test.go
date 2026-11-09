@@ -101,7 +101,9 @@ func TestSpecializationProofEventPublicationRetainsCanonicalQueries(t *testing.T
 // The measured Stage1 canonical analyzer has22893 report rows. This isolates
 // prefix-copy cost at the first private append; it is not a semantic workload.
 func BenchmarkSpecializationProofEventPrefixAppend(b *testing.B) {
-	source := &Analyzer{proofReport: make([]ProofFact, 22893)}
+	source := &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
+		proofReport: make([]ProofFact, 22893),
+	}}
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

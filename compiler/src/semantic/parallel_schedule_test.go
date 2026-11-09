@@ -230,9 +230,10 @@ func TestParallelBodyWorkerMemoOverlaysUseFrozenBases(t *testing.T) {
 	typ := &BuiltinType{Name: "i64"}
 	sym := &Symbol{Name: "local", Kind: SymbolLocal}
 	nameExpr := &ast.NamedType{Name: "Alias"}
-	base := &Analyzer{
-		typeShapesFrozen:  true,
-		affineHandleMemo:  map[Type]bool{typ: false},
+	base := &Analyzer{analyzerTypeMemoState: analyzerTypeMemoState{
+		typeShapesFrozen: true,
+		affineHandleMemo: map[Type]bool{typ: false},
+	},
 		programLivedTypes: map[Type]bool{typ: true},
 		smtLocalDefDeps:   map[*Symbol][]string{sym: {"x", "y"}},
 		resolvedTypeNames: map[ast.TypeExpr]string{nameExpr: "Hidden.Alias"},
@@ -275,10 +276,11 @@ func TestParallelBodyWorkerKeepsShadowableCallGraphCachesLocal(t *testing.T) {
 	fn := &ast.FuncDecl{Name: "owner"}
 	callee := &ast.FuncDecl{Name: "callee"}
 	shadow := &ast.FuncDecl{Name: "callee"}
-	base := &Analyzer{
+	base := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
 		callEdgeCache:   map[*ast.FuncDecl][]*ast.FuncDecl{fn: {callee}},
 		storeFlowSCC:    map[*ast.FuncDecl][]*ast.FuncDecl{fn: {fn, callee}},
 		storeFlowActive: map[*ast.FuncDecl]bool{fn: true},
+	},
 	}
 	worker := cloneAnalyzerValueForBodyWorker(base).Addr().Interface().(*Analyzer)
 	if worker.callEdgeCache[fn][0] != callee || worker.storeFlowSCC[fn][1] != callee || worker.storeFlowActive != nil {
@@ -291,7 +293,7 @@ func TestParallelBodyWorkerKeepsShadowableCallGraphCachesLocal(t *testing.T) {
 	}
 
 	for _, path := range exportDeclMapPaths() {
-		name := reflect.TypeOf(Analyzer{}).Field(path[0]).Name
+		name := analyzerStorageFieldName(path)
 		if parallelBodyWorkerLocalOnlyMap(name) {
 			t.Errorf("worker-private map %s is included in unit exports", name)
 		}
@@ -306,10 +308,11 @@ func TestParallelBodyWorkerKeepsShadowableCallGraphCachesLocal(t *testing.T) {
 		slots:    slots,
 		original: map[*ast.FuncDecl]*ast.FuncDecl{shadow: callee},
 	}
-	worker = &Analyzer{
+	worker = &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
 		callEdgeCache:   map[*ast.FuncDecl][]*ast.FuncDecl{fn: {shadow}},
 		storeFlowSCC:    map[*ast.FuncDecl][]*ast.FuncDecl{fn: {fn, shadow}},
 		storeFlowActive: map[*ast.FuncDecl]bool{fn: true},
+	},
 	}
 	dst := &Analyzer{}
 	baseValue := reflect.ValueOf(dst).Elem()
@@ -371,7 +374,7 @@ func TestParallelWorkerDoesNotExportShadowCallGraphCaches(t *testing.T) {
 	}
 	s.exportUnit(a, 0)
 	for pathIndex, path := range exportDeclMapPaths() {
-		name := reflect.TypeOf(Analyzer{}).Field(path[0]).Name
+		name := analyzerStorageFieldName(path)
 		if name == "callEdgeCache" || name == "storeFlowSCC" {
 			if _, exported := s.exported[0][pathIndex]; exported {
 				t.Errorf("worker-local shadow cache %s was exported", name)

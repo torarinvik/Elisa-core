@@ -73,7 +73,10 @@ func TestSMTHighBudgetWeakeningSatSharedWithoutModel(t *testing.T) {
 	shared := &sync.Map{}
 	dir := t.TempDir()
 	makeAnalyzer := func() *Analyzer {
-		return &Analyzer{smtProofCache: &smtProofCache{directory: dir, identity: "same"}, parallel: &parallelWorkerState{smtFlights: shared}}
+		return &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
+			smtProofCache: &smtProofCache{directory: dir, identity: "same"},
+		},
+			parallel: &parallelWorkerState{smtFlights: shared}}
 	}
 	goal := "(assert (not (>= v_x 0)))"
 	query := "(declare-const v_x Int)\n(declare-fun p (Int) Bool)\n(assert (and (= v_x 3) (forall ((i Int)) (p i))))\n" + goal

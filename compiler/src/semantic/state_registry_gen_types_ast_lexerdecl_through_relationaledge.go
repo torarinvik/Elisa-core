@@ -8,8 +8,13 @@ import (
 	"reflect"
 )
 
-func semanticStateTypes_ast_LexerModeDecl_through_resolvedTypeNameFunctionContribution() []reflect.Type {
+func semanticStateTypes_ast_LexerDecl_through_relationalEdge() []reflect.Type {
 	return []reflect.Type{
+		reflect.TypeFor[ast.LexerDecl](),
+		reflect.TypeFor[ast.LexerKeywordDecl](),
+		reflect.TypeFor[ast.LexerKeywordEntry](),
+		reflect.TypeFor[ast.LexerLiteralDecl](),
+		reflect.TypeFor[ast.LexerLiteralEntry](),
 		reflect.TypeFor[ast.LexerModeDecl](),
 		reflect.TypeFor[ast.ListComprehensionExpr](),
 		reflect.TypeFor[ast.ListLitExpr](),
@@ -405,10 +410,5 @@ func semanticStateTypes_ast_LexerModeDecl_through_resolvedTypeNameFunctionContri
 		reflect.TypeFor[regionUse](),
 		reflect.TypeFor[reindexedPermissionFunctions](),
 		reflect.TypeFor[relationalEdge](),
-		reflect.TypeFor[requiresReportKey](),
-		reflect.TypeFor[requiresVerdict](),
-		reflect.TypeFor[reserveBoundLinear](),
-		reflect.TypeFor[resolvedTypeNameContributions](),
-		reflect.TypeFor[resolvedTypeNameFunctionContribution](),
 	}
 }

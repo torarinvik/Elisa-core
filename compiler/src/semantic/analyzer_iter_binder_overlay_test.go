@@ -17,7 +17,9 @@ func TestIterBinderOverlayExactCopyAndMembership(t *testing.T) {
 	backing[0] = 23
 	value := regionRefState{Deps: shared, StoreDeps: map[*Symbol]packedStoreDependencyState{symbol: {}}, DirectParamDep: 4, HasDirectParamDep: true, ParamDeps: IntBitSet{extra: backing}, Fields: map[string]regionRefState{"nested": {Deps: shared}}, PackedStoreSummaryKnown: true, ParamOnlySummary: true}
 	base := map[*Symbol]regionRefState{symbol: value, other: value, nil: {}}
-	root := &Analyzer{iterBinderElementStates: base}
+	root := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
+		iterBinderElementStates: base,
+	}}
 	worker := cloneAnalyzerValueForSpecialization(root).Addr().Interface().(*Analyzer)
 	if len(worker.iterBinderElementStates) != 0 || worker.iterBinderElementOverlay == nil {
 		t.Fatal("eager construction copy")
@@ -65,7 +67,9 @@ func TestIterBinderOverlayExactCopyAndMembership(t *testing.T) {
 
 func TestIterBinderOverlayNilAndOrdinaryClone(t *testing.T) {
 	for _, table := range []map[*Symbol]regionRefState{nil, {}} {
-		root := &Analyzer{iterBinderElementStates: table}
+		root := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
+			iterBinderElementStates: table,
+		}}
 		worker := cloneAnalyzerValueForSpecialization(root).Addr().Interface().(*Analyzer)
 		ordinary := cloneAnalyzerValueForBodyWorker(root).Addr().Interface().(*Analyzer)
 		if (worker.iterBinderElementStates == nil) != (table == nil) || (ordinary.iterBinderElementStates == nil) != (table == nil) || ordinary.iterBinderElementOverlay != nil {
@@ -73,7 +77,9 @@ func TestIterBinderOverlayNilAndOrdinaryClone(t *testing.T) {
 		}
 	}
 	symbol := &Symbol{}
-	root := &Analyzer{iterBinderElementStates: map[*Symbol]regionRefState{symbol: {Deps: map[*Symbol]regionDependencyState{symbol: {Generation: 1}}}}}
+	root := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
+		iterBinderElementStates: map[*Symbol]regionRefState{symbol: {Deps: map[*Symbol]regionDependencyState{symbol: {Generation: 1}}}},
+	}}
 	ordinary := cloneAnalyzerValueForBodyWorker(root).Addr().Interface().(*Analyzer)
 	row := ordinary.iterBinderElementStates[symbol]
 	row.Deps[symbol] = regionDependencyState{Generation: 2}
@@ -202,7 +208,9 @@ func TestIterBinderOverlayActualPrivateLoopConstruction(t *testing.T) {
 func TestIterBindingSourceOverlayIsolation(t *testing.T) {
 	inherited, missing, added := &Symbol{}, &Symbol{}, &Symbol{}
 	expression := &ast.Ident{Name: "source"}
-	root := &Analyzer{iterBindingSources: map[*Symbol]ast.Expr{inherited: expression, nil: nil}}
+	root := &Analyzer{analyzerReturnBorrowState: analyzerReturnBorrowState{
+		iterBindingSources: map[*Symbol]ast.Expr{inherited: expression, nil: nil},
+	}}
 	worker := cloneAnalyzerValueForSpecialization(root).Addr().Interface().(*Analyzer)
 	if len(worker.iterBindingSources) != 0 {
 		t.Fatal("specialization copied source rows")

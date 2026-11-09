@@ -6,7 +6,10 @@ import (
 
 func BenchmarkRegionRefReadOnlyBlock(b *testing.B) {
 	scope := NewScope(nil)
-	a := &Analyzer{currentScope: scope, currentRegionRefs: map[*Symbol]regionRefState{}}
+	a := &Analyzer{currentScope: scope,
+		analyzerFunctionRegionState: analyzerFunctionRegionState{
+			currentRegionRefs: map[*Symbol]regionRefState{},
+		}}
 	for i := 0; i < 128; i++ {
 		a.currentRegionRefs[&Symbol{Kind: SymbolLocal}] = regionRefStateFromParamDependency(i)
 	}

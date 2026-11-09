@@ -3,7 +3,9 @@ package semantic
 import "testing"
 
 func TestResolvedStructFieldsMemoReusesFrozenFieldList(t *testing.T) {
-	a := &Analyzer{typeShapesFrozen: true}
+	a := &Analyzer{analyzerTypeMemoState: analyzerTypeMemoState{
+		typeShapesFrozen: true,
+	}}
 	tuple := &TupleType{Fields: []TupleField{{Name: "value", Type: &BuiltinType{Name: "i64"}}}}
 	first, ok := a.resolvedStructFields(tuple)
 	if !ok || len(first) != 1 || first[0].Name != "value" {

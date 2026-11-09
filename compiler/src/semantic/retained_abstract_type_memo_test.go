@@ -6,7 +6,9 @@ import "testing"
 // memo dependency and invalidator behavior; they do not claim that a new
 // reference-field addition is admitted by RetainedAnalysis.Update.
 func TestRetainedTypeMemoClearRefreshesAbstractParameterLayout(t *testing.T) {
-	a := &Analyzer{typeShapesFrozen: true}
+	a := &Analyzer{analyzerTypeMemoState: analyzerTypeMemoState{
+		typeShapesFrozen: true,
+	}}
 	typ := &StructType{Name: "Layout", Fields: map[string]Field{"old": {Name: "old", Type: &SViewType{}}}}
 	initial, ok := a.abstractParamRegionRefState(typ, 0, nil)
 	if !ok || len(initial.Fields) != 1 {
@@ -17,7 +19,9 @@ func TestRetainedTypeMemoClearRefreshesAbstractParameterLayout(t *testing.T) {
 		t.Fatal("initial layout was not memoized")
 	}
 	typ.Fields["added"] = Field{Name: "added", Type: &SViewType{}}
-	fresh := &Analyzer{typeShapesFrozen: true}
+	fresh := &Analyzer{analyzerTypeMemoState: analyzerTypeMemoState{
+		typeShapesFrozen: true,
+	}}
 	ground, ok := fresh.abstractParamRegionRefState(typ, 0, nil)
 	if !ok || len(ground.Fields) != 2 {
 		t.Fatal("fresh layout did not observe added field")
@@ -47,7 +51,9 @@ func TestRetainedTypeMemoClearRefreshesAbstractParameterLayout(t *testing.T) {
 }
 
 func TestRetainedTypeMemoClearRefreshesAbstractReferenceRestart(t *testing.T) {
-	a := &Analyzer{typeShapesFrozen: true}
+	a := &Analyzer{analyzerTypeMemoState: analyzerTypeMemoState{
+		typeShapesFrozen: true,
+	}}
 	typ := &StructType{Name: "Restart", Fields: map[string]Field{"text": {Name: "text", Type: &SViewType{}}}}
 	blocked := "Restart&"
 	if !a.abstractRefElementCanRestart(typ, blocked) {
@@ -58,7 +64,9 @@ func TestRetainedTypeMemoClearRefreshesAbstractReferenceRestart(t *testing.T) {
 		t.Fatal("initial positive restart answer was not memoized")
 	}
 	typ.Fields["borrow"] = Field{Name: "borrow", Type: &RefType{Elem: &BuiltinType{Name: "u8"}, State: RefStateNonNull}}
-	fresh := &Analyzer{typeShapesFrozen: true}
+	fresh := &Analyzer{analyzerTypeMemoState: analyzerTypeMemoState{
+		typeShapesFrozen: true,
+	}}
 	if fresh.abstractRefElementCanRestart(typ, blocked) {
 		t.Fatal("fresh nested-reference layout incorrectly permits restart")
 	}

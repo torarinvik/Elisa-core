@@ -18,8 +18,10 @@ func TestNestedStoreFlowSCCKeepsOuterInProgressSummary(t *testing.T) {
 			outer:  {Name: "outer"},
 			nested: {Name: "nested"},
 		},
-		storeFlowInProgress: map[*ast.FuncDecl]*storeFlowSummary{outer: inProgress},
-		storeFlowActive:     map[*ast.FuncDecl]bool{outer: true},
+		analyzerFunctionRegionState: analyzerFunctionRegionState{
+			storeFlowInProgress: map[*ast.FuncDecl]*storeFlowSummary{outer: inProgress},
+			storeFlowActive:     map[*ast.FuncDecl]bool{outer: true},
+		},
 	}
 	if got := a.storeFlowSummaryFor(nested); got != nil {
 		t.Fatalf("overlapping nested component should remain unknown, got %#v", got)

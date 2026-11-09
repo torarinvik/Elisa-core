@@ -134,8 +134,8 @@ func captureRetainedPlainDefaultProductPhase(a *Analyzer, fn *ast.FuncDecl, head
 	// This source tranche owns only ordinary optimization symbol observations.
 	// New/current semantic symbol tables are not guessed to be disposable.
 	analyzerFields := reflect.ValueOf(a).Elem()
-	for i := 0; i < analyzerFields.NumField(); i++ {
-		table := settable(analyzerFields.Field(i))
+	for _, field := range analyzerStorageFields {
+		table := settable(analyzerFields.FieldByIndex(field.Index))
 		if table.Kind() != reflect.Map || table.Type().Key() != reflect.TypeFor[*Symbol]() || table.IsNil() {
 			continue
 		}
@@ -145,7 +145,7 @@ func captureRetainedPlainDefaultProductPhase(a *Analyzer, fn *ast.FuncDecl, head
 			if symbol == nil || symbol.Node != fn {
 				continue
 			}
-			name := analyzerFields.Type().Field(i).Name
+			name := field.Name
 			if name != canonicalOptimizationSymbolIdentityTableName() && name != "symbolFacts" {
 				return nil, fmt.Errorf("unsupported owner symbol contribution %s", name)
 			}

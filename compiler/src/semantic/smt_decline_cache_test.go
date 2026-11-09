@@ -60,7 +60,9 @@ func TestSMTDeclinePersistentHitWarmsMemoryCache(t *testing.T) {
 	cache := &smtProofCache{directory: t.TempDir(), identity: "test-identity"}
 	query := "(declare-const x Int)(assert (= x 1))"
 	cache.publishDeclined(query, smt.Sat, "x = 1")
-	analyzer := &Analyzer{smtProofCacheInitialized: true, smtProofCache: cache}
+	analyzer := &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
+		smtProofCacheInitialized: true, smtProofCache: cache,
+	}}
 	first, ok, _, _ := analyzer.smtCachedQuery(query)
 	if !ok || first.proven || first.ce != "x = 1" {
 		t.Fatalf("first hit: %+v %v", first, ok)

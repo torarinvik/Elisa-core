@@ -29,7 +29,9 @@ func TestStoreFlowIdentFastMatchesReflectiveWalk(t *testing.T) {
 			for _, collectNames := range []bool{false, true} {
 				run := func(fast bool) ([]string, [][]string, bool) {
 					storeFlowIdentFast = fast
-					a := &Analyzer{storeFlowEnv: map[string]string{"source": "renamed_source", "name": "renamed_name"}}
+					a := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
+						storeFlowEnv: map[string]string{"source": "renamed_source", "name": "renamed_name"},
+					}}
 					q := storeFlowQueryScan{}
 					names := a.storeFlowCollectMentionsWithQuery(reflect.ValueOf(expr), 0, nil, nil, nil, callsOnly, collectNames, &q)
 					return names, q.pairs, q.incomplete
@@ -51,7 +53,9 @@ func TestStoreFlowSimpleExprNamesMatchesWalk(t *testing.T) {
 	old := storeFlowIdentFast
 	defer func() { storeFlowIdentFast = old }()
 	for _, id := range []*ast.Ident{{Position: lexer.Pos{File: "source"}, Name: "value"}, {Position: lexer.Pos{File: "file.elisa"}, Name: "Upper"}, {Name: "source"}} {
-		a := &Analyzer{storeFlowEnv: map[string]string{"source": "renamed"}}
+		a := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
+			storeFlowEnv: map[string]string{"source": "renamed"},
+		}}
 		storeFlowIdentFast = false
 		want := a.storeFlowArgNames(id, nil)
 		storeFlowIdentFast = true

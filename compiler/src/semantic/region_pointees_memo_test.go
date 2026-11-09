@@ -18,7 +18,9 @@ func TestRegionPointeesMemoMatchesFullTraversal(t *testing.T) {
 	packed := &EnumType{Name: "Handle", Packed: true, Variants: []*EnumVariant{{Name: "Text", Payload: []Type{&SViewType{}}}}}
 	types := []Type{scalar, node, packed, &TypeParamType{Name: "T"}, &StructType{Name: "Opaque", Store: true}, &DArrayType{Elem: node}, &DArrayType{Elem: scalar},
 		&DictType{Key: &SViewType{}, Value: node}, &SetType{Elem: node}, &OptionalType{Value: node}, nil}
-	a := &Analyzer{typeShapesFrozen: true}
+	a := &Analyzer{analyzerTypeMemoState: analyzerTypeMemoState{
+		typeShapesFrozen: true,
+	}}
 	for _, typ := range types {
 		for round := 0; round < 2; round++ {
 			if got, want := a.argumentStorePointeesOf(typ), argumentStorePointees(typ); !sameRegionPointees(got, want) {
@@ -56,7 +58,9 @@ func TestRegionPointeesMemoWaitsForFinalShapes(t *testing.T) {
 
 func TestRegionPointeesMemoIsPrivateToBodyWorker(t *testing.T) {
 	typ := &SViewType{}
-	base := &Analyzer{typeShapesFrozen: true}
+	base := &Analyzer{analyzerTypeMemoState: analyzerTypeMemoState{
+		typeShapesFrozen: true,
+	}}
 	base.argumentStorePointeesOf(typ)
 	worker := cloneAnalyzerValueForBodyWorker(base).Addr().Interface().(*Analyzer)
 	if worker.regionPointeesMemo != nil {
@@ -84,7 +88,9 @@ func BenchmarkRegionPointeesRepeatedArgument(b *testing.B) {
 	}
 	for _, memo := range []bool{false, true} {
 		b.Run(fmt.Sprint("memo=", memo), func(b *testing.B) {
-			a := &Analyzer{typeShapesFrozen: true}
+			a := &Analyzer{analyzerTypeMemoState: analyzerTypeMemoState{
+				typeShapesFrozen: true,
+			}}
 			a.argumentStorePointeesOf(root)
 			b.ReportAllocs()
 			b.ResetTimer()

@@ -68,10 +68,11 @@ func TestReportedLoopPreservationEscalatesOnlyAStillUnprovenStrategy(t *testing.
 				highResult: tc.highResult,
 				goal:       tc.goal,
 			}
-			a := &Analyzer{
+			a := &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
 				smtEnabled:               true,
 				smtSolver:                solver,
 				smtProofCacheInitialized: true,
+			},
 			}
 			const hyps = "(assert (forall ((k Int)) (= k k)))\n"
 			prove := func() (bool, bool, string) {
@@ -105,7 +106,9 @@ func TestReportedLoopPreservationEscalatesOnlyAStillUnprovenStrategy(t *testing.
 
 func TestReportedLoopPreservationDoesNotEscalateSuccessAndKeepsGuardedRetry(t *testing.T) {
 	t.Run("already proven", func(t *testing.T) {
-		a := &Analyzer{smtEnabled: true}
+		a := &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
+			smtEnabled: true,
+		}}
 		calls := 0
 		proven, guarded, _ := a.proveLoopPreservationReported(func() (bool, bool, string) {
 			calls++
@@ -117,7 +120,9 @@ func TestReportedLoopPreservationDoesNotEscalateSuccessAndKeepsGuardedRetry(t *t
 	})
 
 	t.Run("guarded retry success", func(t *testing.T) {
-		a := &Analyzer{smtEnabled: true}
+		a := &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
+			smtEnabled: true,
+		}}
 		calls := 0
 		proven, guarded, _ := a.proveLoopPreservationReported(func() (bool, bool, string) {
 			calls++

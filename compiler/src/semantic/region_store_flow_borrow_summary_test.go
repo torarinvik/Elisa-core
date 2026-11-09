@@ -370,8 +370,10 @@ func TestStoreFlowNamedPointerFreeTypesRejectAmbiguousLeafNames(t *testing.T) {
 
 func TestStoreFlowPointerFreeTypeRejectsGenericParamShadowingConcreteName(t *testing.T) {
 	a := &Analyzer{
-		namedTypes:           map[string]Type{"T": &BuiltinType{Name: "u32"}},
-		storeFlowCurrentDecl: &ast.FuncDecl{TypeParams: []string{"T"}},
+		namedTypes: map[string]Type{"T": &BuiltinType{Name: "u32"}},
+		analyzerFunctionRegionState: analyzerFunctionRegionState{
+			storeFlowCurrentDecl: &ast.FuncDecl{TypeParams: []string{"T"}},
+		},
 	}
 	if a.storeFlowPointerFreeTypeExpr(&ast.NamedType{Name: "T"}, map[Type]bool{}) {
 		t.Fatal("a generic type parameter must remain unknown even when a concrete type shares its name")

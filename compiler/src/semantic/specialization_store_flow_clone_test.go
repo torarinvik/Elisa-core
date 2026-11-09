@@ -186,10 +186,11 @@ func TestStoreFlowSpecializationDetachesKindsForEverySolvedComponentMember(t *te
 	solved.retKind[0] = storeFlowEdgeElements
 	solved.reachKind[0][0] = storeFlowEdgeElements
 	root := map[*ast.FuncDecl]*storeFlowSummary{first: unsolved, second: solved}
-	worker := &Analyzer{
+	worker := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
 		storeFlowSummaries: root,
 		storeFlowSCC:       map[*ast.FuncDecl][]*ast.FuncDecl{first: {first, second}},
 		callEdgeCache:      map[*ast.FuncDecl][]*ast.FuncDecl{first: nil, second: nil},
+	},
 	}
 	worker.storeFlowSummaries = cloneStoreFlowSummariesForSpecialization(root)
 	worker.parallel = &parallelWorkerState{

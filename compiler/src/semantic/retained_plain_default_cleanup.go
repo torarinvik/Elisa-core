@@ -182,8 +182,8 @@ func preflightRetainedPlainDefaultCleanup(a *Analyzer, product *retainedPlainDef
 		}
 	}
 	fields := reflect.ValueOf(a).Elem()
-	for i := 0; i < fields.NumField(); i++ {
-		table := settable(fields.Field(i))
+	for _, field := range analyzerStorageFields {
+		table := settable(fields.FieldByIndex(field.Index))
 		if table.Kind() != reflect.Map || table.Type().Key() != reflect.TypeFor[*Symbol]() || table.IsNil() {
 			continue
 		}
@@ -194,7 +194,7 @@ func preflightRetainedPlainDefaultCleanup(a *Analyzer, product *retainedPlainDef
 				continue
 			}
 			if check(iter.Value()) {
-				return fmt.Errorf("foreign %s symbol contribution shares owner identity", fields.Type().Field(i).Name)
+				return fmt.Errorf("foreign %s symbol contribution shares owner identity", field.Name)
 			}
 		}
 	}
@@ -243,8 +243,8 @@ func cleanupRetainedPlainDefaultProduct(a *Analyzer, result *Result, product *re
 		}
 	}
 	root := settable(reflect.ValueOf(a).Elem())
-	for i := 0; i < root.NumField(); i++ {
-		table := settable(root.Field(i))
+	for _, field := range analyzerStorageFields {
+		table := settable(root.FieldByIndex(field.Index))
 		if table.Kind() != reflect.Map || table.Type().Key() != reflect.TypeFor[*Symbol]() || table.IsNil() {
 			continue
 		}

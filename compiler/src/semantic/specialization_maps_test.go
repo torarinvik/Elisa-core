@@ -20,34 +20,38 @@ import (
 
 func TestSpecializationOpaqueMapSchemaAndPolicy(t *testing.T) {
 	_, file, _, _ := runtime.Caller(0)
-	source, err := os.ReadFile(filepath.Join(filepath.Dir(file), "analyzer.go"))
+	paths := []string{filepath.Join(filepath.Dir(file), "analyzer.go")}
+	states, err := filepath.Glob(filepath.Join(filepath.Dir(file), "analyzer_*_state.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	parsed, err := parser.ParseFile(token.NewFileSet(), "analyzer.go", source, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	paths = append(paths, states...)
 	var expected []string
-	ast.Inspect(parsed, func(node ast.Node) bool {
-		typ, ok := node.(*ast.TypeSpec)
-		if !ok || typ.Name.Name != "Analyzer" {
-			return true
+	for _, path := range paths {
+		parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+		if err != nil {
+			t.Fatal(err)
 		}
-		for _, field := range typ.Type.(*ast.StructType).Fields.List {
-			if _, ok := field.Type.(*ast.MapType); ok {
-				for _, name := range field.Names {
-					if name.Name != "exprTypes" && name.Name != "exprFacts" && name.Name != "iterBinderElementStates" && name.Name != "optimizationSymbolIDs" && name.Name != "storeScanBinderTypes" && name.Name != "storeScanParamFactsCache" && name.Name != "functionAnalyses" {
-						expected = append(expected, name.Name)
+		ast.Inspect(parsed, func(node ast.Node) bool {
+			typ, ok := node.(*ast.TypeSpec)
+			if !ok || (typ.Name.Name != "Analyzer" && typ.Name.Name != "analyzerReturnBorrowState" && typ.Name.Name != "analyzerFunctionRegionState" && typ.Name.Name != "analyzerControlFlowState" && typ.Name.Name != "analyzerProofSolverState" && typ.Name.Name != "analyzerTypeMemoState") {
+				return true
+			}
+			for _, field := range typ.Type.(*ast.StructType).Fields.List {
+				if _, ok := field.Type.(*ast.MapType); ok {
+					for _, name := range field.Names {
+						if name.Name != "exprTypes" && name.Name != "exprFacts" && name.Name != "iterBinderElementStates" && name.Name != "optimizationSymbolIDs" && name.Name != "storeScanBinderTypes" && name.Name != "storeScanParamFactsCache" && name.Name != "functionAnalyses" {
+							expected = append(expected, name.Name)
+						}
 					}
 				}
 			}
-		}
-		return false
-	})
+			return false
+		})
+	}
 	sort.Strings(expected)
 	if !reflect.DeepEqual(expected, specializationOpaqueMapFields[:]) {
-		t.Fatal("Analyzer direct-map schema changed; regenerate specialization_maps_generated.go")
+		t.Fatal("Analyzer map schema changed; regenerate specialization_maps_generated.go")
 	}
 	generated, err := os.ReadFile(filepath.Join(filepath.Dir(file), "specialization_maps_generated.go"))
 	if err != nil {
@@ -289,7 +293,7 @@ func TestSpecializationOpaqueHookPreservesOrdinaryWorkersAndDeepFallback(t *test
 	hook := strings.Index(body, "if ownedFunctionAnalyses && cloneSpecializationOpaqueMap(")
 	storeScanHook := strings.Index(body, "if ownedFunctionAnalyses && cloneSpecializationStoreScanBoolSetCache(")
 	declarationPolicy := strings.Index(body, "parallelDeclarationMapIsReadOnly(name)")
-	fallback := strings.Index(body, "settable(cloned.Field(i)).Set(deepCloneValue(settable(field)))")
+	fallback := strings.Index(body, "settable(cloned.FieldByIndex(schema.Index)).Set(deepCloneValue(settable(field)))")
 	if storeScanHook < declarationPolicy || storeScanHook < 0 || storeScanHook > hook || hook < 0 || fallback < hook {
 		t.Fatal("typed map hook moved ahead of owner-specific policies or lost specialization guard")
 	}

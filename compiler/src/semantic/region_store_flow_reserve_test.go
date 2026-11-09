@@ -84,7 +84,9 @@ func TestStoreFlowReserveRequiresBuiltinReceiver(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			call := &ast.CallExpr{Func: &ast.FieldExpr{Object: &ast.Ident{Name: "target"}, Field: "reserve"}, Args: []ast.Expr{&ast.Ident{Name: "capacity"}}}
-			a := &Analyzer{storeFlowDarrays: map[string]bool{"target": tc.proven}}
+			a := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
+				storeFlowDarrays: map[string]bool{"target": tc.proven},
+			}}
 			if tc.ufcs != nil {
 				a.ufcsFunctionsByName = map[string][]*Symbol{"Custom.reserve": {{Type: &FuncType{Params: []Type{tc.ufcs}}}}}
 			}
@@ -103,7 +105,9 @@ func TestStoreFlowReserveRequiresBuiltinReceiver(t *testing.T) {
 func TestStoreFlowReserveDoesNotHideUnknownCapacityCall(t *testing.T) {
 	capacity := &ast.CallExpr{Func: &ast.Ident{Name: "unknown"}, Args: []ast.Expr{&ast.Ident{Name: "source"}}}
 	call := &ast.CallExpr{Func: &ast.FieldExpr{Object: &ast.Ident{Name: "target"}, Field: "reserve"}, Args: []ast.Expr{capacity}}
-	a := &Analyzer{storeFlowDarrays: map[string]bool{"target": true}}
+	a := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
+		storeFlowDarrays: map[string]bool{"target": true},
+	}}
 	if _, handled := a.applyCallStoreFlow(call, &storeFlowCtx{}, map[*ast.CallExpr][]string{}); handled {
 		t.Fatal("reserve must not hide an unsummarized capacity call")
 	}

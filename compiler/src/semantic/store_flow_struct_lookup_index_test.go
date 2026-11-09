@@ -23,7 +23,10 @@ func TestStoreFlowStructLookupIndexMatchesUncached(t *testing.T) {
 		locals[name] = name
 	}
 	reference := &Analyzer{namedTypes: named}
-	indexed := &Analyzer{namedTypes: named, storeFlowNamedTypes: locals, storeFlowStructLookup: map[string]Type{}}
+	indexed := &Analyzer{namedTypes: named,
+		analyzerFunctionRegionState: analyzerFunctionRegionState{
+			storeFlowNamedTypes: locals, storeFlowStructLookup: map[string]Type{},
+		}}
 	for i := 0; i < 10; i++ {
 		indexed.storeFlowStructNamed(fmt.Sprintf("Item%d", i))
 	}
@@ -46,7 +49,10 @@ func TestStoreFlowStructLookupLargeTableIndexesEarly(t *testing.T) {
 		locals[name] = name
 	}
 	named["Other.Item3"] = &StructType{Name: "Conflict"}
-	indexed := &Analyzer{namedTypes: named, storeFlowNamedTypes: locals, storeFlowStructLookup: map[string]Type{}}
+	indexed := &Analyzer{namedTypes: named,
+		analyzerFunctionRegionState: analyzerFunctionRegionState{
+			storeFlowNamedTypes: locals, storeFlowStructLookup: map[string]Type{},
+		}}
 	reference := &Analyzer{namedTypes: named}
 	for _, name := range []string{"Item0", "Item1", "Item2"} {
 		if got, want := indexed.storeFlowStructNamed(name), reference.storeFlowStructNamed(name); got != want {
@@ -72,7 +78,11 @@ func TestStoreFlowFrozenStructLookupMatchesUncached(t *testing.T) {
 		"A.Nil": (*StructType)(nil), "A.Unique": &StructType{Name: "Unique"},
 	}
 	reference := &Analyzer{namedTypes: named}
-	worker := &Analyzer{namedTypes: named, typeShapesFrozen: true, parallel: &parallelWorkerState{}}
+	worker := &Analyzer{namedTypes: named,
+		analyzerTypeMemoState: analyzerTypeMemoState{
+			typeShapesFrozen: true,
+		},
+		parallel: &parallelWorkerState{}}
 	for _, name := range []string{"Shared", "Conflict", "NonStruct", "Nil", "Unique", "Missing"} {
 		if got, want := worker.storeFlowStructNamed(name), reference.storeFlowStructNamed(name); got != want {
 			t.Fatalf("%s: got %v want %v", name, got, want)

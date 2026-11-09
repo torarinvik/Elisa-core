@@ -22,7 +22,9 @@ func TestBorrowedRegionRefScopeKeepsCallerBindingsIsolated(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			caller := map[*Symbol]regionRefState{value: regionRefStateFromDependency(from, 1)}
-			a := &Analyzer{currentRegionRefs: caller}
+			a := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
+				currentRegionRefs: caller,
+			}}
 			a.borrowRegionRefStates()
 			test.mutate(a)
 			if !test.check(a) {
@@ -64,7 +66,10 @@ func TestLambdaRestoresBorrowedRegionRefScope(t *testing.T) {
 
 func TestReadOnlyRegionRefBlockRestoresOwnership(t *testing.T) {
 	scope := NewScope(nil)
-	a := &Analyzer{currentScope: scope, currentRegionRefs: map[*Symbol]regionRefState{}}
+	a := &Analyzer{currentScope: scope,
+		analyzerFunctionRegionState: analyzerFunctionRegionState{
+			currentRegionRefs: map[*Symbol]regionRefState{},
+		}}
 	a.analyzeBlockWithRegionCloneCapture(nil, scope)
 	if a.currentRegionRefsBorrowed {
 		t.Fatal("return from scoped analysis left caller map borrowed")

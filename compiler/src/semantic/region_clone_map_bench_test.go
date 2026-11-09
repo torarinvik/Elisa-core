@@ -10,7 +10,9 @@ var regionCloneBenchSink map[*Symbol]regionRefState
 func BenchmarkCloneRegionRefStates(b *testing.B) {
 	for _, n := range []int{4, 16, 64} {
 		b.Run(fmt.Sprint(n), func(b *testing.B) {
-			a := &Analyzer{currentRegionRefs: make(map[*Symbol]regionRefState, n)}
+			a := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
+				currentRegionRefs: make(map[*Symbol]regionRefState, n),
+			}}
 			for i := 0; i < n; i++ {
 				a.currentRegionRefs[&Symbol{Name: fmt.Sprint(i)}] = regionRefState{DirectParamDep: i, HasDirectParamDep: true}
 			}
@@ -28,7 +30,9 @@ var regionStateCloneBenchSink map[*Symbol]regionState
 func BenchmarkCloneRegionStates(b *testing.B) {
 	for _, n := range []int{4, 16, 64} {
 		b.Run(fmt.Sprint(n), func(b *testing.B) {
-			a := &Analyzer{currentRegions: make(map[*Symbol]regionState, n)}
+			a := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
+				currentRegions: make(map[*Symbol]regionState, n),
+			}}
 			for i := 0; i < n; i++ {
 				a.currentRegions[&Symbol{Name: fmt.Sprint(i)}] = regionState{Generation: i}
 			}

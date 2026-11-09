@@ -244,7 +244,7 @@ func TestResetSMTForRetainedUpdateRefreshesSolverAndBudgetState(t *testing.T) {
 		t.Fatal("fixture did not publish a resource decline")
 	}
 
-	a := &Analyzer{
+	a := &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
 		smtBinary:                solver,
 		smtQueryCache:            map[string]smtQueryResult{query: {proven: false}},
 		smtProofCache:            oldCache,
@@ -254,6 +254,7 @@ func TestResetSMTForRetainedUpdateRefreshesSolverAndBudgetState(t *testing.T) {
 		smtSolver:                &fixedSMTSolver{result: smt.Unknown},
 		smtHistory:               []string{"old declaration query"},
 		smtHistoryFor:            &ast.FuncDecl{},
+	},
 	}
 	writeSolver("solver-version-2")
 	t.Setenv("ELISA_SMT_RLIMIT", "2000")

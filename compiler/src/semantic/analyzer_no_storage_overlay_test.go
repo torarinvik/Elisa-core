@@ -294,7 +294,9 @@ func TestCompilerBuiltinHelperCallsOverlayConcurrentPrivateMaps(t *testing.T) {
 func TestReturnElementUnknownOverlayAndCopyDeclRekey(t *testing.T) {
 	original := &ast.ReturnStmt{Value: &ast.Ident{Name: "value"}}
 	originalMissing := &ast.ReturnStmt{Value: &ast.Ident{Name: "other"}}
-	rootAnalyzer := &Analyzer{returnElementStmtUnknown: map[*ast.ReturnStmt]bool{original: true}}
+	rootAnalyzer := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
+		returnElementStmtUnknown: map[*ast.ReturnStmt]bool{original: true},
+	}}
 	worker := cloneAnalyzerValueForSpecialization(rootAnalyzer).Addr().Interface().(*Analyzer)
 	if len(worker.returnElementStmtUnknown) != 0 || worker.noStorageOverlay == nil || len(worker.noStorageOverlay.returnUnknown) != 1 {
 		t.Fatal("specialization copied all return rows or lost their canonical base")

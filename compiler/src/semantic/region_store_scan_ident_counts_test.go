@@ -34,7 +34,10 @@ func TestStoreScanIdentifierCountsPreserveOccurrenceRules(t *testing.T) {
 func TestParallelBodyWorkerRebuildsMutableStoreScanIndexes(t *testing.T) {
 	decl := &ast.FuncDecl{Name: "callee"}
 	for _, retained := range []*RetainedAnalysis{nil, {}} {
-		base := &Analyzer{retained: retained, storeScanIndexCache: map[*ast.FuncDecl]*storeScanDeclIndex{decl: {}}}
+		base := &Analyzer{analyzerTypeMemoState: analyzerTypeMemoState{
+			retained: retained,
+		},
+			storeScanIndexCache: map[*ast.FuncDecl]*storeScanDeclIndex{decl: {}}}
 		worker := cloneAnalyzerValueForBodyWorker(base).Addr().Interface().(*Analyzer)
 		if worker.storeScanIndexCache != nil {
 			t.Fatal("worker inherited mutable scan-index pointers")
@@ -52,12 +55,16 @@ func TestParallelBodyWorkerRebuildsMutableStoreFlowCaches(t *testing.T) {
 		summary := newStoreFlowSummary(1)
 		summary.retConn[0] = true
 		storeFlowInitKinds(summary)
-		base := &Analyzer{
-			retained:               retained,
-			storeFlowBinderIndexes: map[*ast.FuncDecl]*storeFlowBinderIndex{decl: index},
-			storeFlowSummaries:     map[*ast.FuncDecl]*storeFlowSummary{decl: summary},
-			storeFlowInProgress:    map[*ast.FuncDecl]*storeFlowSummary{decl: summary},
-			storeFlowActive:        map[*ast.FuncDecl]bool{decl: true},
+		base := &Analyzer{analyzerTypeMemoState: analyzerTypeMemoState{
+			retained: retained,
+		},
+
+			analyzerFunctionRegionState: analyzerFunctionRegionState{
+				storeFlowBinderIndexes: map[*ast.FuncDecl]*storeFlowBinderIndex{decl: index},
+				storeFlowSummaries:     map[*ast.FuncDecl]*storeFlowSummary{decl: summary},
+				storeFlowInProgress:    map[*ast.FuncDecl]*storeFlowSummary{decl: summary},
+				storeFlowActive:        map[*ast.FuncDecl]bool{decl: true},
+			},
 		}
 		first := cloneAnalyzerValueForBodyWorker(base).Addr().Interface().(*Analyzer)
 		second := cloneAnalyzerValueForBodyWorker(base).Addr().Interface().(*Analyzer)

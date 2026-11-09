@@ -13,7 +13,9 @@ type specializationQueries struct {
 }
 
 func newSpecializationQueries(source *Analyzer, root *Result, current *ast.FuncDecl, helpers map[*ast.CallExpr]string, owned map[ast.Node]bool, canonical map[ast.Node]ast.Node) *specializationQueries {
-	queries := &specializationQueries{root: root, types: &Analyzer{typeShapesFrozen: true}, helpers: map[*ast.CallExpr]string{}, staticBranches: map[*ast.StaticIfStmt][]ast.Stmt{}}
+	queries := &specializationQueries{root: root, types: &Analyzer{analyzerTypeMemoState: analyzerTypeMemoState{
+		typeShapesFrozen: true,
+	}}, helpers: map[*ast.CallExpr]string{}, staticBranches: map[*ast.StaticIfStmt][]ast.Stmt{}}
 	if root != nil {
 		// These declaration maps are immutable program authority shared once by
 		// all products. Only the tiny analyzer's predicate caches receive writes.

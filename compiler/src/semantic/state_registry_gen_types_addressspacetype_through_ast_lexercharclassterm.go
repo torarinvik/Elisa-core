@@ -6,7 +6,7 @@ import (
 	"reflect"
 )
 
-func semanticStateTypes_AddressSpaceType_through_ast_LexerLiteralEntry() []reflect.Type {
+func semanticStateTypes_AddressSpaceType_through_ast_LexerCharClassTerm() []reflect.Type {
 	return []reflect.Type{
 		reflect.TypeFor[AddressSpaceType](),
 		reflect.TypeFor[AggregateStateType](),
@@ -224,13 +224,18 @@ func semanticStateTypes_AddressSpaceType_through_ast_LexerLiteralEntry() []refle
 		reflect.TypeFor[aliasAccessState](),
 		reflect.TypeFor[analysisSetup](),
 		reflect.TypeFor[analyzerASTCensus](),
+		reflect.TypeFor[analyzerControlFlowState](),
 		reflect.TypeFor[analyzerExprFactsOverlay](),
 		reflect.TypeFor[analyzerExprTypeOverlay](),
+		reflect.TypeFor[analyzerFunctionRegionState](),
 		reflect.TypeFor[analyzerIterBinderElementOverlay](),
 		reflect.TypeFor[analyzerNoStorageOverlay](),
 		reflect.TypeFor[analyzerOptimizationSymbolIdentityOverlay](),
+		reflect.TypeFor[analyzerProofSolverState](),
+		reflect.TypeFor[analyzerReturnBorrowState](),
 		reflect.TypeFor[analyzerStoreScanBinderOverlay](),
 		reflect.TypeFor[analyzerStoreScanParamFactsOverlay](),
+		reflect.TypeFor[analyzerTypeMemoState](),
 		reflect.TypeFor[aoEnv](),
 		reflect.TypeFor[aoFacts](),
 		reflect.TypeFor[aoStore](),
@@ -403,10 +408,5 @@ func semanticStateTypes_AddressSpaceType_through_ast_LexerLiteralEntry() []refle
 		reflect.TypeFor[ast.LetDestructureStmt](),
 		reflect.TypeFor[ast.LexerCharClassDecl](),
 		reflect.TypeFor[ast.LexerCharClassTerm](),
-		reflect.TypeFor[ast.LexerDecl](),
-		reflect.TypeFor[ast.LexerKeywordDecl](),
-		reflect.TypeFor[ast.LexerKeywordEntry](),
-		reflect.TypeFor[ast.LexerLiteralDecl](),
-		reflect.TypeFor[ast.LexerLiteralEntry](),
 	}
 }

@@ -4,7 +4,10 @@ import "testing"
 
 func BenchmarkRegionStateBlockCapture(b *testing.B) {
 	scope := NewScope(nil)
-	a := &Analyzer{currentScope: scope, currentRegions: map[*Symbol]regionState{}}
+	a := &Analyzer{currentScope: scope,
+		analyzerFunctionRegionState: analyzerFunctionRegionState{
+			currentRegions: map[*Symbol]regionState{},
+		}}
 	for i := 0; i < 128; i++ {
 		a.currentRegions[&Symbol{Kind: SymbolLocal}] = regionState{Generation: i}
 	}
@@ -19,7 +22,10 @@ func TestRegionStateCaptureKeepsCallerAndBranchIsolated(t *testing.T) {
 	sym := &Symbol{Name: "region"}
 	scope := NewScope(nil)
 	caller := map[*Symbol]regionState{sym: {Generation: 1}}
-	a := &Analyzer{currentScope: scope, currentRegions: caller}
+	a := &Analyzer{currentScope: scope,
+		analyzerFunctionRegionState: analyzerFunctionRegionState{
+			currentRegions: caller,
+		}}
 	branch := a.analyzeBlockWithRegionCloneCapture(nil, scope)
 	branch[sym] = regionState{Generation: 1, Destroyed: true}
 	if caller[sym].Destroyed {
@@ -33,7 +39,10 @@ func TestRegionStateCaptureKeepsCallerAndBranchIsolated(t *testing.T) {
 
 func BenchmarkRegionStateReadOnlyBlock(b *testing.B) {
 	scope := NewScope(nil)
-	a := &Analyzer{currentScope: scope, currentRegions: map[*Symbol]regionState{}}
+	a := &Analyzer{currentScope: scope,
+		analyzerFunctionRegionState: analyzerFunctionRegionState{
+			currentRegions: map[*Symbol]regionState{},
+		}}
 	for i := 0; i < 128; i++ {
 		a.currentRegions[&Symbol{Kind: SymbolLocal}] = regionState{Generation: i}
 	}

@@ -17,7 +17,9 @@ func BenchmarkStorageViewUnresolvedMethod(b *testing.B) {
 	}
 }
 func BenchmarkStorageViewWriteCalleesOverloads(b *testing.B) {
-	a := &Analyzer{storageViewWriteDeclsByName: map[string][]*ast.FuncDecl{}}
+	a := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
+		storageViewWriteDeclsByName: map[string][]*ast.FuncDecl{},
+	}}
 	for i := 0; i < 12; i++ {
 		a.storageViewWriteDeclsByName["write"] = append(a.storageViewWriteDeclsByName["write"], &ast.FuncDecl{Name: "write", Params: []ast.ParamDecl{{}, {}}})
 	}

@@ -45,7 +45,9 @@ func TestAbstractParamRegionRefStateTerminatesOnRecursiveType(t *testing.T) {
 }
 
 func TestAbstractParamRegionRefStateMemoClonesMutableDependencies(t *testing.T) {
-	a := &Analyzer{typeShapesFrozen: true}
+	a := &Analyzer{analyzerTypeMemoState: analyzerTypeMemoState{
+		typeShapesFrozen: true,
+	}}
 	typ := &RefType{Elem: &DArrayType{Elem: &SViewType{}, Shape: &WildcardShape{}, SurfaceName: "darray"}, State: RefStateNonNull}
 	first, ok := a.abstractParamRegionRefState(typ, 70, map[string]bool{})
 	if !ok {
@@ -68,12 +70,16 @@ func TestAbstractParamRegionRefStateForBindingReusesFrozenDependencies(t *testin
 	region := &Symbol{Name: "region"}
 	deps := map[*Symbol]regionDependencyState{region: {Valid: true, Generation: 2}}
 	typ := &RefType{Elem: &DArrayType{Elem: &SViewType{}, Shape: &WildcardShape{}, SurfaceName: "darray"}, State: RefStateNonNull}
-	a := &Analyzer{
+	a := &Analyzer{analyzerTypeMemoState: analyzerTypeMemoState{
 		typeShapesFrozen: true,
 		abstractParamRegionRefMemo: map[abstractParamRegionRefKey]regionRefState{
 			{typeOf: typ, paramIndex: 0}: {Deps: deps, PackedStoreSummaryKnown: true},
 		},
-		currentRegionRefs: map[*Symbol]regionRefState{},
+	},
+
+		analyzerFunctionRegionState: analyzerFunctionRegionState{
+			currentRegionRefs: map[*Symbol]regionRefState{},
+		},
 	}
 	state, ok := a.abstractParamRegionRefStateForBinding(typ, 0)
 	if !ok || regionDependencyMapIdentity(state.Deps) != regionDependencyMapIdentity(deps) {

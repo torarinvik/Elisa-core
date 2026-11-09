@@ -72,7 +72,10 @@ func TestSpecializationQueriesCaptureStaticBranchBeforeGenericScopeEnds(t *testi
 
 func specializationQueryLifetimeFixture() (*specializationQueries, weak.Pointer[Analyzer]) {
 	ownedCall, foreignCall := &ast.CallExpr{}, &ast.CallExpr{}
-	source := &Analyzer{programRegions: map[string]bool{"program": true}, exprTypes: map[ast.Expr]Type{foreignCall: &BuiltinType{Name: "i64"}}, retained: &RetainedAnalysis{}}
+	source := &Analyzer{programRegions: map[string]bool{"program": true}, exprTypes: map[ast.Expr]Type{foreignCall: &BuiltinType{Name: "i64"}},
+		analyzerTypeMemoState: analyzerTypeMemoState{
+			retained: &RetainedAnalysis{},
+		}}
 	source.parallel = &parallelWorkerState{specialization: &specializationContext{worker: source}}
 	root := &Result{NamedTypes: map[string]Type{"i64": &BuiltinType{Name: "i64"}}, StaticImpls: map[string]*StaticImpl{}}
 	queries := newSpecializationQueries(source, root, &ast.FuncDecl{}, map[*ast.CallExpr]string{ownedCall: "owned", foreignCall: "foreign"}, map[ast.Node]bool{ownedCall: true}, nil)
@@ -144,7 +147,10 @@ func TestSpecializationQueryTypePredicatesUseOnlyPrivateCaches(t *testing.T) {
 
 func TestSpecializationQueriesKeepCanonicalSchedulingPriorities(t *testing.T) {
 	fn := &ast.FuncDecl{Name: "first"}
-	root := &Result{analyzer: &Analyzer{retained: &RetainedAnalysis{LastStats: RetainedUpdateStats{Changed: 1}, rbChanged: []*ast.FuncDecl{fn}}, funcDeclSymbols: map[*ast.FuncDecl]*Symbol{fn: &Symbol{Name: "Module.first"}}}}
+	root := &Result{analyzer: &Analyzer{analyzerTypeMemoState: analyzerTypeMemoState{
+		retained: &RetainedAnalysis{LastStats: RetainedUpdateStats{Changed: 1}, rbChanged: []*ast.FuncDecl{fn}},
+	},
+		funcDeclSymbols: map[*ast.FuncDecl]*Symbol{fn: &Symbol{Name: "Module.first"}}}}
 	result := &Result{specializationRoot: root}
 	got := result.CodegenFunctionPriorities()
 	if len(got) != 1 || got[0] != "Module.first" {

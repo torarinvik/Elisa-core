@@ -57,7 +57,10 @@ func (*reentrantFlightSolver) Close() error     { return nil }
 func TestParallelSMTReentrantMissKeepsOuterFlight(t *testing.T) {
 	t.Setenv("ELISACORE_SMT_CACHE_DIR", "")
 	flights := &sync.Map{}
-	a := &Analyzer{smtEnabled: true, parallel: &parallelWorkerState{smtFlights: flights}}
+	a := &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
+		smtEnabled: true,
+	},
+		parallel: &parallelWorkerState{smtFlights: flights}}
 	solver := &reentrantFlightSolver{analyzer: a, query: "(assert false)\n"}
 	a.smtSolver = solver
 	proved, _ := a.smtCheckRawQueryWithLogLabel(solver.query, "outer", solver.query)

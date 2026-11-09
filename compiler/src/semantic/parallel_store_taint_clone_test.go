@@ -33,7 +33,10 @@ func TestParallelBodyWorkerTaintCacheOwnership(t *testing.T) {
 		decl := &ast.FuncDecl{Name: "callee", Params: []ast.ParamDecl{{Name: "first"}, {Name: "second"}}}
 		key := storeScanTaintKey{decl, 0, "second"}
 		published := storeScanTaintResult{params: map[string]bool{"first": true, "second": true}, header: map[string]bool{"first": true}, content: map[string]bool{"first": true}, targets: map[string]bool{"second": true}, views: map[string]bool{}, holders: map[string]bool{}}
-		base := &Analyzer{retained: retained, storeScanTaintCache: map[storeScanTaintKey]storeScanTaintResult{key: published}}
+		base := &Analyzer{analyzerTypeMemoState: analyzerTypeMemoState{
+			retained: retained,
+		},
+			storeScanTaintCache: map[storeScanTaintKey]storeScanTaintResult{key: published}}
 		workers := []*Analyzer{
 			cloneAnalyzerValueForBodyWorker(base).Addr().Interface().(*Analyzer),
 			cloneAnalyzerValueForBodyWorker(base).Addr().Interface().(*Analyzer),

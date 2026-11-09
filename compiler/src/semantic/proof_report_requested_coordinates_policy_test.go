@@ -177,7 +177,7 @@ func TestRequestedProofCoordinatesKeepFrozenFullRendererAndTraversal(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, required := range []string{"for _, m := range modes", "want, err := generate(m)", "bytes.Equal(got, want)"} {
+	for _, required := range []string{"for _, m := range modes", "want, err := generate(m)", "generatedParts(m, want)", "bytes.Equal(got, expected)"} {
 		if !strings.Contains(string(generatorGate), required) {
 			t.Fatal("all-mode generated currentness gate missing", required)
 		}

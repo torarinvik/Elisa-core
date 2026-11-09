@@ -18,8 +18,9 @@ func TestStoreFlowBuiltinDarrayPushKeepsOneWayStorageAndResultFlow(t *testing.T)
 		Func: &ast.FieldExpr{Object: &ast.Ident{Name: "target"}, Field: "push"},
 		Args: []ast.Expr{&ast.Ident{Name: "source"}},
 	}
-	a := &Analyzer{
+	a := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
 		storeFlowDarrays: map[string]bool{"target": true},
+	},
 		ufcsFunctionsByName: map[string][]*Symbol{
 			// This overload cannot receive a DArray; it must not force the builtin
 			// call onto the unknown-call fallback path.
@@ -42,8 +43,9 @@ func TestStoreFlowBuiltinDarrayPushKeepsOneWayStorageAndResultFlow(t *testing.T)
 
 	// An applicable generic UFCS receiver could shadow the builtin, so keep it
 	// conservative even when the receiver is known to be a DArray.
-	generic := &Analyzer{
+	generic := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
 		storeFlowDarrays: map[string]bool{"target": true},
+	},
 		ufcsFunctionsByName: map[string][]*Symbol{
 			"Generic.push": {{Name: "Generic.push", Type: &FuncType{Params: []Type{
 				&RefType{Elem: &TypeParamType{Name: "T"}, Mutable: true}, &TypeParamType{Name: "U"},
@@ -53,8 +55,9 @@ func TestStoreFlowBuiltinDarrayPushKeepsOneWayStorageAndResultFlow(t *testing.T)
 	if generic.storeFlowBuiltinDarrayGrowth(call.Func.(*ast.FieldExpr)) {
 		t.Fatal("a generic UFCS receiver can accept a DArray and must stay unresolved")
 	}
-	darrayUFCS := &Analyzer{
+	darrayUFCS := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
 		storeFlowDarrays: map[string]bool{"target": true},
+	},
 		ufcsFunctionsByName: map[string][]*Symbol{
 			"DArray.push": {{Name: "DArray.push", Type: &FuncType{Params: []Type{
 				&RefType{Elem: &DArrayType{Elem: &BuiltinType{Name: "u32"}}, Mutable: true}, &BuiltinType{Name: "u32"},
@@ -83,8 +86,9 @@ func TestStoreFlowBuiltinDarrayPushKeepsOneWayStorageAndResultFlow(t *testing.T)
 			t.Fatalf("concrete nominal receiver %T cannot accept a builtin DArray", receiver)
 		}
 	}
-	inlineVecUFCS := &Analyzer{
+	inlineVecUFCS := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
 		storeFlowDarrays: map[string]bool{"target": true},
+	},
 		ufcsFunctionsByName: map[string][]*Symbol{
 			"InlineVec.push": {{Name: "InlineVec.push", Type: &FuncType{Params: []Type{
 				&RefType{Elem: &GenericInstanceType{Name: "InlineVec", Base: &StructType{Name: "InlineVec"}, Args: []Type{&TypeParamType{Name: "T"}}}, Mutable: true},
@@ -135,7 +139,9 @@ func TestStoreFlowBuiltinDarrayTruncateDoesNotStoreItsCount(t *testing.T) {
 		Func: &ast.FieldExpr{Object: &ast.Ident{Name: "bindings"}, Field: "truncate"},
 		Args: []ast.Expr{&ast.IntLit{Value: "0"}},
 	}
-	a := &Analyzer{storeFlowDarrays: map[string]bool{"bindings": true}}
+	a := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
+		storeFlowDarrays: map[string]bool{"bindings": true},
+	}}
 	c := &storeFlowCtx{written: map[string]bool{"bindings": true}, scalars: map[string]bool{}}
 	retNames, handled := a.applyCallStoreFlow(call, c, map[*ast.CallExpr][]string{})
 	if !handled {
@@ -164,8 +170,9 @@ func TestStoreFlowDarrayTruncateLeavesPotentialUFCSMethodsUnresolved(t *testing.
 		Func: &ast.FieldExpr{Object: &ast.Ident{Name: "bindings"}, Field: "truncate"},
 		Args: []ast.Expr{&ast.IntLit{Value: "0"}},
 	}
-	a := &Analyzer{
+	a := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
 		storeFlowDarrays: map[string]bool{"bindings": true},
+	},
 		ufcsFunctionsByName: map[string][]*Symbol{
 			"Custom.truncate":  {{Type: &FuncType{Params: []Type{&DArrayType{}}}}},
 			"Generic.truncate": {{Type: &FuncType{TypeParams: []string{"T"}, Params: []Type{&TypeParamType{Name: "T"}}}}},
@@ -184,7 +191,9 @@ func TestStoreFlowDarrayTruncateRequiresIntegerCount(t *testing.T) {
 		Func: &ast.FieldExpr{Object: &ast.Ident{Name: "bindings"}, Field: "truncate"},
 		Args: []ast.Expr{&ast.StringLit{Value: "0"}},
 	}
-	a := &Analyzer{storeFlowDarrays: map[string]bool{"bindings": true}}
+	a := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
+		storeFlowDarrays: map[string]bool{"bindings": true},
+	}}
 	if a.storeFlowBuiltinDarrayTruncate(call) {
 		t.Fatal("a noninteger truncate count must not receive the builtin summary")
 	}
@@ -219,8 +228,10 @@ func TestStoreFlowEnumVariantConstructorDoesNotIgnoreValueShadowing(t *testing.T
 		Args: []ast.Expr{&ast.Ident{Name: "name"}},
 	}
 	a := &Analyzer{
-		namedTypes:           map[string]Type{"Expr": enumType},
-		storeFlowCurrentDecl: &ast.FuncDecl{Params: []ast.ParamDecl{{Name: "Expr"}}},
+		namedTypes: map[string]Type{"Expr": enumType},
+		analyzerFunctionRegionState: analyzerFunctionRegionState{
+			storeFlowCurrentDecl: &ast.FuncDecl{Params: []ast.ParamDecl{{Name: "Expr"}}},
+		},
 	}
 	if a.storeFlowEnumVariantConstructor(call) {
 		t.Fatal("a value binding shadowing the enum name must keep field calls on the conservative path")

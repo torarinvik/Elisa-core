@@ -40,7 +40,7 @@ func TestStoreFlowCloneKeepsOrdinaryCloneAndOwnedBoundary(t *testing.T) {
 	if !found {
 		t.Fatal("ordinary reference helper missing")
 	}
-	if !strings.Contains(string(source), "if ownedFunctionAnalyses {\n\t\t\t\tsettable(cloned.Field(i)).Set(reflect.ValueOf(cloneStoreFlowSummariesForSpecialization(a.storeFlowSummaries)))") {
+	if !strings.Contains(string(source), "if ownedFunctionAnalyses {\n\t\t\t\tsettable(cloned.FieldByIndex(schema.Index)).Set(reflect.ValueOf(cloneStoreFlowSummariesForSpecialization(a.storeFlowSummaries)))") {
 		t.Fatal("owned-only specialization clone boundary changed")
 	}
 }

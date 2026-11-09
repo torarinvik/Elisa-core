@@ -202,10 +202,10 @@ func (a *Analyzer) preBodyGlobalFingerprint() string {
 	// Safety net for body-dependent tables this file does not name: their
 	// sizes must not change either.
 	v := reflect.ValueOf(a).Elem()
-	for i := 0; i < v.NumField(); i++ {
-		switch f := v.Field(i); f.Kind() {
+	for _, field := range analyzerStorageFields {
+		switch f := v.FieldByIndex(field.Index); f.Kind() {
 		case reflect.Map, reflect.Slice:
-			name := v.Type().Field(i).Name
+			name := field.Name
 			if name == "indexBoundsRuntimeSites" {
 				// Pure observational telemetry, never a declaration/codegen input.
 				// Its exact lexical owner/header/origin ledger is independently

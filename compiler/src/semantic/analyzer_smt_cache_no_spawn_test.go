@@ -17,7 +17,10 @@ type fixedSMTSolver struct {
 func TestSMTSharedOuterProofDoesNotStartSolver(t *testing.T) {
 	flights := &sync.Map{}
 	cache := &smtProofCache{directory: t.TempDir(), identity: "test identity"}
-	a := &Analyzer{smtEnabled: true, smtBinary: filepath.Join(t.TempDir(), "missing-z3"), smtProofCache: cache, smtProofCacheInitialized: true, parallel: &parallelWorkerState{smtFlights: flights}}
+	a := &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
+		smtEnabled: true, smtBinary: filepath.Join(t.TempDir(), "missing-z3"), smtProofCache: cache, smtProofCacheInitialized: true,
+	},
+		parallel: &parallelWorkerState{smtFlights: flights}}
 	tr, query := smtQueryForCacheTest(a, "(declare-const v_x Int)\n", "(= v_x v_x)")
 	keys, _ := cache.lookupProof(query)
 	leader := &Analyzer{parallel: &parallelWorkerState{smtFlights: flights}}
@@ -65,9 +68,10 @@ func TestSMTInMemoryCacheHitDoesNotStartSolver(t *testing.T) {
 			name = "proven"
 		}
 		t.Run(name, func(t *testing.T) {
-			a := &Analyzer{
+			a := &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
 				smtEnabled: true,
 				smtBinary:  filepath.Join(t.TempDir(), "missing-z3"),
+			},
 			}
 			tr, query := smtQueryForCacheTest(a, "", "true")
 			a.smtQueryCache = map[string]smtQueryResult{query: cached}
@@ -96,9 +100,10 @@ func TestSMTInMemoryCacheHitDoesNotStartSolver(t *testing.T) {
 }
 
 func TestSMTPersistentCacheHitDoesNotStartSolver(t *testing.T) {
-	a := &Analyzer{
+	a := &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
 		smtEnabled: true,
 		smtBinary:  filepath.Join(t.TempDir(), "missing-z3"),
+	},
 	}
 	tr, query := smtQueryForCacheTest(a, "", "true")
 	cache := &smtProofCache{directory: t.TempDir(), identity: "test identity"}
@@ -120,10 +125,11 @@ func TestSMTPersistentCacheHitDoesNotStartSolver(t *testing.T) {
 
 func TestSMTRawQueryCacheHitDoesNotStartSolver(t *testing.T) {
 	query := "(assert false)\n"
-	a := &Analyzer{
+	a := &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
 		smtEnabled:    true,
 		smtBinary:     filepath.Join(t.TempDir(), "missing-z3"),
 		smtQueryCache: map[string]smtQueryResult{query: {proven: true}},
+	},
 	}
 
 	proven, ce := a.smtCheckRawQueryWithLogLabel(query, "requires-vacuity", "fn")
@@ -139,7 +145,7 @@ func TestSMTRawQueryCacheHitDoesNotStartSolver(t *testing.T) {
 }
 
 func TestSMTRawSatDoesNotHideRegularCounterexample(t *testing.T) {
-	a := &Analyzer{
+	a := &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
 		smtEnabled:               true,
 		smtProofCacheInitialized: true,
 		smtProofCache:            &smtProofCache{directory: t.TempDir(), identity: "raw-vc-collision"},
@@ -147,6 +153,7 @@ func TestSMTRawSatDoesNotHideRegularCounterexample(t *testing.T) {
 			result: smt.Sat,
 			model:  map[string]string{"v_x": "1"},
 		},
+	},
 	}
 	tr := a.newSMTTranslator(nil)
 	tr.decls["x"] = true
@@ -177,9 +184,10 @@ func TestSMTQueryCacheDoesNotOverrideDisabledOrUnavailableSolver(t *testing.T) {
 		{name: "unavailable", enabled: true, unavailable: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			a := &Analyzer{
+			a := &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
 				smtEnabled:     tc.enabled,
 				smtUnavailable: tc.unavailable,
+			},
 			}
 			if tc.unavailable {
 				a.smtStats.Enabled = true // the earlier failed open already records this.

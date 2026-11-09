@@ -8,7 +8,9 @@ import (
 )
 
 func BenchmarkSMTTransformedUnprovedSerial(b *testing.B) {
-	a := &Analyzer{smtProofCache: &smtProofCache{directory: b.TempDir(), identity: "bench"}}
+	a := &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
+		smtProofCache: &smtProofCache{directory: b.TempDir(), identity: "bench"},
+	}}
 	query := "(assert (" + strings.Repeat("x ", 2048) + "))"
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
@@ -23,7 +25,10 @@ func BenchmarkSMTTransformedRepeatedModelFree(b *testing.B) {
 	query := "(declare-const v_x Int)" + strings.Repeat("(assert (>= v_x 0))", 1000)
 	flights := &sync.Map{}
 	worker := func() *Analyzer {
-		return &Analyzer{smtProofCache: &smtProofCache{directory: b.TempDir(), identity: "bench"}, parallel: &parallelWorkerState{smtFlights: flights}}
+		return &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
+			smtProofCache: &smtProofCache{directory: b.TempDir(), identity: "bench"},
+		},
+			parallel: &parallelWorkerState{smtFlights: flights}}
 	}
 	// Keep both workers in the same cache namespace and directory.
 	first, next := worker(), worker()

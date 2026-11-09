@@ -30,7 +30,9 @@ func TestResolvedSingletonPermissionOwnsRow(t *testing.T) {
 
 func TestRecordSingletonPermissionOwnsRow(t *testing.T) {
 	refs := []ast.PermissionRef{{Name: "Memory", Member: "Read"}}
-	a := &Analyzer{currentFunctionUsedPermissions: map[string]bool{}}
+	a := &Analyzer{analyzerControlFlowState: analyzerControlFlowState{
+		currentFunctionUsedPermissions: map[string]bool{},
+	}}
 	a.recordFunctionPermissionRefs(refs)
 	refs[0].Member = "Write"
 	if len(a.currentFunctionUsedPermissionRefs) != 1 || a.currentFunctionUsedPermissionRefs[0].Member != "Read" || !a.currentFunctionUsedPermissions["Memory"] {
@@ -61,7 +63,9 @@ func BenchmarkPermissionResolutionForSignature(b *testing.B) {
 }
 
 func BenchmarkRecordSingletonPermission(b *testing.B) {
-	a := &Analyzer{currentFunctionUsedPermissions: map[string]bool{}}
+	a := &Analyzer{analyzerControlFlowState: analyzerControlFlowState{
+		currentFunctionUsedPermissions: map[string]bool{},
+	}}
 	refs := []ast.PermissionRef{{Name: "Memory", Member: "Read"}}
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {

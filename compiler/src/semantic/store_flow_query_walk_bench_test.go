@@ -106,7 +106,9 @@ func BenchmarkStoreFlowDeclaredCallQueryScans(b *testing.B) {
 			saved := storeFlowDeclaredCallQueryFast
 			storeFlowDeclaredCallQueryFast = fast
 			defer func() { storeFlowDeclaredCallQueryFast = saved }()
-			a := &Analyzer{declaredFuncNames: map[string]bool{"f": true}}
+			a := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
+				declaredFuncNames: map[string]bool{"f": true},
+			}}
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
 				scan := storeFlowQueryScan{}

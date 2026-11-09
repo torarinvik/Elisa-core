@@ -3,7 +3,6 @@ package semantic
 import (
 	"elisacore/src/ast"
 	"elisacore/src/easm"
-	"elisacore/src/lexer"
 	"sync/atomic"
 )
 
@@ -384,182 +383,7 @@ type Analyzer struct {
 	// region on some paths but not others (which would make the caller's
 	// must-consume obligation unsound).
 	currentFuncSawPlainValueReturn bool
-	currentRegions                 map[*Symbol]regionState
-	currentRegionsBorrowed         bool
-	// regionLifetimeOrdinals maps a local region name to a monotonic ordinal
-	// assigned at its `region NAME(...)` declaration. Because regions nest
-	// lexically (LIFO destruction), a LOWER ordinal means a longer-lived region:
-	// an outer region is declared before — and freed after — an inner one. This
-	// is the region outlives-lattice for local regions; region params are
-	// caller-owned and outlive every local (ordinal 0), and 'heap/borrowed arenas
-	// are treated as outermost. Used to reject storing an inner-@r value into an
-	// outer-region slot (a dangling pointer once the inner region is freed).
-	regionLifetimeOrdinals map[string]int
-	regionLifetimeCounter  int
-	// regionLifetimeAncestors maps a local region name to the names of the
-	// regions that were lexically OPEN (live enclosing region blocks) at the
-	// point it was declared — i.e. its true nesting ancestors. The outlives-
-	// lattice consults this so only genuinely nested regions are comparable;
-	// disjoint sibling regions, absent from each other's ancestor set, are
-	// incomparable (neither outlives the other). regionLiveStack is the stack of
-	// currently-open region names used to populate it; it is saved/restored
-	// across a scoped `region NAME(...):` block exactly like currentRegions.
-	regionLifetimeAncestors map[string][]string
-	regionLiveStack         []string
-	currentRegionMarks      map[*Symbol]regionMarkState
-	currentCheckpoints      map[*Symbol]checkpointState
-	currentRegionRefs       map[*Symbol]regionRefState
-	// A scoped block borrows its caller map until the first binding write.
-	currentRegionRefsBorrowed bool
-	// currentStructInteriorRegionTaint records, per region-less aggregate local,
-	// the innermost (shortest-lived) region name that one of its interior
-	// container/view fields was stored a value from. A struct's TYPE never carries
-	// its fields' regions, so copying such a struct out to a longer-lived binding
-	// would otherwise launder a dangling interior reference past the region's death
-	// undetected. Consumed only by checkStructCopyInteriorRegionEscape; kept off the
-	// shared region-ref provenance map to avoid perturbing promote/packed/invalidation.
-	currentStructInteriorRegionTaint map[*Symbol]string
-	// currentStructLocalAllocRegion records, per locally-constructed aggregate local
-	// whose container/view fields were allocated under an ambient region, the name of
-	// that region. Unlike currentStructInteriorRegionTaint (which tracks the shortest
-	// region a value was STORED FROM, for copy-escape), this records the region the
-	// struct's own fresh fields LIVE IN at construction. It lets a call site bind a
-	// callee's struct-ref region param (`def f(b: mutable Bag& @r)`) when the argument
-	// is such a local — the locally-constructed analogue of threading a struct param's
-	// region. Consumed by attachStructLocalArgRegion at call sites.
-	currentStructLocalAllocRegion map[*Symbol]string
-	// Concrete declared return-region bindings belong to each call, not the shared callee type.
-	declaredCallReturnRegions map[*ast.CallExpr]string
-	// currentElementReads / currentElementStates track the element provenance of eligible
-	// function-local containers (see region_local_container_elements.go).
-	currentElementReads  map[*ast.IndexExpr]bool
-	currentElementStates map[*Symbol]regionRefState
-	// currentElementExtendSources are the statement `ys.extend(xs)` calls whose local source xs
-	// is not grown again in any loop enclosing the call, so xs's tracked element state at the
-	// call is the exact provenance the copied elements carry.
-	currentElementExtendSources map[ast.Expr]bool
-	// storeFlowBinderIndexes caches each function's binding sites for the store-flow summaries.
-	storeFlowBinderIndexes map[*ast.FuncDecl]*storeFlowBinderIndex
-	// storeFlowStructLookup is scoped to one synchronous summary computation.
-	storeFlowStructLookup         map[string]Type
-	storeFlowStructLookupComplete bool
-	// Parallel body workers use a frozen named-type table, so their complete
-	// unqualified struct index can be reused across summary computations.
-	storeFlowFrozenStructLookup map[string]Type
-	// currentElementBinderLoops are the by-value `for x in xs` loops over an eligible local
-	// container whose binder may take the container's tracked element provenance;
-	// iterBinderElementStates holds that provenance per binder symbol.
-	currentElementBinderLoops map[*ast.IterForStmt]bool
-	// currentElementLoop holds the in-loop reads of containers the same loop also pushes into,
-	// with the assumptions those reads made (region_local_container_loop_reads.go).
-	currentElementLoop *elementLoopInfo
-	// ambientFillAnalyzed / ambientFillFresh summarize each function for callers that pass it a
-	// local container to fill: analyzed once its body was checked with diagnostics on, fresh when
-	// that body may put data allocated in a caller's arena into a parameter container (a void
-	// grower's adoption sanction fired or it called a region-polymorphic function, or a parameter
-	// was forwarded to a callee not known to fill it only from its arguments).
-	ambientFillAnalyzed map[*ast.FuncDecl]bool
-	ambientFillFresh    map[*ast.FuncDecl]bool
-	// ambientFillFreshParams narrows freshness to the parameters (by index) that a function
-	// forwarded to a callee not known to fill them only from its arguments: only those
-	// parameter containers may receive caller-arena data through that call.
-	ambientFillFreshParams map[*ast.FuncDecl]map[int]bool
-	// fillMayAdoptSet is the lazily built syntactic over-approximation of ambientFillFresh
-	// (see fillMayAdopt).
-	fillMayAdoptSet map[*ast.FuncDecl]bool
-	// funcAnalysisActive holds the functions whose body analysis is on the stack;
-	// provisionalSummaryFn is the function a quiet on-demand analysis is publishing summaries for.
-	funcAnalysisActive   map[*ast.FuncDecl]bool
-	provisionalSummaryFn *ast.FuncDecl
-	// summary convergence state (region_summary_convergence.go)
-	convergeDepth       int
-	storeFlowSummaries  map[*ast.FuncDecl]*storeFlowSummary
-	storeFlowInProgress map[*ast.FuncDecl]*storeFlowSummary
-	storeFlowActive     map[*ast.FuncDecl]bool
-	// retainedProofsScoped: a retained update re-proves task-group submits only in bodies whose
-	// summaries it already dropped, so a fresh proof there must not drop the rest.
-	retainedProofsScoped bool
-	storeFlowCurrentDecl *ast.FuncDecl // declaration context for type and binder resolution
-	// storeFlowSCC caches each function's call-graph component (region_store_flow_summary.go).
-	storeFlowSCC                map[*ast.FuncDecl][]*ast.FuncDecl
-	storeFlowBinds              bool
-	storeFlowParams             map[string]bool
-	storeFlowDarrays            map[string]bool
-	storeFlowViews              map[string]bool
-	storeFlowLocals             map[string]bool
-	storeFlowNamedTypes         map[string]string
-	storeFlowEnv                map[string]string
-	storeFlowStmtEnv            map[uintptr]map[string]string
-	declaredFuncNames           map[string]bool
-	convMembers                 map[*ast.FuncDecl]bool
-	cyclicFuncSet               map[*ast.FuncDecl]bool
-	callEdgeCache               map[*ast.FuncDecl][]*ast.FuncDecl
-	callDeclsByName             map[string][]*ast.FuncDecl
-	storageViewWriteDeclsByName map[string][]*ast.FuncDecl
-	// returnElementStmtStates / returnElementStmtUnknown record, per return statement, the element
-	// provenance of the returned container (region_return_element_summary.go);
-	// returnElementSummaries holds each function's published summary.
-	returnElementStmtStates  map[*ast.ReturnStmt]regionRefState
-	returnElementStmtUnknown map[*ast.ReturnStmt]bool
-	returnElementSummaries   map[*ast.FuncDecl]regionRefState
-	iterBinderElementStates  map[*Symbol]regionRefState
-
-	iterBinderElementOverlay *analyzerIterBinderElementOverlay
-
-	// comprehensionElementStates holds the provenance of each list comprehension's element
-	// expression, read in the binder scope, for a local container it initializes.
-	comprehensionElementStates   map[*ast.ListComprehensionExpr]regionRefState
-	currentAffineValues          map[affineValueKey]affineValueState
-	currentBorrowedOwnerRefs     map[*Symbol]borrowedOwnerRefState
-	currentFunctionValues        map[*Symbol]*FuncType
-	currentSpecializedValueTypes map[*Symbol]Type
-	currentValueBindings         map[*Symbol]ast.Expr
-	currentStorageViewDeps       map[*Symbol]storageViewDependencyState
-	patternStorageFallback       ast.Expr
-	// pendingStorageViewErrors holds invalidated-view uses deferred until the per-function region
-	// stack assignment is known (Phase C1b): a use whose source darray got a reserve_commit stack
-	// is stable and the error is dropped; otherwise it is emitted. Scoped per function.
-	pendingStorageViewErrors []pendingStorageViewError
-	// currentIteratedSources keys (by optimizationExprString) the relocatable containers
-	// currently being iterated by an enclosing `for` loop, to the loop position. A
-	// relocating mutation (push/extend/reserve/clear/truncate) of such a container would
-	// move its buffer out from under the live iteration — the iterator-invalidation gap —
-	// so it is rejected at invalidateStorageViewsForSource, the universal mutation chokepoint.
-	currentIteratedSources map[string]lexer.Pos
-	currentAliasAccesses   map[string]aliasAccessState
-	currentAliasBindings   map[*Symbol]aliasAccessBinding
-	// callAlignedAliasArgs records, per call, the argument expressions aligned 1:1 to the
-	// callee's parameters (receiver + reordered named args + implicits) — the same alignment
-	// validateCallArgAliasAccess uses. It lets a ref bound from a reference-returning call map
-	// the callee's return-isolation AliasParamIndices back to the borrowed argument, for method
-	// and free-function calls alike.
-	callAlignedAliasArgs map[*ast.CallExpr][]ast.Expr
-	// currentAliasCarriers tracks struct/value locals that carry a reference into a parameter,
-	// bound from a reference-returning call (`r = wrap(v)` where wrap's result aliases v). A later
-	// reference-typed field access `r.p` is then known to alias v, closing the laundering gap for
-	// mutable wrappers (which, unlike immutable ones, get no value binding to resolve through). It
-	// follows the same scope save/restore lifecycle as currentAliasBindings. Re-bound on every
-	// whole-local assignment; reference-field assignments use currentAliasCarrierFieldOverrides to
-	// replace only the assigned field's roots without dropping sibling carried fields.
-	// Keyed by local NAME (not *Symbol): a declaration and a later assignment to the same local
-	// can resolve to distinct Symbol instances, but the name is stable, and block-scope cloning of
-	// this map already isolates shadowed names.
-	currentAliasCarriers              map[string][]string
-	currentAliasCarrierFieldOverrides map[string]map[string][]string
-	currentPackedVariantViews         map[*Symbol]*PackedVariantViewType
-	currentPackedStores               map[string]*PackedEnumStoreType
-	currentPackedStoreResolutions     map[*Symbol]packedStoreResolution
-	currentRewriteDefault             *rewriteDefaultContext
-	currentSequenceRewrite            *sequenceRewriteContext
-	currentAllocExpr                  ast.Expr
-	// localArenaEscapeLocals tracks local collection variables whose backing
-	// buffer was grown while a function-local Arena value was the active
-	// allocation owner. Such a buffer is freed when the local arena goes out of
-	// scope, so returning the collection (or a pointer into it) or storing it
-	// into a longer-lived location is a use-after-free. Keyed by the unique
-	// local *Symbol, so no per-function reset is required (symbols never alias
-	// across functions); the value is the offending arena's name for diagnostics.
-	localArenaEscapeLocals map[*Symbol]string
+	analyzerFunctionRegionState
 	// suppressUninitReadCheck > 0 while analyzing an address-of operand or an
 	// assignment target, where naming a `zeroed`-uninitialized local is not a
 	// value read (it is being filled / had its address taken), so the
@@ -573,83 +397,8 @@ type Analyzer struct {
 	zeroedPlaceholderExpected Type
 	suppressGlobalReadCheck   int
 	currentPoolScopes         []poolScopeState
-	currentIndexBounds        map[string]indexBoundFact
-	// currentBoundEqual is a flow-sensitive equivalence relation over upper-bound EXPRESSION STRINGS
-	// (the same canonical form as indexBoundFact.Upper / indexableUpperBoundString): a symmetric
-	// adjacency set recording that two length-ish expressions are provably equal — `n == xs.count`
-	// from a guard, or `n = xs.count` from an immutable binding. It lets a loop index whose bound is
-	// `n` discharge an `xs[i]` access whose bound is `xs.count` (docs/86 brick 86-6, the cross-variable
-	// coupling §8 flagged). It rides EXACTLY the same clone/save/restore/invalidate sites as
-	// currentIndexBounds, so it can never outlive a branch or survive a mutation that the index facts
-	// themselves wouldn't (soundness).
-	currentBoundEqual map[string]map[string]bool
-	// indexBoundsShared / boundEqualShared mark currentIndexBounds / currentBoundEqual as possibly
-	// aliased by an enclosing block's saved copy: a writer clones first (ownIndexBounds /
-	// ownBoundEqual). Entering a block only sets the flag instead of copying both maps.
-	indexBoundsShared                 bool
-	boundEqualShared                  bool
-	currentFunctionUsedPermissions    map[string]bool
-	currentFunctionUsedPermissionRefs []ast.PermissionRef
-	// currentFunctionGuardedIndexes collects the positions of index accesses in the current function
-	// that would emit a runtime bounds check (bounds-requiring type, not statically proven). It backs
-	// the `NoBoundsChecks` shape law (docs/89): a function `fulfills NoBoundsChecks` is violated iff
-	// this list is non-empty. Saved/restored per function like currentFunctionUsedPermissionRefs.
-	currentFunctionGuardedIndexes []lexer.Pos
-	// currentFunctionExpectsVectorize is set while analyzing a function that `fulfills Vectorizes` (a
-	// measure law, docs/89 Stage 5). It opts the function's range loops into the existing autovec
-	// verifier: each ForStmt is tagged AutovecExpected, so the post-optimization pass warns (verify-
-	// only, never build-gating) if the loop did not vectorize. Saved/restored per function.
-	currentFunctionExpectsVectorize bool
-	currentProgressSummary          *FunctionProgressSummary
-	loopDepth                       int
-	// loopAffineFrames collects each loop's `continue` affine states; loopRepeatReported keeps the
-	// repeated-consume diagnostic to one per root across nested loops.
-	loopAffineFrames []loopAffineFrame
-	// storageViewLoopUseFrames records each enclosing loop's first view uses (back-edge check).
-	storageViewLoopUseFrames []storageViewLoopUseFrame
-	loopRepeatReported       map[*Symbol]bool
-	// protocolLeakReported dedupes "must be consumed before scope exit" between an early exit
-	// (return, try, break, continue) and the end of the function.
-	protocolLeakReported map[affineValueKey]bool
-	// activeOuterLoopInvariants is a stack of proven outer-loop invariant clauses accumulated as the
-	// analyzer descends into nested loops. Each push corresponds to one WhileStmt whose invariants were
-	// fully proven; each pop happens after the body is analyzed. The inner-loop invariant prover reads
-	// this stack to use outer invariants as additional hypotheses when the outer invariant's dependency
-	// variables are disjoint from the inner loop's assigned variables (conservative: if the inner loop
-	// mutates ANY variable the outer invariant depends on, the outer invariant is NOT admitted).
-	activeOuterLoopInvariants []*ast.ContractStmt
-	implicitIntConvFuncs      map[*ast.FuncDecl]bool
-	rangeFactWriteLogs        [][]rangeFactWrite
-	pendingLoopInvariantLints map[*ast.ContractStmt]string
-	// seqLoopContinueStep is the index update a `continue` performs in the range loop whose
-	// synthesized while body the sequential model is walking (nil for a while loop).
-	seqLoopContinueStep               map[string]ast.Expr
-	currentTrustedNonProgressDepth    int
-	currentTrustedAssumeProgressDepth int
-	currentTrustedStaleRefDepth       int
-	// currentUnsafePointerCastGrantDepth tracks an explicit local
-	// `can Unsafe.PointerCast` or `trusted Unsafe.PointerCast` scope. The raw
-	// StringView ABI carrier may only be constructed within this boundary;
-	// surface `sview` values should otherwise come from validated constructors.
-	currentUnsafePointerCastGrantDepth int
-	// currentGrantedStaleRefDepth tracks an enclosing *tracked* `can Unsafe.StaleRef:`
-	// grant (vs the untracked `trusted` suppression in currentTrustedStaleRefDepth).
-	// A forwarded-ref store inside it is allowed AND surfaces Unsafe.StaleRef in the
-	// function's effect signature (recorded by analyzeCanStmt), so the unsafe store is
-	// auditable through the capability system rather than invisibly suppressed.
-	currentGrantedStaleRefDepth int
-	// currentGranted{NonProgress,AssumeProgress}Depth: an enclosing tracked `can Unsafe.NonProgress:`
-	// / `can Unsafe.AssumeProgress:` discharges a wrapped loop's progress obligation just like
-	// `trusted` (the grant is in scope), but — unlike `trusted` — also propagates the effect to the
-	// function's signature. Mirrors currentGrantedStaleRefDepth above.
-	currentGrantedNonProgressDepth    int
-	currentGrantedAssumeProgressDepth int
-	currentReturnProvenance           regionRefState
-	currentReturnBorrowedOwnerRefs    borrowedOwnerRefSummary
-	currentConservativeCallWidenings  map[*Symbol][]conservativeCallWidening
-	currentRegionFactTransforms       []FactTransform
-	conditionalCallPoststateOriginals map[*ast.CallExpr]map[*Symbol]Type
-	suppressDiagnostics               bool
+	analyzerControlFlowState
+	suppressDiagnostics bool
 	// warnOnceSeen dedupes warnings emitted from multi-visit paths (warnOncef).
 	warnOnceSeen map[string]bool
 	// deprecatedSeen dedupes deprecation diagnostics emitted for the same site+message
@@ -704,58 +453,12 @@ type Analyzer struct {
 	// cited inside the block (which ride the scope-walled assert/flow/range fact channels). This is what
 	// makes a scoped proof's verdict depend solely on its citations.
 	inClosedWorldProof bool
-	// SMT discharge tier (docs/90). The solver is opened LAZILY on the first obligation that needs it
-	// (so a compile with no hard obligations never spawns a process) and closed at the end of
-	// analysis. smtUnavailable latches once Open fails, so we don't retry a missing solver per query.
-	smtEnabled     bool
-	smtBinary      string
-	smtSolver      smtSolverHandle
-	smtUnavailable bool
-	// smtSnapshotTainted prevents reuse of semantic results produced after a
-	// solver failure or an Unknown that cannot be safely memoized. It is sticky
-	// across retained updates because unaffected bodies may retain those results.
-	smtSnapshotTainted bool
-	smtStats           SMTStats
+	analyzerProofSolverState
 	storeScanFillWhy   string               // trace only: last reason storeScanLocalIsFilled rejected a local
 	viewProvWhy        string               // trace only: last view-provenance decline reason
 	parallel           *parallelWorkerState // set only on a parallel body-analysis worker
 	trackedShareChecks []trackedShareRecord // ELISA_TRACKED_SHARE_CHECK; see tracked_share.go
 	smtTextFree        []*smtTextBuilder    // recycled SMT text buffers; see smt_text_scratch.go
-	// smtQueryCache memoizes solver verdicts keyed on the FULL query string (VC IR brick 5). z3 is
-	// deterministic for a given query + timeout, so an identical query — same preamble, hypotheses, and
-	// negated obligation — has the same verdict and counterexample; reusing it is sound and skips the
-	// round-trip. Lazily created; lives for one analysis pass (a query embeds its function's facts, so a
-	// cross-function key collision means a byte-identical proof).
-	smtQueryCache map[string]smtQueryResult
-	// smtEscalation > 0 while withSMTEscalation re-runs a failed obligation.
-	smtEscalation int
-	// smtHistory lists the obligation queries asked so far in smtHistoryFor's body, cache hits
-	// included, for the warm-session stage of an escalated retry.
-	smtHistory               []string
-	smtHistoryFor            *ast.FuncDecl
-	smtProofCache            *smtProofCache
-	smtProofCacheInitialized bool
-	// smtDeclIDs gives each declaration a run-stable identity for SMT symbol names (smtStableDeclID).
-	smtDeclIDs        map[*ast.FuncDecl]string
-	smtDeclIDOrdinals map[string]int
-	// recursiveProofMemo caches recursiveProofMembers per resolution context.
-	recursiveProofMemo map[recursiveProofKey]map[*ast.FuncDecl]bool
-	// aggregateEquationEligibleMemo caches aggregateRecordDefiningEquationEligible likewise.
-	aggregateEquationEligibleMemo map[recursiveProofKey]bool
-	// pinnedRelationalEdges is the edge snapshot for a batch of read-only range lookups.
-	pinnedRelationalEdges      []relationalEdge
-	pinnedRelationalEdgesValid bool
-	// smtDeadPathCache memoizes cone-of-influence dead-path verdicts by the dropped text.
-	smtDeadPathCache map[string]smtVerdict
-	// recursiveCertInProgress holds the recursive calls whose termination certificate or callee
-	// requires is being proven.
-	// The certificate's own goal translates the caller's immutable locals, and a local DEFINED by that
-	// same call would request the certificate again without end (stack overflow).
-	recursiveCertInProgress map[*ast.CallExpr]bool
-	proofReport             []ProofFact
-	proofLifecycle          proofReportLifecycle
-	currentProofCategory    ProofObligationCategory                   // elision-telemetry tag stamped on the next recordProof call; cleared after each call
-	indexBoundsRuntimeSites map[*ast.IndexExpr]indexBoundsRuntimeSite // live ordinary panic-guard sites; speculative visits do not count
 	// zeroedStructLocals tracks locals declared `= zeroed` whose type is a struct and whose root has
 	// not been wholesale-replaced since declaration. Cleared for a root in invalidateWrittenFieldsForRoot
 	// when called for a non-field write (a root reassignment, borrow, or mutating-callee escape).
@@ -769,52 +472,7 @@ type Analyzer struct {
 	// speculative re-analyses (return-provenance / borrowed-owner-ref inference) resolve
 	// unqualified names exactly as the body's real analysis does.
 	funcDeclUsings map[*ast.FuncDecl][]string
-	// Return-borrow summaries (returnBorrowFlowForFunc), memoized once a function's body has been
-	// analyzed: before that its expression types are missing and the summary is conservative.
-	returnBorrowFuncAnalyzed  map[*ast.FuncDecl]bool
-	returnBorrowFuncSummaries map[*ast.FuncDecl]returnBorrowFlow
-	returnBorrowQueryMemo     map[*ast.FuncDecl]returnBorrowQueryEntry
-	// Query memos per root function, kept while one function is being analyzed: repeated queries
-	// rooted at the same function reuse the callee summaries (returnBorrowRootMemo).
-	returnBorrowRootMemos    map[*ast.FuncDecl]map[*ast.FuncDecl]returnBorrowQueryEntry
-	returnBorrowRootMemosFor *ast.FuncDecl
-	// returnBorrowMayTarget answers per (holder, referent) type pair.
-	returnBorrowMayTargetMemo       map[[2]Type]bool
-	returnBorrowResultMayTargetMemo map[[2]Type]bool
-	returnBorrowCutLog              []*ast.FuncDecl
-	// returnBorrowCycleAssume is the current fixpoint approximation of each function whose
-	// summary is being computed; a recursive call inside it reads this instead of recursing.
-	returnBorrowCycleAssume map[*ast.FuncDecl]returnBorrowFlow
-	// returnBorrowLateFrames holds the deferred store checks of functions analyzed while
-	// returnBorrowLateEnabled is set; they are evaluated once every body has been analyzed.
-	returnBorrowLateFrames   []returnBorrowLateFrame
-	returnBorrowLateEnabled  bool
-	returnBorrowContentReads bool
-	iterBindingSources       map[*Symbol]ast.Expr
-	iterBindingByRef         map[*Symbol]bool
-	// Deferred local-borrow store checks and the per-binding store environment they are evaluated
-	// against (analyzer_return_borrow_store_env.go).
-	returnBorrowDeferFrames      []*returnBorrowDeferFrame
-	returnBorrowDeclEnv          map[returnBorrowBinderKey]returnBorrowFlow
-	returnBorrowDeclRecording    map[returnBorrowBinderKey]returnBorrowFlow
-	returnBorrowDeclRecordingFn  *ast.FuncDecl
-	returnBorrowDeclChanged      bool
-	returnBorrowDeclConservative map[string]bool
-	returnBorrowDeclRefLinks     map[string][]string
-	// returnBorrowSynthesizedBinders are the binder patterns value comprehensions and single-binder
-	// queries synthesize; the return-borrow walker defines them (returnBorrowFlowForComprehension,
-	// returnBorrowFlowForQuery).
-	returnBorrowSynthesizedBinders   map[ast.Node]bool
-	returnBorrowDeclProcessedCalls   map[*ast.CallExpr]bool
-	returnBorrowWalkFn               *ast.FuncDecl
-	returnBorrowReboundNames         map[*ast.FuncDecl]map[string]bool
-	returnProvenanceLocalInProgress  map[*Symbol]bool
-	returnBorrowedOwnerRefInProgress map[*ast.FuncDecl]bool
-	// inReturnBorrowCapture is true only while computing a return statement's
-	// borrowed-owner summary, enabling pass-through tracking of raw reference parameters
-	// (so `return p` records "returns param i") without affecting any other analysis.
-	inReturnBorrowCapture            bool
-	returnBorrowedOwnerLocalProgress map[*Symbol]bool
+	analyzerReturnBorrowState
 	// functionValueResolveInProgress guards functionValueTypeForExpr against a self-referential /
 	// cyclic value binding (e.g. `x = x`, where the symbol's value expr resolves back to itself):
 	// re-entering a symbol already on the resolution stack returns "no function-value type" instead of
@@ -906,61 +564,5 @@ type Analyzer struct {
 	// semanticLimitHits counts reportSemanticDepthLimit calls, so a memo can tell whether a
 	// traversal was cut short (and must not be cached).
 	semanticLimitHits int
-	// typeShapesFrozen is set once every declaration's type has its final fields and
-	// affinity (just before body analysis); type-predicate memos are only valid after it.
-	typeShapesFrozen bool
-	// resolvedStructFieldsMemo stores immutable resolved field lists for finalized types.
-	resolvedStructFieldsMemo map[Type][]moveBindResolvedField
-	// affineHandleMemo caches containsAffineHandleValues per type once typeShapesFrozen.
-	affineHandleMemo map[Type]bool
-	// typeParamMemo caches complete type-parameter graph queries after shapes freeze.
-	typeParamMemo map[Type]bool
-	// retained is non-nil when this analysis is kept for in-place updates (retained_analysis.go).
-	retained            *RetainedAnalysis
-	explicitBackingMemo *regionBackingMemo // live only during inferRegionParamsForGrownContainerParams
-	// preBody stops a scratch analysis after the declaration phase (retained_prebody.go).
-	preBody *preBodyState
-	// Current declaration-phase classification, including local maps that are
-	// otherwise absent from the retained pre-body dependency certificate.
-	preBodyClassify *retainedClassifyState
-	// typeSeenScratch is a reused visited set for containsAffineHandleValues traversals.
-	typeSeenScratch     map[Type]bool
-	typeSeenScratchBusy bool
-	// borrowedOwnerRefMemo caches containsBorrowedOwnerRefValues likewise.
-	borrowedOwnerRefMemo map[Type]bool
-	// regionRefsMemo caches typeCanContainRegionRefs likewise.
-	regionRefsMemo map[Type]bool
-	// abstractParamRegionRefMemo caches complete parameter-provenance layouts for
-	// frozen types. Recursive walk results depend on the current cycle path, so only
-	// roots entered with an empty seen set are memoized.
-	abstractParamRegionRefMemo map[abstractParamRegionRefKey]regionRefState
-	// Frozen layout classifications for safe reference-element summary reuse.
-	abstractRefRestartMemo map[abstractRefRestartKey]bool
-	// regionRefAnyIndexParamFields shares the immutable one-entry wildcard field map for
-	// repeated array-like parameter states during abstract region-reference construction.
-	regionRefAnyIndexParamFields map[int]map[string]regionRefState
-	// mutableBorrowCapabilityMemo caches hasMutableBorrowCapability likewise when no
-	// incremental session supplies its own capability cache.
-	mutableBorrowCapabilityMemo map[Type]bool
-	// containerRegionMemo caches containerRegion per type once typeShapesFrozen.
-	containerRegionMemo map[Type]string
-	// regionPointeesMemo holds completed immutable reachability sets for frozen types.
-	regionPointeesMemo map[regionPointeesMemoKey]regionPointees
-	// storeScanAddressMemo caches root store-scan address reachability once type shapes freeze.
-	// Recursive child results are never memoized under a partial cycle traversal.
-	storeScanAddressMemo map[Type]bool
-	storeScanAddressSeen map[Type]bool
-	// storeScanPlainValueMemo and storeScanProgramLivedMemo cache the two per-type early-outs of
-	// the struct-target store scan's value judgement once type shapes freeze.
-	storeScanPlainValueMemo   map[Type]bool
-	storeScanProgramLivedMemo map[Type]bool
-	storeScanAddressSeenBusy  bool
-	// symbolTypeEpoch changes whenever an existing Symbol's Type is reassigned.
-	symbolTypeEpoch uint64
-	// globalDerivedLoopCandidates caches the global scope's derived-state bindings for
-	// captureDerivedLoopEntry (valid for one globalScope symbolsVersion and symbolTypeEpoch).
-	globalDerivedLoopCandidates derivedLoopCandidates
-	// Parallel body workers read a frozen global symbol table. Cache its local
-	// names per scope/version rather than filtering the entire table per proof.
-	smtGlobalLocalNames smtGlobalLocalNameCache
+	analyzerTypeMemoState
 }

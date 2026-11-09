@@ -68,12 +68,11 @@ func (r *RetainedAnalysis) cleanupPlainBodyRetirement(retirement *retainedPlainB
 	}
 	owner := reflect.ValueOf(retirement.Product.Owner)
 	fields := reflect.ValueOf(r.a).Elem()
-	for i := 0; i < fields.NumField(); i++ {
-		field := fields.Type().Field(i)
+	for _, field := range analyzerStorageFields {
 		if !plainDefaultBodyOwnerField(field.Name) {
 			continue
 		}
-		table := settable(fields.Field(i))
+		table := settable(fields.FieldByIndex(field.Index))
 		if table.Kind() != reflect.Map || !owner.Type().AssignableTo(table.Type().Key()) {
 			return fmt.Errorf("body owner field %s changed schema", field.Name)
 		}
@@ -88,8 +87,8 @@ func (r *RetainedAnalysis) cleanupPlainBodyRetirement(retirement *retainedPlainB
 		if symbol == nil || symbol.Node != retirement.Product.Owner || symbol.Kind == SymbolFunc {
 			continue
 		}
-		for i := 0; i < fields.NumField(); i++ {
-			table := settable(fields.Field(i))
+		for _, field := range analyzerStorageFields {
+			table := settable(fields.FieldByIndex(field.Index))
 			if table.Kind() == reflect.Map && table.Type().Key() == reflect.TypeFor[*Symbol]() && !table.IsNil() {
 				table.SetMapIndex(reflect.ValueOf(symbol), reflect.Value{})
 			}

@@ -154,7 +154,9 @@ func BenchmarkCompilerBuiltinHelperCallsOverlayConstruction(b *testing.B) {
 var returnElementUnknownCloneSink *Analyzer
 
 func BenchmarkReturnElementUnknownOverlayConstruction(b *testing.B) {
-	root := &Analyzer{returnElementStmtUnknown: make(map[*ast.ReturnStmt]bool, 32768)}
+	root := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
+		returnElementStmtUnknown: make(map[*ast.ReturnStmt]bool, 32768),
+	}}
 	for i := 0; i < 32768; i++ {
 		root.returnElementStmtUnknown[&ast.ReturnStmt{}] = true
 	}
@@ -176,7 +178,10 @@ func TestContainerRegionMemoOverlayIsolation(t *testing.T) {
 	inherited := &DArrayType{Region: "outer"}
 	empty := &BuiltinType{Name: "i64"}
 	fresh := &DArrayType{Region: "local"}
-	root := &Analyzer{typeShapesFrozen: true, containerRegionMemo: map[Type]string{inherited: "outer", empty: ""}, storeScanViewOnlyCache: map[Type]bool{empty: true}}
+	root := &Analyzer{analyzerTypeMemoState: analyzerTypeMemoState{
+		typeShapesFrozen: true, containerRegionMemo: map[Type]string{inherited: "outer", empty: ""},
+	},
+		storeScanViewOnlyCache: map[Type]bool{empty: true}}
 	worker := cloneAnalyzerValueForSpecialization(root).Addr().Interface().(*Analyzer)
 	if len(worker.containerRegionMemo) != 0 {
 		t.Fatal("eagerly copied inherited rows")

@@ -10,7 +10,10 @@ import (
 )
 
 func capabilityTestAnalyzer(session *IncrementalAnalysisSession) *Analyzer {
-	return &Analyzer{typeShapesFrozen: true, capabilityQueries: &capabilityQueryInvocation{session: session, local: map[Type]capabilityLocalResult{}}}
+	return &Analyzer{analyzerTypeMemoState: analyzerTypeMemoState{
+		typeShapesFrozen: true,
+	},
+		capabilityQueries: &capabilityQueryInvocation{session: session, local: map[Type]capabilityLocalResult{}}}
 }
 func capabilityTestGraph(mutable bool) Type {
 	scalar := &BuiltinType{Name: "i64"}

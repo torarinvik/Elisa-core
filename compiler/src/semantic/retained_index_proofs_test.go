@@ -51,7 +51,10 @@ func TestRetainedIndexProofOwnershipIncludesDetachedNodes(t *testing.T) {
 	fn, unaffected := &ast.FuncDecl{Name: "folded"}, &ast.FuncDecl{Name: "unaffected"}
 	detached, kept := &ast.IndexExpr{}, &ast.IndexExpr{}
 	retained := &RetainedAnalysis{indexProofsUpdating: true, indexProofsByFunc: map[*ast.FuncDecl]map[*ast.IndexExpr]bool{}}
-	a := &Analyzer{retained: retained, currentFuncDecl: fn}
+	a := &Analyzer{analyzerTypeMemoState: analyzerTypeMemoState{
+		retained: retained,
+	},
+		currentFuncDecl: fn}
 	retained.a = a
 	a.recordIndexBoundsProof(detached)
 	a.currentFuncDecl = unaffected
@@ -71,7 +74,9 @@ func TestRetainedIndexProofKeepsGlobalAndUnchangedHeaderOwnership(t *testing.T) 
 	fn := &ast.FuncDecl{Name: "read"}
 	body, header, global := &ast.IndexExpr{}, &ast.IndexExpr{}, &ast.IndexExpr{}
 	retained := &RetainedAnalysis{indexProofsUpdating: true, indexProofsByFunc: map[*ast.FuncDecl]map[*ast.IndexExpr]bool{}}
-	a := &Analyzer{retained: retained}
+	a := &Analyzer{analyzerTypeMemoState: analyzerTypeMemoState{
+		retained: retained,
+	}}
 	retained.a = a
 	a.recordIndexBoundsProof(global)
 	if owner, present := a.indexBoundsProofOwners[global]; !present || owner != nil || a.indexBoundsProofHeaders[global] {

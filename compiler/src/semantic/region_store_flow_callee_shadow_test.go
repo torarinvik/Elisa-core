@@ -22,8 +22,10 @@ func TestStoreFlowCalleeHonorsCallableShadows(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			a := &Analyzer{
 				funcDeclSymbols: map[*ast.FuncDecl]*Symbol{global: {Type: &FuncType{}}},
-				storeFlowLocals: tc.locals,
-				storeFlowParams: tc.params,
+				analyzerFunctionRegionState: analyzerFunctionRegionState{
+					storeFlowLocals: tc.locals,
+					storeFlowParams: tc.params,
+				},
 			}
 			got := a.storeFlowCallee(call)
 			if (got == global) != tc.wantGlobal {

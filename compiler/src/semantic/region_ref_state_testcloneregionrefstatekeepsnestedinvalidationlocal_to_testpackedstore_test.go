@@ -108,12 +108,14 @@ func TestRegionRefStateForExprAppliesPackedStoreRemapLazily(t *testing.T) {
 
 	a := &Analyzer{
 		currentScope: scope,
-		currentRegionRefs: map[*Symbol]regionRefState{
-			value: {
-				Fields: map[string]regionRefState{
-					"node": {
-						StoreDeps: map[*Symbol]packedStoreDependencyState{
-							from: {Type: originalType},
+		analyzerFunctionRegionState: analyzerFunctionRegionState{
+			currentRegionRefs: map[*Symbol]regionRefState{
+				value: {
+					Fields: map[string]regionRefState{
+						"node": {
+							StoreDeps: map[*Symbol]packedStoreDependencyState{
+								from: {Type: originalType},
+							},
 						},
 					},
 				},
@@ -149,7 +151,7 @@ func TestRegionRefStateForExprAppliesPackedStoreRemapLazily(t *testing.T) {
 }
 func TestCloneRegionRefStatesKeepsFieldInsertionLocal(t *testing.T) {
 	value := &Symbol{Name: "value", Kind: SymbolLocal}
-	a := &Analyzer{
+	a := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
 		currentRegionRefs: map[*Symbol]regionRefState{
 			value: {
 				Fields: map[string]regionRefState{
@@ -159,6 +161,7 @@ func TestCloneRegionRefStatesKeepsFieldInsertionLocal(t *testing.T) {
 				},
 			},
 		},
+	},
 	}
 
 	cloned := a.cloneRegionRefStates()
@@ -177,7 +180,7 @@ func TestCloneRegionRefStatesKeepsFieldInsertionLocal(t *testing.T) {
 func TestCloneRegionRefStatesKeepsDependencyInvalidationLocal(t *testing.T) {
 	value := &Symbol{Name: "value", Kind: SymbolLocal}
 	region := &Symbol{Name: "scratch", Kind: SymbolRegion}
-	a := &Analyzer{
+	a := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
 		currentRegionRefs: map[*Symbol]regionRefState{
 			value: {
 				Deps: map[*Symbol]regionDependencyState{
@@ -185,6 +188,7 @@ func TestCloneRegionRefStatesKeepsDependencyInvalidationLocal(t *testing.T) {
 				},
 			},
 		},
+	},
 	}
 
 	cloned := a.cloneRegionRefStates()
@@ -210,7 +214,7 @@ func TestCloneRegionRefStatesKeepsStoreRemapLocal(t *testing.T) {
 	enumType := &EnumType{Name: "Expr", Packed: true}
 	originalType := &PackedEnumStoreType{Enum: enumType, State: localState}
 	remappedType := &PackedEnumStoreType{Enum: enumType, State: frozenState}
-	a := &Analyzer{
+	a := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
 		currentRegionRefs: map[*Symbol]regionRefState{
 			value: {
 				StoreDeps: map[*Symbol]packedStoreDependencyState{
@@ -218,6 +222,7 @@ func TestCloneRegionRefStatesKeepsStoreRemapLocal(t *testing.T) {
 				},
 			},
 		},
+	},
 	}
 
 	cloned := a.cloneRegionRefStates()
@@ -305,14 +310,16 @@ func TestInstantiateReturnProvenanceKeepsOverlayMutationLocal(t *testing.T) {
 
 	a := &Analyzer{
 		currentScope: scope,
-		currentRegionRefs: map[*Symbol]regionRefState{
-			left: {
-				ParamDeps: intBitSetOf(9),
-			},
-			right: {
-				Fields: map[string]regionRefState{
-					"inner": {
-						ParamDeps: intBitSetOf(7),
+		analyzerFunctionRegionState: analyzerFunctionRegionState{
+			currentRegionRefs: map[*Symbol]regionRefState{
+				left: {
+					ParamDeps: intBitSetOf(9),
+				},
+				right: {
+					Fields: map[string]regionRefState{
+						"inner": {
+							ParamDeps: intBitSetOf(7),
+						},
 					},
 				},
 			},
@@ -357,9 +364,11 @@ func TestInstantiateReturnProvenanceHandlesFieldCycles(t *testing.T) {
 
 	a := &Analyzer{
 		currentScope: scope,
-		currentRegionRefs: map[*Symbol]regionRefState{
-			arg: {
-				ParamDeps: intBitSetOf(9),
+		analyzerFunctionRegionState: analyzerFunctionRegionState{
+			currentRegionRefs: map[*Symbol]regionRefState{
+				arg: {
+					ParamDeps: intBitSetOf(9),
+				},
 			},
 		},
 	}
@@ -398,8 +407,10 @@ func TestInstantiateReturnProvenanceReusesSingleParamSummaryArgState(t *testing.
 	scope.Define(arg)
 
 	a := &Analyzer{
-		currentScope:      scope,
-		currentRegionRefs: map[*Symbol]regionRefState{},
+		currentScope: scope,
+		analyzerFunctionRegionState: analyzerFunctionRegionState{
+			currentRegionRefs: map[*Symbol]regionRefState{},
+		},
 	}
 
 	argState, ok := abstractParamOnlyRegionRefState(regionRefState{
@@ -448,11 +459,13 @@ func TestRecordResolvedRegionRefBindingKeepsNestedFieldMutationLocal(t *testing.
 
 	a := &Analyzer{
 		currentScope: scope,
-		currentRegionRefs: map[*Symbol]regionRefState{
-			src: {
-				Fields: map[string]regionRefState{
-					"left": {
-						ParamDeps: intBitSetOf(0),
+		analyzerFunctionRegionState: analyzerFunctionRegionState{
+			currentRegionRefs: map[*Symbol]regionRefState{
+				src: {
+					Fields: map[string]regionRefState{
+						"left": {
+							ParamDeps: intBitSetOf(0),
+						},
 					},
 				},
 			},

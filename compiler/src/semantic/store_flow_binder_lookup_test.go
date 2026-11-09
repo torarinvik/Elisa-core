@@ -63,7 +63,9 @@ func TestStoreFlowScalarNamesMatchesOriginalCalculation(t *testing.T) {
 		},
 		rangeNames: []string{"range"}, other: []string{"shadow"}, untyped: map[string]bool{"shadow": true},
 	}
-	a := &Analyzer{storeFlowBinderIndexes: map[*ast.FuncDecl]*storeFlowBinderIndex{decl: idx}}
+	a := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
+		storeFlowBinderIndexes: map[*ast.FuncDecl]*storeFlowBinderIndex{decl: idx},
+	}}
 	want := idx.typedNames(storeFlowScalarTypeExpr)
 	total, pointerFree := map[string]int{}, map[string]int{}
 	for _, binder := range idx.typed {

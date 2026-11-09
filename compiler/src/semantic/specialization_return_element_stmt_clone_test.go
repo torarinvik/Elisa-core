@@ -59,7 +59,9 @@ def foreign(value: i64) -> i64:
 	}
 	root.analyzer.returnElementSummaries = map[*ast.FuncDecl]regionRefState{foreign: nested}
 	for _, source := range []map[*ast.ReturnStmt]regionRefState{nil, {}} {
-		clone := cloneAnalyzerValueForSpecialization(&Analyzer{returnElementStmtStates: source}).Addr().Interface().(*Analyzer)
+		clone := cloneAnalyzerValueForSpecialization(&Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
+			returnElementStmtStates: source,
+		}}).Addr().Interface().(*Analyzer)
 		if (source == nil) != (clone.returnElementStmtStates == nil) || len(clone.returnElementStmtStates) != 0 {
 			t.Fatal("return-statement state clone changed nil/empty shape")
 		}
@@ -232,7 +234,9 @@ var specializationReturnElementStmtCloneSink *Analyzer
 
 func BenchmarkSpecializationSyntheticReturnElementStmtStateClone(b *testing.B) {
 	for _, foreignRows := range []int{0, 290} {
-		root := &Analyzer{returnElementStmtStates: make(map[*ast.ReturnStmt]regionRefState, foreignRows)}
+		root := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
+			returnElementStmtStates: make(map[*ast.ReturnStmt]regionRefState, foreignRows),
+		}}
 		for i := 0; i < foreignRows; i++ {
 			root.returnElementStmtStates[&ast.ReturnStmt{}] = regionRefState{Fields: map[string]regionRefState{
 				"nested": {ParamDeps: intBitSetOf(130)},

@@ -23,7 +23,9 @@ func TestAbstractGenericProvenanceSkipsScalarFields(t *testing.T) {
 		for _, argument := range []Type{&BuiltinType{Name: "i64"}, &SViewType{}, &RefType{Elem: &BuiltinType{Name: "i64"}, State: RefStateNonNull}} {
 			typ := genericProvenanceCapacityFixture().(*GenericInstanceType)
 			typ.Args[0] = argument
-			a := &Analyzer{typeShapesFrozen: frozen}
+			a := &Analyzer{analyzerTypeMemoState: analyzerTypeMemoState{
+				typeShapesFrozen: frozen,
+			}}
 			state, ok := a.abstractParamRegionRefState(typ, 3, map[string]bool{"parent": true})
 			wantFields := 2
 			if IsNumericType(argument) {
@@ -40,7 +42,9 @@ func TestAbstractGenericProvenanceSkipsScalarFields(t *testing.T) {
 }
 
 func BenchmarkAbstractGenericProvenanceCapacity(b *testing.B) {
-	a := &Analyzer{typeShapesFrozen: true}
+	a := &Analyzer{analyzerTypeMemoState: analyzerTypeMemoState{
+		typeShapesFrozen: true,
+	}}
 	typ := genericProvenanceCapacityFixture()
 	seen := map[string]bool{"parent": true}
 	b.ReportAllocs()

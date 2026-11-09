@@ -29,15 +29,6 @@ func cloneAnalyzerValueForSpecialization(a *Analyzer) reflect.Value {
 	return cloneAnalyzerValueForParallelPolicy(a, true, true)
 }
 
-var parallelAnalyzerFieldNames = func() []string {
-	t := reflect.TypeFor[Analyzer]()
-	names := make([]string, t.NumField())
-	for i := range names {
-		names[i] = t.Field(i).Name
-	}
-	return names
-}()
-
 func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunctionAnalyses bool) reflect.Value {
 	if a == nil {
 		return reflect.Value{}
@@ -49,17 +40,17 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 	// Preserve deepCloneValue's value policy if OptimizationFacts ever grows
 	// inline maps/slices: that schema keeps the ordinary reflective copy.
 	useExprFactsOverlay := ownedFunctionAnalyses && !typeHoldsMapInline(reflect.TypeFor[OptimizationFacts]())
-	for i := 0; i < source.NumField(); i++ {
-		field := source.Field(i)
-		name := parallelAnalyzerFieldNames[i]
+	for _, schema := range analyzerStorageFields {
+		field := source.FieldByIndex(schema.Index)
+		name := schema.Name
 		if ownedFunctionAnalyses && name == "proofLifecycle" {
 			// The private construction journal contains only concrete work;
 			// publication retains the canonical Result's full public report.
-			settable(cloned.Field(i)).Set(reflect.ValueOf(a.specializationProofReportLifecycle()))
+			settable(cloned.FieldByIndex(schema.Index)).Set(reflect.ValueOf(a.specializationProofReportLifecycle()))
 			continue
 		}
 		if name == "proofLifecycle" {
-			settable(cloned.Field(i)).Set(reflect.ValueOf(a.forkProofReportLifecycle()))
+			settable(cloned.FieldByIndex(schema.Index)).Set(reflect.ValueOf(a.forkProofReportLifecycle()))
 			continue
 		}
 		if ownedFunctionAnalyses && name == "proofReport" {
@@ -67,14 +58,14 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			// Published specialization views inherit the complete canonical
 			// Result report and summary, then discard this analyzer. Borrowing
 			// its event prefix would copy the whole program on the first append.
-			settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+			settable(cloned.FieldByIndex(schema.Index)).Set(reflect.Zero(field.Type()))
 			continue
 		}
 		if ownedFunctionAnalyses && name == "visibleCandidates" {
 			// This memo contains only candidate names derived from lexical
 			// context and aliases. Rebuild the few private lookups on demand
 			// instead of copying every context/name table in the program.
-			settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+			settable(cloned.FieldByIndex(schema.Index)).Set(reflect.Zero(field.Type()))
 			continue
 		}
 		if ownedFunctionAnalyses && name == "headerFunctionNames" {
@@ -87,46 +78,46 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			// Reanalysis must re-emit its own errors, even when position/text
 			// matches an inherited canonical diagnostic. Skip before cloning
 			// either the inherited slice or its potentially large dedup map.
-			settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+			settable(cloned.FieldByIndex(schema.Index)).Set(reflect.Zero(field.Type()))
 			continue
 		}
 		if name == "optimizationSymbolIdentityOverlay" {
-			settable(cloned.Field(i)).Set(reflect.ValueOf(cloneAnalyzerOptimizationSymbolIdentityOverlay(a.optimizationSymbolIdentityOverlay)))
+			settable(cloned.FieldByIndex(schema.Index)).Set(reflect.ValueOf(cloneAnalyzerOptimizationSymbolIdentityOverlay(a.optimizationSymbolIdentityOverlay)))
 			continue
 		}
 		if ownedFunctionAnalyses && name == "optimizationSymbolIDs" {
 			if field.IsNil() {
-				settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+				settable(cloned.FieldByIndex(schema.Index)).Set(reflect.Zero(field.Type()))
 			} else {
-				settable(cloned.Field(i)).Set(reflect.MakeMap(field.Type()))
+				settable(cloned.FieldByIndex(schema.Index)).Set(reflect.MakeMap(field.Type()))
 			}
 			continue
 		}
 		if name == "storeScanBinderOverlay" {
-			settable(cloned.Field(i)).Set(reflect.ValueOf(cloneAnalyzerStoreScanBinderOverlay(a.storeScanBinderOverlay)))
+			settable(cloned.FieldByIndex(schema.Index)).Set(reflect.ValueOf(cloneAnalyzerStoreScanBinderOverlay(a.storeScanBinderOverlay)))
 			continue
 		}
 		if name == "storeScanParamFactsOverlay" {
-			settable(cloned.Field(i)).Set(reflect.ValueOf(cloneAnalyzerStoreScanParamFactsOverlay(a.storeScanParamFactsOverlay)))
+			settable(cloned.FieldByIndex(schema.Index)).Set(reflect.ValueOf(cloneAnalyzerStoreScanParamFactsOverlay(a.storeScanParamFactsOverlay)))
 			continue
 		}
 		if name == "noStorageOverlay" {
-			settable(cloned.Field(i)).Set(reflect.ValueOf(cloneAnalyzerNoStorageOverlay(a.noStorageOverlay)))
+			settable(cloned.FieldByIndex(schema.Index)).Set(reflect.ValueOf(cloneAnalyzerNoStorageOverlay(a.noStorageOverlay)))
 			continue
 		}
 		if ownedFunctionAnalyses && name == "storeScanBinderTypes" {
 			if field.IsNil() {
-				settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+				settable(cloned.FieldByIndex(schema.Index)).Set(reflect.Zero(field.Type()))
 			} else {
-				settable(cloned.Field(i)).Set(reflect.MakeMap(field.Type()))
+				settable(cloned.FieldByIndex(schema.Index)).Set(reflect.MakeMap(field.Type()))
 			}
 			continue
 		}
 		if ownedFunctionAnalyses && (name == "storeScanNoStorageCache" || name == "containerRegionMemo" || name == "storeScanCache") {
 			if field.IsNil() {
-				settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+				settable(cloned.FieldByIndex(schema.Index)).Set(reflect.Zero(field.Type()))
 			} else {
-				settable(cloned.Field(i)).Set(reflect.MakeMap(field.Type()))
+				settable(cloned.FieldByIndex(schema.Index)).Set(reflect.MakeMap(field.Type()))
 			}
 			continue
 		}
@@ -135,9 +126,9 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			// rows through noStorageOverlay and keep new rows private to this
 			// specialization instead of copying the whole program cache.
 			if field.IsNil() {
-				settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+				settable(cloned.FieldByIndex(schema.Index)).Set(reflect.Zero(field.Type()))
 			} else {
-				settable(cloned.Field(i)).Set(reflect.MakeMap(field.Type()))
+				settable(cloned.FieldByIndex(schema.Index)).Set(reflect.MakeMap(field.Type()))
 			}
 			continue
 		}
@@ -146,9 +137,9 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			// specialization. Keep the whole-program canonical table as a
 			// read-only overlay base instead of cloning every helper call.
 			if field.IsNil() {
-				settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+				settable(cloned.FieldByIndex(schema.Index)).Set(reflect.Zero(field.Type()))
 			} else {
-				settable(cloned.Field(i)).Set(reflect.MakeMap(field.Type()))
+				settable(cloned.FieldByIndex(schema.Index)).Set(reflect.MakeMap(field.Type()))
 			}
 			continue
 		}
@@ -156,9 +147,9 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			// copyDecl rekeys only owned return rows. Inherit the remaining
 			// whole-program facts through the overlay base instead of copying all.
 			if field.IsNil() {
-				settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+				settable(cloned.FieldByIndex(schema.Index)).Set(reflect.Zero(field.Type()))
 			} else {
-				settable(cloned.Field(i)).Set(reflect.MakeMap(field.Type()))
+				settable(cloned.FieldByIndex(schema.Index)).Set(reflect.MakeMap(field.Type()))
 			}
 			continue
 		}
@@ -167,9 +158,9 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			// re-analyzes its private syntax and publishes the canonical summary,
 			// so start with a private empty ledger instead of copying every site.
 			if field.IsNil() {
-				settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+				settable(cloned.FieldByIndex(schema.Index)).Set(reflect.Zero(field.Type()))
 			} else {
-				settable(cloned.Field(i)).Set(reflect.MakeMap(field.Type()))
+				settable(cloned.FieldByIndex(schema.Index)).Set(reflect.MakeMap(field.Type()))
 			}
 			continue
 		}
@@ -177,58 +168,58 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			// This reachability memo is shared as an immutable base. Keep only
 			// private rows produced while analyzing the concrete specialization.
 			if field.IsNil() {
-				settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+				settable(cloned.FieldByIndex(schema.Index)).Set(reflect.Zero(field.Type()))
 			} else {
-				settable(cloned.Field(i)).Set(reflect.MakeMap(field.Type()))
+				settable(cloned.FieldByIndex(schema.Index)).Set(reflect.MakeMap(field.Type()))
 			}
 			continue
 		}
 		if name == "iterBinderElementOverlay" {
-			settable(cloned.Field(i)).Set(reflect.ValueOf(cloneAnalyzerIterBinderElementOverlay(a.iterBinderElementOverlay)))
+			settable(cloned.FieldByIndex(schema.Index)).Set(reflect.ValueOf(cloneAnalyzerIterBinderElementOverlay(a.iterBinderElementOverlay)))
 			continue
 		}
 		if ownedFunctionAnalyses && (name == "iterBinderElementStates" || name == "iterBindingSources") {
 			if field.IsNil() {
-				settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+				settable(cloned.FieldByIndex(schema.Index)).Set(reflect.Zero(field.Type()))
 			} else {
-				settable(cloned.Field(i)).Set(reflect.MakeMap(field.Type()))
+				settable(cloned.FieldByIndex(schema.Index)).Set(reflect.MakeMap(field.Type()))
 			}
 			continue
 		}
 		if name == "exprFactsOverlay" {
-			settable(cloned.Field(i)).Set(reflect.ValueOf(cloneAnalyzerExprFactsOverlay(a.exprFactsOverlay)))
+			settable(cloned.FieldByIndex(schema.Index)).Set(reflect.ValueOf(cloneAnalyzerExprFactsOverlay(a.exprFactsOverlay)))
 			continue
 		}
 		if useExprFactsOverlay && (name == "exprFacts" || name == "symbolFacts") {
 			if field.IsNil() {
-				settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+				settable(cloned.FieldByIndex(schema.Index)).Set(reflect.Zero(field.Type()))
 			} else {
-				settable(cloned.Field(i)).Set(reflect.MakeMap(field.Type()))
+				settable(cloned.FieldByIndex(schema.Index)).Set(reflect.MakeMap(field.Type()))
 			}
 			continue
 		}
 		if name == "exprTypeOverlay" {
-			settable(cloned.Field(i)).Set(reflect.ValueOf(cloneAnalyzerExprTypeOverlay(a.exprTypeOverlay)))
+			settable(cloned.FieldByIndex(schema.Index)).Set(reflect.ValueOf(cloneAnalyzerExprTypeOverlay(a.exprTypeOverlay)))
 			continue
 		}
 		if ownedFunctionAnalyses && name == "exprTypes" {
 			// Private observations only: canonical reads use the immutable base.
 			// Skip its entire map before reflective cloning or typed cloning.
 			if field.IsNil() {
-				settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+				settable(cloned.FieldByIndex(schema.Index)).Set(reflect.Zero(field.Type()))
 			} else {
-				settable(cloned.Field(i)).Set(reflect.MakeMap(field.Type()))
+				settable(cloned.FieldByIndex(schema.Index)).Set(reflect.MakeMap(field.Type()))
 			}
 			continue
 		}
 		if ownedFunctionAnalyses && name == "storeScanParamFactsCache" {
-			settable(cloned.Field(i)).Set(reflect.ValueOf(cloneStoreScanParamFactsConstructionMap(a.storeScanParamFactsCache, specializationParamFactsCopySchemaValid)))
+			settable(cloned.FieldByIndex(schema.Index)).Set(reflect.ValueOf(cloneStoreScanParamFactsConstructionMap(a.storeScanParamFactsCache, specializationParamFactsCopySchemaValid)))
 			continue
 		}
 		if ownedFunctionAnalyses && name == "functionAnalyses" {
 			// Skip BEFORE deepCloneValue: cloning then clearing still performs
 			// a whole-program map traversal in the serialized specialization path.
-			settable(cloned.Field(i)).Set(reflect.MakeMap(field.Type()))
+			settable(cloned.FieldByIndex(schema.Index)).Set(reflect.MakeMap(field.Type()))
 			continue
 		}
 		if ownedFunctionAnalyses && name == "regionStacks" {
@@ -236,9 +227,9 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			// from the canonical source. Private analysis only writes fresh rows;
 			// published queries inherit foreign assignments through the root view.
 			if field.IsNil() {
-				settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+				settable(cloned.FieldByIndex(schema.Index)).Set(reflect.Zero(field.Type()))
 			} else {
-				settable(cloned.Field(i)).Set(reflect.MakeMap(field.Type()))
+				settable(cloned.FieldByIndex(schema.Index)).Set(reflect.MakeMap(field.Type()))
 			}
 			continue
 		}
@@ -249,9 +240,9 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			// shadows and recompute those rows on demand. Keep this map private so
 			// fresh memo entries cannot mutate the canonical analyzer.
 			if field.IsNil() {
-				settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+				settable(cloned.FieldByIndex(schema.Index)).Set(reflect.Zero(field.Type()))
 			} else {
-				settable(cloned.Field(i)).Set(reflect.MakeMap(field.Type()))
+				settable(cloned.FieldByIndex(schema.Index)).Set(reflect.MakeMap(field.Type()))
 			}
 			continue
 		}
@@ -260,59 +251,59 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			// syntax. Unrelated functions' rows are never queried during private
 			// specialization analysis, so avoid cloning the whole-program map.
 			if field.IsNil() {
-				settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+				settable(cloned.FieldByIndex(schema.Index)).Set(reflect.Zero(field.Type()))
 			} else {
-				settable(cloned.Field(i)).Set(reflect.MakeMap(field.Type()))
+				settable(cloned.FieldByIndex(schema.Index)).Set(reflect.MakeMap(field.Type()))
 			}
 			continue
 		}
 		if ownedFunctionAnalyses && name == "storeScanBoundCache" {
 			// Settled name sets are read-only; only publish new rows privately.
-			settable(cloned.Field(i)).Set(reflect.ValueOf(maps.Clone(a.storeScanBoundCache)))
+			settable(cloned.FieldByIndex(schema.Index)).Set(reflect.ValueOf(maps.Clone(a.storeScanBoundCache)))
 			continue
 		}
 		if ownedFunctionAnalyses && name == "funcDeclUsings" {
 			// Usings are installed as fresh slices and only read (or copied into a
 			// resolution context). Keep the index private for declaration edits,
 			// while sharing its immutable per-declaration rows.
-			settable(cloned.Field(i)).Set(reflect.ValueOf(maps.Clone(a.funcDeclUsings)))
+			settable(cloned.FieldByIndex(schema.Index)).Set(reflect.ValueOf(maps.Clone(a.funcDeclUsings)))
 			continue
 		}
 		if name == "retained" {
 			// The retained analysis owns the whole analyzer; a worker records into a
 			// shell of its own (analyzeDeclsParallel), merged back after the join.
-			settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+			settable(cloned.FieldByIndex(schema.Index)).Set(reflect.Zero(field.Type()))
 			continue
 		}
 		if useMemoOverlays && (name == "smtSolver" || name == "smtStats") {
 			// A parent's live solver serializes all checks behind its mutex.
 			// Workers own lazy solver sessions and account only their own work.
-			settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+			settable(cloned.FieldByIndex(schema.Index)).Set(reflect.Zero(field.Type()))
 			continue
 		}
 		if useMemoOverlays && name == "storeScanTaintCache" {
 			// Published taint sets are read-only. Only the cache's outer map
 			// receives new entries, so give each worker an independent map
 			// while preserving the settled sets (and their internal sharing).
-			settable(cloned.Field(i)).Set(reflect.ValueOf(maps.Clone(a.storeScanTaintCache)))
+			settable(cloned.FieldByIndex(schema.Index)).Set(reflect.ValueOf(maps.Clone(a.storeScanTaintCache)))
 			continue
 		}
 		if useMemoOverlays && name == "storeFlowSummaries" {
 			if ownedFunctionAnalyses {
-				settable(cloned.Field(i)).Set(reflect.ValueOf(cloneStoreFlowSummariesForSpecialization(a.storeFlowSummaries)))
+				settable(cloned.FieldByIndex(schema.Index)).Set(reflect.ValueOf(cloneStoreFlowSummariesForSpecialization(a.storeFlowSummaries)))
 			} else {
-				settable(cloned.Field(i)).Set(reflect.ValueOf(cloneStoreFlowSummariesForBodyWorker(a.storeFlowSummaries)))
+				settable(cloned.FieldByIndex(schema.Index)).Set(reflect.ValueOf(cloneStoreFlowSummariesForBodyWorker(a.storeFlowSummaries)))
 			}
 			continue
 		}
 		// These caches contain lazily populated maps/slices behind pointers.
 		// Rebuild them privately rather than sharing mutable pointer values.
 		if useMemoOverlays && parallelBodyWorkerRebuildMap(name) {
-			settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+			settable(cloned.FieldByIndex(schema.Index)).Set(reflect.Zero(field.Type()))
 			continue
 		}
 		if useMemoOverlays && parallelBodyMemoMap(name) {
-			settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+			settable(cloned.FieldByIndex(schema.Index)).Set(reflect.Zero(field.Type()))
 			continue
 		}
 		if shareDeclarationMaps && field.Kind() == reflect.Map && !field.IsNil() && parallelDeclarationMapIsReadOnly(name) {
@@ -352,13 +343,13 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			// Filled-local rows are completed fixed-point results. The scanner
 			// only reads them after publication, so copy the mutable cache header
 			// and share its immutable result sets.
-			settable(cloned.Field(i)).Set(reflect.ValueOf(maps.Clone(a.storeScanFilledCache)))
+			settable(cloned.FieldByIndex(schema.Index)).Set(reflect.ValueOf(maps.Clone(a.storeScanFilledCache)))
 			continue
 		}
 		if ownedFunctionAnalyses && cloneSpecializationOpaqueMap(cloned.Addr().Interface().(*Analyzer), a, name, field) {
 			continue
 		}
-		settable(cloned.Field(i)).Set(deepCloneValue(settable(field)))
+		settable(cloned.FieldByIndex(schema.Index)).Set(deepCloneValue(settable(field)))
 	}
 	if ownedFunctionAnalyses {
 		worker := cloned.Addr().Interface().(*Analyzer)

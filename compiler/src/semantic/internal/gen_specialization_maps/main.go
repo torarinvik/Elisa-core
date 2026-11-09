@@ -16,37 +16,62 @@ import (
 	"strings"
 )
 
-func generate(source []byte) ([]byte, error) {
-	f, err := parser.ParseFile(token.NewFileSet(), "analyzer.go", source, 0)
-	if err != nil {
-		return nil, err
-	}
-	var fields []string
-	for _, decl := range f.Decls {
-		group, ok := decl.(*ast.GenDecl)
-		if !ok {
-			continue
+func generate(source []byte, additional ...[]byte) ([]byte, error) {
+	types := map[string]*ast.StructType{}
+	for _, input := range append([][]byte{source}, additional...) {
+		f, err := parser.ParseFile(token.NewFileSet(), "analyzer state", input, 0)
+		if err != nil {
+			return nil, err
 		}
-		for _, spec := range group.Specs {
-			typ, ok := spec.(*ast.TypeSpec)
-			if !ok || typ.Name.Name != "Analyzer" {
+		for _, decl := range f.Decls {
+			group, ok := decl.(*ast.GenDecl)
+			if !ok {
 				continue
 			}
-			body, ok := typ.Type.(*ast.StructType)
-			if !ok {
-				return nil, fmt.Errorf("Analyzer must be a struct")
-			}
-			for _, field := range body.Fields.List {
-				if _, ok := field.Type.(*ast.MapType); !ok {
-					continue // Unknown/named resource shapes retain reflective fallback.
+			for _, spec := range group.Specs {
+				typ, ok := spec.(*ast.TypeSpec)
+				if !ok {
+					continue
 				}
-				for _, name := range field.Names {
-					if name.Name != "exprTypes" && name.Name != "exprFacts" && name.Name != "iterBinderElementStates" && name.Name != "optimizationSymbolIDs" && name.Name != "storeScanBinderTypes" && name.Name != "storeScanParamFactsCache" && name.Name != "functionAnalyses" {
-						fields = append(fields, name.Name)
-					}
+				if body, ok := typ.Type.(*ast.StructType); ok {
+					types[typ.Name.Name] = body
 				}
 			}
 		}
+	}
+	analyzer, ok := types["Analyzer"]
+	if !ok {
+		return nil, fmt.Errorf("Analyzer must be a struct")
+	}
+	var fields []string
+	var collect func(*ast.StructType) error
+	collect = func(body *ast.StructType) error {
+		for _, field := range body.Fields.List {
+			if len(field.Names) == 0 {
+				if name, ok := field.Type.(*ast.Ident); ok && strings.HasPrefix(name.Name, "analyzer") && strings.HasSuffix(name.Name, "State") {
+					nested, found := types[name.Name]
+					if !found {
+						return fmt.Errorf("missing embedded Analyzer state %s", name.Name)
+					}
+					if err := collect(nested); err != nil {
+						return err
+					}
+				}
+				continue
+			}
+			if _, ok := field.Type.(*ast.MapType); !ok {
+				continue
+			}
+			for _, name := range field.Names {
+				if name.Name != "exprTypes" && name.Name != "exprFacts" && name.Name != "iterBinderElementStates" && name.Name != "optimizationSymbolIDs" && name.Name != "storeScanBinderTypes" && name.Name != "storeScanParamFactsCache" && name.Name != "functionAnalyses" {
+					fields = append(fields, name.Name)
+				}
+			}
+		}
+		return nil
+	}
+	if err := collect(analyzer); err != nil {
+		return nil, err
 	}
 	if len(fields) == 0 {
 		return nil, fmt.Errorf("no direct Analyzer maps found")
@@ -125,7 +150,19 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	generated, err := generate(source)
+	statePaths, err := filepath.Glob(filepath.Join(filepath.Dir(*input), "analyzer_*_state.go"))
+	if err != nil {
+		panic(err)
+	}
+	var stateSources [][]byte
+	for _, path := range statePaths {
+		state, err := os.ReadFile(path)
+		if err != nil {
+			panic(err)
+		}
+		stateSources = append(stateSources, state)
+	}
+	generated, err := generate(source, stateSources...)
 	if err != nil {
 		panic(err)
 	}

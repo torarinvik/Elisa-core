@@ -41,7 +41,10 @@ func TestSMTBitvectorAbstractionProvesMaskBoundCheaply(t *testing.T) {
 func TestSMTBitvectorAbstractionSharesSatWithoutModel(t *testing.T) {
 	shared, dir := &sync.Map{}, t.TempDir()
 	worker := func() *Analyzer {
-		return &Analyzer{smtProofCache: &smtProofCache{directory: dir, identity: "solver"}, parallel: &parallelWorkerState{smtFlights: shared}}
+		return &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
+			smtProofCache: &smtProofCache{directory: dir, identity: "solver"},
+		},
+			parallel: &parallelWorkerState{smtFlights: shared}}
 	}
 	goal := "(assert (not (< key_index keys_len)))"
 	query := "(declare-const h Int)\n(declare-const mask Int)\n(declare-const key_index Int)\n(declare-const keys_len Int)\n" +

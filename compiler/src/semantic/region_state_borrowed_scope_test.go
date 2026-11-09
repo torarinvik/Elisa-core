@@ -28,7 +28,10 @@ func TestBorrowedRegionStateMutationsKeepCallerIsolated(t *testing.T) {
 			scope.Define(child)
 			scope.Define(parent)
 			caller := map[*Symbol]regionState{child: initial, parent: initial}
-			a := &Analyzer{currentScope: scope, currentRegions: caller}
+			a := &Analyzer{currentScope: scope,
+				analyzerFunctionRegionState: analyzerFunctionRegionState{
+					currentRegions: caller,
+				}}
 			a.borrowRegionStates()
 			test.mutate(a)
 			if !test.changed(a) {
@@ -49,7 +52,10 @@ func TestRegionStateBlockMutationAndBorrowedOwnershipRestore(t *testing.T) {
 	scope := NewScope(nil)
 	scope.Define(sym)
 	caller := map[*Symbol]regionState{sym: {Generation: 1}}
-	a := &Analyzer{currentScope: scope, currentRegions: caller}
+	a := &Analyzer{currentScope: scope,
+		analyzerFunctionRegionState: analyzerFunctionRegionState{
+			currentRegions: caller,
+		}}
 	a.borrowRegionStates()
 	stmts := []ast.Stmt{&ast.DestroyStmt{Name: "owner"}}
 	a.analyzeBlockWithRegionClone(stmts, scope)

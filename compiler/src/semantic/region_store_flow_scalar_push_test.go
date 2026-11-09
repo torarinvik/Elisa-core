@@ -12,9 +12,12 @@ func TestStoreFlowGenericDarrayPushRetainsNumericAddressExpressions(t *testing.T
 			cast := &ast.CastExpr{Operand: source, Target: &ast.NamedType{Name: numeric}, Origin: ast.CastExprOriginExplicitCast}
 			for _, expr := range []ast.Expr{cast, &ast.BinaryExpr{Left: cast, Right: &ast.IntLit{Value: "0"}}, &ast.CallExpr{Func: &ast.Ident{Name: "encode"}, Args: []ast.Expr{source}}} {
 				receiver := &ast.Ident{Name: "target"}
-				a := &Analyzer{storeFlowDarrays: map[string]bool{"target": true}, exprTypes: map[ast.Expr]Type{
-					receiver: &DArrayType{Elem: &TypeParamType{Name: "E"}}, source: &RefType{Elem: &BuiltinType{Name: "u8"}}, expr: &BuiltinType{Name: numeric}, cast: &BuiltinType{Name: numeric},
-				}}
+				a := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
+					storeFlowDarrays: map[string]bool{"target": true},
+				},
+					exprTypes: map[ast.Expr]Type{
+						receiver: &DArrayType{Elem: &TypeParamType{Name: "E"}}, source: &RefType{Elem: &BuiltinType{Name: "u8"}}, expr: &BuiltinType{Name: numeric}, cast: &BuiltinType{Name: numeric},
+					}}
 				call := &ast.CallExpr{Func: &ast.FieldExpr{Object: receiver, Field: "push"}, Args: []ast.Expr{expr}}
 				c := &storeFlowCtx{written: map[string]bool{"target": true}, scalars: map[string]bool{}}
 				ret, handled := a.applyCallStoreFlow(call, c, map[*ast.CallExpr][]string{})

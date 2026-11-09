@@ -13,7 +13,9 @@ func BenchmarkSpecializationIterBinderConstruction(b *testing.B) {
 	for depth := 0; depth < 5; depth++ {
 		value = regionRefState{Fields: map[string]regionRefState{"left": value, "right": value}}
 	}
-	source := &Analyzer{iterBinderElementStates: map[*Symbol]regionRefState{}}
+	source := &Analyzer{analyzerFunctionRegionState: analyzerFunctionRegionState{
+		iterBinderElementStates: map[*Symbol]regionRefState{},
+	}}
 	for i := 0; i < 512; i++ {
 		source.iterBinderElementStates[&Symbol{Name: fmt.Sprint(i)}] = value
 	}

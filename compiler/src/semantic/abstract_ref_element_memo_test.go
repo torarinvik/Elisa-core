@@ -45,7 +45,9 @@ func TestAbstractRefElementSummaryMatchesUncachedWalk(t *testing.T) {
 		for _, param := range []int{0, 3, 70, 135} {
 			baseline := &Analyzer{}
 			want, known := baseline.abstractParamRegionRefStateWalk(typ, param, map[string]bool{})
-			optimized := &Analyzer{typeShapesFrozen: true}
+			optimized := &Analyzer{analyzerTypeMemoState: analyzerTypeMemoState{
+				typeShapesFrozen: true,
+			}}
 			// A cached standalone element must not bypass a recursive or
 			// nominal marker introduced by a later reference traversal.
 			optimized.abstractParamRegionRefState(typ.Elem, param, nil)
@@ -63,7 +65,9 @@ var abstractRefElementSink regionRefState
 
 func BenchmarkAbstractRefElementSummary(b *testing.B) {
 	_, typ := refElementFixture()
-	a := &Analyzer{typeShapesFrozen: true}
+	a := &Analyzer{analyzerTypeMemoState: analyzerTypeMemoState{
+		typeShapesFrozen: true,
+	}}
 	seen := map[string]bool{}
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -78,7 +82,9 @@ func BenchmarkAbstractRefElementSummary(b *testing.B) {
 
 func TestAbstractRefElementMemoSharesOnlyIndependentFrozenFields(t *testing.T) {
 	base, firstRef := refElementFixture()
-	a := &Analyzer{typeShapesFrozen: true}
+	a := &Analyzer{analyzerTypeMemoState: analyzerTypeMemoState{
+		typeShapesFrozen: true,
+	}}
 	first, _ := a.abstractParamRegionRefStateWalk(firstRef, 3, map[string]bool{})
 	second, _ := a.abstractParamRegionRefStateWalk(&RefType{Elem: base, Mutable: true, State: RefStateNonNull}, 3, map[string]bool{})
 	if regionRefFieldsIdentity(first.Fields) == 0 || regionRefFieldsIdentity(first.Fields) != regionRefFieldsIdentity(second.Fields) {
@@ -103,7 +109,9 @@ func TestAbstractRefElementMemoSharesOnlyIndependentFrozenFields(t *testing.T) {
 func TestAbstractRefRestartMemoUsesFrozenWorkerBase(t *testing.T) {
 	element, ref := refElementFixture()
 	key := abstractRefRestartKey{element, ref.String()}
-	base := &Analyzer{typeShapesFrozen: true, abstractRefRestartMemo: map[abstractRefRestartKey]bool{key: false}}
+	base := &Analyzer{analyzerTypeMemoState: analyzerTypeMemoState{
+		typeShapesFrozen: true, abstractRefRestartMemo: map[abstractRefRestartKey]bool{key: false},
+	}}
 	worker := cloneAnalyzerValueForBodyWorker(base).Addr().Interface().(*Analyzer)
 	if worker.abstractRefRestartMemo != nil {
 		t.Fatal("worker copied the frozen restart cache")
