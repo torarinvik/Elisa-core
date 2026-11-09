@@ -216,7 +216,7 @@ func TestAnalyzerExprTypeReadsUseClosedOverlayAPI(t *testing.T) {
 	boundary := map[string]map[string]bool{
 		"analyzer_expr_type_overlay.go": {"lookupExprType": true, "deleteExprType": true, "rangeExprTypes": true},
 		"parallel_body_worker_clone.go": {"cloneAnalyzerValueForParallelPolicy": true},
-		"analyzer.go":                   {"finishProgramResult": true},
+		"analyzer_pipeline.go":          {"finishProgramResult": true},
 	}
 	for _, entry := range entries {
 		if !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {

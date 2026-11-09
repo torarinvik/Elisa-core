@@ -287,7 +287,7 @@ func TestAnalyzerExprFactAccessUsesClosedOverlayAPI(t *testing.T) {
 	boundary := map[string]map[string]bool{
 		"analyzer_expr_facts_overlay.go": {"lookupExprFacts": true, "setExprFacts": true, "deleteExprFacts": true, "rangeExprFacts": true, "exprFactsLen": true, "hasExprFactsStorage": true},
 		"parallel_body_worker_clone.go":  {"cloneAnalyzerValueForParallelPolicy": true},
-		"analyzer.go":                    {"finishProgramResult": true},
+		"analyzer_pipeline.go":           {"finishProgramResult": true},
 	}
 	for _, entry := range entries {
 		if !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
@@ -326,7 +326,7 @@ func TestAnalyzerExprFactAccessUsesClosedOverlayAPI(t *testing.T) {
 				}
 			}
 			if pair, ok := node.(*goast.KeyValueExpr); ok {
-				if key, ok := pair.Key.(*goast.Ident); ok && key.Name == "exprFacts" && !(entry.Name() == "analyzer.go" && function == "analyzeWithLookupRecorder") {
+				if key, ok := pair.Key.(*goast.Ident); ok && key.Name == "exprFacts" && !(entry.Name() == "analyzer_pipeline.go" && function == "analyzeWithLookupRecorder") {
 					t.Errorf("Analyzer fact-map initializer needs explicit canonical-owner policy at %s", set.Position(pair.Pos()))
 				}
 			}
