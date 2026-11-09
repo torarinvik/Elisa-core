@@ -12,6 +12,7 @@ import (
 	"go/token"
 	"go/types"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -326,7 +327,26 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	if err = os.WriteFile("src/ast/syntax_snapshot_gen.go", source, 0644); err != nil {
+	parts, err := splitGenerated(source)
+	if err != nil {
 		panic(err)
+	}
+	existing, err := filepath.Glob("src/ast/syntax_snapshot_part_*_gen.go")
+	if err != nil {
+		panic(err)
+	}
+	wanted := make(map[string]bool, len(parts))
+	for _, part := range parts {
+		wanted[part.name] = true
+		if err := os.WriteFile(part.name, part.data, 0644); err != nil {
+			panic(err)
+		}
+	}
+	for _, path := range existing {
+		if !wanted[path] {
+			if err := os.Remove(path); err != nil {
+				panic(err)
+			}
+		}
 	}
 }
