@@ -71,10 +71,6 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	// that phase's body-dependent results must be what the retained state holds.
 	pairing := time.Since(start)
 	var pre *preBodyState
-	var fastBodies [][]ast.Stmt
-	var fastResolvedTypeNameRows map[string]map[ast.TypeExpr]string
-	var fastResolvedTypeNameContributions map[string]string
-	var fastResolvedTypeNameSourceOwners map[ast.TypeExpr]resolvedTypeNameSourceOwner
 	bodyEnvironmentUnchanged := len(added)+len(removed)+len(addedConsts)+len(removedConsts)+len(addedStructs)+len(removedStructs) == 0 &&
 		len(structPairs)+len(constPairs)+len(constEnumPairs)+len(enumPairs)+len(hierarchyPairs) == 0 &&
 		len(replaced)+len(insertedBefore)+len(overloadNames)+len(appendedInto)+len(movedSplices)+len(shifted)+len(shiftedOther) == 0 &&
@@ -90,31 +86,9 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	// cannot change them, so a location-only update replaces just the owners it
 	// touched instead of rescanning the whole program.
 	funcNameUsageIncremental := usingsAdded+usingsRemoved == 0 && len(removed)+len(replaced) == 0 // owners added or replaced are reconciled below
-	// Zero edits is a comment or blank-line change: the same certificate holds,
-	// with only the line movement left to authorize.
-	if retainedFastPrepareMode == "on" && len(shadowEdits) == len(splices) && fastBodyEnvironmentUnchanged {
-		var why string
-		if !bodyEnvironmentUnchanged {
-			why = r.fastLineShiftAuthority(a, marks)
-		}
-		if why == "" {
-			fastBodies, fastResolvedTypeNameRows, fastResolvedTypeNameContributions, why = r.fastPathBodies(a, shadowEdits, scoped, oldDecls)
-			if why == "" {
-				var ownershipErr error
-				fastResolvedTypeNameSourceOwners, ownershipErr = resolvedTypeNameFastBodySourceOwners(shadowEdits, fastBodies, retainedPreBodyFunctionKeys(r.decls))
-				if ownershipErr != nil {
-					why = ownershipErr.Error()
-				}
-			}
-		}
-		if why != "" {
-			fastBodies = nil
-			fastResolvedTypeNameRows = nil
-			fastResolvedTypeNameContributions = nil
-			fastResolvedTypeNameSourceOwners = nil
-			r.LastStats.FastDeclined = why
-		}
-	}
+	fast := r.prepareRetainedFastBodies(a, shadowEdits, scoped, oldDecls, marks, len(splices), bodyEnvironmentUnchanged, fastBodyEnvironmentUnchanged)
+	fastBodies, fastResolvedTypeNameRows := fast.bodies, fast.rows
+	fastResolvedTypeNameContributions, fastResolvedTypeNameSourceOwners := fast.contributions, fast.owners
 	// A pure addition of fresh closed functions: see retained_fresh_function.go.
 	if retainedFastPrepareMode == "on" && len(added) != 0 && len(splices)+len(shadowEdits)+len(removed)+len(addedConsts)+len(removedConsts)+len(addedStructs)+len(removedStructs) == 0 &&
 		len(structPairs)+len(constPairs)+len(constEnumPairs)+len(enumPairs)+len(hierarchyPairs)+len(replaced)+len(overloadNames)+usingsAdded+usingsRemoved == 0 &&
