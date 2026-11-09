@@ -220,6 +220,10 @@ func portableLocalTypeGraphFacts(fn *ast.FuncDecl, reads []semantic.CodegenFactR
 }
 
 func compareLocalTypeGraphFacts(fn *ast.FuncDecl, result *semantic.Result, facts []irPortableTypeGraphFact) (bool, error) {
+	return compareLocalTypeGraphFactsWithView(fn, result, facts, semantic.NewCodegenReadView(result, nil))
+}
+
+func compareLocalTypeGraphFactsWithView(fn *ast.FuncDecl, result *semantic.Result, facts []irPortableTypeGraphFact, view semantic.CodegenReadView) (bool, error) {
 	if result == nil {
 		return false, fmt.Errorf("missing codegen result")
 	}
@@ -243,7 +247,7 @@ func compareLocalTypeGraphFacts(fn *ast.FuncDecl, result *semantic.Result, facts
 		if !ok {
 			return false, fmt.Errorf("type graph key is not an expression")
 		}
-		typ, present := result.LookupExprTypes(expr)
+		typ, present := view.LookupExprTypes(expr)
 		if !present {
 			return false, nil
 		}
@@ -284,6 +288,10 @@ func portableLocalBuiltinTypeFacts(fn *ast.FuncDecl, reads []semantic.CodegenFac
 }
 
 func compareLocalBuiltinTypeFacts(fn *ast.FuncDecl, result *semantic.Result, facts []irPortableBuiltinTypeFact) (bool, error) {
+	return compareLocalBuiltinTypeFactsWithView(fn, result, facts, semantic.NewCodegenReadView(result, nil))
+}
+
+func compareLocalBuiltinTypeFactsWithView(fn *ast.FuncDecl, result *semantic.Result, facts []irPortableBuiltinTypeFact, view semantic.CodegenReadView) (bool, error) {
 	if result == nil {
 		return false, fmt.Errorf("missing codegen result")
 	}
@@ -307,7 +315,7 @@ func compareLocalBuiltinTypeFacts(fn *ast.FuncDecl, result *semantic.Result, fac
 		if !ok {
 			return false, fmt.Errorf("type fact key is not an expression")
 		}
-		value, present := result.LookupExprTypes(expr)
+		value, present := view.LookupExprTypes(expr)
 		if present != facts[i].Key.Present {
 			return false, nil
 		}
@@ -342,10 +350,14 @@ func portableOwnMapPresence(read semantic.CodegenFactRead) (irPortableMapPresenc
 // compareOwnMapPresence checks only the observed physical map presence. A
 // match does not validate the semantic view, its values or any other inputs.
 func compareOwnMapPresence(result *semantic.Result, fact irPortableMapPresence) (bool, error) {
+	return compareOwnMapPresenceWithView(result, fact, semantic.NewCodegenReadView(result, nil))
+}
+
+func compareOwnMapPresenceWithView(result *semantic.Result, fact irPortableMapPresence, view semantic.CodegenReadView) (bool, error) {
 	if result == nil || fact.Table != "PermGrowthOps" {
 		return false, fmt.Errorf("unsupported map presence query")
 	}
-	return (result.PermGrowthOps != nil) == fact.Present, nil
+	return view.HasOwnPermGrowthOpsMap() == fact.Present, nil
 }
 
 // portableLocalBoolFacts deliberately rejects every value except a concrete
@@ -371,6 +383,10 @@ func portableLocalBoolFacts(fn *ast.FuncDecl, reads []semantic.CodegenFactRead) 
 // an independently constructed function and Result. A match is evidence only
 // for these individual reads; it must never authorize cached IR on its own.
 func compareLocalBoolFacts(fn *ast.FuncDecl, result *semantic.Result, facts []irPortableBoolFact) (bool, error) {
+	return compareLocalBoolFactsWithView(fn, result, facts, semantic.NewCodegenReadView(result, nil))
+}
+
+func compareLocalBoolFactsWithView(fn *ast.FuncDecl, result *semantic.Result, facts []irPortableBoolFact, view semantic.CodegenReadView) (bool, error) {
 	if result == nil {
 		return false, fmt.Errorf("missing codegen result")
 	}
@@ -394,7 +410,7 @@ func compareLocalBoolFacts(fn *ast.FuncDecl, result *semantic.Result, facts []ir
 		if !ok {
 			return false, fmt.Errorf("boolean fact key is not an expression")
 		}
-		value, present := result.LookupPermGrowthOps(expr)
+		value, present := view.LookupPermGrowthOps(expr)
 		if present != facts[i].Key.Present || value != facts[i].Value {
 			return false, nil
 		}
