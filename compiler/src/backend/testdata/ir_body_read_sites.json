@@ -81,11 +81,6 @@
       "selectors": 4,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
-    "llvm_generatellvmir_to_flattenllvmtreememberdecls.go": {
-      "sha256": "53afd0d0a7e1c8417697869187134f40fe1ded6466c82d3d27600f0cea9af1e9",
-      "selectors": 1,
-      "classification": "reviewed-statement-lambda-or-declaration-branch"
-    },
     "llvm_ir_input_reads.go": {
       "sha256": "3b70826bcf1f813469df37f950bb875a5ccbacd69345466b0da6fc4411ab1cc4",
       "selectors": 1,
@@ -94,6 +89,11 @@
     "llvm_lambda.go": {
       "sha256": "184c3815ea5ec79fee8c9a0b839fa06970bffd509c291604a409b1735d9446a0",
       "selectors": 2,
+      "classification": "reviewed-statement-lambda-or-declaration-branch"
+    },
+    "llvm_module_declarations.go": {
+      "sha256": "b464f39b365f6e116546eb1ef34a9b1135ff99ff709df2c9be5e5440cd613fad",
+      "selectors": 1,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
     "llvm_partition_ir.go": {
