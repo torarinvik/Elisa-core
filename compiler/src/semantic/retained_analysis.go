@@ -207,54 +207,9 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		return fail("proof report declaration capture: %s", pre.proofPrefixError)
 	}
 	// A payload-less enum variant is a const value of the declaration phase.
-	constsIn, constsOut, globalsIn := 0, 0, 0
-	for _, d := range removedConsts {
-		if _, isConst := d.(*ast.ConstDecl); isConst {
-			constsOut++
-		}
-	}
-	for _, d := range addedConsts {
-		if _, isConst := d.(*ast.ConstDecl); isConst {
-			constsIn++
-		} else {
-			globalsIn++
-		}
-	}
-	if len(enumPairs)+len(hierarchyPairs) != 0 {
-		if !retainedEnumStoreSetsEqual(oldDecls, newDecls) {
-			return fail("an enum edit changes which enums are recursive or store-backed")
-		}
-		storeBacked := retainedStoreBackedEnums(newDecls)
-		for _, e := range append(append([][2]*ast.EnumDecl(nil), enumPairs...), hierarchyPairs...) {
-			sb := storeBacked[e[1].Name]
-			if d := retainedConstVariantCount(e[1], sb) - retainedConstVariantCount(e[0], sb); d > 0 {
-				constsIn += d
-			} else {
-				constsOut -= d
-			}
-		}
-	}
-	for _, pair := range constEnumPairs {
-		if delta := len(pair[1].Members) - len(pair[0].Members); delta > 0 {
-			constsIn += delta
-		} else {
-			constsOut -= delta
-		}
-	}
-	growth := retainedGrowth{addedFuncs: len(added), removedFuncs: len(removed), addedConsts: constsIn, removedConsts: constsOut, addedGlobals: globalsIn, usings: usingsAdded+usingsRemoved != 0}
-	for _, st := range removedStructs {
-		namespace := ""
-		if block := r.oldMemberBlock(st); block != "" {
-			namespace = block
-		}
-		growth.removedStructs = append(growth.removedStructs, joinQualifiedName(namespace, st.Name))
-	}
-	for _, st := range addedStructs {
-		namespace := ""
-		if block := memberOf[st]; block != nil && !topLevel[st] {
-			namespace = namespaceOf[block]
-		}
-		growth.addedStructs = append(growth.addedStructs, joinQualifiedName(namespace, st.Name))
+	growth, globalsIn, growthErr := retainedGrowthForUpdate(r, paired, comparison, oldDecls, newDecls, topLevel, memberOf, namespaceOf)
+	if growthErr != nil {
+		return fail("%s", growthErr)
 	}
 	// Build the declaration pairing and using-dependent reanalysis plan before
 	// comparing resolved type-name rows. Those planned owners are the only
