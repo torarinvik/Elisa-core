@@ -1,0 +1,358 @@
+//go:build cgo
+
+package backend
+
+/*
+#include <stdlib.h>
+#include <llvm-c/Core.h>
+*/
+import "C"
+
+import (
+	"elisacore/src/ast"
+	"elisacore/src/semantic"
+	"fmt"
+	"unsafe"
+)
+
+func inferTypeBindingsFromCall(fn *semantic.FuncType, args []ast.Expr, argTypes []semantic.Type, resultType semantic.Type) map[string]semantic.Type {
+	bindings := map[string]semantic.Type{}
+	if fn == nil {
+		return bindings
+	}
+	limit := len(fn.Params)
+	if len(argTypes) < limit {
+		limit = len(argTypes)
+	}
+	for i := 0; i < limit; i++ {
+		collectSpecializationBindings(fn.Params[i], argTypes[i], bindings)
+	}
+	if resultType != nil && fn.Return != nil {
+		collectSpecializationBindings(fn.Return, resultType, bindings)
+		collectSpecializationBindings(semantic.StripAggregateStateType(fn.Return), semantic.StripAggregateStateType(resultType), bindings)
+	}
+	params := funcGenericParams(fn)
+	for _, param := range params {
+		if _, ok := bindings[param.Name]; ok || param.Kind != ast.GenericParamValue {
+			continue
+		}
+		for _, argType := range argTypes {
+			if value, ok := findConstGenericArgInType(argType, param.Name); ok {
+				bindings[param.Name] = value
+				break
+			}
+		}
+	}
+	_ = args
+	return bindings
+}
+
+func findConstGenericArgInType(t semantic.Type, name string) (*semantic.ConstValueType, bool) {
+	switch tt := t.(type) {
+	case *semantic.GenericInstanceType:
+		params := structGenericParams(asStructType(tt.Base))
+		for i, param := range params {
+			if i >= len(tt.Args) {
+				break
+			}
+			if param.Name == name {
+				if value, ok := tt.Args[i].(*semantic.ConstValueType); ok {
+					return value, true
+				}
+			}
+			if value, ok := findConstGenericArgInType(tt.Args[i], name); ok {
+				return value, true
+			}
+		}
+	case *semantic.RefType:
+		return findConstGenericArgInType(tt.Elem, name)
+	case *semantic.ArrayType:
+		return findConstGenericArgInType(tt.Elem, name)
+	case *semantic.DArrayType:
+		return findConstGenericArgInType(tt.Elem, name)
+	}
+	return nil, false
+}
+
+func asStructType(t semantic.Type) *semantic.StructType {
+	st, _ := t.(*semantic.StructType)
+	return st
+}
+
+func inferTypeBindingsFromFuncTypes(pattern *semantic.FuncType, actual *semantic.FuncType) map[string]semantic.Type {
+	bindings := map[string]semantic.Type{}
+	if pattern == nil || actual == nil {
+		return bindings
+	}
+	collectSpecializationBindings(pattern, actual, bindings)
+	return bindings
+}
+
+func mergeTypeBindings(dst map[string]semantic.Type, src map[string]semantic.Type) map[string]semantic.Type {
+	if len(src) == 0 {
+		if dst == nil {
+			return map[string]semantic.Type{}
+		}
+		return dst
+	}
+	if dst == nil {
+		dst = make(map[string]semantic.Type, len(src))
+	}
+	for name, typ := range src {
+		if typ == nil {
+			continue
+		}
+		if _, exists := dst[name]; !exists {
+			dst[name] = typ
+		}
+	}
+	return dst
+}
+
+func dynDictRuntimeInstance(t semantic.Type) (*semantic.GenericInstanceType, bool) {
+	gi, ok := t.(*semantic.GenericInstanceType)
+	if !ok || gi.Name != "DynDict" || len(gi.Args) != 2 {
+		return nil, false
+	}
+	return gi, true
+}
+
+func dynSetRuntimeInstance(t semantic.Type) (*semantic.GenericInstanceType, bool) {
+	gi, ok := t.(*semantic.GenericInstanceType)
+	if !ok || gi.Name != "DynSet" || len(gi.Args) != 1 {
+		return nil, false
+	}
+	return gi, true
+}
+
+// bindBackendErrorSetParamContribution mirrors the analyzer's join-aware
+// error-set-param binding so monomorphization sees the identical set. Repeat
+// encounters union; an empty contribution (infallible callback) is the unit.
+func bindBackendErrorSetParamContribution(bindings map[string]semantic.Type, name string, contribution *semantic.ErrorSetType) {
+	if contribution == nil {
+		return
+	}
+	if existing, bound := bindings[name].(*semantic.ErrorSetType); bound {
+		bindings[name] = semantic.UnionErrorSets(existing, contribution)
+		return
+	}
+	if _, ok := bindings[name]; !ok {
+		bindings[name] = contribution
+	}
+}
+
+func collectSpecializationBindings(pattern semantic.Type, actual semantic.Type, bindings map[string]semantic.Type) {
+	if pattern == nil || actual == nil {
+		return
+	}
+	if patternDynDict, ok := dynDictRuntimeInstance(pattern); ok {
+		if actualDict, ok := actual.(*semantic.DictType); ok {
+			collectSpecializationBindings(patternDynDict.Args[0], actualDict.Key, bindings)
+			collectSpecializationBindings(patternDynDict.Args[1], actualDict.Value, bindings)
+			return
+		}
+	}
+	if patternDict, ok := pattern.(*semantic.DictType); ok {
+		if actualDynDict, ok := dynDictRuntimeInstance(actual); ok {
+			collectSpecializationBindings(patternDict.Key, actualDynDict.Args[0], bindings)
+			collectSpecializationBindings(patternDict.Value, actualDynDict.Args[1], bindings)
+			return
+		}
+	}
+	if patternDynSet, ok := dynSetRuntimeInstance(pattern); ok {
+		if actualSet, ok := actual.(*semantic.SetType); ok {
+			collectSpecializationBindings(patternDynSet.Args[0], actualSet.Elem, bindings)
+			return
+		}
+	}
+	if patternSet, ok := pattern.(*semantic.SetType); ok {
+		if actualDynSet, ok := dynSetRuntimeInstance(actual); ok {
+			collectSpecializationBindings(patternSet.Elem, actualDynSet.Args[0], bindings)
+			return
+		}
+	}
+	switch p := pattern.(type) {
+	case *semantic.RegionParamType:
+		if actualRegion := regionTypeArgumentName(actual); actualRegion != "" {
+			if _, exists := bindings[p.Name]; !exists {
+				bindings[p.Name] = &semantic.RegionValueType{Name: actualRegion}
+			}
+		}
+	case *semantic.TypeParamType:
+		if _, ok := bindings[p.Name]; !ok {
+			bindings[p.Name] = actual
+		}
+	case *semantic.ConstParamType:
+		if _, ok := bindings[p.Name]; !ok {
+			if value, ok := actual.(*semantic.ConstValueType); ok {
+				bindings[p.Name] = value
+			}
+		}
+	case *semantic.IDType:
+		if a, ok := actual.(*semantic.IDType); ok {
+			collectSpecializationBindings(p.Tag, a.Tag, bindings)
+			collectSpecializationBindings(p.Storage, a.Storage, bindings)
+		}
+	case *semantic.AddressSpaceType:
+		if a, ok := actual.(*semantic.AddressSpaceType); ok && p.Space == a.Space {
+			collectSpecializationBindings(p.Elem, a.Elem, bindings)
+			collectSpecializationBindings(p.Storage, a.Storage, bindings)
+		}
+	case *semantic.RefType:
+		if a, ok := actual.(*semantic.RefType); ok {
+			collectSpecializationBindings(p.Elem, a.Elem, bindings)
+		} else {
+			// Parameter is `T&` but the argument is a value, auto-ref'd at the call site
+			// (e.g. `write_span(byte[0], n)` against `data: T&`). Bind the element type
+			// parameter against the value's own type so T specializes to the value type.
+			collectSpecializationBindings(p.Elem, actual, bindings)
+		}
+	case *semantic.ArrayType:
+		if a, ok := actual.(*semantic.ArrayType); ok {
+			if p.ConstParam != "" && a.HasConstSize {
+				if _, ok := bindings[p.ConstParam]; !ok {
+					bindings[p.ConstParam] = &semantic.ConstValueType{Value: semantic.ConstValue{Kind: semantic.ConstInt, Int: a.ConstSize}}
+				}
+			}
+			collectSpecializationBindings(p.Elem, a.Elem, bindings)
+		}
+	case *semantic.DArrayType:
+		if a, ok := actual.(*semantic.DArrayType); ok {
+			collectSpecializationBindings(p.Elem, a.Elem, bindings)
+		}
+	case *semantic.ViewType:
+		if a, ok := actual.(*semantic.ViewType); ok {
+			collectSpecializationBindings(p.Elem, a.Elem, bindings)
+		}
+	case *semantic.DictType:
+		if a, ok := actual.(*semantic.DictType); ok {
+			collectSpecializationBindings(p.Key, a.Key, bindings)
+			collectSpecializationBindings(p.Value, a.Value, bindings)
+		}
+	case *semantic.SetType:
+		if a, ok := actual.(*semantic.SetType); ok {
+			collectSpecializationBindings(p.Elem, a.Elem, bindings)
+		}
+	case *semantic.GenericInstanceType:
+		if a, ok := actual.(*semantic.GenericInstanceType); ok && p.Name == a.Name && len(p.Args) == len(a.Args) {
+			for i := range p.Args {
+				collectSpecializationBindings(p.Args[i], a.Args[i], bindings)
+			}
+		}
+	case *semantic.ErrorUnionType:
+		if a, ok := actual.(*semantic.ErrorUnionType); ok {
+			collectSpecializationBindings(p.Value, a.Value, bindings)
+			if p.Errors != nil && len(p.Errors.Params) == 1 && a.Errors != nil {
+				bindBackendErrorSetParamContribution(bindings, p.Errors.Params[0], semantic.SubtractErrorTags(a.Errors, p.Errors))
+			}
+		} else {
+			// Infallible argument bound into an `error[R]` pattern -> R := empty.
+			if p.Errors != nil && len(p.Errors.Params) == 1 {
+				bindBackendErrorSetParamContribution(bindings, p.Errors.Params[0], &semantic.ErrorSetType{Name: "error[]"})
+			}
+			collectSpecializationBindings(p.Value, actual, bindings)
+		}
+	case *semantic.FuncType:
+		if a, ok := actual.(*semantic.FuncType); ok {
+			limit := len(p.Params)
+			if len(a.Params) < limit {
+				limit = len(a.Params)
+			}
+			for i := 0; i < limit; i++ {
+				collectSpecializationBindings(p.Params[i], a.Params[i], bindings)
+			}
+			collectSpecializationBindings(p.Return, a.Return, bindings)
+		}
+	}
+}
+
+// orderedGenericTypeArgs returns the concrete type arguments in DECLARATION order, which
+// is the order semantic.withGenericParams binds them in. The bindings map is keyed by
+// parameter name and therefore unordered; ordering here keeps the analyzer's binding of
+// `T` matched to the argument the backend specialized on.
+//
+// Falls back to the declaration's own generic params when the specialized signature no
+// longer carries them (specializeFuncType clears them once bound).
+func orderedGenericTypeArgs(fnType *semantic.FuncType, decl *ast.FuncDecl, bindings map[string]semantic.Type) []semantic.Type {
+	if len(bindings) == 0 {
+		return nil
+	}
+	params := funcGenericParams(fnType)
+	if len(params) == 0 && decl != nil {
+		params = decl.GenericParams
+	}
+	args := make([]semantic.Type, 0, len(params))
+	for _, param := range params {
+		bound, ok := bindings[param.Name]
+		if !ok {
+			return nil
+		}
+		args = append(args, bound)
+	}
+	if len(args) == 0 {
+		return nil
+	}
+	return args
+}
+
+// Legacy external spellings remain ABI names, not specialization authority.
+// Distinct structural arguments may share one spelling only when the current
+// lowered signature, calling convention and ABI parameter attributes agree.
+func (g *llvmGenerator) checkGenericExternABI(name string, fn *semantic.FuncType) error {
+	cname := C.CString(g.llvmSymbolName(name))
+	defer C.free(unsafe.Pointer(cname))
+	existing := C.LLVMGetNamedFunction(g.module, cname)
+	if existing == nil {
+		return nil
+	}
+	if err := g.ensureDeclaredFunctionType(name, existing, fn); err != nil {
+		return err
+	}
+	cc, _ := g.llvmCallConvForFunc(fn)
+	if C.LLVMGetFunctionCallConv(existing) != cc {
+		return fmt.Errorf("generic extern ABI calling convention conflict for %s", name)
+	}
+	typ, err := g.lowerFunctionTypeForSymbol(name, fn)
+	if err != nil {
+		return err
+	}
+	probeName := C.CString(".elisa.generic.abi.probe")
+	defer C.free(unsafe.Pointer(probeName))
+	probe := C.LLVMAddFunction(g.module, probeName, typ)
+	defer C.LLVMDeleteFunction(probe)
+	g.applyAggregateAbiAttrs(probe, fn)
+	for index := C.LLVMAttributeIndex(0); index <= C.LLVMAttributeIndex(C.LLVMCountParams(probe)); index++ {
+		count := C.LLVMGetAttributeCountAtIndex(existing, index)
+		if count != C.LLVMGetAttributeCountAtIndex(probe, index) {
+			return fmt.Errorf("generic extern ABI attribute conflict for %s", name)
+		}
+		if count == 0 {
+			continue
+		}
+		left := make([]C.LLVMAttributeRef, int(count))
+		right := make([]C.LLVMAttributeRef, int(count))
+		C.LLVMGetAttributesAtIndex(existing, index, &left[0])
+		C.LLVMGetAttributesAtIndex(probe, index, &right[0])
+		have := make(map[C.LLVMAttributeRef]bool, len(left))
+		for _, attr := range left {
+			have[attr] = true
+		}
+		for _, attr := range right {
+			if !have[attr] {
+				return fmt.Errorf("generic extern ABI attribute conflict for %s", name)
+			}
+		}
+	}
+	return nil
+}
+
+func genericImplSpecializationBase(base string, owner *semantic.StaticImpl, method string) (string, error) {
+	if owner == nil {
+		return "", fmt.Errorf("missing generic impl owner")
+	}
+	receiver, err := semantic.TypeSymbolKey(owner.Receiver)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%d:%s|%d:%s|%d:%s|%s", len(owner.InterfaceName), owner.InterfaceName, len(receiver), receiver, len(method), method, base), nil
+}
