@@ -324,60 +324,11 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	oldDecls, newDecls := retainedWalkDecls(r.pristine), retainedWalkDecls(file)
 	// Index declaration scopes before pairing edits with the retained graph.
 	topLevel, memberOf, namespaceOf := retainedDeclarationScopes(file)
-	newNames := map[string]bool{}
-	oldValueNames := map[string]bool{} // consts, globals and functions: names an added const must not take
-	oldTypeNames := map[string]bool{}  // structs and enums: names an added struct must not take
-	oldFunctionNames := retainedQualifiedFunctionNames(r.pristine)
-	newFunctionNames := retainedQualifiedFunctionNames(file)
-	oldFuncNameCount := map[string]int{}
-	for _, d := range oldDecls {
-		if f, ok := d.(*ast.FuncDecl); ok {
-			if oldFunctionNames[f] == "" {
-				oldFunctionNames[f] = f.Name
-			}
-			oldFuncNameCount[oldFunctionNames[f]]++
-		}
-		switch n := d.(type) {
-		case *ast.StructDecl:
-			oldTypeNames[n.Name] = true
-		case *ast.EnumDecl:
-			oldTypeNames[n.Name] = true
-		case *ast.FuncDecl:
-			oldValueNames[n.Name] = true
-		case *ast.ConstDecl:
-			oldValueNames[n.Name] = true
-		case *ast.GlobalDecl:
-			oldValueNames[n.Name] = true
-		}
-	}
-	newValueNames := map[string]bool{} // consts, globals and functions of the edited program
-	newFuncNameCount := map[string]int{}
-	newDeclIndex := make(map[ast.Decl]int, len(newDecls))
-	for j, d := range newDecls {
-		newDeclIndex[d] = j
-		if f, ok := d.(*ast.FuncDecl); ok {
-			if newFunctionNames[f] == "" {
-				newFunctionNames[f] = f.Name
-			}
-			newFuncNameCount[newFunctionNames[f]]++
-		}
-	}
-	newTypeNames := map[string]bool{} // structs and enums of the edited program
-	for _, d := range newDecls {
-		switch n := d.(type) {
-		case *ast.StructDecl:
-			newTypeNames[n.Name] = true
-		case *ast.EnumDecl:
-			newTypeNames[n.Name] = true
-		case *ast.FuncDecl:
-			newNames[n.Name] = true
-			newValueNames[n.Name] = true
-		case *ast.ConstDecl:
-			newValueNames[n.Name] = true
-		case *ast.GlobalDecl:
-			newValueNames[n.Name] = true
-		}
-	}
+	nameIndex := retainedIndexDeclarationNames(r.pristine, file, oldDecls, newDecls)
+	newNames, oldValueNames, oldTypeNames := nameIndex.newNames, nameIndex.oldValueNames, nameIndex.oldTypeNames
+	oldFunctionNames, newFunctionNames := nameIndex.oldFunctionNames, nameIndex.newFunctionNames
+	oldFuncNameCount, newFuncNameCount := nameIndex.oldFuncNameCount, nameIndex.newFuncNameCount
+	newDeclIndex, newTypeNames, newValueNames := nameIndex.newDeclIndex, nameIndex.newTypeNames, nameIndex.newValueNames
 	oldTop, oldRemovable := retainedRemovableDeclarations(r.pristine)
 	var removed []*ast.FuncDecl
 	var pairs [][2]int
