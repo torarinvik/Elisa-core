@@ -27,8 +27,8 @@
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
     "llvm_bodies_emititerlooppatternbindings_to_emitpoolstmt.go": {
-      "sha256": "50436a15d76af2506d0ea27281afe90d5bf0039cdd10b67c17baf83670df4dbf",
-      "selectors": 11,
+      "sha256": "7b3f99f9b94abe955823bd2ed6ffdb158fca3f94df6e2f85b81708957603b479",
+      "selectors": 2,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
     "llvm_bodies_emitparallelforstmt_to_backendconditionoptionalbindtype.go": {
@@ -64,6 +64,11 @@
     "llvm_bodies_packedenumvariantpayloadfieldbyteoffset_to_resolvepackedmatchstorebind.go": {
       "sha256": "1eeac05c676bbc2efa872be155856cbf6091ac27352a0e7543937b16fb4587b6",
       "selectors": 13,
+      "classification": "reviewed-statement-lambda-or-declaration-branch"
+    },
+    "llvm_bodies_store_pool_scope.go": {
+      "sha256": "e7ac6f04af4877b46671edbd454bbff8fb5f58e8681ffca770c417c5fdde81ac",
+      "selectors": 9,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
     "llvm_bodies_treevisitrelevantexactarms_to_emitstringmatch.go": {
