@@ -48,33 +48,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	addedStructs, removedStructs := paired.addedStructs, paired.removedStructs
 	insertedBefore, overloadNames := paired.insertedBefore, paired.overloadNames
 	usingsAdded, usingsRemoved := paired.usingsAdded, paired.usingsRemoved
-	type fnKey struct {
-		pos  string
-		name string
-	}
-	// The analyzed AST also holds declarations the analyzer synthesized, so pair
-	// its functions by source position and name rather than by index.
-	type declKey struct {
-		pos  string
-		kind reflect.Type
-	}
-	liveOther := map[declKey][]ast.Decl{}
-	liveFns := map[fnKey][]*ast.FuncDecl{}
-	for _, d := range retainedWalkDecls(a.file) {
-		if f, ok := d.(*ast.FuncDecl); ok {
-			k := fnKey{retainedLineKey(f.Pos()), f.Name}
-			liveFns[k] = append(liveFns[k], f)
-		} else {
-			k := declKey{retainedLineKey(d.Pos()), reflect.TypeOf(d)}
-			liveOther[k] = append(liveOther[k], d)
-		}
-	}
-	scoped := make(map[*ast.FuncDecl]scopedDecl, len(r.decls))
-	for _, sd := range r.decls {
-		if f, ok := sd.Decl.(*ast.FuncDecl); ok {
-			scoped[f] = sd
-		}
-	}
+	liveOther, liveFns, scoped := retainedIndexLiveDeclarations(a.file, r.decls)
 	type splice struct {
 		live *ast.FuncDecl
 		edit *ast.FuncDecl // the function in file, found again in the prepared scratch parse
