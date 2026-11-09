@@ -167,9 +167,11 @@ func (s *IncrementalObjectSession) buildIRPartitionWithMode(result *semantic.Res
 	inputSize := int(C.LLVMGetBufferSize(bitcode))
 	inputBytes := unsafe.Slice((*byte)(unsafe.Pointer(inputData)), inputSize)
 	var object []byte
+	var objectKey [32]byte
 	retainInput := inputSize <= s.maxBytes-len(configKey)
 	if retainInput {
-		object = s.lookupObjectBytes(inputBytes, configKey)
+		objectKey = incrementalObjectKeyBytes(inputBytes, configKey)
+		object = s.lookupObjectBytesWithKey(inputBytes, configKey, objectKey)
 	}
 	var retainedInput string
 	if object == nil && retainInput {
@@ -248,7 +250,7 @@ func (s *IncrementalObjectSession) buildIRPartitionWithMode(result *semantic.Res
 		stats.PartitionsEmitted++
 	})
 	if retainInput {
-		s.retainObjectForSlot(retainedInput, configKey, object, incrementalObjectSlot(unitID, targetID, mode.cachePart))
+		s.retainObjectForSlotWithKey(retainedInput, configKey, object, incrementalObjectSlot(unitID, targetID, mode.cachePart), objectKey)
 	}
 	return object, specializationDefinitions, nil
 }

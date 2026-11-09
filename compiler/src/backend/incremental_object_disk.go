@@ -108,6 +108,13 @@ func diskInputEquals(r io.Reader, expected, chunk []byte) bool {
 }
 
 func (d *incrementalObjectDisk) store(bitcode, target string, object []byte) {
+	if d == nil {
+		return
+	}
+	d.storeKey(bitcode, target, object, incrementalObjectKey(bitcode, target))
+}
+
+func (d *incrementalObjectDisk) storeKey(bitcode, target string, object []byte, key [32]byte) {
 	if d == nil || len(object) == 0 || int64(len(bitcode))+int64(len(target))+int64(len(object))+64 > d.maxBytes {
 		return
 	}
@@ -142,7 +149,7 @@ func (d *incrementalObjectDisk) store(bitcode, target string, object []byte) {
 	if err != nil || closeErr != nil {
 		return
 	}
-	if os.Rename(f.Name(), d.path([]byte(bitcode), target)) != nil {
+	if os.Rename(f.Name(), d.pathForKey(key)) != nil {
 		return
 	}
 	d.prune()

@@ -2,8 +2,10 @@ package backend
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
+	"unsafe"
 )
 
 func TestIncrementalObjectExactInputsAndEviction(t *testing.T) {
@@ -107,5 +109,24 @@ func TestIncrementalObjectConcurrentSlotEvictionAccounting(t *testing.T) {
 		if s.slotCounts[slot] != count {
 			t.Fatal("slot count mismatch")
 		}
+	}
+}
+
+// A cache miss hashes and retains the exact LLVM bitcode for later reuse.
+func BenchmarkIncrementalObjectMissAndRetain(b *testing.B) {
+	input := strings.Repeat("LLVM bitcode for a native partition", 30000)
+	object := []byte("native object")
+	session := NewIncrementalObjectSession(1, len(input)*2)
+	key := incrementalObjectKey(input, "target")
+	b.SetBytes(int64(len(input)))
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		inputBytes := unsafe.Slice(unsafe.StringData(input), len(input))
+		lookupKey := incrementalObjectKeyBytes(inputBytes, "target")
+		session.lookupObjectBytesWithKey(inputBytes, "target", lookupKey)
+		session.retainObjectForSlotWithKey(input, "target", object, [32]byte{1}, lookupKey)
+		session.mu.Lock()
+		session.removeObjectLocked(key)
+		session.mu.Unlock()
 	}
 }

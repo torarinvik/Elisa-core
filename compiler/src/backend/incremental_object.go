@@ -136,6 +136,11 @@ func (s *IncrementalObjectSession) lookupObject(bitcode, target string) []byte {
 // pass a view of an LLVM-owned memory buffer; the cache retains only its own copies.
 func (s *IncrementalObjectSession) lookupObjectBytes(bitcode []byte, target string) []byte {
 	key := incrementalObjectKeyBytes(bitcode, target)
+	return s.lookupObjectBytesWithKey(bitcode, target, key)
+}
+
+// The caller may reuse a key computed from these same immutable input bytes.
+func (s *IncrementalObjectSession) lookupObjectBytesWithKey(bitcode []byte, target string, key [32]byte) []byte {
 	input := unsafe.String(unsafe.SliceData(bitcode), len(bitcode))
 	s.mu.Lock()
 	entry := s.entries[key]
@@ -189,15 +194,12 @@ func (s *IncrementalObjectSession) removeObjectLocked(key [32]byte) {
 }
 
 func (s *IncrementalObjectSession) retainObjectForSlot(bitcode, target string, object []byte, slot [32]byte) {
-	s.disk.store(bitcode, target, object)
-	s.retainObjectInMemory(bitcode, target, object, slot)
+	s.retainObjectForSlotWithKey(bitcode, target, object, slot, incrementalObjectKey(bitcode, target))
 }
 
-func (s *IncrementalObjectSession) retainObjectInMemory(bitcode, target string, object []byte, slot [32]byte) {
-	if len(bitcode)+len(target)+len(object) > s.maxBytes {
-		return
-	}
-	s.retainObjectInMemoryWithKey(bitcode, target, object, slot, incrementalObjectKey(bitcode, target))
+func (s *IncrementalObjectSession) retainObjectForSlotWithKey(bitcode, target string, object []byte, slot, key [32]byte) {
+	s.disk.storeKey(bitcode, target, object, key)
+	s.retainObjectInMemoryWithKey(bitcode, target, object, slot, key)
 }
 
 func (s *IncrementalObjectSession) retainObjectInMemoryWithKey(bitcode, target string, object []byte, slot, key [32]byte) {
