@@ -72,9 +72,17 @@ func TestCodegenGlobalSemanticReadsUseReadView(t *testing.T) {
 func TestCodegenASTSemanticReadsUseExplicitReadView(t *testing.T) {
 	_, sourceFile, _, _ := runtime.Caller(0)
 	backendDir := filepath.Dir(sourceFile)
-	generated, err := os.ReadFile(filepath.Join(backendDir, "..", "semantic", "codegen_read_view_gen.go"))
-	if err != nil {
-		t.Fatal(err)
+	parts, err := filepath.Glob(filepath.Join(backendDir, "..", "semantic", "codegen_read_view*_gen.go"))
+	if err != nil || len(parts) == 0 {
+		t.Fatalf("find generated read views: %v", err)
+	}
+	var generated []byte
+	for _, part := range parts {
+		data, err := os.ReadFile(part)
+		if err != nil {
+			t.Fatal(err)
+		}
+		generated = append(generated, data...)
 	}
 	tableMatches := regexp.MustCompile(`Table: "([A-Za-z0-9_]+)"`).FindAllSubmatch(generated, -1)
 	tables := make(map[string]bool, len(tableMatches))
