@@ -322,31 +322,8 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	}
 	a.resetSMTForRetainedUpdate()
 	oldDecls, newDecls := retainedWalkDecls(r.pristine), retainedWalkDecls(file)
-	// Pair declarations in order. A new declaration with no partner is accepted
-	// only as an added top-level function with a fresh name: it is declared in the
-	// live analysis below and checked against the scratch declaration phase.
-	topLevel := make(map[ast.Decl]bool, len(file.Decls))
-	for _, d := range file.Decls {
-		topLevel[d] = true
-	}
-	// A function directly inside `module`/`extend` blocks is added the same way,
-	// in its block's namespace; memberOf maps it to its innermost block.
-	memberOf := map[ast.Decl]*ast.NamespaceDecl{}
-	namespaceOf := map[*ast.NamespaceDecl]string{}
-	var collectMembers func(decls []ast.Decl, namespace string)
-	collectMembers = func(decls []ast.Decl, namespace string) {
-		for _, d := range decls {
-			if n, ok := d.(*ast.NamespaceDecl); ok && !n.Const {
-				full := joinQualifiedName(namespace, n.Name)
-				namespaceOf[n] = full
-				for _, m := range n.Decls {
-					memberOf[m] = n
-				}
-				collectMembers(n.Decls, full)
-			}
-		}
-	}
-	collectMembers(file.Decls, "")
+	// Index declaration scopes before pairing edits with the retained graph.
+	topLevel, memberOf, namespaceOf := retainedDeclarationScopes(file)
 	newNames := map[string]bool{}
 	oldValueNames := map[string]bool{} // consts, globals and functions: names an added const must not take
 	oldTypeNames := map[string]bool{}  // structs and enums: names an added struct must not take
@@ -401,24 +378,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			newValueNames[n.Name] = true
 		}
 	}
-	oldTop := make(map[ast.Decl]bool, len(r.pristine.Decls))
-	for _, d := range r.pristine.Decls {
-		oldTop[d] = true
-	}
-	// Removing a direct module/extend member follows the same live-symbol
-	// pruning as removing a top-level function. Keep oldTop separate because
-	// signature edits also use it to verify that a declaration stayed in scope.
-	oldRemovable := map[ast.Decl]bool{}
-	var collectRemovable func([]ast.Decl)
-	collectRemovable = func(decls []ast.Decl) {
-		for _, d := range decls {
-			oldRemovable[d] = true
-			if ns, ok := d.(*ast.NamespaceDecl); ok && !ns.Const {
-				collectRemovable(ns.Decls)
-			}
-		}
-	}
-	collectRemovable(r.pristine.Decls)
+	oldTop, oldRemovable := retainedRemovableDeclarations(r.pristine)
 	var removed []*ast.FuncDecl
 	var pairs [][2]int
 	var added []*ast.FuncDecl
