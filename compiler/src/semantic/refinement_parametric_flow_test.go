@@ -1,0 +1,513 @@
+//go:build cgo
+
+package semantic
+
+import (
+	"testing"
+)
+
+// COMPLETENESS-POSITIVE: two differently-instantiated aliases (`SlotIndex[cap128]` and
+// `SlotIndex[cap256]`) are independent; values within their respective bounds prove statically.
+func TestParametricTypeAliasRefinementTwoInstances(t *testing.T) {
+	src := `
+law InRange(self: u32, lo: u32, hi: u32) = self >= lo and self <= hi
+
+type SlotIndex[cap] = u32 is InRange[0, cap]
+
+const cap128: u32 = 128
+const cap256: u32 = 256
+
+def f() -> u32:
+    a: SlotIndex[cap128] = 10
+    b: SlotIndex[cap256] = 200
+    return a + b
+`
+	result := analyzeTreeTestSource(t, "param_alias_two_instances.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("two independently-instantiated parametric aliases should analyze cleanly, got: %v", errs)
+	}
+}
+
+// SOUNDNESS-NEGATIVE: a constant that is OUT of the instantiated range is a compile-time refutation,
+// not silently accepted. `SlotIndex[cap128]` (cap128=128) with value 200 must be rejected.
+func TestParametricTypeAliasRefinementConstRefuted(t *testing.T) {
+	src := `
+law InRange(self: u32, lo: u32, hi: u32) = self >= lo and self <= hi
+
+type SlotIndex[cap] = u32 is InRange[0, cap]
+
+const cap128: u32 = 128
+
+def f() -> u32:
+    x: SlotIndex[cap128] = 200
+    return x
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "param_alias_const_refuted.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "is violated") && len(result.RefinementChecks) == 0 {
+		t.Fatalf("constant 200 violates InRange[0,128]: expected refutation or runtime check, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// SOUNDNESS-NEGATIVE: `SlotIndex[cap128]` (cap128=128) does NOT prove `InRange[0,127]` — the
+// instantiated hi bound is 128, so a value at exactly 128 would violate the tighter bound. A
+// non-const value typed as `SlotIndex[cap128]` may be in [0,128]; discharging `InRange[0,127]`
+// requires a runtime check.
+func TestParametricTypeAliasDoesNotOverproveNarrower(t *testing.T) {
+	src := `
+law InRange(self: u32, lo: u32, hi: u32) = self >= lo and self <= hi
+
+type SlotIndex[cap] = u32 is InRange[0, cap]
+
+const cap128: u32 = 128
+
+def needs_127(x: u32 is InRange[0, 127]) -> u32: return x
+
+def f(n: SlotIndex[cap128]) -> u32:
+    return needs_127(n)
+`
+	result := analyzeTreeTestSource(t, "param_alias_no_overprove.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("a SlotIndex[cap128] param should parse and typecheck, got: %v", errs)
+	}
+	if len(result.CallArgRefinementChecks) == 0 {
+		t.Fatalf("SlotIndex[cap128] (bound [0,128]) must NOT statically prove InRange[0,127] — runtime check expected")
+	}
+}
+
+// A refuted refinement is recorded as such in the report.
+func TestProofReportRecordsRefutation(t *testing.T) {
+	src := `
+law Nat(self: i64) = self >= 0
+
+def f() -> i64:
+    x: i64 is Nat = 0 - 3
+    return x
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "proof_refute.elisa", src, AnalyzeOptions{})
+	found := false
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofRefuted {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("a violated refinement should be recorded as refuted in the proof report, got %+v", result.ProofReport)
+	}
+}
+
+// A refinement-typed RETURN proves statically for a satisfying constant — no runtime check.
+func TestRefinementReturnConstantProven(t *testing.T) {
+	src := `
+law Positive(self: i64) = self > 0
+
+def f() -> i64 is Positive:
+    return 5
+`
+	result := analyzeTreeTestSource(t, "refine_ret_proven.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("returning 5 satisfies Positive, should be clean, got: %v", errs)
+	}
+	if len(result.ReturnRefinementChecks) != 0 {
+		t.Fatalf("proven return refinement should emit NO runtime check, got %d", len(result.ReturnRefinementChecks))
+	}
+}
+
+// A refinement-typed RETURN of a violating constant is REFUTED at compile time.
+func TestRefinementReturnConstantRefuted(t *testing.T) {
+	src := `
+law Positive(self: i64) = self > 0
+
+def f() -> i64 is Positive:
+    return 0 - 3
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_ret_refuted.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "is violated") {
+		t.Fatalf("returning -3 violates Positive: expected a compile-time refutation, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// A refinement-typed RETURN of a flow-proven value proves statically — no runtime check, clean.
+func TestRefinementReturnFlowProven(t *testing.T) {
+	src := `
+law Positive(self: i64) = self > 0
+
+def f(n: i64) -> i64 is Positive:
+    if n > 0:
+        return n
+    return 1
+`
+	result := analyzeTreeTestSource(t, "refine_ret_flow.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("flow-proven return should be clean, got: %v", errs)
+	}
+	if len(result.ReturnRefinementChecks) != 0 {
+		t.Fatalf("flow-proven return refinement should emit NO runtime check, got %d", len(result.ReturnRefinementChecks))
+	}
+}
+
+// A refinement-typed RETURN of an unproven side-effect-free value records a runtime check.
+func TestRefinementReturnUnprovenRuntimeCheck(t *testing.T) {
+	src := `
+law Positive(self: i64) = self > 0
+
+def f(n: i64) -> i64 is Positive:
+    return n
+`
+	result := analyzeTreeTestSource(t, "refine_ret_runtime.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unproven return should analyze (runtime fallback), got: %v", errs)
+	}
+	if len(result.ReturnRefinementChecks) == 0 {
+		t.Fatalf("unproven return refinement should record a runtime check")
+	}
+}
+
+// The user must KNOW when a refinement isn't statically guaranteed: a non-provable refinement
+// WARNS by default (not an error) — visible, but prototyping stays fluid (docs/85).
+func TestRefinementUnprovenWarnsByDefault(t *testing.T) {
+	src := `
+law Nat(self: i64) = self >= 0
+
+def f(n: i64) -> i64:
+    x: i64 is Nat = n
+    return x
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_warn.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "could not be proven statically") {
+		t.Fatalf("unprovable refinement should be reported, got:\n%s", allDiagnostics(result))
+	}
+	if len(result.Errors()) != 0 {
+		t.Fatalf("by default the proof fallback is a WARNING, not an error, got: %v", result.Errors())
+	}
+}
+
+// Under -strict it is a hard error — the Dafny-like prove-it-or-fail mode.
+func TestRefinementUnprovenStrictErrors(t *testing.T) {
+	src := `
+law Nat(self: i64) = self >= 0
+
+def f(n: i64) -> i64:
+    x: i64 is Nat = n
+    return x
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_strict.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) == 0 {
+		t.Fatal("under -strict an unprovable refinement must be a hard error")
+	}
+}
+
+// A statically-proven refinement emits NO proof diagnostic — silence means a real guarantee.
+func TestRefinementProvenNoProofDiagnostic(t *testing.T) {
+	src := `
+law Nat(self: i64) = self >= 0
+
+def f() -> i64:
+    x: i64 is Nat = 5
+    return x
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_silent.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) != 0 {
+		t.Fatalf("a proven refinement must NOT warn/error even under -strict, got: %v", result.Errors())
+	}
+}
+
+// FLOW entailment (docs/85 1d-2): inside `if a > 5:`, `a` satisfies `Nat` (a >= 0) by the branch
+// condition — proven statically, no warning, no runtime check. The headline refinement-type case.
+func TestRefinementFlowEntailmentProven(t *testing.T) {
+	src := `
+law Nat(self: i64) = self >= 0
+
+def f(a: i64) -> i64:
+    if a > 5:
+        x: i64 is Nat = a
+        return x
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_flow.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) != 0 {
+		t.Fatalf("`if a > 5` should statically prove `a is Nat` (no error even under -strict), got: %v", result.Errors())
+	}
+	if len(result.RefinementChecks) != 0 {
+		t.Fatalf("flow-proven refinement should emit NO runtime check, got %d", len(result.RefinementChecks))
+	}
+}
+
+// Without the guard, the same refinement is NOT provable → warning (visible) + runtime check.
+func TestRefinementFlowNoGuardWarns(t *testing.T) {
+	src := `
+law Nat(self: i64) = self >= 0
+
+def f(a: i64) -> i64:
+    x: i64 is Nat = a
+    return x
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_noguard.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "could not be proven statically") {
+		t.Fatalf("unguarded refinement should warn, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// A guard that does NOT entail the predicate stays unproven (sound): `a > -5` does not imply a >= 0.
+func TestRefinementFlowInsufficientGuardWarns(t *testing.T) {
+	src := `
+law Nat(self: i64) = self >= 0
+
+def f(a: i64) -> i64:
+    if a > 0 - 5:
+        x: i64 is Nat = a
+        return x
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_weakguard.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "could not be proven statically") {
+		t.Fatalf("`a > -5` does NOT entail Nat; must stay unproven, got:\n%s", allDiagnostics(result))
+	}
+}
+
+const boundedLaw = `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+`
+
+// Parametric refinement, constant: 42 ∈ [0,500] proven; bracket args bound into the law body.
+func TestRefinementParametricConstantProven(t *testing.T) {
+	src := boundedLaw + `
+def f() -> i64:
+    x: i64 is Bounded[0, 500] = 42
+    return x
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_param_const.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) != 0 {
+		t.Fatalf("42 ∈ [0,500] should prove (clean under -strict), got: %v", result.Errors())
+	}
+	if len(result.RefinementChecks) != 0 {
+		t.Fatalf("proven parametric refinement should emit no runtime check")
+	}
+}
+
+// Range sugar `[0..500]` is the two endpoints; a violating constant is refuted.
+func TestRefinementParametricRangeRefuted(t *testing.T) {
+	src := boundedLaw + `
+def f() -> i64:
+    x: i64 is Bounded[0..=500] = 600
+    return x
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_param_refute.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "is violated") {
+		t.Fatalf("600 ∉ [0,500] should be refuted, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// Flow + parametric: a ∈ [10,20] ⊆ [0,500] proven from the branch condition.
+func TestRefinementParametricFlowProven(t *testing.T) {
+	src := boundedLaw + `
+def f(a: i64) -> i64:
+    if a >= 10 and a <= 20:
+        x: i64 is Bounded[0..=500] = a
+        return x
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_param_flow.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) != 0 {
+		t.Fatalf("a ∈ [10,20] ⊆ [0,500] should prove, got: %v", result.Errors())
+	}
+}
+
+// Flow + parametric, insufficient: a ∈ [10,∞) does NOT prove the upper bound — stays unproven.
+func TestRefinementParametricFlowInsufficient(t *testing.T) {
+	src := boundedLaw + `
+def f(a: i64) -> i64:
+    if a >= 10:
+        x: i64 is Bounded[0..=500] = a
+        return x
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_param_flow_weak.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "could not be proven statically") {
+		t.Fatalf("a >= 10 alone does not bound the top of [0,500]; must stay unproven, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// Call-site discharge: a constant argument satisfying the param refinement is proven.
+func TestRefinementCallArgConstantProven(t *testing.T) {
+	src := `
+law Nat(self: i64) = self >= 0
+
+def needs_nat(x: i64 is Nat) -> i64:
+    return x
+
+def caller() -> i64:
+    return needs_nat(7)
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_callarg_ok.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) != 0 {
+		t.Fatalf("needs_nat(7) should prove (clean under -strict), got: %v", result.Errors())
+	}
+}
+
+// Call-site discharge: a constant argument that violates the param refinement is refuted.
+func TestRefinementCallArgRefuted(t *testing.T) {
+	src := `
+law Nat(self: i64) = self >= 0
+
+def needs_nat(x: i64 is Nat) -> i64:
+    return x
+
+def caller() -> i64:
+    return needs_nat(0 - 3)
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_callarg_refute.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "is violated") {
+		t.Fatalf("needs_nat(-3) should be refuted, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// Call-site discharge: an unprovable argument warns by default, errors under -strict.
+func TestRefinementCallArgUnprovenWarnsThenStrictErrors(t *testing.T) {
+	src := `
+law Nat(self: i64) = self >= 0
+
+def needs_nat(x: i64 is Nat) -> i64:
+    return x
+
+def caller(n: i64) -> i64:
+    return needs_nat(n)
+`
+	warn := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_callarg_warn.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(warn), "could not be proven statically") || len(warn.Errors()) != 0 {
+		t.Fatalf("unprovable arg should warn (not error) by default, got:\n%s", allDiagnostics(warn))
+	}
+	strict := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_callarg_strict.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(strict.Errors()) == 0 {
+		t.Fatal("unprovable call arg must be a hard error under -strict")
+	}
+}
+
+// Call-site discharge composes with flow: needs_nat(a) inside `if a > 5` is proven.
+func TestRefinementCallArgFlowProven(t *testing.T) {
+	src := `
+law Nat(self: i64) = self >= 0
+
+def needs_nat(x: i64 is Nat) -> i64:
+    return x
+
+def caller(a: i64) -> i64:
+    if a > 5:
+        return needs_nat(a)
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_callarg_flow.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) != 0 {
+		t.Fatalf("needs_nat(a) under `if a > 5` should prove, got: %v", result.Errors())
+	}
+}
+
+// --- Mutable refinement flow (docs/85): predicate facts on mutable variables, invalidated at
+// every mutation site. Today's range prover refuses mutables; these facts carry on mutables
+// SOUNDLY because a mutation drops them. n is seeded from a parameter so it is never a tracked
+// constant — the predicate fact is the ONLY thing that can discharge the obligation. ---
+
+// A predicate fact gained by `if x is P:` discharges a later obligation on x even when x is a
+// MUTABLE variable — sound because no mutation happens between the narrowing and the use.
+func TestMutableRefinementFactProvesWhenUnmutated(t *testing.T) {
+	src := `
+law Positive(self: i64) = self > 0
+
+def needs_pos(x: i64 is Positive) -> i64:
+    return x
+
+def f(seed: i64) -> i64:
+    n: mutable i64 = seed
+    if n is Positive:
+        return needs_pos(n)
+    return 0
+`
+	result := analyzeTreeTestSource(t, "mut_refine_proven.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("narrowed mutable n (unmutated) should prove needs_pos(n), got: %v", errs)
+	}
+	if len(result.CallArgRefinementChecks) != 0 {
+		t.Fatalf("unmutated narrowed mutable should be statically proven, got %d runtime checks", len(result.CallArgRefinementChecks))
+	}
+}
+
+// SOUNDNESS CORE: a write to x between the narrowing and the use DROPS the predicate fact, so the
+// obligation falls back to a runtime check. The compiler stops trusting the refinement exactly
+// where the mutation happens.
+func TestMutableRefinementFactDroppedByAssignment(t *testing.T) {
+	src := `
+law Positive(self: i64) = self > 0
+
+def needs_pos(x: i64 is Positive) -> i64:
+    return x
+
+def f(seed: i64, other: i64) -> i64:
+    n: mutable i64 = seed
+    if n is Positive:
+        n <- other
+        return needs_pos(n)
+    return 0
+`
+	result := analyzeTreeTestSource(t, "mut_refine_assign_drop.elisa", src)
+	if len(result.CallArgRefinementChecks) == 0 {
+		t.Fatalf("mutation `n = other` must drop the Positive fact, forcing a runtime check on needs_pos(n)")
+	}
+}
+
+// A mutating call through a mutable ref (`bump(&n)`, the same shape as `arr.pop()`) also drops the
+// fact — this is the "loses the refinement where it is called" behavior the design targets.
+func TestMutableRefinementFactDroppedByRefCall(t *testing.T) {
+	src := `
+law Positive(self: i64) = self > 0
+
+def needs_pos(x: i64 is Positive) -> i64:
+    return x
+
+def bump(x: mutable i64&) -> void:
+    pass
+
+def f(seed: i64) -> i64:
+    n: mutable i64 = seed
+    if n is Positive:
+        bump(&n)
+        return needs_pos(n)
+    return 0
+`
+	result := analyzeTreeTestSource(t, "mut_refine_refcall_drop.elisa", src)
+	if len(result.CallArgRefinementChecks) == 0 {
+		t.Fatalf("passing &n to a mutable-ref param must drop the Positive fact, forcing a runtime check")
+	}
+}
+
+// --- Mutable refinement flow brick 2: `ensures <param> is Law` postconditions. The caller GAINS
+// the fact at the call site (A); the callee's returns are checked (B) so the gain is backed. ---
+
+// After calling a function that `ensures arr is Positive` on a by-ref param, the caller knows the
+// predicate holds — a subsequent obligation on that variable proves with no runtime check, even
+// though the ref call would otherwise DROP the fact (brick 1).
+func TestEnsuresRefinementGainsFactAtCallSite(t *testing.T) {
+	src := `
+law Positive(self: i64) = self > 0
+
+def needs_pos(x: i64 is Positive) -> i64:
+    return x
+
+def ensure_pos(p: mutable i64&) -> void ensures p is Positive:
+    p <- 1
+
+def f(seed: i64) -> i64:
+    n: mutable i64 = seed
+    ensure_pos(&n)
+    return needs_pos(n)
+`
+	result := analyzeTreeTestSource(t, "ensures_gain.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("`ensures p is Positive` should let needs_pos(n) prove after ensure_pos(&n), got: %v", errs)
+	}
+	if len(result.CallArgRefinementChecks) != 0 {
+		t.Fatalf("the gained postcondition fact should prove needs_pos(n) statically, got %d runtime checks", len(result.CallArgRefinementChecks))
+	}
+}
+
+// --- docs/90 brick 90-11: `ensures <param> is Law` seeds the caller's INTERVAL store, not only the
+// factset. This lets the flow prover use the mutated variable's numeric bound — discharging an
+// obligation the factset (exact-key) path cannot. ---
