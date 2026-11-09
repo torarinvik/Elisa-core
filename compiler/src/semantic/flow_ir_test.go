@@ -159,38 +159,41 @@ func TestEveryASTStatementKindHasCFGDisposition(t *testing.T) {
 		t.Fatal("no sealed AST statement kinds found")
 	}
 
-	flowFile := filepath.Join(filepath.Dir(testFile), "flow_ir.go")
-	file, err := goparser.ParseFile(token.NewFileSet(), flowFile, nil, 0)
-	if err != nil {
-		t.Fatalf("parse CFG source %s: %v", flowFile, err)
-	}
 	mappedKinds := map[string]bool{}
-	for _, decl := range file.Decls {
-		function, ok := decl.(*goast.FuncDecl)
-		if !ok || function.Body == nil {
-			continue
+	for _, name := range []string{"flow_ir.go", "flow_ir_control.go"} {
+		flowFile := filepath.Join(filepath.Dir(testFile), name)
+		file, err := goparser.ParseFile(token.NewFileSet(), flowFile, nil, 0)
+		if err != nil {
+			t.Fatalf("parse CFG source %s: %v", flowFile, err)
 		}
-		switch function.Name.Name {
-		case "buildStmtList", "flowStmtTerminator", "flowStmtIsExplicitlyLinear":
-			goast.Inspect(function.Body, func(node goast.Node) bool {
-				clause, ok := node.(*goast.CaseClause)
-				if !ok {
-					return true
-				}
-				for _, expr := range clause.List {
-					star, ok := expr.(*goast.StarExpr)
+		for _, decl := range file.Decls {
+			function, ok := decl.(*goast.FuncDecl)
+			if !ok || function.Body == nil {
+				continue
+			}
+			switch function.Name.Name {
+			case "buildStmtList", "flowStmtTerminator", "flowStmtIsExplicitlyLinear":
+				goast.Inspect(function.Body, func(node goast.Node) bool {
+					clause, ok := node.(*goast.CaseClause)
 					if !ok {
-						continue
+						return true
 					}
-					selector, ok := star.X.(*goast.SelectorExpr)
-					if !ok || selector.Sel.Name == "" {
-						continue
+					for _, expr := range clause.List {
+						star, ok := expr.(*goast.StarExpr)
+						if !ok {
+							continue
+						}
+						selector, ok := star.X.(*goast.SelectorExpr)
+						if !ok || selector.Sel.Name == "" {
+							continue
+						}
+						mappedKinds[selector.Sel.Name] = true
 					}
-					mappedKinds[selector.Sel.Name] = true
-				}
-				return true
-			})
+					return true
+				})
+			}
 		}
+
 	}
 
 	for kind := range statementKinds {
