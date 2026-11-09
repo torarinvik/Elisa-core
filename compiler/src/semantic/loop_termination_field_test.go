@@ -9,7 +9,7 @@ import (
 
 // Increment 3 (struct-FIELD array stores + FIELD-READ measures) for the loop-termination prover.
 //
-// SOUNDNESS BASIS (see analyzer_loop_invariants.go::loopStoreTargetBaseKey + the termination capture
+// SOUNDNESS BASIS (see analyzer_loop_invariant_effects.go::loopStoreTargetBaseKey + the termination capture
 // mode): in termination mode every store is DISCARDED and only the SCALAR measure decrease is proven.
 // A field-element store `self.xs[j] <- v` changes the field array's contents but no scalar counter and
 // not `self.xs.count`; and the capture rules forbid the only things that could mutate `self.xs.count`
