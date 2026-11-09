@@ -19,13 +19,16 @@ func TestNoStorageOverlayClosedAccessPolicy(t *testing.T) {
 		"analyzer_no_storage_overlay.go": {"lookupStoreScanViewOnly": true, "setStoreScanViewOnly": true, "lookupStoreScanNoStorage": true, "setStoreScanNoStorage": true, "lookupStoreScanShares": true, "setStoreScanShares": true, "lookupStoreScanParamWriteCache": true, "setStoreScanParamWriteCache": true, "lookupCompilerBuiltinHelperCall": true, "setCompilerBuiltinHelperCall": true, "lookupReturnElementStmtUnknown": true, "setReturnElementStmtUnknown": true, "clearReturnElementStmtUnknown": true},
 		// analyzeDeclsParallel rejects every active construction overlay before
 		// clearing canonical per-return scratch maps for its next body pass.
-		"parallel_bodies.go":                {"analyzeDeclsParallel": true},
-		"parallel_body_worker_clone.go":     {"cloneAnalyzerValueForParallelPolicy": true, "cloneSpecializationStoreScanBoolSetCache": true},
-		"specialization_maps_generated.go":  {"cloneSpecializationOpaqueMap": true},
-		"shared_codegen.go":                 {"BeginSharedCodegen": true},
-		"optimization_result_api.go":        {"IsCompilerBuiltinHelperCall": true},
-		"retained_plain_default_product.go": {"captureRetainedPlainDefaultProductPhase": true},
-		"retained_analysis.go":              {"UpdatePrepared": true},
+		"parallel_bodies.go":                     {"analyzeDeclsParallel": true},
+		"parallel_body_worker_clone.go":          {"cloneAnalyzerValueForParallelPolicy": true, "cloneSpecializationStoreScanBoolSetCache": true},
+		"specialization_maps_generated.go":       {"cloneSpecializationOpaqueMap": true},
+		"specialization_maps_generated_part0.go": {"cloneSpecializationOpaqueMapPart0": true},
+		"specialization_maps_generated_part1.go": {"cloneSpecializationOpaqueMapPart1": true},
+		"specialization_maps_generated_part2.go": {"cloneSpecializationOpaqueMapPart2": true},
+		"shared_codegen.go":                      {"BeginSharedCodegen": true},
+		"optimization_result_api.go":             {"IsCompilerBuiltinHelperCall": true},
+		"retained_plain_default_product.go":      {"captureRetainedPlainDefaultProductPhase": true},
+		"retained_analysis.go":                   {"UpdatePrepared": true},
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -98,4 +101,11 @@ func TestNoStorageOverlayClosedAccessPolicy(t *testing.T) {
 	if !strings.Contains(string(retainedUpdate), "a.storeScanParamWriteCache = nil") || !strings.Contains(string(retainedUpdate), "a.storeScanParamFactsCache = nil") {
 		t.Fatal("retained semantic updates no longer invalidate parameter-write reachability and facts")
 	}
+}
+
+// Reviewed generated clone parts are the only typed-copy exemptions.
+func isGeneratedSpecializationClone(file, function string) bool {
+	return (file == "specialization_maps_generated_part0.go" && function == "cloneSpecializationOpaqueMapPart0") ||
+		(file == "specialization_maps_generated_part1.go" && function == "cloneSpecializationOpaqueMapPart1") ||
+		(file == "specialization_maps_generated_part2.go" && function == "cloneSpecializationOpaqueMapPart2")
 }

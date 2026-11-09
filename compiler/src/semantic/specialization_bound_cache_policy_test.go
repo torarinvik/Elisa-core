@@ -54,7 +54,7 @@ func TestSpecializationBoundCacheSourcePolicy(t *testing.T) {
 			goast.Inspect(fn.Body, func(node goast.Node) bool {
 				if literal, ok := node.(*goast.BasicLit); ok && literal.Kind == token.STRING {
 					value, _ := strconv.Unquote(literal.Value)
-					if value == "storeScanBoundCache" && !(entry.Name() == "parallel_body_worker_clone.go" && name == "cloneAnalyzerValueForParallelPolicy") && !(entry.Name() == "specialization_maps_generated.go" && name == "cloneSpecializationOpaqueMap") {
+					if value == "storeScanBoundCache" && !(entry.Name() == "parallel_body_worker_clone.go" && name == "cloneAnalyzerValueForParallelPolicy") && !isGeneratedSpecializationClone(entry.Name(), name) {
 						t.Errorf("named reflection bypass needs review: %s", set.Position(node.Pos()))
 					}
 				}
@@ -62,7 +62,7 @@ func TestSpecializationBoundCacheSourcePolicy(t *testing.T) {
 				if !ok {
 					return true
 				}
-				if selector.Sel.Name == "storeScanBoundCache" && !(entry.Name() == "parallel_body_worker_clone.go" && name == "cloneAnalyzerValueForParallelPolicy") && !(entry.Name() == "specialization_maps_generated.go" && name == "cloneSpecializationOpaqueMap") && !(entry.Name() == "region_struct_target_store_scan.go" && name == "storeScanBoundNames") {
+				if selector.Sel.Name == "storeScanBoundCache" && !(entry.Name() == "parallel_body_worker_clone.go" && name == "cloneAnalyzerValueForParallelPolicy") && !isGeneratedSpecializationClone(entry.Name(), name) && !(entry.Name() == "region_struct_target_store_scan.go" && name == "storeScanBoundNames") {
 					t.Errorf("raw cache access outside reviewed policy: %s", set.Position(node.Pos()))
 				}
 				if selector.Sel.Name == "storeScanBoundNames" && !allowedCalls[name] {

@@ -54,8 +54,8 @@ func TestSpecializationParamCacheSourcePolicy(t *testing.T) {
 			goast.Inspect(fn.Body, func(node goast.Node) bool {
 				if literal, ok := node.(*goast.BasicLit); ok && literal.Kind == token.STRING {
 					value, _ := strconv.Unquote(literal.Value)
-					if (value == "storeScanParamFactsCache" && !(entry.Name() == "parallel_body_worker_clone.go" && name == "cloneAnalyzerValueForParallelPolicy") && !(entry.Name() == "specialization_maps_generated.go" && name == "cloneSpecializationOpaqueMap")) ||
-						(value == "storeScanParamWriteCache" && !(entry.Name() == "parallel_body_worker_clone.go" && name == "cloneAnalyzerValueForParallelPolicy") && !(entry.Name() == "specialization_maps_generated.go" && name == "cloneSpecializationOpaqueMap")) {
+					if (value == "storeScanParamFactsCache" && !(entry.Name() == "parallel_body_worker_clone.go" && name == "cloneAnalyzerValueForParallelPolicy") && !isGeneratedSpecializationClone(entry.Name(), name)) ||
+						(value == "storeScanParamWriteCache" && !(entry.Name() == "parallel_body_worker_clone.go" && name == "cloneAnalyzerValueForParallelPolicy") && !isGeneratedSpecializationClone(entry.Name(), name)) {
 						t.Errorf("named reflection bypass needs review: %s", set.Position(node.Pos()))
 					}
 				}
@@ -63,10 +63,10 @@ func TestSpecializationParamCacheSourcePolicy(t *testing.T) {
 				if !ok {
 					return true
 				}
-				if selector.Sel.Name == "storeScanParamFactsCache" && !(entry.Name() == "parallel_body_worker_clone.go" && name == "cloneAnalyzerValueForParallelPolicy") && !(entry.Name() == "specialization_maps_generated.go" && name == "cloneSpecializationOpaqueMap") && !(entry.Name() == "analyzer_store_scan_param_facts_overlay.go" && (name == "lookupStoreScanParamFacts" || name == "setStoreScanParamFacts")) && !(entry.Name() == "retained_analysis.go" && name == "UpdatePrepared") {
+				if selector.Sel.Name == "storeScanParamFactsCache" && !(entry.Name() == "parallel_body_worker_clone.go" && name == "cloneAnalyzerValueForParallelPolicy") && !isGeneratedSpecializationClone(entry.Name(), name) && !(entry.Name() == "analyzer_store_scan_param_facts_overlay.go" && (name == "lookupStoreScanParamFacts" || name == "setStoreScanParamFacts")) && !(entry.Name() == "retained_analysis.go" && name == "UpdatePrepared") {
 					t.Errorf("raw cache access outside reviewed policy: %s", set.Position(node.Pos()))
 				}
-				if selector.Sel.Name == "storeScanParamWriteCache" && !(entry.Name() == "analyzer_no_storage_overlay.go" && (name == "lookupStoreScanParamWriteCache" || name == "setStoreScanParamWriteCache")) && !(entry.Name() == "parallel_body_worker_clone.go" && name == "cloneAnalyzerValueForParallelPolicy") && !(entry.Name() == "specialization_maps_generated.go" && name == "cloneSpecializationOpaqueMap") && !(entry.Name() == "retained_analysis.go" && name == "UpdatePrepared") {
+				if selector.Sel.Name == "storeScanParamWriteCache" && !(entry.Name() == "analyzer_no_storage_overlay.go" && (name == "lookupStoreScanParamWriteCache" || name == "setStoreScanParamWriteCache")) && !(entry.Name() == "parallel_body_worker_clone.go" && name == "cloneAnalyzerValueForParallelPolicy") && !isGeneratedSpecializationClone(entry.Name(), name) && !(entry.Name() == "retained_analysis.go" && name == "UpdatePrepared") {
 					t.Errorf("raw reachability cache access outside reviewed policy: %s", set.Position(node.Pos()))
 				}
 				if selector.Sel.Name == "storeScanParamLocalFacts" && !allowedCalls[name] {
