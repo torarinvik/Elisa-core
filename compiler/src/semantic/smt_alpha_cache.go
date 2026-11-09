@@ -88,6 +88,7 @@ func smtAlphaWriteQuery(query string, out smtAlphaOutput) bool {
 	// Only identical token spellings share validation; quoted and unquoted forms
 	// can represent the same name while having different validity rules.
 	lastValidated := ""
+	lastReplacement := ""
 	ok = smtAlphaWalk(query, func(tok smtAlphaToken, _ int) bool {
 		if !first {
 			if out.WriteByte(' ') != nil {
@@ -96,6 +97,12 @@ func smtAlphaWriteQuery(query string, out smtAlphaOutput) bool {
 		}
 		first = false
 		if tok.kind == 'a' {
+			// Generated names often recur throughout one proof. Reuse the
+			// last successful lookup before hashing a potentially long name.
+			if tok.text == lastValidated && lastReplacement != "" {
+				_, err := out.WriteString(lastReplacement)
+				return err == nil
+			}
 			id := smtAlphaSymbol(tok.text)
 			// The names map contains only compiler-generated identifiers. Most
 			// atoms are operators, keywords, numerals or sorts and cannot match.
@@ -107,6 +114,7 @@ func smtAlphaWriteQuery(query string, out smtAlphaOutput) bool {
 						}
 						lastValidated = tok.text
 					}
+					lastReplacement = replacement
 					_, err := out.WriteString(replacement)
 					return err == nil
 				}
