@@ -162,11 +162,12 @@ func smtAlphaValidSymbol(token string) bool {
 	if name == "" {
 		return false
 	}
-	for _, c := range name {
+	for i := 0; i < len(name); i++ {
+		c := name[i]
 		if c < 32 || c > 126 || c == '|' || c == '\\' {
 			return false
 		}
-		if !quoted && !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || strings.ContainsRune("~!@$%^&*_-+=<>.?/", c)) {
+		if !quoted && !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || strings.IndexByte("~!@$%^&*_-+=<>.?/", c) >= 0) {
 			return false
 		}
 	}

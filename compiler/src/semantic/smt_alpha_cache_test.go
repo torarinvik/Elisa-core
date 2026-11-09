@@ -305,3 +305,32 @@ func TestSMTAlphaInvalidControlScan(t *testing.T) {
 		}
 	}
 }
+
+func TestSMTAlphaValidSymbolByteValidation(t *testing.T) {
+	reference := func(token string) bool {
+		quoted := len(token) >= 2 && token[0] == '|' && token[len(token)-1] == '|'
+		name := smtAlphaSymbol(token)
+		if name == "" {
+			return false
+		}
+		for _, c := range name {
+			if c < 32 || c > 126 || c == '|' || c == '\\' {
+				return false
+			}
+			if !quoted && !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || strings.ContainsRune("~!@$%^&*_-+=<>.?/", c)) {
+				return false
+			}
+		}
+		return true
+	}
+	cases := []string{"", "|", "||", "v_λ", "|v_λ|", "v_😀"}
+	for c := 0; c < 256; c++ {
+		name := "v_" + string([]byte{byte(c)})
+		cases = append(cases, name, "|"+name+"|")
+	}
+	for _, token := range cases {
+		if got, want := smtAlphaValidSymbol(token), reference(token); got != want {
+			t.Errorf("%q: got %v, want %v", token, got, want)
+		}
+	}
+}
