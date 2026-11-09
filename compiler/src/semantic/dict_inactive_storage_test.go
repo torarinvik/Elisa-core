@@ -39,7 +39,7 @@ func actualDictInactiveSource(t *testing.T) string {
 		}
 		return source[start:start+len(prefix)+next[0]] + "\n"
 	}
-	collections, arena := read("collections.elisa"), read("arena.elisa")
+	collections, arena := read("collections.elisa"), read("arena_region_blocks.elisa")
 	return "extern memset(dest: mutable void&, val: i32, n: usize) -> mutable void&\n" +
 		extract(collections, "struct DictBucket[") + extract(collections, "def collections_mutable_void_from_items[") + extract(arena, "def arena_checked_mul_usize(") + extract(collections, "def arena_dict_zero_buckets[")
 }

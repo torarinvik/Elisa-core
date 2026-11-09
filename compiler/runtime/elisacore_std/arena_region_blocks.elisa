@@ -1,0 +1,536 @@
+def arena_checked_add_usize(left: usize, right: usize) -> usize:
+    can Abort.Panic:
+        result: usize = left + right
+        if result < left:
+            panic("arena size addition overflow")
+        return result
+
+@internal
+def arena_checked_mul_usize(left: usize, right: usize) -> usize:
+    can Abort.Panic:
+        result: usize = left * right
+        if left != 0 and result / left != right:
+            panic("arena size multiplication overflow")
+        return result
+
+@internal
+def arena_region_payload_bytes(capacity_slots: usize) -> usize:
+    return arena_checked_mul_usize(capacity_slots, size_of(uintptr)) can Abort.Panic
+
+@internal
+def arena_region_total_bytes(capacity_slots: usize) -> usize:
+    return arena_checked_add_usize(size_of(Region), arena_region_payload_bytes(capacity_slots)) can Abort.Panic
+
+@internal
+def arena_size_bytes_to_slots(size_bytes: usize) -> usize:
+    can Abort.Panic:
+        word_bytes: usize = size_of(uintptr)
+        if word_bytes == 0:
+            panic("arena has zero-sized allocation words")
+
+        slots: mutable usize = size_bytes / word_bytes
+        if size_bytes % word_bytes != 0:
+            slots <- arena_checked_add_usize(slots, 1)
+        slots <- 1 if slots == 0
+
+        rounded_bytes: usize = slots * word_bytes
+        if slots != 0 and rounded_bytes / slots != word_bytes:
+            panic("arena allocation size overflow")
+        if rounded_bytes < size_bytes:
+            panic("arena allocation size overflow")
+        return slots
+
+@internal
+def arena_region_can_fit(r: Region&, requested_slots: usize) -> bool:
+    can Abort.Panic:
+        if r.count > r.capacity:
+            panic("arena cursor exceeds region capacity")
+        return requested_slots <= r.capacity - r.count
+
+
+# Own a fresh, aligned mapping sized for Region plus its requested payload.
+# Failed/null carriers are rejected before the one suppressed conversion;
+# arbitrary integer promotion in arena_region_from_uintptr remains tracked.
+static if ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
+    @internal
+    def arena_mmap_owned_region(capacity: usize) -> mutable heap Region&:
+        size_bytes: usize = arena_region_total_bytes(capacity) can Abort.Panic
+        raw_addr: mutable uintptr = 0.uintptr()
+        trusted Unsafe.RawExtern:
+            raw_addr <- (mmap(
+                0.uintptr(),
+                size_bytes,
+                ELISA_ARENA_PROT_READ | ELISA_ARENA_PROT_WRITE,
+                ELISA_ARENA_MAP_ANONYMOUS | ELISA_ARENA_MAP_PRIVATE | ELISA_ARENA_MAP_NORESERVE,
+                -1,
+                0
+            ) can Memory.Allocate)
+        if raw_addr == MAP_FAILED() or raw_addr == 0.uintptr():
+            can Abort.Panic:
+                panic("arena allocation failed")
+        trusted Unsafe.PointerCast:
+            return arena_region_from_uintptr(raw_addr)
+
+def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap Region&:
+    can Abort.Panic, Atomics{Exchange,Store}, Memory.Allocate, Unsafe.Alias:
+        size_bytes: usize = arena_region_total_bytes(capacity)
+
+        # Reuse the parked region when it is big enough — its own (possibly larger)
+        # capacity is kept, exactly as if the caller had asked for that size.
+        static if ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
+            if capacity > REGION_CACHE_MAX_SLOTS:
+                reserved_region: mutable heap Region&? = (arena_reserve_cache_take(capacity, owner_tag) can Global{Read,Write})
+                if reserved_region is reserved:
+                    return reserved
+            else:
+                cached_region: mutable heap Region&? = (arena_region_cache_take(capacity, owner_tag) can Global{Read,Write})
+                if cached_region is cached:
+                    return cached
+        static else:
+            pass
+
+        static if ARENA_BACKEND == ARENA_BACKEND_LIBC_MALLOC:
+            raw: mutable heap void&? = null
+            trusted Unsafe.RawExtern:
+                raw <- malloc(size_bytes)
+            if raw == null:
+                panic("arena allocation failed")
+            r: mutable heap Region& = arena_region_from_raw(raw)
+
+        static elif ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
+            r: mutable heap Region& = arena_mmap_owned_region(capacity) can Memory.Allocate, Abort.Panic
+
+        static elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
+            raw: mutable heap void&? = null
+            trusted Unsafe.RawExtern:
+                raw <- VirtualAllocEx(
+                    GetCurrentProcess(),
+                    null,
+                    size_bytes,
+                    MEM_COMMIT | MEM_RESERVE,
+                    PAGE_READWRITE
+                )
+            if inv_handle(raw) or raw == null:
+                panic("arena allocation failed")
+            r: mutable heap Region& = arena_region_from_raw(raw)
+
+        static elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE:
+            raw: mutable heap void&? = null
+            trusted Unsafe.RawExtern:
+                raw <- malloc(size_bytes)
+            if raw == null:
+                panic("arena allocation failed")
+            r: mutable heap Region& = arena_region_from_raw(raw)
+
+        static else:
+            static error("Unknown arena backend")
+
+        r.next <- null
+        r.count <- 0
+        r.capacity <- capacity
+        r.owner_tag <- owner_tag
+        r.owner_next <- null
+        r.global_index <- 0
+        r.committed <- 0
+        r.free_list <- null
+        return r
+
+def new_region(capacity: usize) -> mutable heap Region&:
+    can Atomics{Exchange,Store}, Unsafe.Alias:
+        return (new_region_with_owner(capacity, 0.uintptr()) can Global{Read,Write}) can Memory.Allocate, Abort.Panic
+
+# A libc-malloc-backed region block, available on every target (malloc/free are declared for
+# all backends above). Used by malloc-selected regions regardless of the compile-time default.
+@internal
+def new_region_malloc(capacity: usize) -> mutable heap Region&:
+    can Memory.Allocate, Abort.Panic:
+        size_bytes: usize = arena_region_total_bytes(capacity)
+        raw: mutable heap void&? = null
+        trusted Unsafe.RawExtern:
+            raw <- malloc(size_bytes)
+        if raw == null:
+            panic("arena allocation failed")
+        r: mutable heap Region& = arena_region_from_raw(raw)
+        r.next <- null
+        r.count <- 0
+        r.capacity <- capacity
+        r.owner_tag <- 0.uintptr()
+        r.owner_next <- null
+        r.global_index <- 0
+        r.committed <- 0
+        r.free_list <- null
+        return r
+
+# A reserve-only region block for the reserve_commit/fixed strategies. On Windows the block's
+# address range is MEM_RESERVE'd up front (no physical backing) and pages are MEM_COMMIT'd on
+# demand by arena_region_ensure_committed as the bump pointer advances — so a large default
+# reservation (256 MiB) costs only address space, matching POSIX mmap's demand-paging. On every
+# other backend it is identical to new_region (mmap demand-pages, or malloc/eager-commit), and
+# the commit-on-demand helper no-ops.
+@internal
+def new_region_reserve(capacity: usize) -> mutable heap Region&:
+    can Abort.Panic, Atomics{Exchange,Store}, Memory.Allocate, Unsafe.Alias:
+        static if ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
+            size_bytes: usize = arena_region_total_bytes(capacity)
+            raw: mutable heap void&? = null
+            trusted Unsafe.RawExtern:
+                raw <- VirtualAllocEx(
+                    GetCurrentProcess(),
+                    null,
+                    size_bytes,
+                    MEM_RESERVE,
+                    PAGE_READWRITE
+                )
+            if inv_handle(raw) or raw == null:
+                panic("arena reservation failed")
+            # Commit an initial chunk covering the Region header before writing any field.
+            initial: usize = win_commit_round_up(arena_region_total_bytes(1))
+            commit_raw: mutable heap void&? = null
+            trusted Unsafe.RawExtern:
+                commit_raw <- VirtualAllocEx(
+                    GetCurrentProcess(),
+                    raw,
+                    initial,
+                    MEM_COMMIT,
+                    PAGE_READWRITE
+                )
+            if inv_handle(commit_raw) or commit_raw == null:
+                panic("arena initial page commit failed")
+            r: mutable heap Region& = arena_region_from_raw(raw)
+            r.next <- null
+            r.count <- 0
+            r.capacity <- capacity
+            r.owner_tag <- 0.uintptr()
+            r.owner_next <- null
+            r.global_index <- 0
+            r.committed <- initial
+            r.free_list <- null
+            return r
+        static else:
+            return (new_region(capacity) can Global{Read,Write})
+
+# WINDOWS reserve_commit/fixed only: commit (page-in) enough pages so that `needed_bytes` from the
+# block base are physically backed, growing the committed watermark in chunks to amortize syscalls.
+# Idempotent — re-committing already-committed pages is a no-op per VirtualAlloc. A no-op on every
+# other backend (their blocks are fully backed at creation: mmap demand-pages, malloc/eager-commit).
+@internal
+def arena_region_ensure_committed(r: mutable heap Region&, needed_bytes: usize):
+    can Abort.Panic:
+        static if ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
+            if needed_bytes > r.committed:
+                target: mutable usize = win_commit_round_up(needed_bytes)
+                full: usize = arena_region_total_bytes(r.capacity)
+                target <- full if target > full
+                base: mutable heap void&? = arena_mutable_heap_void_from_region(r)
+                commit_raw: mutable heap void&? = null
+                trusted Unsafe.RawExtern:
+                    commit_raw <- VirtualAllocEx(
+                        GetCurrentProcess(),
+                        base,
+                        target,
+                        MEM_COMMIT,
+                        PAGE_READWRITE
+                    )
+                if inv_handle(commit_raw) or commit_raw == null:
+                    panic("arena page commit failed")
+                r.committed <- target
+        static else:
+            pass
+
+# Strategy-dispatching region allocator: chooses the block source. MALLOC draws blocks from
+# libc malloc; every other strategy (CHAINED/RESERVE_COMMIT/FIXED/SCRATCH) uses the compile-time
+# ARENA_BACKEND (mmap/VirtualAlloc), so it is identical to new_region for those.
+def new_region_backend(capacity: usize, strategy: int) -> mutable heap Region&:
+    can Abort.Panic, Atomics{Exchange,Store}, Memory.Allocate, Unsafe.Alias:
+        return new_region_malloc(capacity) if strategy == ARENA_STRATEGY_MALLOC
+        # reserve_commit/fixed take a contiguous block that grows in place. On Windows that block
+        # is reserved-then-committed-on-demand (new_region_reserve); on POSIX it is a demand-paged
+        # mmap (new_region_reserve falls through to new_region there). CHAINED/SCRATCH keep the
+        # plain block source.
+        return (new_region_reserve(capacity) can Global{Read,Write}) if strategy == ARENA_STRATEGY_RESERVE_COMMIT or strategy == ARENA_STRATEGY_FIXED
+        return (new_region(capacity) can Global{Read,Write})
+
+@internal
+def arena_free_block_after_slots(block: mutable heap ArenaFreeBlock&, slots: usize) -> mutable heap ArenaFreeBlock&:
+    trusted [Unsafe.PointerCast, Unsafe.PointerArithmetic]:
+        return (block.cast[mutable heap u8&] + slots * size_of(uintptr)).cast[mutable heap ArenaFreeBlock&]
+
+@internal
+def arena_take_free_block(r: mutable heap Region&, need_slots: usize, exhaustive: bool) -> mutable heap void&?:
+    can Unsafe.Alias:
+        header_slots: usize = (size_of(ArenaFreeBlock) + size_of(uintptr) - 1) / size_of(uintptr)
+        # FIRST-FIT WITH A BOUNDED PROBE. The exhaustive walk made every allocation
+        # O(live free blocks): a compiler-sized run reclaims thousands of darray backings
+        # into this list, and sampling stage1 compiling its own driver put ~35% of ALL
+        # cpu inside this walk (arena_take_free_block + _chain + reclaim, plus the
+        # mmap/munmap churn it drives). Ordinary allocations use a bounded probe and then
+        # bump-allocate. Constrained arenas request an exhaustive probe only on the overflow
+        # path, where missing a reusable block would otherwise cause a spurious panic.
+        # Insertion is LIFO, so the bounded probe still sees the most recently freed — cache-
+        # warm and, in the grow-in-place realloc pattern that dominates, right-sized — blocks
+        # first.
+        probes_left: mutable usize = 32
+        previous: mutable heap ArenaFreeBlock&? = null
+        current: mutable heap ArenaFreeBlock&? = r.free_list
+        while current != null and (exhaustive == true or probes_left > 0):
+            probes_left <- probes_left - 1 if not exhaustive
+            if current.slots >= need_slots:
+                block: mutable heap ArenaFreeBlock& = current
+                remainder: usize = current.slots - need_slots
+                if remainder >= header_slots:
+                    # The checked request size and remainder bound establish a live free-block
+                    # header here; construct its reference directly instead of zeroing a non-null
+                    # reference slot and rebinding it inside an unsafe block.
+                    split: mutable heap ArenaFreeBlock& = arena_free_block_after_slots(block, need_slots)
+                    split.slots <- remainder
+                    split.next <- current.next
+                    if previous != null:
+                        previous.next <- split
+                    else:
+                        r.free_list as & <- split
+                else:
+                    if previous != null:
+                        previous.next <- current.next
+                    else:
+                        r.free_list <- current.next
+                trusted Unsafe.PointerCast:
+                    return block.cast[mutable heap void&]
+            previous <- current
+            current <- current.next
+        return null
+
+# The reclaimed-span HINT is keyed by arena address. A stale hint can cost reuse on growable
+# arenas; fixed/reserve-commit arenas exhaustively scan only after bump overflow so a displaced
+# hint cannot hide reclaimed capacity and cause a spurious reservation-exhausted panic. The
+# allocator calls this lookup only when a non-empty arena cannot use its current bump region; a
+# first allocation and normal bump allocation avoid even the advisory atomic owner load.
+
+@internal
+def arena_find_free_region(start: mutable heap Region&?) -> mutable heap Region&?:
+    cursor: mutable heap Region&? = start
+    while cursor != null:
+        return cursor if cursor.free_list != null
+        cursor <- cursor.next
+    return null
+
+
+@internal
+def arena_fixed_overflow_reuse(a: mutable Arena&, need_slots: usize, size_bytes: usize) -> mutable heap void&?:
+    can Atomics{Exchange,Load,Store}, Unsafe{Alias,PointerCast,RawExtern}:
+        cursor: mutable heap Region&? = a.begin
+        while cursor != null:
+            if arena_take_free_block(cursor, need_slots, true) is reclaimed:
+                next_hint: mutable heap Region&? = arena_find_free_region(a.begin)
+                if next_hint != null:
+                    (arena_free_hint_set(a.cast[uintptr], next_hint) can Global{Read,Write})
+                else:
+                    # Clear only our own exhausted hint; do not evict another arena's useful
+                    # entry when this constrained arena has no reusable blocks left.
+                    (arena_free_hint_update(a.cast[uintptr], null) can Global{Read,Write})
+                (arena_profile_region_layout(a, cursor) can Global{Read,Write})
+                arena_profile_allocation_event(
+                    ELISA_PROFILE_ALLOCATION_ALLOC,
+                    reclaimed.cast[uintptr],
+                    size_bytes,
+                    0.uintptr(),
+                    0.usize(),
+                    a.cast[uintptr],
+                    cursor.global_index
+                ) can Global{Read,Write}, Atomics{Exchange,Load,Store}
+                return reclaimed
+            cursor <- cursor.next
+        return null
+
+
+@internal
+def arena_take_free_block_chain(a: mutable Arena&, need_slots: usize, size_bytes: usize) -> mutable heap void&?:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Unsafe{Alias,PointerCast,RawExtern}:
+        hinted: mutable heap Region&? = (arena_free_hint_get(a.cast[uintptr]) can Global{Read,Write}, Atomics.Load)
+        if hinted == null:
+            if a.strategy == ARENA_STRATEGY_RESERVE_COMMIT or a.strategy == ARENA_STRATEGY_FIXED:
+                if a.end != null and not arena_region_can_fit(a.end, need_slots):
+                    if (arena_fixed_overflow_reuse(a, need_slots, size_bytes) can Global{Read,Write}) is reclaimed:
+                        return reclaimed
+            return null
+
+        # Probe the remembered region first. This is the usual reclaim/realloc path and
+        # avoids scanning all earlier regions in a compiler-sized arena.
+        if arena_take_free_block(hinted, need_slots, false) is reclaimed:
+            next_hint: mutable heap Region&? = hinted
+            next_hint <- arena_find_free_region(hinted) if hinted.free_list == null
+            (arena_free_hint_update(a.cast[uintptr], next_hint) can Global{Read,Write})
+            (arena_profile_region_layout(a, hinted) can Global{Read,Write})
+            arena_profile_allocation_event(
+                ELISA_PROFILE_ALLOCATION_ALLOC,
+                reclaimed.cast[uintptr],
+                size_bytes,
+                0.uintptr(),
+                0.usize(),
+                a.cast[uintptr],
+                hinted.global_index
+            ) can Global{Read,Write}, Atomics{Exchange,Load,Store}
+            return reclaimed
+
+        # NEXT-FIT WITH A BOUNDED SCAN. The hint is valid (reset, rewind, trim, free and adopt
+        # all clear or re-point it), so every region reached from it is still in this chain.
+        # The old fallback walked the WHOLE chain from `a.begin` on every hint miss, probing up
+        # to 32 blocks per region. A compiler-sized arena holds ~1000 regions, and the miss is
+        # the common case (a darray growth move asks for twice the block it just freed), so
+        # sampling stage1 compiling itself put ~45% of all cpu in arena_take_free_block. Visit
+        # a bounded number of regions after the hint, wrapping at `a.begin`, and leave the
+        # hint where the scan stopped: the next miss resumes there, so every region is still
+        # revisited in turn. A scan that wraps back to the hint has seen everything and clears
+        # it, exactly as the exhaustive walk did.
+        cursor: mutable heap Region&? = hinted.next
+        cursor <- a.begin if cursor == null
+        regions_left: mutable usize = ARENA_FREE_CHAIN_REGION_VISITS
+        trusted Unsafe.AssumeProgress:
+            while cursor != null and cursor != hinted and regions_left > 0:
+                regions_left <- regions_left - 1
+                if cursor.free_list != null:
+                    if arena_take_free_block(cursor, need_slots, false) is reclaimed:
+                        next_hint: mutable heap Region&? = cursor
+                        next_hint <- arena_find_free_region(cursor) if cursor.free_list == null
+                        (arena_free_hint_update(a.cast[uintptr], next_hint) can Global{Read,Write})
+                        (arena_profile_region_layout(a, cursor) can Global{Read,Write})
+                        arena_profile_allocation_event(
+                            ELISA_PROFILE_ALLOCATION_ALLOC,
+                            reclaimed.cast[uintptr],
+                            size_bytes,
+                            0.uintptr(),
+                            0.usize(),
+                            a.cast[uintptr],
+                            cursor.global_index
+                        ) can Global{Read,Write}, Atomics{Exchange,Load,Store}
+                        return reclaimed
+                cursor <- cursor.next
+                cursor <- a.begin if cursor == null
+        if a.strategy == ARENA_STRATEGY_RESERVE_COMMIT or a.strategy == ARENA_STRATEGY_FIXED:
+            if a.end != null and not arena_region_can_fit(a.end, need_slots):
+                if (arena_fixed_overflow_reuse(a, need_slots, size_bytes) can Global{Read,Write}) is reclaimed:
+                    return reclaimed
+        resume: mutable heap Region&? = cursor
+        resume <- null if cursor == hinted
+        (arena_free_hint_update(a.cast[uintptr], resume) can Global{Read,Write})
+        return null
+
+# Unchecked containment test for the reclaim walk. A region's payload size was
+# overflow-checked when the region was created, so recomputing it cannot overflow and
+# needs no checked multiply; the full validated test runs only on the region that
+# actually contains `raw`. The walk used to pay three checked multiplies per region on
+# every darray growth move (~12% of a self-host compile in arena_checked_mul_usize).
+@internal
+def arena_region_contains_address(r: heap Region&, raw: uintptr) -> bool:
+    base: mutable uintptr = 0.uintptr()
+    trusted Unsafe.PointerCast:
+        base <- arena_heap_u8_from_region_data(r).uintptr()
+    return false if raw < base
+    return (raw - base).usize() < r.capacity * size_of(uintptr)
+
+# Compiler-emitted reclaim of a darray buffer the analyzer proved unreferenced (a reassigned local
+# whose old value has no other header copy or view; analyzer_reassign_reclaim.go). size_bytes is
+# the buffer's capacity in bytes. A pointer outside `a` is ignored by arena_reclaim_allocation.
+def arena_reclaim_bytes(a: mutable Arena&, ptr: mutable void&, size_bytes: usize):
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Unsafe.RawExtern:
+        return if size_bytes == 0
+        (arena_reclaim_allocation(a, ptr, arena_size_bytes_to_slots(size_bytes), size_bytes) can Global{Read,Write})
+
+@internal
+def arena_reclaim_allocation(a: mutable Arena&, oldptr: mutable void&, old_slots: usize, old_size: usize):
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Unsafe.RawExtern:
+        header_slots: usize = (size_of(ArenaFreeBlock) + size_of(uintptr) - 1) / size_of(uintptr)
+        return if old_slots < header_slots
+
+        raw: mutable uintptr = 0.uintptr()
+        trusted Unsafe.PointerCast:
+            raw <- oldptr.cast[heap u8&].uintptr()
+        cursor: mutable heap Region&? = a.begin
+        while cursor != null:
+            if arena_region_contains_address(cursor, raw):
+                trusted Unsafe.PointerCast:
+                    base: uintptr = arena_heap_u8_from_region_data(cursor).uintptr()
+                    if cursor.count > cursor.capacity:
+                        panic("arena cursor exceeds region capacity")
+                    payload_bytes: usize = arena_region_payload_bytes(cursor.capacity)
+                    used_bytes: usize = arena_region_payload_bytes(cursor.count)
+                    allocation_bytes: usize = arena_region_payload_bytes(old_slots)
+                    if raw >= base:
+                        offset_bytes: usize = (raw - base).usize()
+                        if offset_bytes % size_of(uintptr) == 0 and offset_bytes <= used_bytes and allocation_bytes <= used_bytes - offset_bytes and offset_bytes <= payload_bytes and allocation_bytes <= payload_bytes - offset_bytes:
+                            block: mutable heap ArenaFreeBlock& = oldptr.cast[mutable heap ArenaFreeBlock&]
+                            block.slots <- old_slots
+                            block.next <- cursor.free_list
+                            cursor.free_list as & <- block
+                            (arena_cache_record_reclaim(a.cast[uintptr], cursor) can Global{Read,Write})
+                            arena_profile_allocation_event(
+                                ELISA_PROFILE_ALLOCATION_RECLAIM,
+                                0.uintptr(),
+                                0.usize(),
+                                oldptr.cast[uintptr],
+                                old_size,
+                                a.cast[uintptr],
+                                cursor.global_index
+                            ) can Global{Read,Write}, Atomics{Exchange,Load,Store}
+                            return
+            cursor <- cursor.next
+
+def free_region(r: heap Region&):
+    can Abort.Panic, Atomics{Exchange,Store}, Memory.Release:
+        static if ARENA_BACKEND == ARENA_BACKEND_LIBC_MALLOC:
+            trusted Unsafe.RawExtern:
+                free(arena_heap_void_from_region(r))
+
+        static elif ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
+            # A fresh anonymous mmap is kernel-zeroed. Restore that invariant before
+            # publishing a parked region so a concurrent cache consumer never observes
+            # stale bytes from its former owner.
+            if (arena_region_cache_try_park(r) can Global{Read,Write}):
+                return
+            if (arena_reserve_cache_try_park(r) can Global{Read,Write}):
+                return
+            size_bytes: usize = arena_region_total_bytes(r.capacity)
+            ret: mutable int = 0
+            trusted Unsafe.RawExtern:
+                ret <- munmap(arena_heap_void_from_region(r), size_bytes)
+            if ret != 0:
+                panic("arena region release failed")
+
+        static elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
+            ok: i32 = VirtualFreeEx(
+                GetCurrentProcess(),
+                arena_heap_void_from_region(r),
+                0,
+                MEM_RELEASE
+            )
+            if ok == 0:
+                panic("arena region release failed")
+
+        static elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE:
+            trusted Unsafe.RawExtern:
+                free(arena_heap_void_from_region(r))
+
+# Free a libc-malloc-backed region block (counterpart to new_region_malloc).
+@internal
+def free_region_malloc(r: heap Region&):
+    can Memory.Release, Abort.Panic:
+        trusted Unsafe.RawExtern:
+            free(arena_heap_void_from_region(r))
+
+# Strategy-dispatching region free. MALLOC frees via libc free (matching new_region_backend's
+# MALLOC block source); every other strategy frees via free_region (munmap/VirtualFree).
+def free_region_backend(r: heap Region&, strategy: int):
+    can Abort.Panic, Atomics{Exchange,Store}, Memory.Release:
+        if strategy == ARENA_STRATEGY_MALLOC:
+            free_region_malloc(r)
+            return
+        trusted Unsafe.RawExtern:
+            (free_region(r) can Global{Read,Write})
+
+# Intended allocator contract: every returned extent is distinct from every other live extent.
+# A block may be reused only after its previous allocation lifetime has ended through
+# explicit reclaim/reset/rewind/trim/free; `arena_adopt` transfers extents without ending them.
+# The LLVM backend does not publish this as a return `noalias` attribute: arena extents are
+# subranges of Region storage, and mutable Arena/Region bookkeeping or source-provided
+# replacements can violate malloc-like disjointness from objects accessible to the caller.
+# `arena_trim`, reset, rewind, and free require the caller to ensure no later use of pointers
+# into the storage they release.

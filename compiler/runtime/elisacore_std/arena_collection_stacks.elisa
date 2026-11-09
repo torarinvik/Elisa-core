@@ -1,0 +1,399 @@
+const COLLECTION_STACK_MEMO_SLOTS: usize = 4096
+const COLLECTION_ARENA_MEMO_SLOTS: usize = 256
+
+struct CollectionStackMemoEntry:
+    table: mutable uintptr
+    region: mutable heap Region&?
+    arena: mutable uintptr
+    begin: mutable uintptr
+
+struct CollectionArenaMemoEntry:
+    arena: mutable uintptr
+    begin: mutable uintptr
+    last_table: mutable uintptr
+    no_pooled: mutable bool
+    # When known, no pooled stack of the arena holds more than pooled_bound slots, so an
+    # acquire needing more skips the walk over the region chain.
+    pooled_bound_known: mutable bool
+    pooled_bound: mutable usize
+
+global mutable __elisa_collection_stack_memo: CollectionStackMemoEntry[COLLECTION_STACK_MEMO_SLOTS] = zeroed
+global mutable __elisa_collection_arena_memo: CollectionArenaMemoEntry[COLLECTION_ARENA_MEMO_SLOTS] = zeroed
+
+@internal
+def collection_memo_hash(key: uintptr, slots: usize) -> usize:
+    mixed: uintptr = (key >> 4.uintptr()) ^ (key >> 13.uintptr()) ^ (key >> 22.uintptr())
+    return (mixed & (slots - 1).uintptr()).usize()
+
+@internal
+def collection_region_addr(r: heap Region&) -> uintptr:
+    can Unsafe.PointerCast:
+        return r.cast[uintptr]
+
+@internal
+def collection_region_table_addr(r: heap Region&) -> uintptr:
+    trusted Unsafe.PointerCast:
+        return arena_heap_u8_from_region_data(r).cast[uintptr]
+
+@internal
+def collection_table_addr(table: void&) -> uintptr:
+    trusted Unsafe.PointerCast:
+        return table.cast[uintptr]
+
+@internal
+def collection_arena_addr(a: Arena&) -> uintptr:
+    can Unsafe.PointerCast:
+        return a.cast[uintptr]
+
+@internal
+def collection_arena_begin_addr(a: Arena&) -> uintptr:
+    can Unsafe.PointerCast:
+        first: heap Region&? = a.begin
+        return 0.uintptr() if first == null
+        first_region: heap Region& = first
+        return collection_region_addr(first_region)
+
+# Record `r` (a collection stack linked into `a`'s chain) in the stack memo.
+@internal
+def collection_stack_memo_put(a: Arena&, r: mutable heap Region&):
+    can Unsafe{PointerCast,UncheckedIndex}:
+        key: uintptr = collection_region_table_addr(r)
+        arena_key: uintptr = collection_arena_addr(a)
+        begin_key: uintptr = collection_arena_begin_addr(a)
+        slot: usize = collection_memo_hash(key, COLLECTION_STACK_MEMO_SLOTS)
+        __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
+        trusted Unsafe.MutableGlobal:
+            can Global{Read,Write}:
+                entry: mutable CollectionStackMemoEntry& = &__elisa_collection_stack_memo[slot]
+                entry.table <- key
+                entry.region <- r
+                entry.arena <- arena_key
+                entry.begin <- begin_key
+        __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
+
+# The memoised stack whose data base is `key` in arena `a`, or null.
+@internal
+def collection_stack_memo_get(a: Arena&, key: uintptr) -> mutable heap Region&?:
+    can Unsafe{PointerCast,UncheckedIndex}:
+        result: mutable heap Region&? = null
+        return result if key == 0.uintptr()
+        arena_key: uintptr = collection_arena_addr(a)
+        begin_key: uintptr = collection_arena_begin_addr(a)
+        return result if begin_key == 0.uintptr()
+        slot: usize = collection_memo_hash(key, COLLECTION_STACK_MEMO_SLOTS)
+        __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
+        trusted Unsafe.MutableGlobal:
+            entry: CollectionStackMemoEntry& = &__elisa_collection_stack_memo[slot] can Global.Read
+            can Global.Read:
+                if entry.table == key and entry.arena == arena_key and entry.begin == begin_key:
+                    result <- entry.region
+        __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
+        return result
+
+# Drop `r` from the stack memo. Called for every collection-tagged region before it is
+# released, parked or retagged; a no-op when its slot holds another stack.
+@internal
+def collection_stack_memo_forget(r: heap Region&):
+    can Unsafe{PointerCast,UncheckedIndex}:
+        key: uintptr = collection_region_table_addr(r)
+        region_key: uintptr = collection_region_addr(r)
+        slot: usize = collection_memo_hash(key, COLLECTION_STACK_MEMO_SLOTS)
+        __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
+        trusted Unsafe.MutableGlobal:
+            can Global{Read,Write}, Unsafe.Alias:
+                entry: mutable CollectionStackMemoEntry& = &__elisa_collection_stack_memo[slot]
+                held: heap Region&? = entry.region
+                if held is held_region and collection_region_addr(held_region) == region_key:
+                    entry.table <- 0.uintptr()
+                    entry.region <- null
+                    entry.arena <- 0.uintptr()
+                    entry.begin <- 0.uintptr()
+        __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
+
+@internal
+def collection_arena_memo_last_table(a: Arena&) -> uintptr:
+    can Unsafe{PointerCast,UncheckedIndex}:
+        result: mutable uintptr = 0.uintptr()
+        arena_key: uintptr = collection_arena_addr(a)
+        begin_key: uintptr = collection_arena_begin_addr(a)
+        slot: usize = collection_memo_hash(arena_key, COLLECTION_ARENA_MEMO_SLOTS)
+        __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
+        trusted Unsafe.MutableGlobal:
+            entry: CollectionArenaMemoEntry& = &__elisa_collection_arena_memo[slot] can Global.Read
+            can Global.Read:
+                if entry.arena == arena_key and entry.begin == begin_key:
+                    result <- entry.last_table
+        __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
+        return result
+
+@internal
+def collection_arena_memo_no_pooled(a: Arena&) -> bool:
+    can Unsafe{PointerCast,UncheckedIndex}:
+        result: mutable bool = false
+        arena_key: uintptr = collection_arena_addr(a)
+        begin_key: uintptr = collection_arena_begin_addr(a)
+        slot: usize = collection_memo_hash(arena_key, COLLECTION_ARENA_MEMO_SLOTS)
+        __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
+        trusted Unsafe.MutableGlobal:
+            entry: CollectionArenaMemoEntry& = &__elisa_collection_arena_memo[slot] can Global.Read
+            can Global.Read:
+                if entry.arena == arena_key and entry.begin == begin_key:
+                    result <- entry.no_pooled
+        __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
+        return result
+
+# Update `a`'s arena memo: `last_table` when non-zero, and the no-pooled hint.
+@internal
+def collection_arena_memo_set(a: Arena&, last_table: uintptr, no_pooled: bool):
+    can Unsafe{PointerCast,UncheckedIndex}:
+        arena_key: uintptr = collection_arena_addr(a)
+        begin_key: uintptr = collection_arena_begin_addr(a)
+        return if begin_key == 0.uintptr()
+        slot: usize = collection_memo_hash(arena_key, COLLECTION_ARENA_MEMO_SLOTS)
+        __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
+        trusted Unsafe.MutableGlobal:
+            can Global{Read,Write}:
+                entry: mutable CollectionArenaMemoEntry& = &__elisa_collection_arena_memo[slot]
+                if entry.arena != arena_key or entry.begin != begin_key:
+                    entry.arena <- arena_key
+                    entry.begin <- begin_key
+                    entry.last_table <- 0.uintptr()
+                    entry.pooled_bound_known <- false
+                entry.last_table <- last_table if last_table != 0.uintptr()
+                entry.no_pooled <- no_pooled
+        __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
+
+# Reset/rewind pool every stack of `a`: the no-pooled hint no longer holds.
+@internal
+def collection_arena_memo_pooled(a: Arena&):
+    can Unsafe{PointerCast,UncheckedIndex}:
+        arena_key: uintptr = collection_arena_addr(a)
+        slot: usize = collection_memo_hash(arena_key, COLLECTION_ARENA_MEMO_SLOTS)
+        __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
+        trusted Unsafe.MutableGlobal:
+            can Global{Read,Write}:
+                entry: mutable CollectionArenaMemoEntry& = &__elisa_collection_arena_memo[slot]
+                if entry.arena == arena_key:
+                    entry.no_pooled <- false
+                    entry.pooled_bound_known <- false
+        __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
+
+# One stack of `capacity` slots was pooled: the no-pooled hint no longer holds, and a
+# known bound widens to cover it.
+@internal
+def collection_arena_memo_pool_one(a: Arena&, capacity: usize):
+    can Unsafe{PointerCast,UncheckedIndex}:
+        arena_key: uintptr = collection_arena_addr(a)
+        begin_key: uintptr = collection_arena_begin_addr(a)
+        slot: usize = collection_memo_hash(arena_key, COLLECTION_ARENA_MEMO_SLOTS)
+        __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
+        trusted Unsafe.MutableGlobal:
+            can Global{Read,Write}:
+                entry: mutable CollectionArenaMemoEntry& = &__elisa_collection_arena_memo[slot]
+                if entry.arena == arena_key and entry.begin == begin_key:
+                    entry.no_pooled <- false
+                    entry.pooled_bound <- capacity if entry.pooled_bound_known and capacity > entry.pooled_bound
+        __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
+
+# A full walk saw every pooled stack of `a`; none holds more than `bound` slots.
+@internal
+def collection_arena_memo_bound_set(a: Arena&, bound: usize):
+    can Unsafe{PointerCast,UncheckedIndex}:
+        arena_key: uintptr = collection_arena_addr(a)
+        begin_key: uintptr = collection_arena_begin_addr(a)
+        slot: usize = collection_memo_hash(arena_key, COLLECTION_ARENA_MEMO_SLOTS)
+        __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
+        trusted Unsafe.MutableGlobal:
+            can Global{Read,Write}:
+                entry: mutable CollectionArenaMemoEntry& = &__elisa_collection_arena_memo[slot]
+                if entry.arena == arena_key and entry.begin == begin_key:
+                    entry.pooled_bound_known <- true
+                    entry.pooled_bound <- bound
+        __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
+
+# Whether a pooled stack of `a` could hold `needed_slots`, as far as the memo knows.
+@internal
+def collection_arena_memo_may_fit(a: Arena&, needed_slots: usize) -> bool:
+    can Unsafe{PointerCast,UncheckedIndex}:
+        result: mutable bool = true
+        arena_key: uintptr = collection_arena_addr(a)
+        begin_key: uintptr = collection_arena_begin_addr(a)
+        slot: usize = collection_memo_hash(arena_key, COLLECTION_ARENA_MEMO_SLOTS)
+        __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
+        trusted Unsafe.MutableGlobal:
+            entry: CollectionArenaMemoEntry& = &__elisa_collection_arena_memo[slot] can Global.Read
+            can Global.Read:
+                if entry.arena == arena_key and entry.begin == begin_key:
+                    result <- false if entry.no_pooled or (entry.pooled_bound_known and needed_slots > entry.pooled_bound)
+        __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
+        return result
+
+# The table a stack holds: its data base.
+def collection_stack_table(r: heap Region&) -> mutable heap void&:
+    return arena_heap_void_from_data_base(arena_heap_u8_from_region_data(r), 0)
+
+# The collection stack whose data base IS `table`, or null. A dict/set built from a
+# literal or comprehension gets its first table straight from the bump chain (the
+# backend allocates it), so a table pointer alone cannot be assumed to sit at a stack's
+# base -- matched, never computed. Walked only on growth.
+@internal
+def collection_stack_of_table(a: mutable Arena&, table: void&) -> mutable heap Region&?:
+    can Atomics{Exchange,Store}, Unsafe{Alias,PointerCast,UncheckedIndex}:
+        target: uintptr = collection_table_addr(table)
+        memo: mutable heap Region&? = (collection_stack_memo_get(a, target) can Global{Read,Write})
+        if memo is memo_stack and memo_stack.owner_tag == ARENA_OWNER_TAG_COLLECTION.uintptr():
+            return memo_stack
+        trusted Unsafe.AssumeProgress:
+            cursor: mutable heap Region&? = a.begin
+            while cursor != null:
+                found: mutable heap Region& = cursor
+                if found.owner_tag == ARENA_OWNER_TAG_COLLECTION.uintptr() and collection_region_table_addr(found) == target:
+                    (collection_stack_memo_put(a, found) can Global{Read,Write})
+                    return found
+                cursor <- found.next
+        return null
+
+# Link a fresh stack at the chain's tail. Never at a.end: an empty arena first
+# materialises its own block through its strategy's path (one slot, once), so the bump
+# cursor is always an ordinary block.
+@internal
+def collection_stack_link(a: mutable Arena&, fresh: mutable heap Region&):
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        if a.end == null:
+            _ = (arena_alloc(a, size_of(uintptr)) can Global{Read,Write}, Atomics.Load)
+        assert a.end != null
+        last_block: mutable heap Region&? = a.end
+        # The last stack linked into this arena is at or past the tail found last time;
+        # start there instead of re-walking every stack behind a.end.
+        last_linked: mutable heap Region&? = (collection_stack_memo_get(a, collection_arena_memo_last_table(a)) can Global{Read,Write})
+        last_block <- last_linked if last_linked != null
+        trusted Unsafe.AssumeProgress:
+            while last_block != null and last_block.next != null:
+                last_block <- last_block.next
+        assert last_block != null
+        tail_region: mutable heap Region& = last_block
+        tail_region.next as & <- fresh
+        fresh.global_index <- tail_region.global_index + 1
+        (collection_stack_memo_put(a, fresh) can Global{Read,Write})
+        (collection_arena_memo_set(a, collection_region_table_addr(fresh), collection_arena_memo_no_pooled(a)) can Global{Read,Write})
+
+# Claim a stack for a table of `needed_slots` (uintptr slots) in arena `a`, for the
+# collection whose current table is `live_table` (null when it has none). Preference:
+# the collection's own spare when the table fits; a pooled stack that fits; a fresh
+# mapping. The result is claimed and committed where that is a separate step; the CALLER
+# zeroes the buckets, because a reused stack still holds the dead table. When the
+# collection had a live stack, it becomes the returned stack's spare.
+def collection_stack_acquire(a: mutable Arena&, live_table: void&?, needed_slots: usize) -> mutable heap Region&:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        live: mutable heap Region&? = null
+        chosen: mutable heap Region&? = null
+        if live_table != null:
+            live_ref: void& = live_table
+            live <- (collection_stack_of_table(a, live_ref) can Global{Read,Write})
+            if live != null:
+                live_stack: mutable heap Region& = live
+                spare: mutable heap Region&? = live_stack.owner_next
+                chosen <- spare if spare != null and spare.capacity >= needed_slots
+
+        if chosen == null and (collection_arena_memo_may_fit(a, needed_slots) can Global{Read,Write}):
+            probe: mutable heap Region&? = a.begin
+            saw_pooled: mutable bool = false
+            largest_pooled: mutable usize = 0
+            trusted Unsafe.AssumeProgress:
+                while probe != null:
+                    if probe.owner_tag == ARENA_OWNER_TAG_COLLECTION.uintptr() and probe.count == 0:
+                        saw_pooled <- true
+                        if probe.capacity >= needed_slots:
+                            chosen <- probe
+                            probe <- null
+                        else:
+                            largest_pooled <- probe.capacity if probe.capacity > largest_pooled
+                            probe <- probe.next
+                    else:
+                        probe <- probe.next
+            # A full walk that met no pooled stack at all: later acquires skip the walk
+            # until something pools a stack again.
+            (collection_arena_memo_set(a, 0.uintptr(), true) can Global{Read,Write}) if not saw_pooled
+            # A full walk that found no fit: later acquires larger than every pooled stack
+            # skip the walk until a reset pools stacks of unknown size.
+            (collection_arena_memo_bound_set(a, largest_pooled) can Global{Read,Write}) if chosen == null
+
+        # Fresh, from the arena's own block source so arena_free's strategy-dispatched
+        # free matches it. Running out is a panic inside new_region_*; there is no error
+        # to return.
+        if chosen == null:
+            capacity: mutable usize = COLLECTION_STACK_RESERVE_SLOTS
+            if needed_slots > capacity / 2:
+                capacity <- arena_checked_mul_usize(needed_slots, 2)
+            fresh: mutable heap Region& = (new_region_backend(capacity, a.strategy) can Global{Read,Write})
+            fresh.owner_tag <- ARENA_OWNER_TAG_COLLECTION.uintptr()
+            (collection_stack_link(a, fresh) can Global{Read,Write}, Atomics.Load)
+            arena_profile_allocation_event(
+                ELISA_PROFILE_ALLOCATION_REGION_CREATE,
+                fresh.cast[uintptr],
+                arena_region_payload_bytes(fresh.capacity),
+                0.uintptr(),
+                0.usize(),
+                a.cast[uintptr],
+                fresh.global_index
+            ) can Global{Read,Write}, Atomics{Exchange,Load,Store}
+            chosen <- fresh
+
+        assert chosen != null
+        claimed: mutable heap Region& = chosen
+        (collection_stack_memo_put(a, claimed) can Global{Read,Write})
+        claimed.count <- needed_slots
+        claimed.free_list <- null
+        arena_region_ensure_committed(claimed, arena_region_total_bytes(needed_slots))
+        (arena_profile_region_layout(a, claimed) can Global{Read,Write})
+        arena_profile_allocation_event(
+            ELISA_PROFILE_ALLOCATION_ALLOC,
+            collection_stack_table(claimed).cast[uintptr],
+            arena_region_payload_bytes(needed_slots),
+            0.uintptr(),
+            0.usize(),
+            a.cast[uintptr],
+            claimed.global_index
+        ) can Global{Read,Write}, Atomics{Exchange,Load,Store}
+
+        # Ping-pong: the old live stack is the new spare. A spare too small for this table
+        # is unpaired and pooled for a smaller one.
+        if live != null:
+            old_live: mutable heap Region& = live
+            dropped: mutable heap Region&? = old_live.owner_next
+            if dropped != null and dropped != chosen:
+                dropped_stack: mutable heap Region& = dropped
+                dropped_stack.count <- 0
+                dropped_stack.owner_next <- null
+                (collection_arena_memo_pool_one(a, dropped_stack.capacity) can Global{Read,Write})
+            old_live.owner_next <- null
+            claimed.owner_next <- old_live
+        else:
+            claimed.owner_next <- null
+        return claimed
+
+# Rehash callers invoke this only after the last read of the old table. The stack
+# remains pooled for reuse, but the profiler must see the logical retirement so
+# allocation pressure and retained table capacity are not understated.
+def collection_stack_profile_release(a: mutable Arena&, table: void&?) -> void:
+    can Atomics{Exchange,Load,Store}, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        return if:
+            table == null
+            not (arena_profile_allocation_supported() can Global{Read,Write}, Atomics{Exchange,Load,Store})
+        old_table: void& = table
+        old_backing: mutable heap Region&? = (collection_stack_of_table(a, old_table) can Global{Read,Write})
+        if old_backing != null:
+            arena_profile_allocation_event(
+                ELISA_PROFILE_ALLOCATION_RECLAIM,
+                0.uintptr(),
+                0.usize(),
+                old_table.cast[uintptr],
+                old_backing.count * size_of(uintptr),
+                a.cast[uintptr],
+                old_backing.global_index
+            ) can Global{Read,Write}, Atomics{Exchange,Load,Store}
+
+# ------------------------------------------------------------
+# Optional stdio formatting stubs
+# ------------------------------------------------------------
+

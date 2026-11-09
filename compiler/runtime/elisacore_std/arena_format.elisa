@@ -1,0 +1,27 @@
+extern va_list
+extern va_copy(args: va_list) -> va_list
+extern va_end(args: va_list)
+
+extern vsnprintf(
+    buffer: u8&?,
+    buffer_size: usize,
+    format: u8&,
+    args: va_list
+) -> i32
+
+def arena_vsprintf(a: mutable Arena&, format: u8&, args: va_list) -> mutable heap u8&:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Console.Format, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern}:
+        args_copy: mutable va_list = args
+        n: mutable int = -1
+        trusted Unsafe.RawExtern:
+            args_copy <- va_copy(args)
+            n <- vsnprintf(null, 0, format, args_copy)
+            va_end(args_copy)
+
+        assert n >= 0
+
+        allocation_bytes: usize = arena_checked_add_usize(n.usize(), 1)
+        result: mutable heap u8& = arena_heap_u8_from_alloc((arena_alloc(a, allocation_bytes) can Global{Read,Write}, Atomics.Load))
+        trusted Unsafe.RawExtern:
+            _ = vsnprintf(arena_nullable_u8_from_heap(result), allocation_bytes, format, args)
+        return result

@@ -160,6 +160,9 @@ func isRuntimeStdPermissionInternal(path string) bool {
 // with runtime/elisacore_std/*.elisa (the directory check above covers full-path builds).
 var runtimeStdBaseNames = map[string]bool{
 	"allocator.elisa": true, "arena.elisa": true,
+	"arena_alloc_realloc.elisa": true, "arena_collection_stacks.elisa": true,
+	"arena_defaults_and_pointers.elisa": true, "arena_format.elisa": true,
+	"arena_lifecycle.elisa": true, "arena_region_blocks.elisa": true, "arena_region_cache.elisa": true,
 	"collections.elisa": true, "debug_referee.elisa": true,
 	"deque.elisa": true, "elisacore_runtime.elisa": true, "elisacore_runtime_concurrency.elisa": true,
 	"elisacore_runtime_prelude.elisa": true, "elisacore_runtime_strings.elisa": true,

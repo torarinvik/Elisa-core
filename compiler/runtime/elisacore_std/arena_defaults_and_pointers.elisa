@@ -1,0 +1,130 @@
+def arena_default_reserve_slots() -> usize:
+    return ARENA_NARROW_RESERVE_COMMIT_SLOTS if size_of(uintptr) < 8
+    return ARENA_DEMAND_PAGED_RESERVE_COMMIT_SLOTS if ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP or ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC
+    return ARENA_DEFAULT_RESERVE_COMMIT_SLOTS
+
+def max(a: usize, b: usize) -> usize:
+    ensure result >= a
+    ensure result >= b
+    return a if a > b else b
+
+def min(a: usize, b: usize) -> usize:
+    ensure result <= a
+    ensure result <= b
+    return a if a < b else b
+
+def clamp(x: usize, lo: usize, hi: usize) -> usize:
+    requires lo <= hi
+    ensure result >= lo
+    ensure result <= hi
+    return lo if x < lo
+    return hi if x > hi
+    return x
+
+def inv_handle(ptr: heap void&?) -> bool:
+    return ptr == null
+
+@internal
+def arena_region_from_raw(raw: heap void&) -> mutable heap Region&:
+    trusted Unsafe.PointerCast:
+        return raw.cast[mutable heap Region&]
+
+@internal
+def arena_region_from_uintptr(raw: uintptr) -> mutable heap Region&:
+    # An integer alone proves neither allocation provenance nor Region layout.
+    can Unsafe.PointerCast:
+        return raw.cast[mutable heap Region&]
+
+@internal
+def arena_heap_void_from_region(r: heap Region&) -> heap void&:
+    trusted Unsafe.PointerCast:
+        return r.cast[heap void&]
+
+@internal
+def arena_mutable_heap_void_from_region(r: heap Region&) -> mutable heap void&?:
+    trusted Unsafe.PointerCast:
+        return r.cast[mutable heap void&?]
+
+@internal
+def arena_heap_u8_from_region_data(r: heap Region&) -> mutable heap u8&:
+    trusted [Unsafe.PointerCast, Unsafe.PointerArithmetic]:
+        return (r.cast[heap u8&] + size_of(Region)).cast[mutable heap u8&]
+
+@internal
+def arena_heap_void_from_data_base(data_base: heap u8&, offset_bytes: usize) -> mutable heap void&:
+    trusted [Unsafe.PointerCast, Unsafe.PointerArithmetic]:
+        return (data_base + offset_bytes).cast[mutable heap void&]
+
+@internal
+def arena_heap_void_from_mutable(ptr: mutable void&) -> mutable heap void&:
+    # Promoting an arbitrary borrow to heap requires authority at the caller.
+    can Unsafe.PointerCast:
+        return ptr.cast[mutable heap void&]
+
+@internal
+def arena_heap_u8_from_void(ptr: heap void&) -> mutable heap u8&:
+    trusted Unsafe.PointerCast:
+        return ptr.cast[mutable heap u8&]
+
+@internal
+def arena_heap_void_from_u8(ptr: heap u8&) -> heap void&:
+    trusted Unsafe.PointerCast:
+        return ptr.cast[heap void&]
+
+@internal
+def arena_u8_from_void(ptr: void&) -> u8&:
+    trusted Unsafe.PointerCast:
+        return ptr.cast[u8&]
+
+@internal
+def arena_mutable_u8_from_void(ptr: mutable void&) -> mutable u8&:
+    trusted Unsafe.PointerCast:
+        return ptr.cast[mutable u8&]
+
+@internal
+def arena_heap_u8_from_alloc(ptr: heap void&) -> mutable heap u8&:
+    trusted Unsafe.PointerCast:
+        return ptr.cast[mutable heap u8&]
+
+@internal
+def arena_void_from_mutable_u8(ptr: mutable heap u8&) -> mutable void&:
+    trusted Unsafe.PointerCast:
+        return ptr.cast[mutable void&]
+
+@internal
+def arena_void_from_u8(ptr: u8&) -> void&:
+    trusted Unsafe.PointerCast:
+        return ptr.cast[void&]
+
+@internal
+def arena_nullable_u8_from_heap(ptr: heap u8&) -> u8&?:
+    trusted Unsafe.PointerCast:
+        return ptr.cast[u8&?]
+
+# ------------------------------------------------------------
+# Pointer-state helpers
+# ------------------------------------------------------------
+
+def sfree[T](ptr: heap T&) -> heap T!:
+    can Memory.Release:
+        # Only valid against the libc-malloc backend; mmap/VirtualAlloc regions are released
+        # by free_region (which knows the size). Calling libc free on an mmap pointer is UB.
+        static if ARENA_BACKEND == ARENA_BACKEND_LIBC_MALLOC:
+            trusted [Unsafe.PointerCast, Unsafe.RawExtern]:
+                free(ptr.cast[heap void&])
+    return null
+
+# ------------------------------------------------------------
+# Region allocation / freeing
+# ------------------------------------------------------------
+
+# A bounded cache of the most recently freed mmap-backed regions. Sampling the -O2
+# compiler showed 15.5% of ALL cpu inside mmap/munmap: ordinary backend helpers each
+# spin up a scratch region and tear it down again, so the same-sized block is unmapped
+# and re-mapped thousands of times per compile. The cache keeps up to
+# REGION_CACHE_MAX_ENTRIES parked regions; new_region_with_owner probes that list and
+# reuses a region when its capacity suffices. free_region parks instead of unmapping
+# while the cache has room and the region is not oversized (so a giant block is never
+# pinned). Cache metadata and the cross-arena free-region hint are protected by the
+# runtime atomic lock below; the per-arena region chains remain under their arena
+# owner's synchronization contract.

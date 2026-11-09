@@ -1,0 +1,334 @@
+def arena_used_slots(a: mutable Arena&) -> usize:
+    total: mutable usize = 0
+    cursor: mutable heap Region&? = a.begin
+    trusted Unsafe.AssumeProgress:
+        while cursor != null:
+            total <- total + cursor.count
+            cursor <- cursor.next
+    return total
+
+# Total committed (used) bytes across the whole region chain.
+def arena_used_bytes(a: mutable Arena&) -> usize:
+    return arena_used_slots(a) * size_of(uintptr)
+
+# Number of regions (blocks) currently chained into the arena.
+def arena_region_count(a: mutable Arena&) -> usize:
+    n: mutable usize = 0
+    cursor: mutable heap Region&? = a.begin
+    trusted Unsafe.AssumeProgress:
+        while cursor != null:
+            n <- n + 1
+            cursor <- cursor.next
+    return n
+
+# ------------------------------------------------------------
+# Memory/string helpers
+# ------------------------------------------------------------
+
+def arena_strlen(s: u8&) -> usize:
+    n:mutable usize = 0
+    trusted Unsafe.UncheckedIndex:
+        trusted Unsafe.AssumeProgress:
+            while s[n] != 0:
+                n <- n + 1
+    return n
+
+def arena_memcpy(dest: mutable void&, src: void&, n: usize) -> mutable void&:
+    d: mutable u8& = arena_mutable_u8_from_void(dest)
+    s: u8& = arena_u8_from_void(src)
+
+    trusted Unsafe.UncheckedIndex:
+        for i in 0..<n:
+            d[i] <- s[i]
+
+    return dest
+
+def arena_memeq(lhs: void&, rhs: void&, n: usize) -> bool:
+    left: u8& = arena_u8_from_void(lhs)
+    right: u8& = arena_u8_from_void(rhs)
+
+    trusted Unsafe.UncheckedIndex:
+        for i in 0..<n:
+            return false if left[i] != right[i]
+
+    return true
+
+def arena_strdup(a: mutable Arena&, cstr: u8&) -> mutable heap u8&:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern}:
+        n: usize = arena_strlen(cstr)
+        allocation_bytes: usize = arena_checked_add_usize(n, 1)
+        dup: mutable heap u8& = arena_heap_u8_from_alloc((arena_alloc(a, allocation_bytes) can Global{Read,Write}, Atomics.Load))
+        arena_memcpy(arena_void_from_mutable_u8(dup), arena_void_from_u8(cstr), n)
+        trusted Unsafe.UncheckedIndex:
+            dup[n] <- 0
+        return dup
+
+def arena_memdup(a: mutable Arena&, data: void&, size: usize) -> mutable heap void&:
+    can Atomics{Exchange,Load,Store}, Unsafe{Alias,PointerCast,RawExtern}:
+        dup: mutable heap void& = (arena_alloc(a, size) can Global{Read,Write}, Atomics.Load) can Memory.Allocate, Abort.Panic
+        _ = arena_memcpy(dup, data, size)
+        return dup
+
+# ------------------------------------------------------------
+# Snapshot / rewind / reset / free / trim
+# ------------------------------------------------------------
+
+def arena_snapshot(a: Arena&) -> ArenaMark:
+    if a.end == null:
+        assert a.begin == null
+        return ArenaMark{region: null, count: 0}
+
+    return ArenaMark{region: a.end, count: a.end.count}
+
+def arena_reset(a: mutable Arena&):
+    can Atomics{Exchange,Load,Store}, Unsafe{PointerCast,RawExtern,UncheckedIndex}:
+        r: mutable heap Region&? = a.begin
+        trusted Unsafe.AssumeProgress:
+            while r != null:
+                r.count <- 0
+                r.free_list <- null
+                r <- r.next
+
+        a.end <- a.begin
+        a.end_index <- 0
+        (arena_free_hint_clear(a.cast[uintptr]) can Global{Read,Write})
+        (collection_arena_memo_pooled(a) can Global{Read,Write})
+        arena_profile_allocation_event(
+            ELISA_PROFILE_ALLOCATION_REGION_RESET,
+            0.uintptr(),
+            0.usize(),
+            0.uintptr(),
+            0.usize(),
+            a.cast[uintptr],
+            a.end_index
+        ) can Global{Read,Write}, Atomics{Exchange,Load,Store}
+
+def arena_rewind(a: mutable Arena&, m: ArenaMark):
+    can Atomics{Exchange,Load,Store}, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        if m.region == null:
+            (arena_reset(a) can Global{Read,Write})
+            return
+
+        region: mutable heap Region& = m.region
+        region.count <- m.count
+        region.free_list <- null
+
+        r: mutable heap Region&? = region.next
+        trusted Unsafe.AssumeProgress:
+            while r != null:
+                r.count <- 0
+                r.free_list <- null
+                r <- r.next
+
+        a.end as & <- region
+        (arena_free_hint_clear(a.cast[uintptr]) can Global{Read,Write})
+        (collection_arena_memo_pooled(a) can Global{Read,Write})
+
+        region_index: mutable usize = 0
+        current: mutable heap Region&? = a.begin
+        trusted Unsafe.AssumeProgress:
+            while current != null and current != region:
+                current <- current.next
+                region_index <- region_index + 1
+
+        assert current != null
+        a.end_index <- region_index
+        arena_profile_allocation_event(
+            ELISA_PROFILE_ALLOCATION_REGION_REWIND,
+            region.cast[uintptr],
+            m.count * size_of(uintptr),
+            0.uintptr(),
+            0.usize(),
+            a.cast[uintptr],
+            region_index
+        ) can Global{Read,Write}, Atomics{Exchange,Load,Store}
+
+# Install a caller-frame block as the arena's single region. The backend emits this for a
+# reserve_commit stack whose proven element bound fits the block at run time, so the stack
+# never needs a second block: allocation bumps within it (overflow still panics on the
+# reserve_commit path) and the base never moves. `block` must be uintptr-aligned, hold
+# `capacity` payload slots after the Region header, and outlive the arena (it lives in the
+# frame of the function that owns the region, which frees the arena before returning).
+def arena_init_stack_block(a: mutable Arena&, block: mutable heap void&, capacity: usize):
+    can Unsafe.Alias:
+        r: mutable heap Region& = arena_region_from_raw(block)
+        r.next <- null
+        r.count <- 0
+        r.capacity <- capacity
+        r.owner_tag <- ARENA_OWNER_TAG_STACK.uintptr()
+        r.owner_next <- null
+        r.global_index <- 0
+        r.committed <- 0
+        r.free_list <- null
+        a.begin as & <- r
+        a.end as & <- r
+        a.end_index <- 0
+
+def arena_free(a: mutable Arena&):
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Release, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        r: mutable heap Region&? = a.begin
+
+        # Detach the chain BEFORE releasing any block.  Backend epilogues may emit more than
+        # one cleanup edge for the same owned carrier (for example, an ordinary fallthrough
+        # plus a generated contract/defer edge).  Clearing the header first makes arena_free
+        # genuinely idempotent: a second call observes begin == null and cannot traverse or
+        # release already-freed memory.
+        a.begin as ! <- null
+        a.end as ! <- null
+        a.end_index <- 0
+        (arena_free_hint_clear(a.cast[uintptr]) can Global{Read,Write})
+
+        arena_profile_allocation_event(
+            ELISA_PROFILE_ALLOCATION_REGION_FREE,
+            0.uintptr(),
+            0.usize(),
+            0.uintptr(),
+            0.usize(),
+            a.cast[uintptr],
+            0.usize()
+        ) can Global{Read,Write}, Atomics{Exchange,Load,Store}
+
+        trusted Unsafe.AssumeProgress:
+            while r != null:
+                r0: mutable heap Region& = r
+                r <- r.next
+                (collection_stack_memo_forget(r0) can Global{Read,Write}) if r0.owner_tag == ARENA_OWNER_TAG_COLLECTION.uintptr()
+                if r0.owner_tag != ARENA_OWNER_TAG_STACK.uintptr():
+                    trusted Unsafe.RawExtern:
+                        (free_region_backend(r0, a.strategy) can Global{Read,Write})
+
+
+def arena_trim(a: mutable Arena&):
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Release, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        return if a.end == null
+
+        r: mutable heap Region&? = a.end.next
+        trusted Unsafe.AssumeProgress:
+            while r != null:
+                r0: mutable heap Region& = r
+                r <- r.next
+                (collection_stack_memo_forget(r0) can Global{Read,Write}) if r0.owner_tag == ARENA_OWNER_TAG_COLLECTION.uintptr()
+                if r0.owner_tag != ARENA_OWNER_TAG_STACK.uintptr():
+                    trusted Unsafe.RawExtern:
+                        (free_region_backend(r0, a.strategy) can Global{Read,Write})
+
+        a.end.next as ! <- null
+        (arena_free_hint_update(a.cast[uintptr], arena_find_free_region(a.begin)) can Global{Read,Write})
+        arena_profile_allocation_event(
+            ELISA_PROFILE_ALLOCATION_REGION_TRIM,
+            0.uintptr(),
+            0.usize(),
+            0.uintptr(),
+            0.usize(),
+            a.cast[uintptr],
+            a.end_index
+        ) can Global{Read,Write}, Atomics{Exchange,Load,Store}
+
+# Splice an entire child region's block chain onto the parent (docs/67 adopt).
+# Zero-copy: the child's blocks (and the data they already hold) are appended to
+# the parent's chain and will be freed when the parent is freed. Each adopted
+# block is marked owned so the parent's bump allocator skips it and never
+# overwrites its data. The child is then emptied, so its own cleanup is a no-op.
+# The semantic layer has already proven the child is consumed and that the two
+# backings are compatible (so the parent's free can reclaim the adopted blocks).
+def arena_adopt(parent: mutable Arena&, child: mutable Arena&):
+    can Atomics{Exchange,Load,Store}, Unsafe{PointerCast,RawExtern,UncheckedIndex}, Unsafe{Alias,PointerCast,UncheckedIndex}:
+        return if child.begin == null
+
+        child_free_hint: mutable heap Region&? = (arena_free_hint_get(child.cast[uintptr]) can Global{Read,Write}, Atomics.Load)
+
+        c: mutable heap Region&? = child.begin
+        trusted Unsafe.AssumeProgress:
+            while c != null:
+                (collection_stack_memo_forget(c) can Global{Read,Write}) if c.owner_tag == ARENA_OWNER_TAG_COLLECTION.uintptr()
+                c.owner_tag <- 1.uintptr()
+                c <- c.next
+
+        if parent.begin == null:
+            parent.begin <- child.begin
+            parent.end <- child.begin
+            parent.end_index <- 0
+        else:
+            last: mutable heap Region&? = parent.begin
+            trusted Unsafe.AssumeProgress:
+                while last != null and last.next != null:
+                    last <- last.next
+            last.next as & <- child.begin if last != null
+
+        # Free-list reuse and reclaim report each block's parent-chain index. Adopted
+        # blocks previously kept child-local indices, aliasing parent blocks in profiler
+        # evidence (and subsequent collection-stack indexing). Refresh those indices
+        # before publishing the lifecycle event so profile records never alias a
+        # child-local index with an existing parent block.
+        adopted_index: mutable usize = 0
+        adopted_cursor: mutable heap Region&? = parent.begin
+        trusted Unsafe.AssumeProgress:
+            while adopted_cursor != null:
+                adopted_cursor.global_index <- adopted_index
+                (arena_profile_region_layout(parent, adopted_cursor) can Global{Read,Write})
+                adopted_index <- adopted_index + 1
+                adopted_cursor <- adopted_cursor.next
+
+        child.begin as ! <- null
+        child.end as ! <- null
+        child.end_index <- 0
+        (arena_free_hint_transfer(child.cast[uintptr], parent.cast[uintptr], child_free_hint) can Global{Read,Write})
+        arena_profile_allocation_event(
+            ELISA_PROFILE_ALLOCATION_ARENA_ADOPT,
+            0.uintptr(),
+            0.usize(),
+            child.cast[uintptr],
+            0.usize(),
+            parent.cast[uintptr],
+            parent.end_index
+        ) can Global{Read,Write}, Atomics{Exchange,Load,Store}
+
+# ------------------------------------------------------------
+# Collection stacks
+# ------------------------------------------------------------
+# A hash table cannot grow in place: a rehash needs a differently sized table, and the
+# old one is dead the moment its last entry moves. Bump-allocated in a region, that dead
+# table sat below the live one until the region died -- a dict grown 16 -> 1024 slots
+# kept every intermediate table resident. So a growing collection gets two stacks of its
+# own and ping-pongs between them: rehash into the spare, which becomes the live table,
+# while the old live stack becomes the spare -- reset, never freed, reused on the next
+# growth with no allocation at all. Steady state is one live table and one spare holding
+# its high-water mark; that retention is the model's accepted cost and what makes the
+# next growth free.
+#
+# A stack IS a region of the arena: created by the arena's own strategy-dispatched block
+# source, linked into the `begin` chain, and marked with ARENA_OWNER_TAG_COLLECTION. That
+# rides machinery that already exists for packed stores -- arena_alloc skips any owned
+# region so nothing is ever bumped into a table (it has no neighbour above it, which is
+# the whole point), arena_free frees the chain, arena_reset zeroes every count (which
+# POOLS every stack), arena_adopt splices the chain. Nothing is added to Arena: an
+# earlier attempt kept a separate list in a new Arena field, and that field was not
+# zero-initialised on every path stage0 creates an arena, so arena_free walked garbage.
+# A stack is linked at the chain's TAIL and never becomes the bump cursor: the
+# reserve/fixed strategies bump straight into a.end without looking at owner_tag.
+#
+# Claimed: count == the table it holds. Pooled: count == 0. A live table's stack links
+# its spare through owner_next; DynDict/DynSet are untouched (pinned in both compilers),
+# so the live stack is found by matching the table pointer against the chain.
+
+# Growth used to find a collection's stack by walking the arena's WHOLE region chain
+# (every bump block plus every other collection's stack), and a new stack walked the
+# chain again for a pooled one and once more for the tail: O(chain) per growth, ~37% of
+# a self-compile. Two direct-mapped memo tables make those lookups O(1) on a hit; a miss
+# falls back to the original walk, so a memo can only ever make a lookup faster.
+#
+# COLLECTION_STACK_MEMO: data-base address -> the stack Region, with the arena (address
+# and `begin` block) whose chain it was found in or linked into. It is the only memo
+# that holds a Region pointer, and it is purged by REGION IDENTITY at the two places a
+# stack leaves its chain alive or dead: arena_free/arena_trim (before the block is
+# released or parked) and arena_adopt (before the stack is retagged as an adopted
+# block). So an entry never names a freed or re-owned region. A hit additionally
+# requires the caller's arena address AND its `begin` block to match the entry, so a
+# different arena header that reuses an old address cannot pick up another chain's
+# stack.
+#
+# COLLECTION_ARENA_MEMO: arena address (+ `begin`) -> the data base of the last stack
+# linked into that arena (resolved through the stack memo, never dereferenced on its
+# own) and whether a full walk found NO pooled stack. Both are hints: a stale "no pooled
+# stack" only skips reuse and maps a fresh stack, which is always safe; it is cleared on
+# reset/rewind (which pool every stack) and when acquire pools a spare.
