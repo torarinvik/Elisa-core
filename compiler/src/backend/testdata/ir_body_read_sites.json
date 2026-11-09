@@ -52,7 +52,7 @@
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
     "llvm_bodies_invertbranchhint_to_emitexpectpatternstmt.go": {
-      "sha256": "9daafb30d7f5dcab422d7c0700bf54616deb10380fc50dcb8142e386e2a70a96",
+      "sha256": "608074f21ec917ab08886bbeeadd8467484be883e73655918e228ab718079fb2",
       "selectors": 4,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
