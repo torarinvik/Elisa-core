@@ -1,0 +1,96 @@
+const COLLECTION_STACK_MEMO_SLOTS: usize = 4096
+
+const COLLECTION_ARENA_MEMO_SLOTS: usize = 256
+
+struct CollectionStackMemoEntry:
+    table: mutable uintptr
+    region: mutable heap Region&?
+    arena: mutable uintptr
+    begin: mutable uintptr
+
+struct CollectionArenaMemoEntry:
+    arena: mutable uintptr
+    begin: mutable uintptr
+    last_table: mutable uintptr
+    no_pooled: mutable bool
+    # When known, no pooled stack of the arena holds more than pooled_bound slots, so an
+    # acquire needing more skips the walk over the region chain.
+    pooled_bound_known: mutable bool
+    pooled_bound: mutable usize
+
+extern __elisa_collection_stack_memo: CollectionStackMemoEntry[COLLECTION_STACK_MEMO_SLOTS]
+
+extern __elisa_collection_arena_memo: CollectionArenaMemoEntry[COLLECTION_ARENA_MEMO_SLOTS]
+
+extern collection_stack_table(r: heap Region&) -> mutable heap void&
+
+extern collection_stack_acquire(a: mutable Arena&, live_table: void&?, needed_slots: usize) -> mutable heap Region&
+
+extern collection_stack_profile_release(a: mutable Arena&, table: void&?) -> void
+
+extern va_list
+
+extern va_copy(args: va_list) -> va_list
+
+extern va_end(args: va_list)
+
+extern vsnprintf(buffer: u8&?, buffer_size: usize, format: u8&, args: va_list) -> i32
+
+extern arena_vsprintf(a: mutable Arena&, format: u8&, args: va_list) -> mutable heap u8&
+
+const ARENA_DEQUE_INIT_CAP: usize = 16
+
+struct Deque[T]:
+    items: mutable T&?
+    head: mutable usize
+    count: mutable usize
+    capacity: mutable usize
+
+extern arena_deque_init[T]() -> Deque[T]
+
+extern arena_deque_init_buffer[T](buffer: T&, capacity: usize) -> Deque[T]
+
+extern arena_deque_with_capacity[T](a: mutable Arena&, capacity: usize) -> Deque[T]
+
+extern arena_deque_len[T](d: Deque[T]&) -> usize
+
+extern arena_deque_capacity[T](d: Deque[T]&) -> usize
+
+extern arena_deque_is_empty[T](d: Deque[T]&) -> bool
+
+extern arena_deque_clear[T](d: mutable Deque[T]&)
+
+extern arena_deque_buffer_index[T](d: Deque[T]&, logical_index: usize) -> usize
+
+extern arena_deque_copy_linearized[T](d: Deque[T]&, dst: mutable T&)
+
+extern arena_deque_reserve[T](a: mutable Arena&, d: mutable Deque[T]&, needed: usize) -> mutable Deque[T]&
+
+extern arena_deque_ensure_unused[T](a: mutable Arena&, d: mutable Deque[T]&, additional: usize) -> mutable Deque[T]&
+
+extern arena_deque_push_front_assume_capacity[T](d: mutable Deque[T]&, item: T)
+
+extern arena_deque_push_back_assume_capacity[T](d: mutable Deque[T]&, item: T)
+
+extern arena_deque_push_front_bounded[T](d: mutable Deque[T]&, item: T) -> bool
+
+extern arena_deque_push_back_bounded[T](d: mutable Deque[T]&, item: T) -> bool
+
+extern arena_deque_push_front[T](a: mutable Arena&, d: mutable Deque[T]&, item: T) -> mutable Deque[T]&
+
+extern arena_deque_push_back[T](a: mutable Arena&, d: mutable Deque[T]&, item: T) -> mutable Deque[T]&
+
+extern arena_deque_front[T](d: Deque[T]&) -> T&?
+
+extern arena_deque_back[T](d: Deque[T]&) -> T&?
+
+extern arena_deque_at[T](d: Deque[T]&, index: usize) -> T&
+
+extern arena_deque_at_mut[T](d: mutable Deque[T]&, index: usize) -> mutable T&
+
+extern arena_deque_pop_front[T](d: mutable Deque[T]&, out: mutable T&) -> bool
+
+extern arena_deque_pop_back[T](d: mutable Deque[T]&, out: mutable T&) -> bool
+
+extern memset(dest: mutable void&, val: i32, n: usize) -> mutable void&
+
