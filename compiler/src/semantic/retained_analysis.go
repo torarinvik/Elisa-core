@@ -115,24 +115,6 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			r.LastStats.FastDeclined = why
 		}
 	}
-	shiftedPreBodyDiagnostics := func() []Diagnostic {
-		diags := append([]Diagnostic(nil), r.pre.diags...)
-		owners := retainedDiagnosticOwners(r.decls, nil, func(decl ast.Decl) ast.Decl {
-			if fn, ok := decl.(*ast.FuncDecl); ok {
-				return pairedNew[fn]
-			}
-			return nil
-		})
-		for i := range diags {
-			if strings.Contains(diags[i].Message, "__") {
-				if owner, shift := owners.ownerAt(diags[i].Pos); owner != nil {
-					diags[i].Message = retainedShiftLocalGensyms(diags[i].Message, shift)
-				}
-			}
-			diags[i].Pos = retainedShiftPos(diags[i].Pos, marks)
-		}
-		return diags
-	}
 	// A pure addition of fresh closed functions: see retained_fresh_function.go.
 	if retainedFastPrepareMode == "on" && len(added) != 0 && len(splices)+len(shadowEdits)+len(removed)+len(addedConsts)+len(removedConsts)+len(addedStructs)+len(removedStructs) == 0 &&
 		len(structPairs)+len(constPairs)+len(constEnumPairs)+len(enumPairs)+len(hierarchyPairs)+len(replaced)+len(overloadNames)+usingsAdded+usingsRemoved == 0 &&
@@ -149,7 +131,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 				}
 				return namespaceOf[block], nil, ""
 			}
-			pre, why = r.freshFunctionPreBody(a, added, file, src, namespaceInfo, shiftedPreBodyDiagnostics(), retainedGrowth{addedFuncs: len(added)})
+			pre, why = r.freshFunctionPreBody(a, added, file, src, namespaceInfo, r.retainedShiftedPreBodyDiagnostics(pairedNew, marks), retainedGrowth{addedFuncs: len(added)})
 		}
 		if why != "" {
 			pre = nil
@@ -190,7 +172,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 				edits = append(edits, e[1])
 			}
 			var subset *ast.File
-			pre, subset, why = r.scopedDeclarationPreBody(a, file, src, newDecls, newSpans, addedDecls, edits, shiftedPreBodyDiagnostics(), retainedGrowth{addedConsts: len(addedConsts), addedStructs: structNames})
+			pre, subset, why = r.scopedDeclarationPreBody(a, file, src, newDecls, newSpans, addedDecls, edits, r.retainedShiftedPreBodyDiagnostics(pairedNew, marks), retainedGrowth{addedConsts: len(addedConsts), addedStructs: structNames})
 			if why == "" {
 				scratch = subset
 				reportDeclarationImport = false
@@ -217,7 +199,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 				resolvedTypeNames.functions[key] = contribution
 			}
 		}
-		diags := shiftedPreBodyDiagnostics()
+		diags := r.retainedShiftedPreBodyDiagnostics(pairedNew, marks)
 		pre = &preBodyState{classification: r.pre.classification, fingerprint: r.pre.fingerprint, global: r.pre.global, resolvedTypeNames: resolvedTypeNames, resolvedTypeNameSourceOwners: fastResolvedTypeNameSourceOwners, resolvedTypeNameRows: fastResolvedTypeNameRows, diags: diags, plainHeaders: r.pre.plainHeaders, plainGlobal: r.pre.plainGlobal, plainInputs: r.pre.plainInputs, plainIdentities: r.pre.plainIdentities, hasProofReport: r.pre.hasProofReport}
 		r.LastStats.FastPrepared = true
 	} else if prepared.AcceptsScratch(scratch) {
