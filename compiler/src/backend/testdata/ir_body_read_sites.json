@@ -47,8 +47,8 @@
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
     "llvm_bodies_enumtagconstant_to_activestmtbranch.go": {
-      "sha256": "c8261c52903a32aef4fdb9866dc86caea0b453b3620a1999cf65ec7dd85a6b6f",
-      "selectors": 7,
+      "sha256": "7f53b3aff9131243142c6e1b45c94c459b8a800b809003956ecc2fb5d2ee428b",
+      "selectors": 4,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
     "llvm_bodies_invertbranchhint_to_emitexpectpatternstmt.go": {
@@ -119,6 +119,11 @@
     "llvm_sequence_rewrite.go": {
       "sha256": "24773e10b55b16bd976f22435c6e89f05bc5414ca7deabc1196123854330ff0e",
       "selectors": 1,
+      "classification": "reviewed-statement-lambda-or-declaration-branch"
+    },
+    "llvm_static_eval_control_flow.go": {
+      "sha256": "4d8a7674bf059330f79dfcafc1f8ce52aef17d71c11edd6489811711fb68b293",
+      "selectors": 3,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     }
   }
