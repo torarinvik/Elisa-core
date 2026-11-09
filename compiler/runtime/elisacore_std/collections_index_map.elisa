@@ -1,0 +1,218 @@
+def index_map[K, T](owner: mutable Arena&, initial_capacity: usize) -> IndexMap[K, T]:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        map: mutable IndexMap[K, T] = zeroed
+        map.owner as & <- owner
+        map.by_key <- (arena_dict_new[K, usize](owner, initial_capacity) can Global{Read,Write}, Atomics.Load)
+        in owner:
+            _ = map.entries.reserve(initial_capacity)
+        return map
+
+
+def index_map_new[K, T](owner: mutable Arena&) -> IndexMap[K, T]:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        return (index_map[K, T](owner, 32) can Global{Read,Write}, Atomics.Load)
+
+
+def new[K, T](api: IndexMapNamespace, owner: mutable Arena&) -> IndexMap[K, T]:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        _ = api
+        return (index_map_new[K, T](owner) can Global{Read,Write}, Atomics.Load)
+
+
+def index_map_with_capacity[K, T](owner: mutable Arena&, initial_capacity: usize) -> IndexMap[K, T]:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        return (index_map[K, T](owner, initial_capacity) can Global{Read,Write}, Atomics.Load)
+
+
+def with_capacity[K, T](api: IndexMapNamespace, owner: mutable Arena&, initial_capacity: usize) -> IndexMap[K, T]:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        _ = api
+        return (index_map_with_capacity[K, T](owner, initial_capacity) can Global{Read,Write}, Atomics.Load)
+
+
+def index_map_count[K, T](map: IndexMap[K, T]&) -> usize:
+    return map.entries.count
+
+
+def count[K, T](map: IndexMap[K, T]&) -> usize:
+    return index_map_count[K, T](map)
+
+
+def index_map_valid_index[K, T](map: IndexMap[K, T]&, index: usize) -> bool:
+    return index < map.entries.count
+
+
+def index_map_find_index[K, T](map: IndexMap[K, T]&, key: K) -> usize?:
+	found: usize&? = arena_dict_get[K, usize](map.by_key, key)
+    return null if found == null
+    trusted Unsafe.UncheckedIndex:
+        return found[0]
+
+
+def index_map_contains[K, T](map: IndexMap[K, T]&, key: K) -> bool:
+    return index_map_find_index[K, T](map, key) != null
+
+
+def index_map_entry[K, T](map: IndexMap[K, T]&, index: usize) -> IndexMapEntry[K, T]:
+    assert index < map.entries.count
+    return map.entries[index]
+
+
+def index_map_value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
+    return index_map_entry[K, T](map, index).value
+
+
+def index_map_entries[K, T](map: IndexMap[K, T]&) -> view[IndexMapEntry[K, T]]:
+    return map.entries.view()
+
+
+def entry[K, T](map: IndexMap[K, T]&, index: usize) -> IndexMapEntry[K, T]:
+    return index_map_entry[K, T](map, index)
+
+
+def value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
+    return index_map_value[K, T](map, index)
+
+
+def entry_view[K, T](map: IndexMap[K, T]&) -> view[IndexMapEntry[K, T]]:
+    return index_map_entries[K, T](map)
+
+
+def index_map_put[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        match index_map_find_index[K, T](map, key):
+            null:
+                pass
+            existing_index:
+                assert existing_index < map.entries.count
+                map.entries[existing_index].value <- value
+                return existing_index
+
+        assert map.owner != null
+        owner: mutable Arena& = map.owner
+        index: usize = map.entries.count
+        in owner:
+            map.entries.push(IndexMapEntry[K, T]{key: key, value: value})
+        catch (arena_dict_put[K, usize](owner, map.by_key, key, index) can Global{Read,Write}, Atomics.Load):
+            inserted:
+                return index
+            error e:
+                map.entries.count <- index
+                panic("index map put: allocation failed")
+        return index
+
+
+def put[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        return (index_map_put[K, T](map, key, value) can Global{Read,Write}, Atomics.Load)
+
+
+def index_map_set[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        return (index_map_put[K, T](map, key, value) can Global{Read,Write}, Atomics.Load)
+
+
+def set[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        return (index_map_set[K, T](map, key, value) can Global{Read,Write}, Atomics.Load)
+
+
+def index_map_get[K, T](map: IndexMap[K, T]&, key: K) -> T?:
+    index: usize = get index_map_find_index[K, T](map, key)
+    value: T = index_map_value[K, T](map, index)
+    return value
+
+
+def get[K, T](map: IndexMap[K, T]&, key: K) -> T?:
+    return index_map_get[K, T](map, key)
+
+
+def index_map_has[K, T](map: IndexMap[K, T]&, key: K) -> bool:
+    return index_map_contains[K, T](map, key)
+
+
+def has[K, T](map: IndexMap[K, T]&, key: K) -> bool:
+    return index_map_has[K, T](map, key)
+
+
+def update_at[K, T](map: mutable IndexMap[K, T]&, index: usize, value: T) -> bool:
+    return false if not index_map_valid_index[K, T](map, index)
+    assert index < map.entries.count
+    map.entries[index].value <- value
+    return true
+
+
+def clear[K, T](map: mutable IndexMap[K, T]&):
+    map.entries.count <- 0
+    arena_dict_clear[K, usize](map.by_key)
+
+
+# ------------------------------------------------------------
+# Symbol tables
+# ------------------------------------------------------------
+
+def symbol_table_index(symbol_id: SymbolTableId) -> usize:
+    assert symbol_id != SYMBOL_TABLE_INVALID_ID
+    return (!symbol_id).usize() - 1
+
+
+def symbol_table_id_from_index(index: usize) -> SymbolTableId:
+    return (index + 1).u32().SymbolTableId()
+
+
+# --- Store / Handle unification (docs/69) -----------------------------------
+# `Store` is the shared surface over every handle-into-store container: a handle
+# resolves to an element, and the store has a size. darray is the first backing
+# (Handle = usize index); dict/pool/packed stores implement the same interface
+# with their own Handle representations. Layout/provenance/usage stay orthogonal:
+# the core surface is read + size only and says nothing about growth or ownership.
+protocol Store:
+    type Elem
+    type Handle
+    # A total handle lookup can reject an out-of-range handle by panicking.
+    def store_get(s: Self&, h: Handle) -> Elem& can[Abort.Panic]
+    def store_count(s: Self&) -> usize
+
+impl[T] Store for darray[T]:
+    type Elem = T
+    type Handle = usize
+    def store_get(s: darray[T]&, h: usize) -> T&:
+        if h >= s.count:
+            can Abort.Panic:
+                panic("store_get: handle out of bounds")
+        trusted Unsafe.UncheckedIndex:
+            return s[h]
+    def store_count(s: darray[T]&) -> usize:
+        return s.count
+
+# Deque is a second Store backing: a ring buffer rather than a contiguous darray, yet the
+# same surface — a usize handle resolves to an element and there's a count. arena_deque_at
+# maps the logical handle through the ring's head/wrap. (Deque comes from the include above.)
+impl[T] Store for Deque[T]:
+    type Elem = T
+    type Handle = usize
+    def store_get(s: Deque[T]&, h: usize) -> T&:
+        can Abort.Panic:
+            return arena_deque_at(s, h)
+    def store_count(s: Deque[T]&) -> usize:
+        return arena_deque_len(s)
+
+
+# --- KeyedStore: the partial-lookup sub-protocol (docs/69) ----------------------
+# Some stores are addressed by a KEY that may or may not be present, so their lookup is
+# partial: `store_find` returns an optional element rather than the total `store_get`. This
+# is the orthogonality the core Store preserves — dict is keyed/partial, not a total
+# handle→element store, so it implements KeyedStore instead of distorting the core.
+protocol KeyedStore:
+    type Key
+    type Elem
+    def store_find(s: Self&, k: Key) -> Elem&?
+    def store_count(s: Self&) -> usize
+
+impl[K, T] KeyedStore for dict[K, T]:
+    type Key = K
+    type Elem = T
+    def store_find(s: dict[K, T]&, k: K) -> T&?:
+        return arena_dict_get(s, k)
+    def store_count(s: dict[K, T]&) -> usize:
+        return s.count

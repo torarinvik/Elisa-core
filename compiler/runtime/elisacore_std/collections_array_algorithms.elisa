@@ -1,0 +1,347 @@
+def arena_da_append[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, item: T) -> mutable darray[T, shape_out]&:
+    can Memory.Allocate, Abort.Panic:
+        needed: usize = arena_checked_add_usize(da.count, 1) can Abort.Panic
+        in a:
+            _ = da.reserve(needed)
+
+        assert da.items != null
+
+        da.items[da.count] <- item
+        da.count <- needed
+        return da
+
+def darray_pop[T](da: mutable darray[T]&) -> T:
+    can Abort.Panic, Unsafe.UncheckedIndex:
+        assert da.count > 0
+        da.count <- da.count - 1
+        return da[da.count]
+
+def pop[T](da: mutable darray[T]&) -> T:
+    can Abort.Panic:
+        trusted Unsafe.UncheckedIndex:
+            return darray_pop[T](da)
+
+def darray_remove_at[T](da: mutable darray[T]&, index: usize) -> T:
+    can Abort.Panic:
+        assert index < da.count
+        removed: T = da[index]
+        next: mutable usize = index + 1
+        trusted Unsafe.AssumeProgress:
+            while next < da.count:
+                da[next - 1] <- da[next]
+                next <- next + 1
+        da.count <- da.count - 1
+        return removed
+
+def remove_at[T](da: mutable darray[T]&, index: usize) -> T:
+    can Abort.Panic:
+        trusted Unsafe.UncheckedIndex:
+            return darray_remove_at[T](da, index)
+
+# Read-only range algorithms (no allocation). The predicate is a pure
+# `fn(T) -> bool`, so a named function or a `lambda` works. These replace
+# hand-rolled scan loops and transliterate std::any_of / all_of / count_if /
+# find_if directly (`v.any_of(pred)` reads as `std::any_of(v..., pred)`).
+def any_of[T](da: darray[T], pred: fn(T) -> bool) -> bool:
+    for x in da:
+        return true if pred(x)
+    return false
+
+def all_of[T](da: darray[T], pred: fn(T) -> bool) -> bool:
+    for x in da:
+        return false if not pred(x)
+    return true
+
+def count_if[T](da: darray[T], pred: fn(T) -> bool) -> usize:
+    n: mutable usize = 0
+    for x in da:
+        n <- n + 1 if pred(x)
+    return n
+
+# Returns the first element satisfying `pred`, or `null` if none does
+# (std::find_if, returning the element rather than an iterator).
+def find_if[T](da: darray[T], pred: fn(T) -> bool) -> T?:
+    for x in da:
+        return x if pred(x)
+    return null
+
+# Comparator-based ordering algorithms (the C++ idiom: a strict-weak-ordering
+# `less(a, b)`, not a `T`-level `<`, so they stay generic without operator
+# overloading). All in-place / allocation-free.
+
+# Internal heapsort sift-down used by `sort`.
+def darray_sift_down[T](da: mutable darray[T]&, less: fn(T, T) -> bool, start: usize, end: usize):
+    can Abort.Panic, Unsafe.UncheckedIndex:
+        root: mutable usize = start
+        trusted Unsafe.AssumeProgress:
+            while true:
+                child: usize = root * 2 + 1
+                return if child >= end
+                largest: mutable usize = root
+                largest <- child if less(da[largest], da[child])
+                largest <- child + 1 if child + 1 < end and less(da[largest], da[child + 1])
+                return if largest == root
+                tmp: T = da[root]
+                da[root] <- da[largest]
+                da[largest] <- tmp
+                root <- largest
+
+# Internal: heapsort of da[lo..hi), the introsort fallback when partitioning degenerates.
+def darray_sift_down_at[T](da: mutable darray[T]&, less: fn(T, T) -> bool, base: usize, start: usize, end: usize):
+    can Abort.Panic, Unsafe.UncheckedIndex:
+        root: mutable usize = start
+        trusted Unsafe.AssumeProgress:
+            while true:
+                child: usize = root * 2 + 1
+                return if child >= end
+                largest: mutable usize = root
+                largest <- child if less(da[base + largest], da[base + child])
+                largest <- child + 1 if child + 1 < end and less(da[base + largest], da[base + child + 1])
+                return if largest == root
+                tmp: T = da[base + root]
+                da[base + root] <- da[base + largest]
+                da[base + largest] <- tmp
+                root <- largest
+
+def darray_heapsort_range[T](da: mutable darray[T]&, less: fn(T, T) -> bool, lo: usize, hi: usize):
+    can Abort.Panic, Unsafe.UncheckedIndex:
+        n: usize = hi - lo
+        return if n < 2
+        i: mutable usize = n / 2
+        trusted Unsafe.AssumeProgress:
+            while i > 0:
+                i <- i - 1
+                darray_sift_down_at[T](da, less, lo, i, n)
+        e: mutable usize = n
+        trusted Unsafe.AssumeProgress:
+            while e > 1:
+                e <- e - 1
+                tmp: T = da[lo]
+                da[lo] <- da[lo + e]
+                da[lo + e] <- tmp
+                darray_sift_down_at[T](da, less, lo, 0, e)
+
+# Internal: introsort of da[lo..hi) down to runs of at most 16 elements, which the final
+# insertion pass in `sort` finishes. Median-of-three pivot; branchless Lomuto partition;
+# recursion on the smaller side only, so the stack is O(log n); heapsort once `depth` runs
+# out, so the worst case stays O(n log n).
+def darray_introsort[T](da: mutable darray[T]&, less: fn(T, T) -> bool, lo0: usize, hi0: usize, depth0: u32):
+    can Abort.Panic, Unsafe.UncheckedIndex:
+        lo: mutable usize = lo0
+        hi: mutable usize = hi0
+        depth: mutable u32 = depth0
+        trusted Unsafe.AssumeProgress:
+            while hi - lo > 16:
+                if depth == 0:
+                    darray_heapsort_range[T](da, less, lo, hi)
+                    return
+                depth <- depth - 1
+                mid: usize = lo + (hi - lo) / 2
+                last: usize = hi - 1
+                if less(da[mid], da[lo]):
+                    t0: T = da[mid]
+                    da[mid] <- da[lo]
+                    da[lo] <- t0
+                if less(da[last], da[mid]):
+                    t1: T = da[mid]
+                    da[mid] <- da[last]
+                    da[last] <- t1
+                    if less(da[mid], da[lo]):
+                        t2: T = da[mid]
+                        da[mid] <- da[lo]
+                        da[lo] <- t2
+                # Branchless Lomuto partition (pdqsort/ipnsort style): the pivot sits at lo,
+                # every element is swapped with the store slot and the store index advances by
+                # the comparison result, so there is no data-dependent branch to mispredict.
+                pivot: T = da[mid]
+                da[mid] <- da[lo]
+                da[lo] <- pivot
+                store: mutable usize = lo + 1
+                k: mutable usize = lo + 1
+                while k < hi:
+                    v: T = da[k]
+                    da[k] <- da[store]
+                    da[store] <- v
+                    store <- store + (1 if less(v, pivot) else 0)
+                    k <- k + 1
+                split: usize = store - 1
+                da[lo] <- da[split]
+                da[split] <- pivot
+                # [lo, split) < pivot, da[split] == pivot, [split + 1, hi) >= pivot.
+                right: mutable usize = split + 1
+                if split == lo:
+                    # Nothing was less than the pivot: gather the pivot's duplicates right after
+                    # it and skip them, so runs of equal keys cannot degrade the partition.
+                    k <- split + 1
+                    while k < hi:
+                        w: T = da[k]
+                        da[k] <- da[right]
+                        da[right] <- w
+                        right <- right + (0 if less(pivot, w) else 1)
+                        k <- k + 1
+                if split - lo < hi - right:
+                    darray_introsort[T](da, less, lo, split, depth)
+                    lo <- right
+                else:
+                    darray_introsort[T](da, less, right, hi, depth)
+                    hi <- split
+
+# In-place sort ascending by `less` (std::sort): introsort -- quicksort with median-of-three
+# pivots, heapsort past 2*log2(n) partition levels, insertion sort for the final short runs.
+# O(n log n) worst case, no allocation, not stable. Measured on LangArena Sort::Self (400k i32):
+# the previous plain heapsort was 6x Rust's slice::sort, cache misses in the sift-down.
+def sort[T](da: mutable darray[T]&, less: fn(T, T) -> bool):
+    can Abort.Panic, Unsafe.UncheckedIndex:
+        n: usize = da.count
+        return if n < 2
+        depth: mutable u32 = 0
+        m: mutable usize = n
+        trusted Unsafe.AssumeProgress:
+            while m > 1:
+                m <- m / 2
+                depth <- depth + 2
+        darray_introsort[T](da, less, 0, n, depth)
+        i: mutable usize = 1
+        trusted Unsafe.AssumeProgress:
+            while i < n:
+                x: T = da[i]
+                j: mutable usize = i
+                while j > 0 and less(x, da[j - 1]):
+                    da[j] <- da[j - 1]
+                    j <- j - 1
+                da[j] <- x
+                i <- i + 1
+
+# Reverse the elements in place (std::reverse).
+def reverse[T](da: mutable darray[T]&):
+    can Unsafe.UncheckedIndex:
+        n: usize = da.count
+        return if n < 2
+        i: mutable usize = 0
+        j: mutable usize = n - 1
+        trusted Unsafe.AssumeProgress:
+            while i < j:
+                tmp: T = da[i]
+                da[i] <- da[j]
+                da[j] <- tmp
+                i <- i + 1
+                j <- j - 1
+
+# True if no element compares `less` than its predecessor (std::is_sorted).
+def is_sorted[T](da: darray[T], less: fn(T, T) -> bool) -> bool:
+    can Unsafe.UncheckedIndex:
+        i: mutable usize = 1
+        trusted Unsafe.AssumeProgress:
+            while i < da.count:
+                return false if less(da[i], da[i - 1])
+                i <- i + 1
+        return true
+
+# Smallest / largest element by `less`, or `null` if empty (std::min_element /
+# std::max_element, returning the element rather than an iterator).
+def min_element[T](da: darray[T], less: fn(T, T) -> bool) -> T?:
+    can Unsafe.UncheckedIndex:
+        return null if da.count == 0
+        best: mutable T = da[0]
+        i: mutable usize = 1
+        trusted Unsafe.AssumeProgress:
+            while i < da.count:
+                best <- da[i] if less(da[i], best)
+                i <- i + 1
+        return best
+
+def max_element[T](da: darray[T], less: fn(T, T) -> bool) -> T?:
+    can Unsafe.UncheckedIndex:
+        return null if da.count == 0
+        best: mutable T = da[0]
+        i: mutable usize = 1
+        trusted Unsafe.AssumeProgress:
+            while i < da.count:
+                best <- da[i] if less(best, da[i])
+                i <- i + 1
+        return best
+
+# Binary-search lookups over a range already sorted by the same `less`
+# (std::lower_bound / std::binary_search). O(log n).
+def lower_bound[T](da: darray[T], target: T, less: fn(T, T) -> bool) -> usize:
+    can Unsafe.UncheckedIndex:
+        lo: mutable usize = 0
+        hi: mutable usize = da.count
+        trusted Unsafe.AssumeProgress:
+            while lo < hi:
+                mid: usize = lo + (hi - lo) / 2
+                mid_is_less: bool = less(da[mid], target)
+                lo <- mid + 1 if mid_is_less
+                hi <- mid if not mid_is_less
+        return lo
+
+def binary_search[T](da: darray[T], target: T, less: fn(T, T) -> bool) -> bool:
+    idx: mutable usize = 0
+    trusted Unsafe.UncheckedIndex:
+        idx <- da.lower_bound(target, less)
+    return false if idx >= da.count
+    return not less(target, da[idx])
+
+def arena_da_append_many[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, new_items: T&, new_items_count: usize) -> mutable darray[T, shape_out]&:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern}:
+        needed: usize = arena_checked_add_usize(da.count, new_items_count) can Abort.Panic
+        copy_bytes: usize = arena_checked_mul_usize(new_items_count, size_of(T)) can Abort.Panic
+
+        if needed > da.capacity:
+            new_capacity: mutable usize = da.capacity
+            new_capacity <- ARENA_DA_INIT_CAP if new_capacity == 0
+
+            trusted Unsafe.AssumeProgress:
+                while needed > new_capacity:
+                    doubled_capacity: usize = new_capacity * 2
+                    if doubled_capacity < new_capacity:
+                        # `needed` was checked before growth; use it if geometric growth wraps.
+                        new_capacity <- needed
+                        break
+                    new_capacity <- doubled_capacity
+
+            old_size: usize = arena_checked_mul_usize(da.capacity, size_of(T)) can Abort.Panic
+            new_size: usize = arena_checked_mul_usize(new_capacity, size_of(T)) can Abort.Panic
+
+            if da.items == null:
+                da.items as & <- collections_items_from_alloc[T]((arena_alloc(a, new_size) can Global{Read,Write}, Atomics.Load))
+            else:
+                resized: heap void& = (arena_realloc(
+                    a,
+                    collections_mutable_void_from_items[T](da.items),
+                    old_size,
+                    new_size
+                ) can Global{Read,Write}, Atomics.Load)
+                da.items as & <- collections_items_from_alloc[T](resized)
+
+            da.capacity <- new_capacity
+
+        assert da.items != null
+
+        arena_memcpy(
+            collections_mutable_void_from_items_at[T](da.items, da.count),
+            collections_void_from_items[T](new_items),
+            copy_bytes
+        )
+
+        da.count <- needed
+        return da
+
+def arena_sb_append_buf(a: mutable Arena&, sb: mutable darray[u8, shape_in]&, buf: u8&, n: usize) -> mutable darray[u8, shape_out]&:
+    can Atomics{Exchange,Load,Store}, Unsafe{Alias,PointerCast,RawExtern}:
+        return (arena_da_append_many(a, sb, buf, n) can Global{Read,Write}, Atomics.Load) can Memory.Allocate, Abort.Panic
+
+def arena_sb_append_cstr(a: mutable Arena&, sb: mutable darray[u8, shape_in]&, cstr: u8&) -> mutable darray[u8, shape_out]&:
+    can Atomics{Exchange,Load,Store}, Unsafe{Alias,PointerCast,RawExtern}:
+        n: usize = arena_strlen(cstr)
+        return (arena_da_append_many(a, sb, cstr, n) can Global{Read,Write}, Atomics.Load) can Memory.Allocate, Abort.Panic
+
+def arena_sb_append_null(a: mutable Arena&, sb: mutable darray[u8, shape_in]&) -> mutable darray[u8, shape_out]&:
+    can Memory.Allocate, Abort.Panic:
+        in a:
+            return sb.extend([0.u8()])
+
+# ------------------------------------------------------------
+# Dictionary helpers
+# ------------------------------------------------------------
+

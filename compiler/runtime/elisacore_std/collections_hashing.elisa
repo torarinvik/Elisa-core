@@ -1,0 +1,164 @@
+def arena_dict_next_capacity(min_capacity: usize) -> usize:
+    can Abort.Panic:
+        return 0 if min_capacity == 0
+
+        cap: mutable usize = DICT_INIT_CAP
+        trusted Unsafe.AssumeProgress:
+            while cap < min_capacity:
+                cap <- arena_checked_mul_usize(cap, 2) can Abort.Panic
+        return cap
+
+# Key hashing for the open-addressing dict. The `ctx_hash_value` builtin (compiler-emitted)
+# dispatches on the concrete key type after monomorphization: a cstr hashes its CONTENT via
+# ctx_hash_cstr (FNV-1a), every fixed-size scalar key (integer/bool/char/const enum) is
+# zero-extended to u64 and finalized by ctx_hash_u64 (splitmix64). Both are deterministic and
+# defined here as plain functions the builtin lowers to.
+def ctx_hash_cstr(s: cstr) -> u64:
+    # FNV-1a over the string content (self-contained so collections.elisa needs no string
+    # module). Matches hash_sview; deterministic and content-based (not pointer-based).
+    h: mutable u64 = 0xcbf29ce484222325
+    for ch in s[0:s.len]:
+        h <- h ^ ch.u64()
+        h <- h * 0x100000001b3
+    return h
+
+def ctx_hash_sview(view: sview) -> u64:
+    ensure result == sview_fnv1a_model(view)
+    can Unsafe.UncheckedIndex:
+        h: mutable u64 = SVIEW_FNV1A_OFFSET_BASIS
+        return h if view.len <= 0
+        view_len: usize = view.len.usize()
+        return h if view_len.i64() != view.len
+        i: mutable usize = 0
+        while i < view_len:
+            decreases view_len - i
+            invariant i <= view_len
+            invariant i.i64().usize() == i
+            invariant view_len == view.len.usize()
+            invariant view_len.i64() == view.len
+            invariant view.len > 0 and view.len.usize().i64() == view.len
+            invariant i <= view.len.usize()
+            invariant 0.usize() <= view.len.usize()
+            invariant sview_fnv1a_fold_from(view, i, view_len - i, h) == sview_fnv1a_fold_from(view, 0.usize(), view_len, SVIEW_FNV1A_OFFSET_BASIS)
+            h <- (h ^ view[i].u8().u64()) * SVIEW_FNV1A_PRIME
+            i <- i + 1.usize()
+        return h
+
+def ctx_cstr_eq_sview(text: cstr, expected_length: i64, view: sview) -> bool:
+    ensure (view.len < 0 or view.len.usize().i64() != view.len) implies result == false
+    ensure expected_length != view.len implies result == false
+    ensure result implies (view.len >= 0 and view.len.usize().i64() == view.len and expected_length == view.len)
+    can Unsafe.UncheckedIndex:
+        return false if view.len < 0
+        len: usize = view.len.usize()
+        return false if:
+            len.i64() != view.len
+            expected_length != view.len
+        for i in 0..<len:
+            view_byte: u8 = view[i].u8()
+            text_byte: mutable u8 = 0
+            # A CStr promises readable bytes through its first NUL. Stop there before any later
+            # index, so this loop never reads beyond a shorter C string.
+            trusted Unsafe.UncheckedIndex:
+                text_byte <- text[i].u8()
+            return false if text_byte == 0
+            return false if text_byte != view_byte
+        terminator: mutable u8 = 1
+        # Every payload byte before `len` was checked nonzero above. Therefore index `len` is
+        # either the CStr terminator or another readable payload byte, and a nonzero byte rejects
+        # a string longer than the view.
+        trusted Unsafe.UncheckedIndex:
+            terminator <- text[len].u8()
+        return false if terminator != 0
+        return true
+
+# Inverse for the SplitMix64 finalizer below. Every xor-shift is undone by its
+# finite geometric series; the odd multipliers are units modulo 2^64.
+const CTX_HASH_U64_INV_MUL_1: u64 = 0x96de1b173f119089
+const CTX_HASH_U64_INV_MUL_2: u64 = 0x319642b2d24d8ec3
+
+def ctx_unhash_xor_31(value: u64) -> u64:
+    ensure result == (value ^ (value >> 31) ^ (value >> 62))
+    ensure result ^ (result >> 31) == value
+    first_shift: u64 = value >> 31
+    second_shift: u64 = value >> 62
+    candidate: u64 = value ^ first_shift ^ second_shift
+    shifted_candidate: u64 = first_shift ^ second_shift
+    assert first_shift >> 31 == second_shift
+    assert second_shift >> 31 == 0
+    assert candidate >> 31 == shifted_candidate
+    assert candidate ^ shifted_candidate == value
+    assert candidate ^ (candidate >> 31) == value
+    assert candidate == (value ^ (value >> 31) ^ (value >> 62))
+    return candidate
+
+def ctx_unhash_xor_27(value: u64) -> u64:
+    ensure result == (value ^ (value >> 27) ^ (value >> 54))
+    ensure result ^ (result >> 27) == value
+    first_shift: u64 = value >> 27
+    second_shift: u64 = value >> 54
+    candidate: u64 = value ^ first_shift ^ second_shift
+    shifted_candidate: u64 = first_shift ^ second_shift
+    assert first_shift >> 27 == second_shift
+    assert second_shift >> 27 == 0
+    assert candidate >> 27 == shifted_candidate
+    assert candidate ^ shifted_candidate == value
+    assert candidate ^ (candidate >> 27) == value
+    assert candidate == (value ^ (value >> 27) ^ (value >> 54))
+    return candidate
+
+def ctx_unhash_xor_30(value: u64) -> u64:
+    ensure result == (value ^ (value >> 30) ^ (value >> 60))
+    ensure result ^ (result >> 30) == value
+    first_shift: u64 = value >> 30
+    second_shift: u64 = value >> 60
+    candidate: u64 = value ^ first_shift ^ second_shift
+    shifted_candidate: u64 = first_shift ^ second_shift
+    assert first_shift >> 30 == second_shift
+    assert second_shift >> 30 == 0
+    assert candidate >> 30 == shifted_candidate
+    assert candidate ^ shifted_candidate == value
+    assert candidate ^ (candidate >> 30) == value
+    assert candidate == (value ^ (value >> 30) ^ (value >> 60))
+    return candidate
+
+def ctx_unhash_mul_1(value: u64) -> u64:
+    ensure result == value * CTX_HASH_U64_INV_MUL_1
+    ensure result * 0xbf58476d1ce4e5b9 == value
+    return value * CTX_HASH_U64_INV_MUL_1
+
+def ctx_unhash_mul_2(value: u64) -> u64:
+    ensure result == value * CTX_HASH_U64_INV_MUL_2
+    ensure result * 0x94d049bb133111eb == value
+    return value * CTX_HASH_U64_INV_MUL_2
+
+def ctx_unhash_u64(hash: u64) -> u64:
+    ensure result == ctx_unhash_xor_30(ctx_unhash_mul_1(ctx_unhash_xor_27(ctx_unhash_mul_2(ctx_unhash_xor_31(hash)))))
+    return ctx_unhash_xor_30(ctx_unhash_mul_1(ctx_unhash_xor_27(ctx_unhash_mul_2(ctx_unhash_xor_31(hash)))))
+
+def ctx_hash_u64(value: u64) -> u64:
+    ensure ctx_unhash_u64(result) == value
+    h: mutable u64 = value
+    h <- (h ^ (h >> 30)) * 0xbf58476d1ce4e5b9
+    ghost after_mul_1: u64 = h
+    h <- (h ^ (h >> 27)) * 0x94d049bb133111eb
+    ghost after_mul_2: u64 = h
+    h <- h ^ (h >> 31)
+    # Keep proof witnesses erased rather than running inverse helpers per hash.
+    ghost hash_value: u64 = h
+    ghost undo_xor_31: u64 = (hash_value ^ (hash_value >> 31) ^ (hash_value >> 62))
+    assert undo_xor_31 == after_mul_2
+    ghost undo_mul_2: u64 = undo_xor_31 * CTX_HASH_U64_INV_MUL_2
+    assert undo_mul_2 == (after_mul_1 ^ (after_mul_1 >> 27))
+    ghost undo_xor_27: u64 = (undo_mul_2 ^ (undo_mul_2 >> 27) ^ (undo_mul_2 >> 54))
+    assert undo_xor_27 == after_mul_1
+    ghost undo_mul_1: u64 = undo_xor_27 * CTX_HASH_U64_INV_MUL_1
+    assert undo_mul_1 == (value ^ (value >> 30))
+    ghost undo_xor_30: u64 = (undo_mul_1 ^ (undo_mul_1 >> 30) ^ (undo_mul_1 >> 60))
+    assert undo_xor_30 == value
+    assert ctx_unhash_u64(hash_value) == value
+    return h
+
+# Open-addressing probe (linear probing over a power-of-2 table). Returns found=true with the
+# slot of the matching occupied entry, or found=false with the slot to insert at: the first
+# tombstone seen (slot reuse), else the terminating empty slot. O(1) expected with load < 1/2.

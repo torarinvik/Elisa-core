@@ -41,7 +41,7 @@ func actualDictInactiveSource(t *testing.T) string {
 	}
 	collections, arena := read("collections.elisa"), read("arena_region_blocks.elisa")
 	return "extern memset(dest: mutable void&, val: i32, n: usize) -> mutable void&\n" +
-		extract(collections, "struct DictBucket[") + extract(collections, "def collections_mutable_void_from_items[") + extract(arena, "def arena_checked_mul_usize(") + extract(collections, "def arena_dict_zero_buckets[")
+		extract(collections, "struct DictBucket[") + extract(collections, "def collections_mutable_void_from_items[") + extract(arena, "def arena_checked_mul_usize(") + extract(read("collections_dict.elisa"), "def arena_dict_zero_buckets[")
 }
 
 func TestActualDictInactiveStorageSpecializesSViewAndNonZeroPayload(t *testing.T) {

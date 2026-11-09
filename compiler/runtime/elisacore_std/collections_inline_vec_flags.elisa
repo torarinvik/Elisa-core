@@ -1,0 +1,239 @@
+def inline_vec[T, N: usize](owner: mutable Arena&) -> InlineVec[T, N]:
+    trusted Unsafe.PointerCast:
+        # Uninitialized inline slots are inactive until vec.len includes them.
+        return InlineVec[T, N]{owner: owner, inline_items: zeroed, overflow: [], len: 0, is_spilled: false}
+
+
+def new[T, N: usize](api: InlineVecNamespace, owner: mutable Arena&) -> InlineVec[T, N]:
+    _ = api
+    return inline_vec[T, N](owner)
+
+
+def inline_vec_count[T, N: usize](vec: InlineVec[T, N]&) -> usize:
+    return vec.len
+
+
+def count[T, N: usize](vec: InlineVec[T, N]&) -> usize:
+    return inline_vec_count[T, N](vec)
+
+
+def inline_vec_is_empty[T, N: usize](vec: InlineVec[T, N]&) -> bool:
+    return vec.len == 0
+
+
+def is_empty[T, N: usize](vec: InlineVec[T, N]&) -> bool:
+    return inline_vec_is_empty[T, N](vec)
+
+
+def inline_vec_spilled[T, N: usize](vec: InlineVec[T, N]&) -> bool:
+    return vec.is_spilled
+
+
+def spilled[T, N: usize](vec: InlineVec[T, N]&) -> bool:
+    return inline_vec_spilled[T, N](vec)
+
+
+def inline_vec_get[T, N: usize](vec: InlineVec[T, N]&, index: usize) -> T:
+    assert index < vec.len
+    trusted Unsafe.UncheckedIndex:
+        return vec.overflow[index] if vec.is_spilled
+    trusted Unsafe.UncheckedIndex:
+        return vec.inline_items[index]
+
+
+def get[T, N: usize](vec: InlineVec[T, N]&, index: usize) -> T:
+    return inline_vec_get[T, N](vec, index)
+
+
+def inline_vec_set[T, N: usize](vec: mutable InlineVec[T, N]&, index: usize, item: T):
+    assert index < vec.len
+    trusted Unsafe.UncheckedIndex:
+        vec.overflow[index] <- item if vec.is_spilled
+    trusted Unsafe.UncheckedIndex:
+        vec.inline_items[index] <- item if not vec.is_spilled
+
+
+def set[T, N: usize](vec: mutable InlineVec[T, N]&, index: usize, item: T):
+    inline_vec_set[T, N](vec, index, item)
+
+
+def inline_vec_spill[T, N: usize](vec: mutable InlineVec[T, N]&):
+    can Memory.Allocate, Abort.Panic:
+        return if vec.is_spilled
+
+        assert vec.owner != null
+        owner: mutable Arena& = vec.owner
+        in owner:
+            _ = vec.overflow.reserve(N * 2)
+            for index in 0..<vec.len:
+                trusted Unsafe.UncheckedIndex:
+                    vec.overflow.push(vec.inline_items[index])
+
+        vec.is_spilled <- true
+
+
+def inline_vec_push[T, N: usize](vec: mutable InlineVec[T, N]&, item: T):
+    can Memory.Allocate, Abort.Panic:
+        if vec.is_spilled:
+            assert vec.owner != null
+            owner: mutable Arena& = vec.owner
+            in owner:
+                vec.overflow.push(item)
+            vec.len <- vec.len + 1
+            return
+
+        if vec.len < N:
+            trusted Unsafe.UncheckedIndex:
+                vec.inline_items[vec.len] <- item
+            vec.len <- vec.len + 1
+            return
+
+        inline_vec_spill[T, N](vec)
+        assert vec.owner != null
+        owner: mutable Arena& = vec.owner
+        in owner:
+            vec.overflow.push(item)
+        vec.len <- vec.len + 1
+
+
+def push[T, N: usize](vec: mutable InlineVec[T, N]&, item: T):
+    can Memory.Allocate, Abort.Panic:
+        inline_vec_push[T, N](vec, item)
+
+
+def inline_vec_pop[T, N: usize](vec: mutable InlineVec[T, N]&) -> T:
+    assert vec.len > 0
+    vec.len <- vec.len - 1
+    if vec.is_spilled:
+        vec.overflow.count <- vec.len
+        trusted Unsafe.UncheckedIndex:
+            return vec.overflow[vec.len]
+    trusted Unsafe.UncheckedIndex:
+        return vec.inline_items[vec.len]
+
+
+def pop[T, N: usize](vec: mutable InlineVec[T, N]&) -> T:
+    return inline_vec_pop[T, N](vec)
+
+
+def inline_vec_last[T, N: usize](vec: InlineVec[T, N]&) -> T:
+    assert vec.len > 0
+    return inline_vec_get[T, N](vec, vec.len - 1)
+
+
+def last[T, N: usize](vec: InlineVec[T, N]&) -> T:
+    return inline_vec_last[T, N](vec)
+
+
+def inline_vec_view[T, N: usize](vec: InlineVec[T, N]&) -> view[T]:
+    return DynArrayView{data: null, len: 0} if vec.len == 0
+    if vec.is_spilled:
+        assert vec.overflow.items != null
+        return DynArrayView{data: collections_void_from_items[T](vec.overflow.items), len: vec.len}
+    trusted Unsafe.UncheckedIndex:
+        return DynArrayView{data: collections_void_from_items[T](&vec.inline_items[0]), len: vec.len}
+
+
+def view[T, N: usize](vec: InlineVec[T, N]&) -> view[T]:
+    return inline_vec_view[T, N](vec)
+
+
+def inline_vec_clear[T, N: usize](vec: mutable InlineVec[T, N]&):
+    vec.overflow.count <- 0 if vec.is_spilled
+    vec.len <- 0
+    vec.is_spilled <- false
+
+
+def clear[T, N: usize](vec: mutable InlineVec[T, N]&):
+    inline_vec_clear[T, N](vec)
+
+
+# ------------------------------------------------------------
+# Typed enum flags
+# ------------------------------------------------------------
+
+def flags_new[T](api: FlagsNamespace) -> Flags[T]:
+    _ = api
+    result: Flags[T] = zeroed
+    return result
+
+
+def new[T](api: FlagsNamespace) -> Flags[T]:
+    return flags_new[T](api)
+
+
+def flags_empty[T]() -> Flags[T]:
+    result: Flags[T] = zeroed
+    return result
+
+
+def flags_from_bits[T](bits: u64) -> Flags[T]:
+    result: mutable Flags[T] = zeroed
+    result.bits <- bits
+    return result
+
+
+def flags_bits[T](items: Flags[T]&) -> u64:
+    return items.bits
+
+
+def bits[T](items: Flags[T]&) -> u64:
+    return flags_bits[T](items)
+
+
+def flags_mask[T](value: T) -> u64:
+    index: u64 = value.u64()
+    assert index < 64
+    return 1.u64() << index.u32()
+
+
+def flags_has[T](items: Flags[T]&, value: T) -> bool:
+    return (items.bits & flags_mask[T](value)) != 0
+
+
+def has[T](items: Flags[T]&, value: T) -> bool:
+    return flags_has[T](items, value)
+
+
+def flags_add[T](items: mutable Flags[T]&, value: T):
+    items.bits <- items.bits | flags_mask[T](value)
+
+
+def add[T](items: mutable Flags[T]&, value: T):
+    flags_add[T](items, value)
+
+
+def flags_remove[T](items: mutable Flags[T]&, value: T):
+    items.bits <- items.bits & ~flags_mask[T](value)
+
+
+def remove[T](items: mutable Flags[T]&, value: T):
+    flags_remove[T](items, value)
+
+
+def flags_set[T](items: mutable Flags[T]&, value: T, enabled: bool):
+    can Unsafe.Alias:
+        items.add(value) if enabled
+        items.remove(value) if not enabled
+
+
+def flags_clear[T](items: mutable Flags[T]&):
+    items.bits <- 0
+
+
+def flags_any[T](items: Flags[T]&) -> bool:
+    return items.bits != 0
+
+
+def flags_union[T](left: Flags[T]&, right: Flags[T]&) -> Flags[T]:
+    return flags_from_bits[T](left.bits | right.bits)
+
+
+def flags_intersection[T](left: Flags[T]&, right: Flags[T]&) -> Flags[T]:
+    return flags_from_bits[T](left.bits & right.bits)
+
+
+def flags_difference[T](left: Flags[T]&, right: Flags[T]&) -> Flags[T]:
+    return flags_from_bits[T](left.bits & ~right.bits)
+
+

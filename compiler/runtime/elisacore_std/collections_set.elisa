@@ -1,0 +1,213 @@
+def arena_set_find_index[T](s: set[T]&, key: T) -> DictProbeResult:
+    ensure (s.capacity == 0 or s.items == null) implies (result.index == 0 and not result.found)
+    ensure s.capacity > 0 implies result.index < s.capacity
+    ensure result.found implies (s.capacity > 0 and s.items != null)
+    return DictProbeResult{index: 0, found: false} if s.capacity == 0 or s.items == null
+
+    assert s.items != null
+    items: SetBucket[T]& = s.items
+    mask: usize = s.capacity - 1
+    slot: mutable usize = ctx_hash_value(key).usize() & mask
+    insert_slot: mutable usize = s.capacity
+    for _ in 0..<s.capacity:
+        invariant slot < s.capacity
+        invariant insert_slot == s.capacity or insert_slot < s.capacity
+        st: u8 = items[slot].state
+        if st == 0:
+            final_slot: usize = slot if insert_slot == s.capacity else insert_slot
+            return DictProbeResult{index: final_slot, found: false}
+        return DictProbeResult{index: slot, found: true} if st == 1 and items[slot].key == key
+        insert_slot <- slot if st == 2 and insert_slot == s.capacity
+        slot <- (slot + 1.usize()) & mask
+    if insert_slot != s.capacity:
+        assert insert_slot < s.capacity
+        return DictProbeResult{index: insert_slot, found: false}
+    return DictProbeResult{index: 0, found: false}
+
+def arena_set_place_fresh[T](s: mutable set[T]&, key: T) -> void:
+    assert s.items != null
+    items: mutable SetBucket[T]& = s.items
+    probe: DictProbeResult = arena_set_find_index(s, key)
+    items[probe.index].key <- key
+    items[probe.index].state <- COLLECTION_BUCKET_OCCUPIED
+    s.count <- s.count + 1.usize()
+    s.used <- s.used + 1.usize()
+
+def arena_set_zero_buckets[T](items: mutable SetBucket[T]&, capacity: usize):
+    return if capacity == 0
+    can Abort.Panic:
+        byte_count: usize = arena_checked_mul_usize(capacity, size_of(SetBucket[T]))
+        trusted Unsafe.RawExtern:
+            # Clear inactive storage without constructing an invalid live payload.
+            # Readers inspect state first; insertion initializes before publishing occupied.
+            memset(collections_mutable_void_from_items[SetBucket[T]](items), 0, byte_count)
+
+
+def arena_set_new[T](a: mutable Arena&, initial_capacity: usize) -> set[T]:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        out: mutable set[T] = zeroed
+        out.arena as & <- a
+
+        capacity: usize = arena_dict_next_capacity(initial_capacity)
+        return out if capacity == 0
+
+        # Same as arena_dict_new: the table is on a collection stack of its own.
+        table_bytes: usize = arena_checked_mul_usize(capacity, size_of(SetBucket[T])) can Abort.Panic
+        table_stack: mutable heap Region& = (collection_stack_acquire(a, null, collections_table_slots(table_bytes)) can Global{Read,Write}, Atomics.Load)
+        items: mutable SetBucket[T]& = collections_items_from_alloc[SetBucket[T]](collection_stack_table(table_stack))
+        arena_set_zero_buckets(items, capacity)
+
+        out.items as & <- items
+        out.capacity <- capacity
+        return out
+
+def arena_set_reserve[T](a: mutable Arena&, s: mutable set[T]&, min_capacity: usize) -> void error[RuntimeError]:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        target_capacity: usize = arena_dict_next_capacity(min_capacity)
+        return if:
+            target_capacity == 0
+
+            target_capacity <= s.capacity
+
+        # Same shape as arena_dict_reserve: see the comments there.
+        had_stack: bool = s.arena != null and s.items != null and s.capacity > 0
+
+        owner: mutable Arena& = s.arena if s.arena != null else a
+        s.arena as & <- owner if s.arena == null
+
+        old_items_opt: mutable SetBucket[T]&? = s.items
+        old_capacity: usize = s.capacity
+
+        live_table: void&? = collections_void_from_items_opt[SetBucket[T]](old_items_opt) if had_stack else null
+        table_bytes: usize = arena_checked_mul_usize(target_capacity, size_of(SetBucket[T])) can Abort.Panic
+        table_stack: mutable heap Region& = (collection_stack_acquire(owner, live_table, collections_table_slots(table_bytes)) can Global{Read,Write}, Atomics.Load)
+        new_items: mutable SetBucket[T]& = collections_items_from_alloc[SetBucket[T]](collection_stack_table(table_stack))
+        arena_set_zero_buckets(new_items, target_capacity)
+
+        # Rehash through a separate set value. This keeps the old backing read
+        # through `s` and the fresh backing mutated through `rehash`, so no
+        # mutable-alias capability escapes from this safe collection helper.
+        rehash: mutable set[T] = zeroed
+        rehash.arena as & <- owner
+        rehash.items as & <- new_items
+        rehash.capacity <- target_capacity
+
+        if old_items_opt != null and old_capacity > 0:
+            old_items: mutable SetBucket[T]& = old_items_opt
+            for i in 0..<old_capacity:
+                arena_set_place_fresh(rehash, old_items[i].key) if old_items[i].state == COLLECTION_BUCKET_OCCUPIED
+
+        s.items as & <- rehash.items
+        (collection_stack_profile_release(owner, live_table) can Global{Read,Write})
+        s.capacity <- rehash.capacity
+        s.count <- rehash.count
+        s.used <- rehash.used
+        return
+
+def arena_set_add[T](a: mutable Arena&, s: mutable set[T]&, key: T) -> bool error[RuntimeError]:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        owner: mutable Arena& = s.arena if s.arena != null else a
+        s.arena as & <- owner if s.arena == null
+
+        # When the next used slot (including tombstones) would cross 1/2 load (speed over memory: short linear-probe chains), probe first:
+        # return false for an existing key, or grow and clear tombstones before inserting a
+        # missing key. Non-growth adds pay only for the ordinary probe below.
+        if s.capacity == 0:
+            target_capacity: usize = DICT_INIT_CAP
+            try (arena_set_reserve(owner, s, target_capacity) can Global{Read,Write}, Atomics.Load)
+        elif s.used >= s.capacity / 2.usize():
+            growth_probe: DictProbeResult = arena_set_find_index(s, key)
+            return false if growth_probe.found
+            # A tombstone is already included in `used`; replacing it leaves that
+            # load unchanged and does not need a larger table or a rehash.
+            if s.items != null and growth_probe.index < s.capacity:
+                tombstone_items: mutable SetBucket[T]& = s.items
+                if tombstone_items[growth_probe.index].state == COLLECTION_BUCKET_TOMBSTONE:
+                    tombstone_items[growth_probe.index].key <- key
+                    tombstone_items[growth_probe.index].state <- COLLECTION_BUCKET_OCCUPIED
+                    s.count <- s.count + 1.usize()
+                    return true
+            target_capacity: usize = arena_checked_mul_usize(s.capacity, 2) can Abort.Panic
+            try (arena_set_reserve(owner, s, target_capacity) can Global{Read,Write}, Atomics.Load)
+
+        assert s.items != null
+        assert s.capacity > 0
+
+        items: mutable SetBucket[T]& = s.items
+        probe: DictProbeResult = arena_set_find_index(s, key)
+        return false if probe.found
+
+        reused_tombstone: bool = items[probe.index].state == COLLECTION_BUCKET_TOMBSTONE
+        items[probe.index].key <- key
+        items[probe.index].state <- COLLECTION_BUCKET_OCCUPIED
+        s.count <- s.count + 1.usize()
+        s.used <- s.used + 1.usize() if not reused_tombstone
+        return true
+
+def arena_set_add_or_panic[T](a: mutable Arena&, s: mutable set[T]&, key: T) -> bool:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        catch (arena_set_add(a, s, key) can Global{Read,Write}, Atomics.Load):
+            inserted:
+                return inserted
+            error e:
+                panic("set add: allocation failed")
+
+def arena_set_reserve_or_panic[T](a: mutable Arena&, s: mutable set[T]&, min_capacity: usize) -> void:
+    can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern,UncheckedIndex}:
+        catch (arena_set_reserve(a, s, min_capacity) can Global{Read,Write}, Atomics.Load):
+            ok:
+                return
+            error e:
+                panic("set reserve: allocation failed")
+
+def arena_set_contains[T](s: set[T]&, key: T) -> bool:
+    return false if s.count == 0 or s.items == null
+    probe: DictProbeResult = arena_set_find_index(s, key)
+    return probe.found
+
+def contains[T](s: set[T]&, key: T) -> bool:
+    return arena_set_contains[T](s, key)
+
+def has[T](s: set[T]&, key: T) -> bool:
+    return arena_set_contains[T](s, key)
+
+def arena_set_remove[T](s: mutable set[T]&, key: T) -> bool:
+    can Unsafe.Alias:
+        return false if s.count == 0 or s.items == null
+
+        probe: DictProbeResult = arena_set_find_index(s, key)
+        return false if not probe.found
+
+        assert s.items != null
+        items: mutable SetBucket[T]& = s.items
+        trusted Unsafe.RawExtern:
+            # The tombstone state prevents readers from observing this inactive payload.
+            memset(collections_mutable_void_from_items[SetBucket[T]](&items[probe.index]), 0, size_of(SetBucket[T]))
+        items[probe.index].state <- COLLECTION_BUCKET_TOMBSTONE
+        s.count <- s.count - 1.usize()
+        return true
+
+def remove[T](s: mutable set[T]&, key: T) -> bool:
+    can Unsafe.Alias:
+        return arena_set_remove[T](s, key)
+
+def arena_set_clear[T](s: mutable set[T]&):
+    if s.items == null or s.capacity == 0:
+        s.count <- 0
+        s.used <- 0
+        return
+
+    assert s.items != null
+    items: mutable SetBucket[T]& = s.items
+    arena_set_zero_buckets(items, s.capacity) can Abort.Panic
+    s.count <- 0
+    s.used <- 0
+
+def clear[T](s: mutable set[T]&):
+    arena_set_clear[T](s)
+
+
+# ------------------------------------------------------------
+# Ordered index maps
+# ------------------------------------------------------------
+

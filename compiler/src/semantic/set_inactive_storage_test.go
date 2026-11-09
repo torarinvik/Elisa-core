@@ -40,7 +40,7 @@ func actualSetInactiveSource(t *testing.T) string {
 	}
 	collections, arena := read("collections.elisa"), read("arena_region_blocks.elisa")
 	return "extern memset(dest: mutable void&, val: i32, n: usize) -> mutable void&\n" +
-		extract(collections, "def collections_mutable_void_from_items[") + extract(arena, "def arena_checked_mul_usize(") + extract(collections, "def arena_set_zero_buckets[")
+		extract(collections, "def collections_mutable_void_from_items[") + extract(arena, "def arena_checked_mul_usize(") + extract(read("collections_set.elisa"), "def arena_set_zero_buckets[")
 }
 
 func TestActualSetInactiveStorageSpecializesNonZeroRawBucket(t *testing.T) {
