@@ -10,17 +10,12 @@ from pathlib import Path
 import subprocess
 import sys
 
+from specialization_field_groups import FIELD_GROUPS
+
 
 def generate(directory: Path) -> dict[str, bytes]:
     fields = json.loads((directory / "generate_specialization_accessors.schema.json").read_text())["fields"]
-    categories = {
-        "expressions": {"ExprTypes", "RewriteDefaults", "OptionalBindSourceTypes", "ExprFacts", "CastHooks", "IndexBoundsProven"},
-        "calls": {"InterfaceMethodRefs", "SafeCalls", "InitCalls", "PostfixShorthandCalls", "TaskGroupSubmits", "CallArgDisjoint"},
-        "types_and_regions": {"PermGrowthOps", "RegionStacks", "ResolvedTypeNames", "ContextualTypeBindings", "ResolvedValueNames", "DenseNodeKeys", "NodeTables"},
-        "control_flow": {"ParallelFor", "ReassignReclaims", "FuncDisjointParams", "Defer", "Fold", "Lambdas"},
-        "contracts": {"LawIsCalls", "LemmaCalls", "GhostDecls", "GhostContracts", "RefinementChecks", "CallArgRefinementChecks", "ReturnRefinementChecks"},
-        "function_analysis": {"FunctionAnalyses", "ProgressSummaries"},
-    }
+    categories = FIELD_GROUPS
     parts = {category: [] for category in categories}
     names = set()
     for field in fields:
