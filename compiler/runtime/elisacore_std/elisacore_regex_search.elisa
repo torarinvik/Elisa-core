@@ -1,0 +1,295 @@
+def regex_set_singleton(sets: darray[u64]&, set: u32) -> i32 can[Abort.Panic]:
+    found: mutable i32 = -1
+    for value in 0..<256 |found, sets, set|:
+        if regex_set_has(sets, set, value.u8()):
+            return -1 if found >= 0
+            found <- value.i32()
+    return found
+
+# Appends, in order, what every match of `node` must contain at top level: a byte value for
+# a mandatory one-byte atom and -1 for anything else (which breaks a literal run).
+def regex_mandatory_sequence(re: Regex&, node: u32, out: mutable darray[i32]&) -> void can[Abort.Panic, Memory.Allocate]:
+    kind: u8 = re.ast_kind[node.usize()]
+    left: u32 = re.ast_left[node.usize()]
+    if kind == REGEX_AST_EMPTY:
+        return
+    if kind == REGEX_AST_BYTES:
+        out.push(regex_set_singleton(re.sets, left))
+        return
+    if kind == REGEX_AST_CONCAT:
+        regex_mandatory_sequence(re, left, out)
+        regex_mandatory_sequence(re, re.ast_right[node.usize()], out)
+        return
+    if kind == REGEX_AST_PLUS:
+        # x+ = x x*: the first copy is mandatory, the rest breaks the run.
+        regex_mandatory_sequence(re, left, out)
+    out.push(-1)
+
+# Compiles `pattern` into `re`; returns false (and leaves `re` invalid) on syntax
+# the engine does not support.
+def regex_compile(re: mutable Regex&, pattern: sview) -> bool can[Abort.Panic, Memory.Allocate]:
+    re.valid <- false
+    re.sets.clear()
+    re.ast_kind.clear()
+    re.ast_left.clear()
+    re.ast_right.clear()
+    parser: mutable RegexParser = RegexParser{position: 0, ok: true, ignore_case: false}
+    root: u32 = regex_parse_either(re, &parser, pattern)
+    return false if not parser.ok or parser.position != pattern.len.usize()
+
+    regex_automaton_clear(&re.forward)
+    for word in re.sets |re|:
+        re.forward.sets.push(word)
+    forward_accept: u32 = regex_nfa_state(&re.forward, REGEX_NFA_ACCEPT, REGEX_NO_STATE, REGEX_NO_STATE, 0)
+    re.forward.nfa_start <- regex_compile_node(re.ast_kind, re.ast_left, re.ast_right, &re.forward, root, forward_accept, false)
+    regex_automaton_ready(&re.forward)
+
+    regex_automaton_clear(&re.backward)
+    for word in re.sets |re|:
+        re.backward.sets.push(word)
+    any_byte: u32 = (re.backward.sets.count / 4).u32()
+    for word in 0..<4 |re|:
+        re.backward.sets.push(0xFFFFFFFFFFFFFFFF)
+    backward_accept: u32 = regex_nfa_state(&re.backward, REGEX_NFA_ACCEPT, REGEX_NO_STATE, REGEX_NO_STATE, 0)
+    reversed_entry: u32 = regex_compile_node(re.ast_kind, re.ast_left, re.ast_right, &re.backward, root, backward_accept, true)
+    # Unanchored: a loop over any byte in front of the reversed pattern.
+    scan_loop: u32 = regex_nfa_state(&re.backward, REGEX_NFA_SPLIT, REGEX_NO_STATE, reversed_entry, 0)
+    skip_byte: u32 = regex_nfa_state(&re.backward, REGEX_NFA_BYTES, scan_loop, REGEX_NO_STATE, any_byte)
+    re.backward.nfa_out1[scan_loop.usize()] <- skip_byte
+    re.backward.nfa_start <- scan_loop
+    regex_automaton_ready(&re.backward)
+
+    # Prefilter: the bytes on which the start state survives. Disabled when the
+    # pattern can match the empty string (every position then matches).
+    re.first_bytes.clear()
+    for word in 0..<4 |re|:
+        re.first_bytes.push(0)
+    start: i32 = re.forward.dfa_start
+    re.use_prefilter <- not re.forward.dfa_accept[start.usize()]
+    re.first_count <- 0
+    re.first_byte <- 0
+    for value in 0..<256 |re, start|:
+        follow: mutable i32 = re.forward.dfa_next[start.usize() * 256 + value]
+        follow <- regex_dfa_compute(&re.forward, start, value.u8(), false) if follow == REGEX_UNKNOWN
+        if follow != REGEX_DEAD:
+            re.first_bytes[value / 64] <- re.first_bytes[value / 64] | (1.u64() << (value % 64).u64())
+            re.first_count <- re.first_count + 1
+            re.first_byte <- value.u8()
+    re.no_newline <- true
+    for set in 0..<(re.sets.count / 4) |re|:
+        re.no_newline <- false if regex_set_has(re.sets, set.u32(), 10)
+    re.literals.clear()
+    re.literal_ends.clear()
+    pending: mutable darray[i32] = []
+    regex_mandatory_sequence(re, root, &pending)
+    pending.push(-1)
+    run_length: mutable u32 = 0
+    for item in pending |re, run_length|:
+        if item >= 0:
+            re.literals.push(item.u8())
+            run_length <- run_length + 1
+        elif run_length > 0:
+            re.literal_ends.push(re.literals.count.u32())
+            run_length <- 0
+    re.valid <- true
+    return true
+
+@link_name("memchr")
+extern regex_libc_memchr(bytes: void&, value: i32, count: usize) -> uintptr
+
+# First index >= from holding `target`, or text.count. libc memchr (vectorized) over the
+# in-bounds range text[from ..< count]; the pointer arithmetic stays inside this function.
+def regex_find_byte(text: darray[u8]&, from: usize, target: u8) -> usize can[Abort.Panic]:
+    return text.count if from >= text.count
+    remaining: usize = text.count - from
+    base: mutable uintptr = 0.uintptr()
+    hit: mutable uintptr = 0.uintptr()
+    trusted Unsafe.PointerCast:
+        base <- (&text[from]).cast[uintptr]
+        start: void& = (&text[from]).cast[void&]
+        trusted Unsafe.RawExtern:
+            hit <- regex_libc_memchr(start, target.i32(), remaining)
+    return text.count if hit == 0.uintptr()
+    return from + (hit - base).usize()
+
+# Leftmost-longest match starting at or after `from`.
+def regex_find_at(re: mutable Regex&, text: darray[u8]&, from: usize) -> RegexMatch can[Abort.Panic, Memory.Allocate]:
+    if not re.valid:
+        panic("regex: search with a pattern that did not compile")
+    position: mutable usize = from
+    while position <= text.count |re, text, position|:
+        if re.use_prefilter:
+            if re.first_count == 1:
+                position <- regex_find_byte(text, position, re.first_byte)
+            else:
+                while position < text.count |position, re, text|:
+                    byte: u8 = text[position]
+                    break if ((re.first_bytes[(byte >> 6).usize()] >> (byte & 63).u64()) & 1) != 0
+                    position <- position + 1
+            break if position >= text.count
+        found_end: i64 = regex_longest_at(&re.forward, text, position)
+        return RegexMatch{found: true, first: position, last: found_end.usize()} if found_end >= 0
+        position <- position + 1
+    return RegexMatch{found: false, first: text.count, last: text.count}
+
+def regex_is_match(re: mutable Regex&, text: darray[u8]&) -> bool can[Abort.Panic, Memory.Allocate]:
+    return regex_find_at(re, text, 0).found
+
+# Whole-text scans pick a strategy. When few bytes can begin a match (a rare-byte
+# prefilter, as with Rust's memchr literal prefilter) the scan searches forward from
+# prefiltered positions and never runs the reversed automaton. Forward search can
+# step the same bytes again from nearby candidates, so it carries a work budget; past
+# it the scan marks every start with one reverse pass and continues from the bitmap,
+# which keeps the whole scan linear. A spread sample of the text decides whether the
+# start bytes are sparse enough (at most 1 in 4) to try forward search at all.
+const REGEX_FORWARD_SCAN_MAX_FIRST_BYTES: u32 = 16
+
+def regex_scan_begin(re: mutable Regex&, text: darray[u8]&) -> void can[Abort.Panic, Memory.Allocate]:
+    re.forward_scan <- re.use_prefilter and re.first_count <= REGEX_FORWARD_SCAN_MAX_FIRST_BYTES
+    if re.forward_scan:
+        # The prefilter only pays when start bytes are not dense: sample 8 windows of
+        # 256 bytes spread over the text (inputs often change character by region).
+        sampled: mutable usize = 0
+        hits: mutable usize = 0
+        stride: usize = text.count / 8
+        for window in 0..<8 |re, text, hits, sampled, stride|:
+            begin: usize = window * stride
+            end: usize = text.count if begin + 256 > text.count else begin + 256
+            for position in begin..<end |re, text, hits|:
+                byte: u8 = text[position]
+                hits <- hits + ((re.first_bytes[(byte >> 6).usize()] >> (byte & 63).u64()) & 1).usize()
+            sampled <- sampled + (end - begin)
+        re.forward_scan <- hits * 4 <= sampled
+    re.forward.scanned <- 0
+    regex_mark_starts(re, text) if not re.forward_scan
+
+# Next non-overlapping match for the whole-text scans (after regex_scan_begin).
+def regex_scan_next(re: mutable Regex&, text: darray[u8]&, from: usize) -> RegexMatch can[Abort.Panic, Memory.Allocate]:
+    if re.forward_scan:
+        if re.forward.scanned <= text.count / 8 + 4096:
+            return regex_find_at(re, text, from)
+        re.forward_scan <- false
+        regex_mark_starts(re, text)
+    position: mutable usize = from
+    while true |re, text, position|:
+        first: usize = regex_next_start(re, position, text.count)
+        break if first > text.count
+        found_end: i64 = regex_longest_at(&re.forward, text, first)
+        return RegexMatch{found: true, first: first, last: found_end.usize()} if found_end >= 0
+        position <- first + 1   # unreachable when the two automata agree
+    return RegexMatch{found: false, first: text.count, last: text.count}
+
+# Number of non-overlapping matches, scanning left to right. Like Go, Rust and
+# Perl, an empty match that abuts the previous match is not reported, and an empty
+# match advances the scan by one byte.
+def regex_count_scan(re: mutable Regex&, text: darray[u8]&) -> usize can[Abort.Panic, Memory.Allocate]:
+    regex_scan_begin(re, text)
+    count: mutable usize = 0
+    position: mutable usize = 0
+    previous_end: mutable i64 = -1
+    while position <= text.count |re, text, count, position, previous_end|:
+        found: RegexMatch = regex_scan_next(re, text, position)
+        break if not found.found
+        empty: bool = found.last == found.first
+        position <- found.last + 1 if empty else found.last
+        continue if empty and found.first.i64() == previous_end
+        count <- count + 1
+        previous_end <- found.last.i64()
+    return count
+
+# The literal run to search for: the longest, ties broken by the rarer first byte in a
+# spread sample of the text. Returns its index in literal_ends, or -1 for none.
+def regex_pick_literal(re: Regex&, text: darray[u8]&) -> i64 can[Abort.Panic]:
+    best: mutable i64 = -1
+    best_length: mutable u32 = 0
+    best_hits: mutable usize = 0
+    start: mutable u32 = 0
+    stride: usize = text.count / 8
+    for index in 0..<re.literal_ends.count |re, text, best, best_length, best_hits, start, stride|:
+        end: u32 = re.literal_ends[index]
+        length: u32 = end - start
+        first: u8 = re.literals[start.usize()]
+        hits: mutable usize = 0
+        for window in 0..<8 |text, hits, first, stride|:
+            begin: usize = window * stride
+            stop: usize = text.count if begin + 256 > text.count else begin + 256
+            for position in begin..<stop |text, hits, first|:
+                hits <- hits + 1 if text[position] == first else hits
+        if best < 0 or length > best_length or (length == best_length and hits < best_hits):
+            best <- index.i64()
+            best_length <- length
+            best_hits <- hits
+        start <- end
+    return best
+
+# First index >= from where literals[lit_start ..< lit_end] occurs in text, or text.count.
+def regex_find_literal(re: Regex&, text: darray[u8]&, from: usize, lit_start: usize, lit_end: usize) -> usize can[Abort.Panic]:
+    length: usize = lit_end - lit_start
+    first: u8 = re.literals[lit_start]
+    position: mutable usize = from
+    while true |re, text, position, first, length, lit_start|:
+        position <- regex_find_byte(text, position, first)
+        return text.count if position + length > text.count
+        same: mutable bool = true
+        for k in 1..<length |same, re, text, position, lit_start|:
+            same <- false if text[position + k] != re.literals[lit_start + k]
+        return position if same
+        position <- position + 1
+    return text.count
+
+# Number of non-overlapping matches, scanning left to right. Like Go, Rust and
+# Perl, an empty match that abuts the previous match is not reported, and an empty
+# match advances the scan by one byte.
+#
+# Required-literal prefilter: when no match can contain '\n' and every match contains a
+# literal run (`@`, `.35`), only lines holding that literal can contain matches. Those lines
+# are found with memchr + compare and counted one at a time; matches cannot cross a line
+# boundary and cannot be empty, so per-line counts add up to the whole-text count.
+def regex_count(re: mutable Regex&, text: darray[u8]&) -> usize can[Abort.Panic, Memory.Allocate]:
+    if not re.valid:
+        panic("regex: search with a pattern that did not compile")
+    pick: i64 = regex_pick_literal(re, text) if re.use_prefilter and re.no_newline else -1
+    return regex_count_scan(re, text) if pick < 0
+    lit_start: usize = 0 if pick == 0 else re.literal_ends[(pick - 1).usize()].usize()
+    lit_end: usize = re.literal_ends[pick.usize()].usize()
+    line: mutable darray[u8] = []
+    count: mutable usize = 0
+    position: mutable usize = 0
+    while position < text.count |re, text, line, count, position, lit_start, lit_end|:
+        hit: usize = regex_find_literal(re, text, position, lit_start, lit_end)
+        break if hit >= text.count
+        line_start: mutable usize = hit
+        while line_start > position and text[line_start - 1] != 10 |line_start, text, position|:
+            line_start <- line_start - 1
+        line_end: usize = regex_find_byte(text, hit, 10)
+        line.clear()
+        for index in line_start..<line_end |line, text|:
+            line.push(text[index])
+        count <- count + regex_count_scan(re, line)
+        position <- line_end + 1
+    return count
+
+# Appends `text` to `output` with every non-overlapping match (as counted by
+# regex_count) replaced by the literal bytes of `replacement`.
+def regex_replace_all(re: mutable Regex&, text: darray[u8]&, replacement: sview, output: mutable darray[u8]&) -> void can[Abort.Panic, Memory.Allocate]:
+    if not re.valid:
+        panic("regex: search with a pattern that did not compile")
+    regex_scan_begin(re, text)
+    copied: mutable usize = 0
+    position: mutable usize = 0
+    previous_end: mutable i64 = -1
+    replacement_length: usize = replacement.len.usize()
+    while position <= text.count |re, text, output, copied, position, previous_end, replacement, replacement_length|:
+        found: RegexMatch = regex_scan_next(re, text, position)
+        break if not found.found
+        empty: bool = found.last == found.first
+        position <- found.last + 1 if empty else found.last
+        continue if empty and found.first.i64() == previous_end
+        previous_end <- found.last.i64()
+        for index in copied..<found.first |output, text|:
+            output.push(text[index])
+        for index in 0..<replacement_length |output, replacement|:
+            output.push(replacement[index].u8())
+        copied <- found.last
+    for index in copied..<text.count |output, text|:
+        output.push(text[index])

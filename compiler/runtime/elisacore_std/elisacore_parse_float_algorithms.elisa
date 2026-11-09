@@ -1,0 +1,265 @@
+def f64_parse_lower(c: u8) -> u8:
+    return c + 32 if c >= 'A' and c <= 'Z' else c
+
+# Whether text[at ..] starts with `word` (lower-case ASCII), ignoring case.
+def f64_parse_word_at(text: sview, at: usize, word: sview) -> bool can[Abort.Panic]:
+    return false if at + word.len > text.len
+    for i in 0..<word.len |text, at, word|:
+        return false if f64_parse_lower(text[at + i].u8()) != word[i].u8()
+    return true
+
+def f64_parse_scan(text: sview, start: usize) -> F64Scan can[Abort.Panic]:
+    failed: F64Scan = F64Scan{ok: false, negative: false, mantissa: 0, exp10: 0, truncated: false, digits_start: start, digits_end: start, point: 0, end: start, special: 0}
+    i: mutable usize = start
+    negative: mutable bool = false
+    if i < text.len and (text[i].u8() == '+' or text[i].u8() == '-'):
+        negative <- text[i].u8() == '-'
+        i <- i + 1
+    first: u8 = text[i].u8() if i < text.len else 0
+    special_start: bool = first == 'i' or first == 'I' or first == 'n' or first == 'N'
+    if special_start and f64_parse_word_at(text, i, "infinity"):
+        return F64Scan{ok: true, negative: negative, mantissa: 0, exp10: 0, truncated: false, digits_start: i, digits_end: i, point: 0, end: i + 8, special: 1}
+    if special_start and f64_parse_word_at(text, i, "inf"):
+        return F64Scan{ok: true, negative: negative, mantissa: 0, exp10: 0, truncated: false, digits_start: i, digits_end: i, point: 0, end: i + 3, special: 1}
+    if special_start and f64_parse_word_at(text, i, "nan") and i == start:   # Go: no sign on NaN
+        return F64Scan{ok: true, negative: negative, mantissa: 0, exp10: 0, truncated: false, digits_start: i, digits_end: i, point: 0, end: i + 3, special: 2}
+    digits_start: usize = i
+    mantissa: mutable u64 = 0
+    kept: mutable i64 = 0          # significant digits folded into mantissa
+    significant: mutable i64 = 0   # significant digits seen (after leading zeros)
+    point: mutable i64 = 0         # decimal point position relative to the first significant digit
+    saw_dot: mutable bool = false
+    saw_digit: mutable bool = false
+    truncated: mutable bool = false
+    while i < text.len |i, text, mantissa, kept, significant, point, saw_dot, saw_digit, truncated|:
+        c: u8 = text[i].u8()
+        if c == '.':
+            break if saw_dot
+            saw_dot <- true
+            point <- significant
+        elif c >= '0' and c <= '9':
+            saw_digit <- true
+            if c == '0' and significant == 0:
+                point <- point - 1 if saw_dot
+            else:
+                significant <- significant + 1
+                if kept < 19:
+                    mantissa <- mantissa * 10 + (c - '0').u64()
+                    kept <- kept + 1
+                elif c != '0':
+                    truncated <- true
+        else:
+            break
+        i <- i + 1
+    return failed if not saw_digit
+    point <- significant if not saw_dot
+    digits_end: usize = i
+    if i < text.len and (text[i].u8() == 'e' or text[i].u8() == 'E'):
+        j: mutable usize = i + 1
+        exp_negative: mutable bool = false
+        if j < text.len and (text[j].u8() == '+' or text[j].u8() == '-'):
+            exp_negative <- text[j].u8() == '-'
+            j <- j + 1
+        if j < text.len and text[j].u8() >= '0' and text[j].u8() <= '9':
+            e: mutable i64 = 0
+            while j < text.len and text[j].u8() >= '0' and text[j].u8() <= '9' |j, e, text|:
+                e <- e * 10 + (text[j].u8() - '0').i64() if e < 100000 else e
+                j <- j + 1
+            point <- point - e if exp_negative else point + e
+            i <- j
+        # A bare `e` (no digits) is not part of the number; the number ends before it.
+    exp10: i64 = point - kept if mantissa != 0 else 0
+    return F64Scan{ok: true, negative: negative, mantissa: mantissa, exp10: exp10, truncated: truncated, digits_start: digits_start, digits_end: digits_end, point: point, end: i, special: 0}
+
+def f64_parse_signed(bits: u64, negative: bool) -> f64:
+    return f64_parse_from_bits(bits | 0x8000000000000000 if negative else bits)
+
+def f64_parse_leading_zeros(value: u64) -> u64:
+    return 64 if value == 0
+    n: mutable u64 = 0
+    x: mutable u64 = value
+    if (x >> 32) == 0:
+        n <- n + 32
+        x <- x << 32
+    if (x >> 48) == 0:
+        n <- n + 16
+        x <- x << 16
+    if (x >> 56) == 0:
+        n <- n + 8
+        x <- x << 8
+    if (x >> 60) == 0:
+        n <- n + 4
+        x <- x << 4
+    if (x >> 62) == 0:
+        n <- n + 2
+        x <- x << 2
+    if (x >> 63) == 0:
+        n <- n + 1
+    return n
+
+# Eisel-Lemire: the f64 bits of mantissa * 10^exp10 (mantissa != 0), or 0xFFFFFFFFFFFFFFFF when
+# the 128-bit approximation cannot decide the rounding (or the result is subnormal/overflows).
+const F64_PARSE_UNDECIDED: u64 = 0xFFFFFFFFFFFFFFFF
+
+def f64_parse_eisel_lemire(mantissa: u64, exp10: i64) -> u64 can[Abort.Panic]:
+    return F64_PARSE_UNDECIDED if exp10 < F64_PARSE_MIN_EXP10 or exp10 > F64_PARSE_MAX_EXP10
+    clz: u64 = f64_parse_leading_zeros(mantissa)
+    man: u64 = mantissa << clz
+    ret_exp2: mutable i64 = ((217706 * exp10) >> 16) + 64 + 1023 - clz.i64()
+    index: usize = (exp10 - F64_PARSE_MIN_EXP10).usize() * 3
+    hi_word: u64 = (get ELISA_F64_PARSE_POW10[index] else 0) | 0x8000000000000000
+    lo_word: u64 = ((get ELISA_F64_PARSE_POW10[index + 1] else 0) << 1) | (get ELISA_F64_PARSE_POW10[index + 2] else 0)
+    x_hi: mutable u64 = f64_parse_mul_hi(man, hi_word)
+    x_lo: mutable u64 = man * hi_word
+    all_ones: u64 = 0xFFFFFFFFFFFFFFFF
+    if (x_hi & 0x1FF) == 0x1FF and x_lo > all_ones - man:
+        y_hi: u64 = f64_parse_mul_hi(man, lo_word)
+        y_lo: u64 = man * lo_word
+        merged_hi: mutable u64 = x_hi
+        merged_lo: u64 = x_lo + y_hi if x_lo <= all_ones - y_hi else y_hi - (all_ones - x_lo) - 1
+        merged_hi <- merged_hi + 1 if x_lo > all_ones - y_hi
+        if (merged_hi & 0x1FF) == 0x1FF and merged_lo == all_ones and y_lo > all_ones - man:
+            return F64_PARSE_UNDECIDED
+        x_hi <- merged_hi
+        x_lo <- merged_lo
+    msb: u64 = x_hi >> 63
+    ret_mantissa: mutable u64 = x_hi >> (msb + 9)
+    ret_exp2 <- ret_exp2 - (1 - msb.i64())
+    if x_lo == 0 and (x_hi & 0x1FF) == 0 and (ret_mantissa & 3) == 1:
+        return F64_PARSE_UNDECIDED
+    ret_mantissa <- ret_mantissa + (ret_mantissa & 1)
+    ret_mantissa <- ret_mantissa >> 1
+    if (ret_mantissa >> 53) > 0:
+        ret_mantissa <- ret_mantissa >> 1
+        ret_exp2 <- ret_exp2 + 1
+    return F64_PARSE_UNDECIDED if ret_exp2 < 1 or ret_exp2 >= 0x7FF
+    return (ret_exp2.u64() << 52) | (ret_mantissa & 0xFFFFFFFFFFFFF)
+
+def f64_parse_mul_pow2(value: mutable BigInt&, count: i64) -> void can[Memory.Allocate, Abort.Panic]:
+    left: mutable i64 = count
+    while left > 0 |value, left|:
+        step: i64 = 62 if left > 62 else left
+        bigint_mul_small_assign(value, 1.u64() << step.u64())
+        left <- left - step
+
+def f64_parse_mul_pow10(value: mutable BigInt&, count: i64) -> void can[Memory.Allocate, Abort.Panic]:
+    left: mutable i64 = count
+    while left > 0 |value, left|:
+        step: i64 = 19 if left > 19 else left
+        factor: mutable u64 = 1
+        for _ in 0..<step |factor|:
+            factor <- factor * 10
+        bigint_mul_small_assign(value, factor)
+        left <- left - step
+
+def f64_parse_bit_length(value: BigInt&) -> i64 can[Abort.Panic]:
+    count: usize = value.limbs.count
+    return 0 if count == 0
+    top: u64 = value.limbs[count - 1]
+    return count.i64() * 64 - f64_parse_leading_zeros(top).i64()
+
+# Exact: the round-half-even f64 bits of D * 10^exp10, D the significant digits of
+# text[scan.digits_start ..< scan.digits_end] (exp10 relative to the last digit).
+def f64_parse_exact(text: sview, scan: F64Scan&) -> u64 can[Memory.Allocate, Abort.Panic]:
+    digits: mutable BigInt = bigint_zero()
+    count: mutable i64 = 0
+    chunk: mutable u64 = 0
+    chunk_digits: mutable i64 = 0
+    started: mutable bool = false
+    for i in scan.digits_start..<scan.digits_end |text, digits, count, chunk, chunk_digits, started|:
+        c: u8 = text[i].u8()
+        continue if c == '.'
+        continue if c == '0' and not started
+        started <- true
+        chunk <- chunk * 10 + (c - '0').u64()
+        chunk_digits <- chunk_digits + 1
+        count <- count + 1
+        if chunk_digits == 19:
+            f64_parse_mul_pow10(&digits, 19)
+            one: BigInt = bigint_from_u64(chunk)
+            bigint_addmul_small(&digits, one, 1)
+            chunk <- 0
+            chunk_digits <- 0
+    if chunk_digits > 0:
+        f64_parse_mul_pow10(&digits, chunk_digits)
+        one: BigInt = bigint_from_u64(chunk)
+        bigint_addmul_small(&digits, one, 1)
+    exp10: i64 = scan.point - count
+    # value = digits * 10^exp10 = num / den
+    num: mutable BigInt = bigint_zero()
+    den: mutable BigInt = bigint_from_u64(1)
+    bigint_assign(&num, digits)
+    if exp10 >= 0:
+        f64_parse_mul_pow10(&num, exp10)
+    else:
+        f64_parse_mul_pow10(&den, 0 - exp10)
+    # Find k with q = floor(num / (den * 2^k)) in [2^53, 2^54) (k may be negative), unless the
+    # value is subnormal, where k is pinned at -1075 (q < 2^53 then).
+    k: mutable i64 = f64_parse_bit_length(num) - f64_parse_bit_length(den) - 54
+    q: mutable BigInt = bigint_zero()
+    r: mutable BigInt = bigint_zero()
+    a: mutable BigInt = bigint_zero()
+    b: mutable BigInt = bigint_zero()
+    q_low: mutable u64 = 0
+    while true |k, q, r, a, b, num, den, q_low|:
+        k <- -1075 if k < -1075
+        bigint_assign(&a, num)
+        bigint_assign(&b, den)
+        if k >= 0:
+            f64_parse_mul_pow2(&b, k)
+        else:
+            f64_parse_mul_pow2(&a, 0 - k)
+        bigint_divmod(&q, &r, a, b)
+        bits: i64 = f64_parse_bit_length(q)
+        if bits > 54:
+            k <- k + (bits - 54)
+            continue
+        if bits < 54 and k > -1075:
+            k <- k - (54 - bits)
+            continue
+        q_low <- bigint_low_u64(q)
+        break
+    # value ~ q * 2^k: mantissa q >> 1 at exponent k + 1, round bit q & 1, sticky r != 0.
+    mantissa: mutable u64 = q_low >> 1
+    exponent: mutable i64 = k + 1
+    round_up: bool = (q_low & 1) == 1 and (not bigint_is_zero(r) or (mantissa & 1) == 1)
+    mantissa <- mantissa + 1 if round_up
+    if mantissa == (1.u64() << 53):
+        mantissa <- mantissa >> 1
+        exponent <- exponent + 1
+    return 0x7FF0000000000000 if exponent + 1075 >= 0x7FF
+    return mantissa if mantissa < (1.u64() << 52)   # subnormal (exponent == -1074)
+    return ((exponent + 1075).u64() << 52) | (mantissa & 0xFFFFFFFFFFFFF)
+
+def f64_parse_prefix(text: sview, start: usize) -> F64Parse can[Memory.Allocate, Abort.Panic]:
+    scan: F64Scan = f64_parse_scan(text, start)
+    return F64Parse{ok: false, value: 0.0, end: start} if not scan.ok
+    if scan.special == 1:
+        return F64Parse{ok: true, value: f64_parse_signed(0x7FF0000000000000, scan.negative), end: scan.end}
+    if scan.special == 2:
+        return F64Parse{ok: true, value: f64_parse_from_bits(0x7FF8000000000000), end: scan.end}
+    if scan.mantissa == 0:
+        return F64Parse{ok: true, value: f64_parse_signed(0, scan.negative), end: scan.end}
+    # Magnitude bounds on 0.D * 10^point: below 1e-325 rounds to 0, at or above 1e310 is inf.
+    if scan.point < -324:
+        return F64Parse{ok: true, value: f64_parse_signed(0, scan.negative), end: scan.end}
+    if scan.point > 310:
+        return F64Parse{ok: true, value: f64_parse_signed(0x7FF0000000000000, scan.negative), end: scan.end}
+    if not scan.truncated and scan.mantissa <= (1.u64() << 53) and scan.exp10 >= -22 and scan.exp10 <= 22:
+        base: f64 = scan.mantissa.f64()
+        power: f64 = get ELISA_F64_PARSE_EXACT_POW10[(scan.exp10 if scan.exp10 >= 0 else 0 - scan.exp10).usize()] else 1.0
+        value: f64 = base * power if scan.exp10 >= 0 else base / power
+        return F64Parse{ok: true, value: -value if scan.negative else value, end: scan.end}
+    bits: mutable u64 = f64_parse_eisel_lemire(scan.mantissa, scan.exp10)
+    if bits != F64_PARSE_UNDECIDED and scan.truncated:
+        # The true value lies in (m, m+1) * 10^exp10: decided only if both ends agree.
+        upper: u64 = f64_parse_eisel_lemire(scan.mantissa + 1, scan.exp10) if scan.mantissa < 0xFFFFFFFFFFFFFFFF else F64_PARSE_UNDECIDED
+        bits <- F64_PARSE_UNDECIDED if upper != bits
+    bits <- f64_parse_exact(text, &scan) if bits == F64_PARSE_UNDECIDED
+    return F64Parse{ok: true, value: f64_parse_signed(bits, scan.negative), end: scan.end}
+
+# Whole-string parse: ok only when all of `text` is one number.
+def f64_parse(text: sview) -> F64Parse can[Memory.Allocate, Abort.Panic]:
+    result: F64Parse = f64_parse_prefix(text, 0)
+    return F64Parse{ok: false, value: 0.0, end: result.end} if result.ok and result.end != text.len
+    return result
