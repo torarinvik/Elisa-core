@@ -290,3 +290,18 @@ func TestSMTExactQueryKeyKeepsLegacyDigest(t *testing.T) {
 		}
 	}
 }
+
+func TestSMTAlphaInvalidControlScan(t *testing.T) {
+	for size := 0; size <= 33; size++ {
+		for position := 0; position < size; position++ {
+			for value := 0; value < 256; value++ {
+				query := []byte(strings.Repeat("a", size))
+				query[position] = byte(value)
+				want := value < 32 && value != '\n' && value != '\t'
+				if got := smtAlphaHasInvalidControl(string(query)); got != want {
+					t.Fatalf("length %d position %d byte %d: got %t, want %t", size, position, value, got, want)
+				}
+			}
+		}
+	}
+}

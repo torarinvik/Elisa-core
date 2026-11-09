@@ -3,6 +3,7 @@ package semantic
 import (
 	"bufio"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"io"
 	"strconv"
@@ -37,10 +38,8 @@ func smtAlphaWriteQuery(query string, out smtAlphaOutput) bool {
 	}
 	// Do not repair malformed input by dropping a comment containing invalid
 	// control bytes. Generated queries use LF; unusual line endings keep exact keys.
-	for i := 0; i < len(query); i++ {
-		if query[i] < 32 && query[i] != '\n' && query[i] != '\t' {
-			return false
-		}
+	if smtAlphaHasInvalidControl(query) {
+		return false
 	}
 	names := make(map[string]string)
 	var ordered []string
@@ -121,6 +120,29 @@ func smtAlphaWriteQuery(query string, out smtAlphaOutput) bool {
 	}
 	return true
 
+}
+
+// Check eight bytes at once in the common case of printable SMT text. Only
+// words containing a control byte need the slower byte-by-byte inspection.
+func smtAlphaHasInvalidControl(query string) bool {
+	i := 0
+	for ; i+8 <= len(query); i += 8 {
+		word := binary.LittleEndian.Uint64([]byte(query[i:i+8])) & 0xe0e0e0e0e0e0e0e0
+		if (word-0x0101010101010101)&^word&0x8080808080808080 == 0 {
+			continue
+		}
+		for j := i; j < i+8; j++ {
+			if query[j] < 32 && query[j] != '\n' && query[j] != '\t' {
+				return true
+			}
+		}
+	}
+	for ; i < len(query); i++ {
+		if query[i] < 32 && query[i] != '\n' && query[i] != '\t' {
+			return true
+		}
+	}
+	return false
 }
 
 // Reject spellings whose replacement could turn a solver syntax error into a
