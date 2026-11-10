@@ -18,6 +18,7 @@
 #include <llvm/Support/CBindingWrapping.h>
 using namespace llvm;
 #include "llvm_checked_initialization.cpp"
+#include "llvm_checked_power.cpp"
 namespace {
 static bool checkedMulCandidate(IntrinsicInst &C, LoopInfo &LI) {
   if (C.getIntrinsicID() != Intrinsic::smul_with_overflow ||
@@ -228,10 +229,41 @@ extern "C" unsigned elisacoreFastCheckedMul(LLVMModuleRef ref, LLVMTargetMachine
     for (auto *C : work) { versionCheckedMul(*C); changed = true; }
     if (!work.empty()) F.addFnAttr("elisa.checkedmul.versioned");
   }
-  if (!changed) return 0;
-  auto options = LLVMCreatePassBuilderOptions();
-  auto error = LLVMRunPasses(ref, "function(instcombine<no-verify-fixpoint>,simplifycfg)", target, options);
-  LLVMDisposePassBuilderOptions(options);
-  if (error) { LLVMConsumeError(error); return 2; }
-  return 1;
+  if (changed) {
+    auto Options = LLVMCreatePassBuilderOptions();
+    auto Error = LLVMRunPasses(ref, "function(instcombine<no-verify-fixpoint>,simplifycfg)", target, Options);
+    LLVMDisposePassBuilderOptions(Options);
+    if (Error) { LLVMConsumeError(Error); return 2; }
+  }
+#if LLVM_VERSION_MAJOR >= 23
+  auto PowerOptions = LLVMCreatePassBuilderOptions();
+  for (Function &F : M) {
+    if (F.isDeclaration() || F.hasOptNone() || F.hasOptSize() || F.hasMinSize() ||
+        F.getSubprogram() || F.hasPersonalityFn() || F.hasGC() ||
+        F.getEntryCount().has_value() || F.hasFnAttribute(Attribute::Convergent) ||
+        F.hasFnAttribute(Attribute::SanitizeAddress) ||
+        F.hasFnAttribute(Attribute::SanitizeHWAddress) ||
+        F.hasFnAttribute(Attribute::SanitizeMemory) ||
+        F.hasFnAttribute(Attribute::SanitizeThread)) continue;
+    LLVMErrorRef Error = nullptr;
+    if (F.hasFnAttribute("elisa.checkedmul.versioned") && foldCheckedPowers(F)) {
+      Error = LLVMRunPassesOnFunction(wrap(&F), "instcombine<no-verify-fixpoint>,simplifycfg",
+                                       target, PowerOptions);
+      changed = true;
+    }
+    if (!Error && unrollShortPowerLoop(F)) {
+      Error = LLVMRunPassesOnFunction(wrap(&F),
+          "instcombine<no-verify-fixpoint>,simplifycfg",
+          target, PowerOptions);
+      changed = true;
+    }
+    if (Error) {
+      LLVMConsumeError(Error);
+      LLVMDisposePassBuilderOptions(PowerOptions);
+      return 2;
+    }
+  }
+  LLVMDisposePassBuilderOptions(PowerOptions);
+#endif
+  return changed ? 1 : 0;
 }
