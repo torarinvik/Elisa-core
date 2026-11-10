@@ -247,14 +247,14 @@ func (i *Interpreter) invokeCallValue(frame *frame, expr *ast.CallExpr, calleeVa
 			return VoidValue(), err
 		}
 		if !prependNamed {
-			if name := expr.ArgName(index); name != "" {
+			if name := loweredCallArgName(expr, index); name != "" {
 				named[name] = value
 			} else {
 				positional = append(positional, value)
 			}
 			continue
 		}
-		if name := expr.ArgName(index + 1); name != "" {
+		if name := loweredCallArgName(expr, index+1); name != "" {
 			named[name] = value
 		} else {
 			positional = append(positional, value)
@@ -262,6 +262,16 @@ func (i *Interpreter) invokeCallValue(frame *frame, expr *ast.CallExpr, calleeVa
 	}
 	return VoidValue(), fmt.Errorf("unknown callable %q", name)
 }
+
+// LoweredArgs uses formal parameter order after semantic resolution. Source
+// argument labels apply only when the call is still in source order.
+func loweredCallArgName(expr *ast.CallExpr, index int) string {
+	if expr.ResolvedArgsValid && expr.ResolvedCommonArgs == nil {
+		return ""
+	}
+	return expr.ArgName(index)
+}
+
 func (i *Interpreter) evalCallArgsForParams(frame *frame, expr *ast.CallExpr, argExprs []ast.Expr, prependNamed bool, params []ast.ParamDecl) ([]Value, map[string]Value, error) {
 	positional := make([]Value, 0, len(argExprs))
 	named := map[string]Value{}
@@ -274,7 +284,7 @@ func (i *Interpreter) evalCallArgsForParams(frame *frame, expr *ast.CallExpr, ar
 		if prependNamed {
 			nameIndex = index + 1
 		}
-		argName := expr.ArgName(nameIndex)
+		argName := loweredCallArgName(expr, nameIndex)
 		var typ ast.TypeExpr
 		if argName != "" {
 			if param, ok := paramByName[argName]; ok {
@@ -307,7 +317,7 @@ func (i *Interpreter) evalCallArgsForStruct(frame *frame, expr *ast.CallExpr, ar
 		if prependNamed {
 			nameIndex = index + 1
 		}
-		argName := expr.ArgName(nameIndex)
+		argName := loweredCallArgName(expr, nameIndex)
 		var typ ast.TypeExpr
 		if argName != "" {
 			if field, ok := fieldByName[argName]; ok {
@@ -340,14 +350,14 @@ func (i *Interpreter) callLambda(lambda *lambdaValue, expr *ast.CallExpr, caller
 			return VoidValue(), err
 		}
 		if !prependNamed {
-			if name := expr.ArgName(index); name != "" {
+			if name := loweredCallArgName(expr, index); name != "" {
 				named[name] = value
 			} else {
 				positional = append(positional, value)
 			}
 			continue
 		}
-		if name := expr.ArgName(index + 1); name != "" {
+		if name := loweredCallArgName(expr, index+1); name != "" {
 			named[name] = value
 		} else {
 			positional = append(positional, value)
