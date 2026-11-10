@@ -340,7 +340,11 @@ func (s *IncrementalObjectSession) writePartitionedObject(result *semantic.Resul
 	if workers > parts {
 		workers = parts
 	}
-	order := partitionedIRWorkOrderWithReads(result, parts, sharedReads, previousMembers)
+	var fallbackWeights []int
+	if len(previousMembers) != parts && options.OptLevel != OptimizationLevel0 {
+		fallbackWeights = partitionIRWorkWeights(declarations)
+	}
+	order := partitionedIRWorkOrderWithReads(result, parts, sharedReads, fallbackWeights, previousMembers)
 	var declinedPart atomic.Int64
 	if err := runPartitionIRWorkers(parts, workers, order, func(part int) error {
 		var err error

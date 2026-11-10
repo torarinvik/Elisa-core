@@ -361,10 +361,10 @@ func (g *llvmGenerator) setResultIndexBoundsProven(expr *ast.IndexExpr, proven b
 // of cache-hit units. Hints only affect scheduling; all units still generate
 // and validate their full current bitcode before any cache lookup.
 func partitionedIRWorkOrder(result *semantic.Result, parts int, previous ...[][]string) []int {
-	return partitionedIRWorkOrderWithReads(result, parts, nil, previous...)
+	return partitionedIRWorkOrderWithReads(result, parts, nil, nil, previous...)
 }
 
-func partitionedIRWorkOrderWithReads(result *semantic.Result, parts int, recorder *irInputReadRecorder, previous ...[][]string) []int {
+func partitionedIRWorkOrderWithReads(result *semantic.Result, parts int, recorder *irInputReadRecorder, fallbackWeights []int, previous ...[][]string) []int {
 	preferred := make([]bool, parts)
 	view := newIRCodegenReadView(result, recorder)
 	for _, name := range result.CodegenFunctionPriorities() {
@@ -419,6 +419,8 @@ func partitionedIRWorkOrderWithReads(result *semantic.Result, parts int, recorde
 	// partition starts last and stretches the wall time. Order never affects output.
 	if len(previous) != 0 && len(previous[0]) == parts {
 		sort.SliceStable(rest, func(i, j int) bool { return len(previous[0][rest[i]]) > len(previous[0][rest[j]]) })
+	} else if len(fallbackWeights) == parts {
+		sort.SliceStable(rest, func(i, j int) bool { return fallbackWeights[rest[i]] > fallbackWeights[rest[j]] })
 	}
 	return append(order, rest...)
 }
