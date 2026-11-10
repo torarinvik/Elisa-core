@@ -8,6 +8,8 @@ so the name on a command line says which compiler ran. There is no bare
 `elisac`: scripts name the stage they want. Warm rebuild ~0.6s; cold ~10s.
 On a build failure the last-good binary is kept and errors go to
 `/tmp/elisac-autoinstall.log`.
+Every compiler rebuild has a 30-second process-group deadline. A timeout keeps
+the last-good binary and does not trigger an automatic retry.
 
 Git does not enable a repo's tracked hooks automatically (for security).
 Enable them once per clone:

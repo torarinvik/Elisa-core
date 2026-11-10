@@ -30,6 +30,7 @@ GO_TAGS := $(if $(filter true,$(ELISAC_FULL_DEBUG)),-tags elisac_full_debug,)
 # inputs without making a sibling self-host checkout part of the build recipe.
 # Explicit custom solver/linker/VCS builds keep their separate direct Go path.
 ELISA_STAGE0_PROVENANCE_SCRIPT ?= $(CURDIR)/scripts/stage0_provenance.py
+ELISA_STAGE0_TIMEOUT_SCRIPT ?= $(CURDIR)/scripts/run_with_timeout.py
 PYTHON_BIN ?= python3
 
 # LLVM for cgo: the #cgo lines in src/backend carry per-OS defaults (Homebrew on macOS,
@@ -62,6 +63,7 @@ FAST_PKGS := ./src/semantic/ ./src/smt/ ./src/backend/ ./src/parser/ ./src/lexer
 .PHONY: test
 test:
 	go test $(FAST_PKGS)
+	$(PYTHON_BIN) scripts/test_run_with_timeout.py
 
 # test-semantic: tightest loop for verification-engine / prover work (~10s). The src/semantic
 # package is the blast radius for analyzer changes (refinements, contracts, SMT discharge, flow).
@@ -91,7 +93,7 @@ build:
 	@if [ "$(Z3)" = "z3" ] && [ "$(ELISAC_BUILD_VCS)" = "false" ] && [ "$(ELISAC_FULL_DEBUG)" = "false" ] && [ "$(GO_LDFLAGS)" = "-X elisacore/src/smt.DefaultBinary=z3" ]; then \
 		env -i HOME="$$HOME" PATH="$$PATH" TMPDIR="$${TMPDIR:-/tmp}" LANG=en_US.UTF-8 "$(PYTHON_BIN)" "$(ELISA_STAGE0_PROVENANCE_SCRIPT)" build --root . --binary bin/elisac; \
 	else \
-		go build -buildvcs=false $(GO_TAGS) -ldflags "$(GO_LDFLAGS)" -o bin/elisac ./src && rm -f bin/elisac.provenance.json; \
+		"$(PYTHON_BIN)" "$(ELISA_STAGE0_TIMEOUT_SCRIPT)" 30 --grace-seconds 0 -- go build -buildvcs=false $(GO_TAGS) -ldflags "$(GO_LDFLAGS)" -o bin/elisac ./src && rm -f bin/elisac.provenance.json; \
 	fi
 
 # install: explicit opt-in installation for users who really want it.
@@ -104,7 +106,7 @@ install:
 	@if [ "$(Z3)" = "z3" ] && [ "$(ELISAC_BUILD_VCS)" = "false" ] && [ "$(ELISAC_FULL_DEBUG)" = "false" ] && [ "$(GO_LDFLAGS)" = "-X elisacore/src/smt.DefaultBinary=z3" ]; then \
 		env -i HOME="$$HOME" PATH="$$PATH" TMPDIR="$${TMPDIR:-/tmp}" LANG=en_US.UTF-8 "$(PYTHON_BIN)" "$(ELISA_STAGE0_PROVENANCE_SCRIPT)" build --root . --binary "$${HOME}/.elisac/elisac-stage0"; \
 	else \
-		go build -buildvcs=false $(GO_TAGS) -ldflags "$(GO_LDFLAGS)" -o "$${HOME}/.elisac/elisac-stage0" ./src && rm -f "$${HOME}/.elisac/elisac-stage0.provenance.json"; \
+		"$(PYTHON_BIN)" "$(ELISA_STAGE0_TIMEOUT_SCRIPT)" 30 --grace-seconds 0 -- go build -buildvcs=false $(GO_TAGS) -ldflags "$(GO_LDFLAGS)" -o "$${HOME}/.elisac/elisac-stage0" ./src && rm -f "$${HOME}/.elisac/elisac-stage0.provenance.json"; \
 	fi
 	rm -f "$${HOME}/.elisac/elisac"
 

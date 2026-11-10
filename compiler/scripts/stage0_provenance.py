@@ -446,7 +446,21 @@ def build(root: Path, binary: Path) -> Path:
         if smt_stamp:
             stamps.append(f"-X main.smtSourceStamp={smt_stamp}")
         ldflags = ["-ldflags", " ".join(stamps)] if stamps else []
-        command = ["go", "build", "-buildvcs=false", *ldflags, "-o", str(staged_binary), "./src"]
+        command = [
+            sys.executable,
+            str(Path(__file__).with_name("run_with_timeout.py")),
+            "30",
+            "--grace-seconds",
+            "0",
+            "--",
+            "go",
+            "build",
+            "-buildvcs=false",
+            *ldflags,
+            "-o",
+            str(staged_binary),
+            "./src",
+        ]
         try:
             result = subprocess.run(command, cwd=root, check=False, capture_output=True, text=True)
         except OSError as error:

@@ -81,7 +81,7 @@ class Stage0ProvenanceTests(unittest.TestCase):
             return stage0_provenance.subprocess.CompletedProcess(
                 args, 0, stdout="\n".join(json.dumps(package) for package in packages), stderr=""
             )
-        if args[1] == "build":
+        if "build" in args and "./src" in args:
             output = Path(args[args.index("-o") + 1])
             output.write_bytes(b"fresh fake executable")
             output.chmod(0o755)
@@ -191,7 +191,7 @@ class Stage0ProvenanceTests(unittest.TestCase):
         previous_receipt = receipt.read_bytes()
 
         def failed_build(args, **kwargs):
-            if args[1] == "build":
+            if "build" in args and "./src" in args:
                 return stage0_provenance.subprocess.CompletedProcess(args, 1, stdout="", stderr="compile failed")
             return self.fake_go(args, **kwargs)
 
@@ -207,7 +207,7 @@ class Stage0ProvenanceTests(unittest.TestCase):
         previous_receipt = receipt.read_bytes()
 
         def no_output_build(args, **kwargs):
-            if args[1] == "build":
+            if "build" in args and "./src" in args:
                 return stage0_provenance.subprocess.CompletedProcess(args, 0, stdout="", stderr="")
             return self.fake_go(args, **kwargs)
 
@@ -223,7 +223,7 @@ class Stage0ProvenanceTests(unittest.TestCase):
         previous_receipt = receipt.read_bytes()
 
         def mutate_during_build(args, **kwargs):
-            if args[1] == "build":
+            if "build" in args and "./src" in args:
                 output = Path(args[args.index("-o") + 1])
                 output.write_bytes(b"fresh but raced executable")
                 output.chmod(0o755)
@@ -307,7 +307,7 @@ class Stage0ProvenanceTests(unittest.TestCase):
 
     def test_rejects_wrong_package_or_module_identity(self) -> None:
         def wrong_identity(args, **kwargs):
-            if args[1] in ("env", "list", "build"):
+            if args[1] in ("env", "list") or ("build" in args and "./src" in args):
                 return self.fake_go(args, **kwargs)
             binary = Path(args[-1])
             return stage0_provenance.subprocess.CompletedProcess(

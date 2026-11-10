@@ -63,23 +63,37 @@ def parse_cli(argv: Sequence[str]) -> tuple[float, argparse.Namespace, list[str]
     return seconds, args, command
 
 
-def terminate_process_group(process: subprocess.Popen[object], grace_seconds: float) -> None:
+def signal_group(process: subprocess.Popen[object], signum: int) -> None:
     try:
-        os.killpg(process.pid, signal.SIGTERM)
+        os.killpg(process.pid, signum)
     except ProcessLookupError:
-        return
-
-    try:
-        process.wait(timeout=grace_seconds)
-        return
-    except subprocess.TimeoutExpired:
         pass
+    except PermissionError:
+        # macOS can report EPERM for a vanished group after its leader exits.
+        if process.poll() is None:
+            raise
 
-    try:
-        os.killpg(process.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        return
+
+def terminate_process_group(process: subprocess.Popen[object], grace_seconds: float) -> None:
+    if grace_seconds:
+        signal_group(process, signal.SIGTERM)
+        try:
+            process.wait(timeout=grace_seconds)
+        except subprocess.TimeoutExpired:
+            pass
+
+    # The leader may exit on SIGTERM while a descendant stays alive.
+    signal_group(process, signal.SIGKILL)
     process.wait()
+
+
+class InterruptedBySignal(Exception):
+    def __init__(self, signum: int) -> None:
+        self.signum = signum
+
+
+def interrupt(signum: int, _frame: object) -> None:
+    raise InterruptedBySignal(signum)
 
 
 def main() -> int:
@@ -97,6 +111,9 @@ def main() -> int:
         print(f"run_with_timeout.py: command not found: {command[0]}", file=sys.stderr)
         return 127
 
+    for signum in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(signum, interrupt)
+
     try:
         return_code = process.wait(timeout=seconds)
     except subprocess.TimeoutExpired:
@@ -109,13 +126,16 @@ def main() -> int:
         )
         terminate_process_group(process, args.grace_seconds)
         return TIMEOUT_EXIT_CODE
+    except InterruptedBySignal as interruption:
+        terminate_process_group(process, args.grace_seconds)
+        return 128 + interruption.signum
     except KeyboardInterrupt:
-        print("interrupted: forwarding SIGINT to child process group", file=sys.stderr)
-        try:
-            os.killpg(process.pid, signal.SIGINT)
-        except ProcessLookupError:
-            pass
-        return process.wait()
+        print("interrupted: terminating child process group", file=sys.stderr)
+        terminate_process_group(process, args.grace_seconds)
+        return 130
+    except BaseException:
+        terminate_process_group(process, args.grace_seconds)
+        raise
 
     if return_code >= 0:
         return return_code
