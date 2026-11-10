@@ -18,6 +18,11 @@ func TestPackedStoreTypeGraphRevisitsShallowerPath(t *testing.T) {
 	if len(roots) != 1 || roots["Root"] != packed {
 		t.Fatalf("shallower path lost packed root: %v", roots)
 	}
+	clear(roots)
+	collectPackedEnumsInSignature(&FuncType{Params: []Type{deep}, Return: shared}, true, roots)
+	if len(roots) != 1 || roots["Root"] != packed {
+		t.Fatalf("shallower return type lost packed root: %v", roots)
+	}
 }
 
 func TestPackedStoreTypeGraphCyclesAndDistinctRoots(t *testing.T) {

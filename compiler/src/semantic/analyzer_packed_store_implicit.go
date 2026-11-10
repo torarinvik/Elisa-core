@@ -58,11 +58,7 @@ func (a *Analyzer) injectInferredPackedStoreParams(fnType *FuncType, regionBacke
 		return
 	}
 	enums := map[string]*EnumType{}
-	explicitCount := funcTypeExplicitParamCount(fnType)
-	for i := 0; i < explicitCount && i < len(fnType.Params); i++ {
-		collectPackedEnumsInType(fnType.Params[i], enums)
-	}
-	collectPackedEnumsInType(fnType.Return, enums)
+	collectPackedEnumsInSignature(fnType, true, enums)
 	if len(enums) == 0 {
 		return
 	}
@@ -118,11 +114,7 @@ func (a *Analyzer) computeTransitiveStoreNeeds(funcs []*ast.FuncDecl, regionBack
 			order = append(order, ft)
 		}
 		sig := map[string]*EnumType{}
-		explicitCount := funcTypeExplicitParamCount(ft)
-		for i := 0; i < explicitCount && i < len(ft.Params); i++ {
-			collectPackedEnumsInType(ft.Params[i], sig)
-		}
-		collectPackedEnumsInType(ft.Return, sig)
+		collectPackedEnumsInSignature(ft, true, sig)
 		for name, et := range sig {
 			// docs/82 `handle: ptr`: the handle is the record address, so signature exposure
 			// alone needs no store — reads are self-contained. Construction still does (below).
@@ -213,57 +205,31 @@ func (a *Analyzer) funcOwnsRegion(fn *ast.FuncDecl) bool {
 		return false
 	}
 	found := false
-	walk := fillMayAdoptSeenPool.Get().(*fillWalkSeen)
-	seen := walk.values
-	var rec func(v reflect.Value)
-	rec = func(v reflect.Value) {
-		if found || !v.IsValid() || !v.CanInterface() {
-			return
+	seen := borrowStoreScanSeen()
+	defer releaseStoreScanSeen(seen)
+	visit := func(node any) bool {
+		if found {
+			return false
 		}
-		switch v.Kind() {
-		case reflect.Pointer:
-			if v.IsNil() {
-				return
-			}
-			node := v.Pointer()
-			if seen[node] {
-				return
-			}
-			seen[node] = true
-			if _, ok := v.Interface().(*ast.RegionStmt); ok {
-				found = true
-				return
-			}
-			// An `in <arena>:` scope is parsed as an InStoreStmt over an Arena value (NOT a RegionStmt),
-			// yet it likewise establishes a region in which the function creates region-backed stores on
-			// demand — e.g. `build_into(a: mutable Arena&)` doing `in a: root = make(N)`. Without treating
-			// it as region ownership the function is judged region-LESS, so the caller hoists+threads the
-			// store and the inner `in a:` can no longer re-home it: the store (and its columns) lands on a
-			// synthesized __auto_ region in the caller instead of `a`. A packed-store `in <store>:` scope
-			// is NOT arena-owning, so we gate on the scope target being an Arena.
-			if in, ok := v.Interface().(*ast.InStoreStmt); ok && in != nil && a.inStoreScopesArena(in.Store, fn) {
-				found = true
-				return
-			}
-			rec(v.Elem())
-		case reflect.Interface:
-			if v.IsNil() {
-				return
-			}
-			rec(v.Elem())
-		case reflect.Struct:
-			for _, i := range syntaxWalkFields(v.Type()) {
-				rec(v.Field(i))
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				rec(v.Index(i))
-			}
+		key := reflect.ValueOf(node).Pointer()
+		if seen[key] {
+			return false
 		}
+		seen[key] = true
+		switch n := node.(type) {
+		case *ast.RegionStmt:
+			found = true
+		case *ast.InStoreStmt:
+			// The parser uses this node for both arena and packed-store scopes.
+			found = a.inStoreScopesArena(n.Store, fn)
+		}
+		return !found
 	}
-	rec(reflect.ValueOf(fn.Body))
-	if walk.reset() {
-		fillMayAdoptSeenPool.Put(walk)
+	for _, stmt := range fn.Body {
+		astPruneWalkIface_ast_Stmt(stmt, visit, seen)
+		if found {
+			break
+		}
 	}
 	return found
 }
@@ -417,10 +383,7 @@ func FuncTypeConsumesPackedEnumRoot(ft *FuncType, rootName string) bool {
 		return false
 	}
 	enums := map[string]*EnumType{}
-	explicitCount := funcTypeExplicitParamCount(ft)
-	for i := 0; i < explicitCount && i < len(ft.Params); i++ {
-		collectPackedEnumsInType(ft.Params[i], enums)
-	}
+	collectPackedEnumsInSignature(ft, false, enums)
 	_, ok := enums[rootName]
 	return ok
 }
@@ -436,9 +399,25 @@ func FuncTypeConsumesPackedEnumRoot(ft *FuncType, rootName string) bool {
 // to one walk; clear keys before pooling so no AST/type graph is retained.
 var packedTypeSeenPool = sync.Pool{New: func() any { return make(map[Type]int, 32) }}
 
+func collectPackedEnumsInSignature(ft *FuncType, includeReturn bool, out map[string]*EnumType) {
+	seen := packedTypeSeenPool.Get().(map[Type]int)
+	explicitCount := min(funcTypeExplicitParamCount(ft), len(ft.Params))
+	for i := 0; i < explicitCount; i++ {
+		collectPackedEnumsInTypeDepth(ft.Params[i], out, 0, seen)
+	}
+	if includeReturn {
+		collectPackedEnumsInTypeDepth(ft.Return, out, 0, seen)
+	}
+	releasePackedTypeSeen(seen)
+}
+
 func collectPackedEnumsInType(t Type, out map[string]*EnumType) {
 	seen := packedTypeSeenPool.Get().(map[Type]int)
 	collectPackedEnumsInTypeDepth(t, out, 0, seen)
+	releasePackedTypeSeen(seen)
+}
+
+func releasePackedTypeSeen(seen map[Type]int) {
 	if len(seen) <= 4096 {
 		clear(seen)
 		packedTypeSeenPool.Put(seen)
