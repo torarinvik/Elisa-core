@@ -11,6 +11,7 @@
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/InlineAsm.h>
+#include <llvm/IR/IntrinsicInst.h>
 #include <llvm/IR/Dominators.h>
 #include <llvm/Analysis/LoopInfo.h>
 #include <llvm/IR/Instructions.h>
@@ -18,6 +19,77 @@
 #include <llvm/Support/CBindingWrapping.h>
 using namespace llvm;
 namespace EvenRange {
+// Round a difference down to an even integer before halving it. With
+// wrapping arithmetic the correction can be folded into the signed shift:
+// (a - (b + ((a - b) & 1))) / 2 == (a - b) >> 1.
+static bool foldParityAdjustedHalf(BinaryOperator &Div) {
+  auto *Two = dyn_cast<ConstantInt>(Div.getOperand(1));
+  if (!Two || !Two->equalsInt(2) || Div.hasMetadataOtherThanDebugLoc())
+    return false;
+  Value *Dividend = Div.getOperand(0);
+  IntrinsicInst *CheckedBias = nullptr;
+  if (auto *Extract = dyn_cast<ExtractValueInst>(Dividend)) {
+    if (Extract->getNumIndices() != 1 || *Extract->idx_begin() != 0)
+      return false;
+    CheckedBias = dyn_cast<IntrinsicInst>(Extract->getAggregateOperand());
+    if (!CheckedBias || CheckedBias->getIntrinsicID() != Intrinsic::sadd_with_overflow ||
+        CheckedBias->hasOperandBundles() || CheckedBias->hasMetadataOtherThanDebugLoc())
+      return false;
+    auto *Bias = dyn_cast<ConstantInt>(CheckedBias->getArgOperand(1));
+    if (!Bias || Bias->getValue()[0])
+      return false;
+    Dividend = CheckedBias->getArgOperand(0);
+  }
+  auto *Difference = dyn_cast<BinaryOperator>(Dividend);
+  if (!Difference || Difference->getOpcode() != Instruction::Sub)
+    return false;
+  auto *Adjusted = dyn_cast<BinaryOperator>(Difference->getOperand(1));
+  if (!Adjusted || Adjusted->getOpcode() != Instruction::Add)
+    return false;
+  for (unsigned Side : {0u, 1u}) {
+    Value *Right = Adjusted->getOperand(1 - Side);
+    auto *Parity = dyn_cast<BinaryOperator>(Adjusted->getOperand(Side));
+    if (!Parity || Parity->getOpcode() != Instruction::And)
+      continue;
+    auto *Mask = dyn_cast<ConstantInt>(Parity->getOperand(1));
+    auto *Unadjusted = dyn_cast<BinaryOperator>(Parity->getOperand(0));
+    if (!Mask || !Mask->isOne() || !Unadjusted ||
+        Unadjusted->getOpcode() != Instruction::Sub || Unadjusted->getOperand(1) != Right)
+      continue;
+    Value *Left = Difference->getOperand(0);
+    Value *OriginalLeft = Unadjusted->getOperand(0);
+    ConstantInt *Bias = nullptr;
+    if (Left != OriginalLeft) {
+      auto *Add = dyn_cast<BinaryOperator>(Left);
+      if (!Add || Add->getOpcode() != Instruction::Add || Add->getOperand(0) != OriginalLeft)
+        continue;
+      Bias = dyn_cast<ConstantInt>(Add->getOperand(1));
+      if (!Bias || Bias->getValue()[0])
+        continue;
+    }
+    IRBuilder<> B(CheckedBias ? static_cast<Instruction *>(CheckedBias) : &Div);
+    B.SetCurrentDebugLocation(CheckedBias ? CheckedBias->getDebugLoc() : Div.getDebugLoc());
+    // Use one concrete choice for each input when the original uses can be undef.
+    Value *StableLeft = B.CreateFreeze(OriginalLeft);
+    Value *StableRight = Right == OriginalLeft ? StableLeft : B.CreateFreeze(Right);
+    if (Bias)
+      StableLeft = B.CreateAdd(StableLeft, Bias);
+    Value *Delta = B.CreateSub(StableLeft, StableRight);
+    if (CheckedBias) {
+      // Keep the checked addition and its overflow flag. Both its operands
+      // are now even, so the successful result needs no division rounding.
+      CheckedBias->setArgOperand(0, B.CreateAnd(Delta, B.getInt64(-2)));
+      B.SetInsertPoint(&Div);
+      Delta = Div.getOperand(0);
+    }
+    B.SetCurrentDebugLocation(Div.getDebugLoc());
+    Div.replaceAllUsesWith(B.CreateAShr(Delta, 1, "even.half"));
+    Div.eraseFromParent();
+    return true;
+  }
+  return false;
+}
+
 static bool rewrite(BinaryOperator &Root) {
   if (Root.getOpcode() != Instruction::Or || !Root.getType()->isIntegerTy(1) ||
       Root.hasMetadataOtherThanDebugLoc())
@@ -145,11 +217,12 @@ extern "C" unsigned elisacoreCompactEvenRanges(LLVMModuleRef Ref) {
     for (BasicBlock &BB : F)
       for (Instruction &I : BB)
         if (auto *Op = dyn_cast<BinaryOperator>(&I))
-          if (Op->getOpcode() == Instruction::Or &&
-              Op->getType()->isIntegerTy(1))
+          if ((Op->getOpcode() == Instruction::Or && Op->getType()->isIntegerTy(1)) ||
+              (Op->getOpcode() == Instruction::SDiv && Op->getType()->isIntegerTy(64)))
             Candidates.push_back(Op);
     for (auto *Op : Candidates)
-      Changed += EvenRange::rewrite(*Op);
+      Changed += Op->getOpcode() == Instruction::SDiv ? EvenRange::foldParityAdjustedHalf(*Op)
+                                                       : EvenRange::rewrite(*Op);
     Changed += EvenRange::compactSigned16Scans(F);
   }
   return Changed;
