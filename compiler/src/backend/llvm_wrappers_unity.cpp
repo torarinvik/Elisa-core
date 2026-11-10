@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <vector>
 #include <llvm/Transforms/Utils/Cloning.h>
+#include <llvm/Transforms/Utils/Local.h>
 #include <llvm/Transforms/IPO/StripDeadPrototypes.h>
 #include <cstdint>
 #include <cstdlib>
@@ -31,6 +32,7 @@
 #include <optional>
 #include <llvm/ADT/DenseSet.h>
 #include <llvm/ADT/SmallPtrSet.h>
+#include <llvm/Analysis/ConstantFolding.h>
 #include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/Dominators.h>
 #include <llvm/IR/IntrinsicInst.h>
