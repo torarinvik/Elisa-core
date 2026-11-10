@@ -240,6 +240,12 @@ def collection_stack_table(r: heap Region&) -> mutable heap void&:
 def collection_stack_of_table(a: mutable Arena&, table: void&) -> mutable heap Region&?:
     can Atomics{Exchange,Store}, Unsafe{Alias,PointerCast,UncheckedIndex}:
         target: uintptr = collection_table_addr(table)
+        # Literal tables start in ordinary bump storage. The current bump
+        # block is disjoint from collection stacks, so a table inside it
+        # cannot match a stack base. Compare in slots to avoid end overflow.
+        if a.end is bump and bump.owner_tag != ARENA_OWNER_TAG_COLLECTION.uintptr():
+            bump_base: uintptr = collection_region_table_addr(bump)
+            return null if target >= bump_base and (target - bump_base).usize() / size_of(uintptr) < bump.capacity
         memo: mutable heap Region&? = (collection_stack_memo_get(a, target) can Global{Read,Write})
         if memo is memo_stack and memo_stack.owner_tag == ARENA_OWNER_TAG_COLLECTION.uintptr():
             return memo_stack
