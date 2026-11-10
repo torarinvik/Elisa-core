@@ -1,5 +1,6 @@
 // Two unsigned remainder steps establish x > y > 0 on entry to the loop.
 // Thereafter x - y is the remainder whenever it is smaller than y.
+#include <llvm/Analysis/LazyValueInfo.h>
 namespace {
 static bool remainderZeroTest(Value *V, Value *Remainder) {
   auto *Compare = dyn_cast<ICmpInst>(V);
@@ -118,14 +119,93 @@ static bool splitRemainderRecurrence(Function &F) {
   OldRem->eraseFromParent();
   return true;
 }
+
+static uint64_t smallRemainderDividend(BinaryOperator &Rem, LazyValueInfo &LVI) {
+  constexpr uint64_t MaxDividend = 65535;
+  Value *N = Rem.getOperand(0);
+  auto Range = LVI.getConstantRange(N, &Rem, false);
+  if (Range.isEmptySet()) return 0;
+  if (Range.getUnsignedMax().ule(MaxDividend))
+    return Range.getUnsignedMax().getZExtValue();
+
+  // The guard may bound the input to a multiply rather than its result.
+  auto *Mul = dyn_cast<BinaryOperator>(N);
+  auto *Factor = Mul && Mul->getOpcode() == Instruction::Mul
+      ? dyn_cast<ConstantInt>(Mul->getOperand(1)) : nullptr;
+  if (!Factor || Factor->isZero() || Factor->getValue().ugt(MaxDividend))
+    return 0;
+  uint64_t Scale = Factor->getZExtValue();
+  Range = LVI.getConstantRange(Mul->getOperand(0), &Rem, false);
+  if (Range.isEmptySet() || Range.getUnsignedMax().ugt(MaxDividend / Scale))
+    return 0;
+  return Range.getUnsignedMax().getZExtValue() * Scale;
+}
+
+static bool hoistSmallRemainder(BinaryOperator &Rem, LoopInfo &LI, LazyValueInfo &LVI) {
+  Loop *L = LI.getLoopFor(Rem.getParent());
+  if (!L || !L->getParentLoop() || !L->getSubLoops().empty()) return false;
+  BasicBlock *Pre = L->getLoopPreheader();
+  Value *D = Rem.getOperand(1);
+  if (!Pre || !L->isLoopInvariant(D) || L->isLoopInvariant(Rem.getOperand(0)))
+    return false;
+  uint64_t Max = smallRemainderDividend(Rem, LVI);
+  if (!Max) return false;
+  unsigned Bits = APInt(64, Max).getActiveBits();
+  uint64_t Limit = uint64_t{1} << Bits;
+  uint64_t Unit = Limit * Limit;
+
+  // Clamping zero makes the hoisted division safe even when the original
+  // remainder would never execute.
+  IRBuilder<> Setup(Pre->getTerminator());
+  D = Setup.CreateFreeze(D);
+  if (Rem.getOpcode() == Instruction::SRem)
+    D = Setup.CreateIntrinsic(Intrinsic::abs, {D->getType()}, {D, Setup.getFalse()});
+  D = Setup.CreateBinaryIntrinsic(Intrinsic::umax, D, Setup.getInt64(1));
+  Value *Magic = Setup.CreateAdd(Setup.CreateUDiv(Setup.getInt64(Unit - 1), D),
+                                 Setup.getInt64(1), "remainder.reciprocal");
+
+  // Magic = ceil(Unit / D). For D < Limit, N*D < Unit makes the quotient
+  // error strictly less than 1/D. Otherwise Magic <= Limit and the shifted
+  // product is zero, matching the quotient for N < Limit <= D.
+  IRBuilder<> B(&Rem);
+  B.SetCurrentDebugLocation(Rem.getDebugLoc());
+  Value *Narrow = B.CreateTrunc(Rem.getOperand(0), B.getIntNTy(Bits));
+  Value *N = B.CreateZExt(B.CreateFreeze(Narrow), Rem.getType());
+  Value *Q = B.CreateLShr(B.CreateMul(N, Magic), B.getInt64(2 * Bits));
+  Value *Result = B.CreateSub(N, B.CreateMul(Q, D), "remainder.with.reciprocal");
+  Rem.replaceAllUsesWith(Result);
+  Rem.eraseFromParent();
+  return true;
+}
 } // namespace
 
 static unsigned elisacoreSplitRemainderRecurrences(Module &M) {
   if (!M.getTargetTriple().isAArch64()) return 0;
   unsigned Changed = 0;
-  for (Function &F : M)
-    if ((F.size() == 3 || F.size() == 4) && !BDU_SkipFunction(F, M) &&
-        splitRemainderRecurrence(F))
+  for (Function &F : M) {
+    if (BDU_SkipFunction(F, M)) continue;
+    if ((F.size() == 3 || F.size() == 4) && splitRemainderRecurrence(F)) {
       ++Changed;
+      continue;
+    }
+    if (F.size() < 5 || F.size() > 32 || F.getInstructionCount() > 384) continue;
+    SmallVector<BinaryOperator *, 4> Candidates;
+    for (Instruction &I : instructions(F))
+      if (auto *Rem = dyn_cast<BinaryOperator>(&I);
+          Rem && (Rem->getOpcode() == Instruction::SRem || Rem->getOpcode() == Instruction::URem) &&
+          Rem->getType()->isIntegerTy(64) && !isa<Constant>(Rem->getOperand(1)) &&
+          !Rem->hasMetadataOtherThanDebugLoc())
+        Candidates.push_back(Rem);
+    if (Candidates.empty() || Candidates.size() > 4) continue;
+    DominatorTree DT(F);
+    LoopInfo LI(DT);
+    AssumptionCache AC(F);
+    LazyValueInfo LVI(&F, &AC);
+    for (auto *Rem : Candidates)
+      if (hoistSmallRemainder(*Rem, LI, LVI)) {
+        ++Changed;
+        break;
+      }
+  }
   return Changed;
 }
