@@ -233,7 +233,9 @@ def source_digest(root: Path, environment: dict[str, str] | None = None) -> str:
     return _digest_sources(_source_candidates(root, environment))
 
 
-def _digest_sources(files: list[tuple[str, Path]]) -> str:
+def _digest_sources(
+    files: list[tuple[str, Path]], *, file_digests: dict[Path, bytes] | None = None,
+) -> str:
     digest = hashlib.sha256()
     for identity, path in files:
         logical_name = identity.encode("utf-8")
@@ -245,7 +247,10 @@ def _digest_sources(files: list[tuple[str, Path]]) -> str:
                     size += len(chunk)
                     file_digest.update(chunk)
         symlink = os.readlink(path).encode("utf-8", errors="surrogateescape") if path.is_symlink() else b""
-        for value in (logical_name, str(size).encode("ascii"), file_digest.digest(), symlink):
+        content_digest = file_digest.digest()
+        if file_digests is not None:
+            file_digests[path] = content_digest
+        for value in (logical_name, str(size).encode("ascii"), content_digest, symlink):
             digest.update(len(value).to_bytes(8, "big"))
             digest.update(value)
     return digest.hexdigest()
@@ -264,26 +269,27 @@ ANALYSIS_MAIN_FILES = (
 
 def analysis_source_digest(
     root: Path, environment: dict[str, str] | None = None, *, files: list[tuple[str, Path]] | None = None,
-    directories: set[Path] | None = None,
+    directories: set[Path] | None = None, file_digests: dict[Path, bytes] | None = None,
 ) -> str | None:
     """None when the tree lacks the analysis packages (not the full compiler); the
     build then embeds no stamp and the analysis cache keys on the executable."""
-    return _closure_digest(root, environment, "semantic", ANALYSIS_MAIN_FILES, b"stage0-analysis-source-v1", files, directories)
+    return _closure_digest(root, environment, "semantic", ANALYSIS_MAIN_FILES, b"stage0-analysis-source-v1", files, directories, file_digests)
 
 
 def smt_source_digest(
     root: Path, environment: dict[str, str] | None = None, *, files: list[tuple[str, Path]] | None = None,
-    directories: set[Path] | None = None,
+    directories: set[Path] | None = None, file_digests: dict[Path, bytes] | None = None,
 ) -> str | None:
     """Digest of the code that turns an SMT query into a verdict (./src/smt and its
     dependencies). Unsat proof records key on it, so analyzer changes keep them."""
-    return _closure_digest(root, environment, "smt", (), b"stage0-smt-source-v1", files, directories)
+    return _closure_digest(root, environment, "smt", (), b"stage0-smt-source-v1", files, directories, file_digests)
 
 
 def _closure_digest(
     root: Path, environment: dict[str, str] | None, package: str, main_files: tuple[str, ...], tag: bytes,
     files: list[tuple[str, Path]] | None,
     directories: set[Path] | None,
+    file_digests: dict[Path, bytes] | None,
 ) -> str | None:
     root = root.resolve()
     main_dir = (root / "src").resolve()
@@ -316,8 +322,12 @@ def _closure_digest(
         if not selected:
             continue
         count += 1
-        data = path.read_bytes() if path.is_file() else b""
-        for value in (identity.encode("utf-8"), hashlib.sha256(data).digest()):
+        if file_digests is None:
+            data = path.read_bytes() if path.is_file() else b""
+            content_digest = hashlib.sha256(data).digest()
+        else:
+            content_digest = file_digests[path]
+        for value in (identity.encode("utf-8"), content_digest):
             digest.update(len(value).to_bytes(8, "big"))
             digest.update(value)
     if count == 0:
@@ -472,12 +482,15 @@ def build(root: Path, binary: Path) -> Path:
     environment = _validate_go_build_context(root)
     closures: dict[str, set[Path]] = {"semantic": set(), "smt": set()}
     source_files = _source_candidates(root, environment, closures=closures)
-    source_before = _digest_sources(source_files)
+    # The stamps and receipt describe the same pre-build contents. The final
+    # receipt check still reads the sources again after Go exits.
+    file_digests: dict[Path, bytes] = {}
+    source_before = _digest_sources(source_files, file_digests=file_digests)
 
     with tempfile.TemporaryDirectory(prefix=f".{binary.name}.stage0-", dir=binary.parent) as staging_dir:
         staged_binary = Path(staging_dir) / binary.name
-        analysis_stamp = analysis_source_digest(root, environment, files=source_files, directories=closures["semantic"])
-        smt_stamp = smt_source_digest(root, environment, files=source_files, directories=closures["smt"])
+        analysis_stamp = analysis_source_digest(root, environment, files=source_files, directories=closures["semantic"], file_digests=file_digests)
+        smt_stamp = smt_source_digest(root, environment, files=source_files, directories=closures["smt"], file_digests=file_digests)
         stamps = []
         if analysis_stamp:
             stamps.append(f"-X main.analysisSourceStamp={analysis_stamp}")
