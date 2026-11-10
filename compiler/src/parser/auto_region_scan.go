@@ -411,44 +411,51 @@ func bodyContainsAutoRegionAllocation(stmts []ast.Stmt) bool {
 	return scan.bodyContainsAutoRegionAllocation(stmts)
 }
 
+var (
+	autoRegionAllocExprType     = reflect.TypeFor[*ast.AllocExpr]()
+	autoRegionStructLitExprType = reflect.TypeFor[*ast.StructLitExpr]()
+)
+
 func (scan *autoRegionScan) bodyContainsAutoRegionAllocation(stmts []ast.Stmt) bool {
-	found := false
-	var rec func(v reflect.Value)
-	rec = func(v reflect.Value) {
-		if found || !v.IsValid() || !v.CanInterface() {
-			return
+	return scan.containsAutoRegionAllocation(reflect.ValueOf(stmts))
+}
+
+func (scan *autoRegionScan) containsAutoRegionAllocation(value reflect.Value) bool {
+	switch value.Kind() {
+	case reflect.Pointer:
+		if value.IsNil() {
+			return false
 		}
-		switch v.Kind() {
-		case reflect.Pointer:
-			if v.IsNil() {
-				return
+		switch value.Type() {
+		case autoRegionAllocExprType:
+			alloc := value.Interface().(*ast.AllocExpr)
+			if alloc.AutoRegion || alloc.Owner == nil {
+				return true
 			}
-			if alloc, ok := v.Interface().(*ast.AllocExpr); ok && alloc != nil && (alloc.AutoRegion || alloc.Owner == nil) {
-				found = true
-				return
+		case autoRegionStructLitExprType:
+			if scan.structLiteralAllocatesContainerArg(value.Interface().(*ast.StructLitExpr)) {
+				return true
 			}
-			if literal, ok := v.Interface().(*ast.StructLitExpr); ok && scan.structLiteralAllocatesContainerArg(literal) {
-				found = true
-				return
+		}
+		return scan.containsAutoRegionAllocation(value.Elem())
+	case reflect.Interface:
+		return scan.containsAutoRegionAllocation(value.Elem())
+	case reflect.Struct:
+		// Child plans contain only exported fields, so the pointer cases
+		// can convert matching nodes to their AST type directly.
+		for _, index := range autoRegionChildFields(value.Type()) {
+			if scan.containsAutoRegionAllocation(value.Field(index)) {
+				return true
 			}
-			rec(v.Elem())
-		case reflect.Interface:
-			if v.IsNil() {
-				return
-			}
-			rec(v.Elem())
-		case reflect.Struct:
-			for _, i := range autoRegionChildFields(v.Type()) {
-				rec(v.Field(i))
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				rec(v.Index(i))
+		}
+	case reflect.Slice, reflect.Array:
+		for index := 0; index < value.Len(); index++ {
+			if scan.containsAutoRegionAllocation(value.Index(index)) {
+				return true
 			}
 		}
 	}
-	rec(reflect.ValueOf(stmts))
-	return found
+	return false
 }
 
 // exprBlocksNeedAutoRegion reports whether any value-position ExprBlock nested anywhere
