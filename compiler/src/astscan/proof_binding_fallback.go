@@ -1,10 +1,17 @@
-package semantic
+package astscan
 
 import (
 	"reflect"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
+)
+
+const (
+	BindingVisitNode         = proofBindingVisitNode
+	BindingVisitStringField  = proofBindingVisitStringField
+	BindingVisitString       = proofBindingVisitString
+	BindingVisitPositionFile = proofBindingVisitPositionFile
 )
 
 const (
@@ -75,4 +82,25 @@ func proofBindingWalkReflect(v reflect.Value, visit func(any, reflect.Type, ast.
 			proofBindingWalkReflect(v.Index(i), visit, seen, owner)
 		}
 	}
+}
+
+// A future Pos schema change must retain the original full visitor.
+var proofBindingPositionSchemaValid = ProofBindingPositionSchemaMatches(reflect.TypeFor[lexer.Pos]())
+
+func ProofBindingPositionSchemaMatches(typ reflect.Type) bool {
+	if typ == nil || typ.Kind() != reflect.Struct || typ.NumField() != 7 {
+		return false
+	}
+	names := []string{"File", "Line", "Col", "Offset", "EndLine", "EndCol", "EndOffset"}
+	for i, name := range names {
+		field := typ.Field(i)
+		expected := reflect.TypeFor[int]()
+		if i == 0 {
+			expected = reflect.TypeFor[string]()
+		}
+		if field.Name != name || field.Type != expected || field.Anonymous || field.Tag != "" || field.PkgPath != "" {
+			return false
+		}
+	}
+	return true
 }

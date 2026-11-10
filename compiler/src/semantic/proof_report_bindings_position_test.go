@@ -4,6 +4,7 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/astscan"
 	"elisacore/src/lexer"
 	"fmt"
 	"reflect"
@@ -11,7 +12,7 @@ import (
 )
 
 func TestProofBindingPositionSchemaFailClosed(t *testing.T) {
-	if !proofBindingPositionSchemaMatches(reflect.TypeFor[lexer.Pos]()) {
+	if !astscan.ProofBindingPositionSchemaMatches(reflect.TypeFor[lexer.Pos]()) {
 		t.Fatal("actual schema not recognized")
 	}
 	for _, typ := range []reflect.Type{nil, reflect.TypeFor[string](), reflect.TypeFor[struct {
@@ -22,7 +23,7 @@ func TestProofBindingPositionSchemaFailClosed(t *testing.T) {
 		Line, Col, Offset, EndLine, EndCol, EndOffset int
 		Extra                                         string
 	}]()} {
-		if proofBindingPositionSchemaMatches(typ) {
+		if astscan.ProofBindingPositionSchemaMatches(typ) {
 			t.Fatal("changed schema admitted", typ)
 		}
 	}

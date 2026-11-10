@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 
 	"elisacore/src/ast"
+	"elisacore/src/astscan"
 	"elisacore/src/lexer"
 	"elisacore/src/parser"
 )
@@ -53,11 +54,11 @@ func (r *RetainedAnalysis) prepareProofReportBindings(file *ast.File, marks map[
 		quantifiers := map[*ast.VarDeclStmt]bool{}
 		visit := func(value any, parentType reflect.Type, owner ast.Decl, event uint8, fieldName, text string, addressable bool) {
 			switch event {
-			case proofBindingVisitPositionFile, proofBindingVisitString:
+			case astscan.BindingVisitPositionFile, astscan.BindingVisitString:
 				if retainedLocalGensymName(text) {
 					blocked[text] = true
 				}
-			case proofBindingVisitNode:
+			case astscan.BindingVisitNode:
 				if block, ok := value.(*ast.ExprBlock); ok {
 					if binder := proofRuntimeQuantifierBinder(block); binder != nil {
 						quantifiers[binder] = true
@@ -88,7 +89,7 @@ func (r *RetainedAnalysis) prepareProofReportBindings(file *ast.File, marks map[
 					previous, present := result[key]
 					result[key] = binder{name, present && (previous.Conflicting || previous.Name != name)}
 				}
-			case proofBindingVisitStringField:
+			case astscan.BindingVisitStringField:
 				if !retainedLocalGensymName(text) {
 					return
 				}
@@ -120,7 +121,7 @@ func (r *RetainedAnalysis) prepareProofReportBindings(file *ast.File, marks map[
 				blocked[text] = true
 			}
 		}
-		proofBindingASTWalkTyped(root, visit, seen)
+		astscan.WalkProofBindings(root, visit, seen)
 		return result, blocked
 	}
 	// Live syntax can retain an older offset epoch. The pristine parse supplies
@@ -420,25 +421,4 @@ func proofReportBindingSource(filename string, source []byte) (*ast.File, string
 		return nil, "retained generated binding source does not parse"
 	}
 	return file, ""
-}
-
-// A future Pos schema change must retain the original full visitor.
-var proofBindingPositionSchemaValid = proofBindingPositionSchemaMatches(reflect.TypeFor[lexer.Pos]())
-
-func proofBindingPositionSchemaMatches(typ reflect.Type) bool {
-	if typ == nil || typ.Kind() != reflect.Struct || typ.NumField() != 7 {
-		return false
-	}
-	names := []string{"File", "Line", "Col", "Offset", "EndLine", "EndCol", "EndOffset"}
-	for i, name := range names {
-		field := typ.Field(i)
-		expected := reflect.TypeFor[int]()
-		if i == 0 {
-			expected = reflect.TypeFor[string]()
-		}
-		if field.Name != name || field.Type != expected || field.Anonymous || field.Tag != "" || field.PkgPath != "" {
-			return false
-		}
-	}
-	return true
 }
