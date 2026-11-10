@@ -380,6 +380,7 @@ extern "C" unsigned elisacoreUnrollLaggedRecurrences(LLVMModuleRef Ref) {
 #include "llvm_shift_parity.cpp"
 #include "llvm_shift_bit_reverse.cpp"
 #include "llvm_power_position.cpp"
+#include "llvm_edge_division_reuse.cpp"
 
 #else
 extern "C" unsigned elisacoreUnrollLaggedRecurrences(LLVMModuleRef) { return 0; }
@@ -397,12 +398,16 @@ extern "C" unsigned elisacoreOptimizeBoundedDivisionLoops(LLVMModuleRef M, LLVMT
     Changed += elisacoreFoldPowerPosition(*llvm::unwrap(M));
   }
 #endif
-  if (!Changed) return 0;
-  auto Options = LLVMCreatePassBuilderOptions();
-  auto Error = LLVMRunPasses(M, "function(instcombine<no-verify-fixpoint>,simplifycfg)", T, Options);
-  LLVMDisposePassBuilderOptions(Options);
-  if (Error) { LLVMConsumeError(Error); return 2; }
-  return 1;
+  if (Changed) {
+    auto Options = LLVMCreatePassBuilderOptions();
+    auto Error = LLVMRunPasses(M, "function(instcombine<no-verify-fixpoint>,simplifycfg)", T, Options);
+    LLVMDisposePassBuilderOptions(Options);
+    if (Error) { LLVMConsumeError(Error); return 2; }
+  }
+#if LLVM_VERSION_MAJOR >= 23
+  if (M) Changed += elisacoreReuseEdgeDivisions(*llvm::unwrap(M));
+#endif
+  return Changed ? 1 : 0;
 }
 
 extern "C" int elisacoreBoundedDivisionUnrollSupported() { return LLVM_VERSION_MAJOR >= 23; }
