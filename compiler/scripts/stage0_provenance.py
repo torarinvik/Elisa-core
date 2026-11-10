@@ -449,7 +449,7 @@ def build(root: Path, binary: Path) -> Path:
         command = [
             sys.executable,
             str(Path(__file__).with_name("run_with_timeout.py")),
-            "30",
+            "5",
             "--grace-seconds",
             "0",
             "--",
