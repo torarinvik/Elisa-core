@@ -4,7 +4,6 @@ import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
 	"fmt"
-	"math"
 )
 
 func cloneConstValue(value ConstValue) ConstValue {
@@ -125,7 +124,7 @@ func constNumericAsFloat64(value ConstValue) float64 {
 }
 
 func constNumericEqual(left, right ConstValue) bool {
-	return math.Float64bits(constNumericAsFloat64(left)) == math.Float64bits(constNumericAsFloat64(right))
+	return constNumericAsFloat64(left) == constNumericAsFloat64(right)
 }
 
 func evalConstIntBinary(op lexer.TokenKind, left, right int64) (ConstValue, bool) {
