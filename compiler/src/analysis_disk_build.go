@@ -132,6 +132,11 @@ func stopAfterFuncAndJoin(stop func() bool, join func()) {
 	}
 }
 
+// parseAnalysisBuildPristine parses independent syntax using request-owned tokens.
+func parseAnalysisBuildPristine(program *loadedProgram) (*ast.File, bool) {
+	return parseProgramWithTokenCache(program.filename, program.source, io.Discard, program.tokenCache)
+}
+
 // An unfinished checkpoint is separate from reusable completed state and admits
 // only this exact source revision. A stopped build reports durable incomplete
 // progress, never a semantic error or artifact. The same normal command resumes
@@ -189,9 +194,9 @@ func advanceAnalysisDiskBuildWithCheckpoint(program *loadedProgram, file *ast.Fi
 		return nil, nil
 	}
 	if build == nil {
-		// A resumed build owns its pristine AST already. Only a new build needs
-		// another parse; on the full compiler this is millions of unused tokens.
-		pristine, ok := parseProgram(program.filename, program.source, io.Discard)
+		// A new build needs an independent syntax tree, but the invocation's
+		// immutable token snapshot can be shared with the primary parse.
+		pristine, ok := parseAnalysisBuildPristine(program)
 		if !ok {
 			return semantic.AnalyzeWithOptions(file, options), nil
 		}

@@ -147,7 +147,9 @@ func (a *Analyzer) smtCheckQueryWithLogLabel(tr *smtTranslator, hyps string, obl
 	// A cached verdict still means the SMT tier handled this obligation, even when
 	// no long-lived solver process needs to be started for the query.
 	a.smtStats.Enabled = true
-	query := tr.takeFactPreamble() + hyps + "(assert (not " + obligation + "))\n" + tr.counterexampleExprDefinitions()
+	goal := "(assert (not " + obligation + "))"
+	query := tr.takeFactPreamble() + hyps + goal + "\n" + tr.counterexampleExprDefinitions()
+	query = smtDeduplicateAssertions(query, goal)
 	a.noteSMTHistory(query)
 	key := a.smtVerdictKey(query)
 	hit, ok, flight, proofKeys := a.smtCachedQuery(key)
@@ -168,7 +170,7 @@ func (a *Analyzer) smtCheckQueryWithLogLabel(tr *smtTranslator, hyps string, obl
 		a.smtSetLogLabelForQuery(solver, label, logObligation, query)
 		resourceBefore, transientBefore, canCertify = smtUnknownCacheEpoch(solver)
 		snapshotBefore, snapshotClassified = smtSnapshotUnknownEpoch(solver)
-		return a.smtCheckSliced(solver, query, "(assert (not "+obligation+"))", tr.declaredSMTVars())
+		return a.smtCheckSliced(solver, query, goal, tr.declaredSMTVars())
 	})
 	if solver == nil && !sharedProof {
 		return false, ""
