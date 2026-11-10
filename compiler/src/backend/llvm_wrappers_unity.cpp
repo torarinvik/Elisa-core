@@ -133,6 +133,7 @@ namespace wrap_llvm_bool_array_pack {
 #include "llvm_wrappers/llvm_bool_array_pack.cpp"
 }  // namespace wrap_llvm_bool_array_pack
 namespace wrap_llvm_bounded_division_unroll {
+// Bounded division and three-state recurrence unrolling.
 #include "llvm_wrappers/llvm_bounded_division_unroll.cpp"
 }  // namespace wrap_llvm_bounded_division_unroll
 namespace wrap_llvm_bounded_unswitch {
