@@ -385,6 +385,7 @@ extern "C" unsigned elisacoreUnrollLaggedRecurrences(LLVMModuleRef Ref) {
 #include "llvm_power_position.cpp"
 #include "llvm_edge_division_reuse.cpp"
 #include "llvm_factored_unsigned_division.cpp"
+#include "llvm_remainder_recurrence.cpp"
 
 #else
 extern "C" unsigned elisacoreUnrollLaggedRecurrences(LLVMModuleRef) { return 0; }
@@ -412,6 +413,7 @@ extern "C" unsigned elisacoreOptimizeBoundedDivisionLoops(LLVMModuleRef M, LLVMT
   if (M) {
     Changed += elisacoreReuseEdgeDivisions(*llvm::unwrap(M));
     Changed += elisacoreSplitFactoredDivisions(*llvm::unwrap(M));
+    Changed += elisacoreSplitRemainderRecurrences(*llvm::unwrap(M));
   }
 #endif
   return Changed ? 1 : 0;
