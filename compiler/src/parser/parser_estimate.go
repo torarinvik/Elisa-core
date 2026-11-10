@@ -5,7 +5,12 @@ import "elisacore/src/lexer"
 // Estimates are only capacity hints.  A malformed or delimiter-heavy source file must not be
 // able to turn a missed closing token into a multi-gigabyte speculative allocation; the slices
 // below still grow normally when the parser actually appends more items.
-const maxEstimatedItems = 1024
+const (
+	maxEstimatedItems = 1024
+	// A capacity hint need only sample the start of a block. An outer block
+	// can contain an arbitrarily large nested block that contributes one item.
+	maxIndentedEstimateTokens = 1024
+)
 
 func boundedEstimate(value int) int {
 	if value < 0 {
@@ -32,7 +37,8 @@ func (p *Parser) estimateIndentedItemsFrom(start int, stop lexer.TokenKind) int 
 	count := 0
 	depth := 0
 	atLineStart := true
-	for i := start; i < len(p.tokens); i++ {
+	end := start + min(len(p.tokens)-start, maxIndentedEstimateTokens)
+	for i := start; i < end; i++ {
 		switch p.tokens[i].Kind {
 		case lexer.TOKEN_INDENT:
 			depth++
