@@ -94,7 +94,7 @@ func TestRequestedProofCoordinatesKeepFrozenFullRendererAndTraversal(t *testing.
 		}
 		return true
 	})
-	fallbackSource, err := os.ReadFile(filepath.Join(dir, "proof_coordinate_walk.go"))
+	fallbackSource, err := os.ReadFile(filepath.Join(dir, "../astscan/proof_coordinate_fallback.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,9 +112,9 @@ func TestRequestedProofCoordinatesKeepFrozenFullRendererAndTraversal(t *testing.
 			}
 		}
 		if call, ok := node.(*goast.CallExpr); ok {
-			if name, ok := call.Fun.(*goast.Ident); ok && name.Name == "proofCoordinateASTWalkTyped" {
+			if name, ok := call.Fun.(*goast.SelectorExpr); ok && render(name.X) == "astscan" && name.Sel.Name == "WalkProofCoordinates" {
 				rootCalls++
-				if render(call) != "proofCoordinateASTWalkTyped(file, addPosition, seen)" {
+				if render(call) != "astscan.WalkProofCoordinates(file, addPosition, seen)" {
 					t.Fatal("typed capture no longer walks complete source root with shared pointer seen set")
 				}
 			}
@@ -124,11 +124,11 @@ func TestRequestedProofCoordinatesKeepFrozenFullRendererAndTraversal(t *testing.
 	if rootCalls != 1 || !sharedSeen {
 		t.Fatal("complete typed source root/shared pointer traversal missing")
 	}
-	generatedSource, err := os.ReadFile(filepath.Join(dir, "proof_coordinate_walk_gen.go"))
+	generatedSource, err := os.ReadFile(filepath.Join(dir, "../astscan/proof_coordinate_walk_gen.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	entry := findFunction(parse("generated", generatedSource), "proofCoordinateASTWalkTyped")
+	entry := findFunction(parse("generated", generatedSource), "WalkProofCoordinates")
 	if len(entry.Body.List) != 1 || render(entry.Body.List[0]) != "proofCoordinateWalkPtr_ast_File(root, add, seen)" {
 		t.Fatal("typed entry no longer delegates full File with identical callback and seen set")
 	}
@@ -165,7 +165,7 @@ func TestRequestedProofCoordinatesKeepFrozenFullRendererAndTraversal(t *testing.
 				enabled = render(field.Value) == "true"
 			}
 		}
-		if file == "src/semantic/proof_coordinate_walk_gen.go" && enabled {
+		if file == "src/astscan/proof_coordinate_walk_gen.go" && enabled {
 			covered = true
 		}
 		return true

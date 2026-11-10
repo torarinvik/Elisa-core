@@ -98,7 +98,7 @@ var modes = []walkMode{
 	{File: "src/astscan/ast_prune_walk_gen.go", Package: "astscan", Maps: false, Prefix: "astPruneWalk", Reflect: "pruneWalkReflect", Entry: "walkPruneTyped", Describe: "walkPruned", Prune: true},
 	{File: "src/astscan/ast_canonical_walk_gen.go", Package: "astscan", Maps: true, Prefix: "astCanonicalWalk", Reflect: "WalkCanonicalOpaque", Entry: "WalkCanonical", Describe: "canonical AST membership", Prune: true, OpaqueFields: true},
 	{File: "src/semantic/proof_binding_walk_gen.go", Describe: "proof-binding source syntax", ProofBinding: true},
-	{File: "src/semantic/proof_coordinate_walk_gen.go", Describe: "proof-coordinate source syntax", ProofCoordinate: true},
+	{File: "src/astscan/proof_coordinate_walk_gen.go", Package: "astscan", Entry: "WalkProofCoordinates", Describe: "proof-coordinate source syntax", ProofCoordinate: true},
 }
 
 type gen struct {
@@ -350,7 +350,7 @@ func main() {
 // directory (package paths are resolved relative to it).
 func generate(m walkMode) ([]byte, error) {
 	if m.ProofCoordinate {
-		return generateProofCoordinate()
+		return generateProofCoordinate(m)
 	}
 	if m.ProofBinding {
 		return generateProofBinding()

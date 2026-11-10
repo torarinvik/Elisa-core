@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"elisacore/src/ast"
+	"elisacore/src/astscan"
 	"elisacore/src/lexer"
 )
 
@@ -39,7 +40,7 @@ func captureProofReportCoordinateWitnesses(file *ast.File) proofReportCoordinate
 		witnesses.slabs[last] = append(witnesses.slabs[last], p)
 	}
 	seen := map[uintptr]bool{}
-	proofCoordinateASTWalkTyped(file, addPosition, seen)
+	astscan.WalkProofCoordinates(file, addPosition, seen)
 	return witnesses
 }
 

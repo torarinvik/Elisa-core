@@ -1,10 +1,12 @@
-package semantic
+package astscan
 
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
 	"reflect"
 )
+
+var retainedPosType = reflect.TypeFor[lexer.Pos]()
 
 // Exact reflective policy retained for unknown dynamic AST and inaccessible
 // fields. Typed capture never assumes those subtrees are empty or canonical.
