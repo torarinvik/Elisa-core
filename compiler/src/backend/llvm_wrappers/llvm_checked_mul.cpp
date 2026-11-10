@@ -17,6 +17,7 @@
 #include <llvm/IR/Module.h>
 #include <llvm/Support/CBindingWrapping.h>
 using namespace llvm;
+#include "llvm_checked_initialization.cpp"
 namespace {
 static bool checkedMulCandidate(IntrinsicInst &C, LoopInfo &LI) {
   if (C.getIntrinsicID() != Intrinsic::smul_with_overflow ||
@@ -184,11 +185,22 @@ extern "C" unsigned elisacoreFastCheckedMul(LLVMModuleRef ref, LLVMTargetMachine
   Module &M = *unwrap(ref);
   if (M.getTargetTriple().getArch() != Triple::aarch64 || M.getNamedMetadata("llvm.dbg.cu")) return 0;
   bool changed = false;
+#if LLVM_VERSION_MAJOR >= 23
+  unsigned InitializerBudget = 6000, InitializerTrials = 0;
+#endif
   for (Function &F : M) {
     if (F.isDeclaration() || F.hasOptNone() || F.hasOptSize() || F.hasMinSize() ||
         F.getSubprogram() || F.hasFnAttribute("elisa.checkedmul.versioned") || F.hasPersonalityFn() || F.hasGC() ||
         F.hasFnAttribute(Attribute::Convergent) || F.getEntryCount().has_value() ||
         F.getInstructionCount() > 5000) continue;
+#if LLVM_VERSION_MAJOR >= 23
+    if (InitializerBudget && InitializerTrials < 8 && mayFoldCheckedInitializers(F)) {
+      ++InitializerTrials;
+      unsigned Folded = tryFoldCheckedInitializers(F, target, InitializerBudget);
+      if (Folded == 2) return 2;
+      changed |= Folded == 1;
+    }
+#endif
     bool hasCheckedMul = false;
     for (BasicBlock &BB : F) for (Instruction &I : BB)
       if (auto *C = dyn_cast<IntrinsicInst>(&I))
