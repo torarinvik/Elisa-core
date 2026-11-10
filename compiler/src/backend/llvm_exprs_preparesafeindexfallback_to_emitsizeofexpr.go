@@ -211,6 +211,10 @@ func (s *functionState) emitRuntimeStringIndexExpr(expr *ast.IndexExpr, helperNa
 	if err != nil {
 		return nil, nil, err
 	}
+	if _, isView := operandType.(*semantic.SViewType); isView && s.g.wordBits == 64 && s.g.optLevel != OptimizationLevel0 {
+		value, err := s.emitInlineStringViewIndex(stringValue, indexValue, resultType)
+		return value, resultType, err
+	}
 	helperType := &semantic.FuncType{
 		Name:   helperName,
 		Params: []semantic.Type{operandType, indexType},
