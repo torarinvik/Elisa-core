@@ -6,6 +6,9 @@
 // exit checks and a remainder loop.
 #include <llvm/Config/llvm-config.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/IR/InstIterator.h>
+#include <llvm/IR/IRBuilder.h>
+#include <llvm/Analysis/TargetLibraryInfo.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/IntrinsicInst.h>
 #include <llvm/IR/ConstantRange.h>
@@ -381,6 +384,7 @@ extern "C" unsigned elisacoreUnrollLaggedRecurrences(LLVMModuleRef Ref) {
 #include "llvm_shift_bit_reverse.cpp"
 #include "llvm_power_position.cpp"
 #include "llvm_edge_division_reuse.cpp"
+#include "llvm_factored_unsigned_division.cpp"
 
 #else
 extern "C" unsigned elisacoreUnrollLaggedRecurrences(LLVMModuleRef) { return 0; }
@@ -405,7 +409,10 @@ extern "C" unsigned elisacoreOptimizeBoundedDivisionLoops(LLVMModuleRef M, LLVMT
     if (Error) { LLVMConsumeError(Error); return 2; }
   }
 #if LLVM_VERSION_MAJOR >= 23
-  if (M) Changed += elisacoreReuseEdgeDivisions(*llvm::unwrap(M));
+  if (M) {
+    Changed += elisacoreReuseEdgeDivisions(*llvm::unwrap(M));
+    Changed += elisacoreSplitFactoredDivisions(*llvm::unwrap(M));
+  }
 #endif
   return Changed ? 1 : 0;
 }
