@@ -378,6 +378,7 @@ extern "C" unsigned elisacoreUnrollLaggedRecurrences(LLVMModuleRef Ref) {
 }
 
 #include "llvm_shift_parity.cpp"
+#include "llvm_shift_bit_reverse.cpp"
 
 #else
 extern "C" unsigned elisacoreUnrollLaggedRecurrences(LLVMModuleRef) { return 0; }
@@ -389,7 +390,10 @@ extern "C" unsigned elisacoreOptimizeBoundedDivisionLoops(LLVMModuleRef M, LLVMT
   unsigned Changed = elisacoreUnrollBoundedDivisionLoops(M);
   Changed += elisacoreUnrollLaggedRecurrences(M);
 #if LLVM_VERSION_MAJOR >= 23
-  if (M) Changed += elisacoreFoldShiftParityLoops(*llvm::unwrap(M));
+  if (M) {
+    Changed += elisacoreFoldShiftParityLoops(*llvm::unwrap(M));
+    Changed += elisacoreFoldShiftBitReverseLoops(*llvm::unwrap(M));
+  }
 #endif
   if (!Changed) return 0;
   auto Options = LLVMCreatePassBuilderOptions();

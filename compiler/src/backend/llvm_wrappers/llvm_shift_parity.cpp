@@ -10,7 +10,8 @@ static bool parityConstant(Value *V, uint64_t Expected) {
 static bool foldShiftParity(BasicBlock &Body) {
   auto *Branch = dyn_cast<CondBrInst>(Body.getTerminator());
   auto *Done = Branch ? dyn_cast<ICmpInst>(Branch->getCondition()) : nullptr;
-  if (!Done || !Done->isEquality() || Branch->getMetadata(LLVMContext::MD_loop) ||
+  if (!Done || !Done->isEquality() || Body.hasAddressTaken() ||
+      Branch->getMetadata(LLVMContext::MD_loop) ||
       Body.size() < 6 || Body.size() > 7)
     return false;
   unsigned ExitIndex = Done->getPredicate() == ICmpInst::ICMP_EQ ? 0 : 1;
