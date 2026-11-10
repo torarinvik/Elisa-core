@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"elisacore/src/ast"
+	"elisacore/src/astscan"
 )
 
 // Embedding preserves the AST interface while exposing a future/unknown AST
@@ -33,7 +34,7 @@ func TestCanonicalTypedASTOpaqueSkipsOnlyAbsentValues(t *testing.T) {
 		reflect.Zero(reflect.TypeFor[any]()),
 		reflect.ValueOf((*ast.IntLit)(nil)),
 	} {
-		canonicalASTWalkOpaque(value, visit, nil)
+		astscan.WalkCanonicalOpaque(value, visit, nil)
 	}
 	if calls != 0 {
 		t.Fatal("absent optional AST fields still reached the boxed fallback")
@@ -43,7 +44,7 @@ func TestCanonicalTypedASTOpaqueSkipsOnlyAbsentValues(t *testing.T) {
 		reflect.ValueOf([]ast.Expr{}),
 		reflect.ValueOf(&canonicalOpaqueMetadataProbe{}),
 	} {
-		canonicalASTWalkOpaque(value, visit, nil)
+		astscan.WalkCanonicalOpaque(value, visit, nil)
 	}
 	if calls != 3 {
 		t.Fatal("present opaque fields bypassed the complete fallback policy")
