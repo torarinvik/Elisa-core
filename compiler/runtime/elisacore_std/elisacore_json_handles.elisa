@@ -155,20 +155,20 @@ extend Json:
         def json_emit_number(out: mutable darray[u8]&, value: f64):
             can Abort.Panic, Console.Format, Memory.Allocate, Unsafe{BufferReinterpret,PointerArithmetic,PointerCast,RawExtern,UncheckedIndex}:
                 wide: mutable u8[64]
-                _ = snprintf((&wide[0]).cast[u8&?], 64.usize(), "%.17g", value)
+                _ = json_snprintf((&wide[0]).cast[u8&?], 64.usize(), "%.17g", value)
                 if not json_formatted_is_number(&wide[0]):
                     json_emit_text(out, sview("null", 0, -1))
                     return
 
                 narrow: mutable u8[64]
-                _ = snprintf((&narrow[0]).cast[u8&?], 64.usize(), "%.15g", value)
-                if strtod(&narrow[0], null) == value:
+                _ = json_snprintf((&narrow[0]).cast[u8&?], 64.usize(), "%.15g", value)
+                if json_strtod(&narrow[0], null) == value:
                     trusted Unsafe.PointerCast:
                         json_emit_text(out, sview((&narrow[0]).cast[cstr], 0, -1))
                     return
 
-                _ = snprintf((&narrow[0]).cast[u8&?], 64.usize(), "%.16g", value)
-                if strtod(&narrow[0], null) == value:
+                _ = json_snprintf((&narrow[0]).cast[u8&?], 64.usize(), "%.16g", value)
+                if json_strtod(&narrow[0], null) == value:
                     trusted Unsafe.PointerCast:
                         json_emit_text(out, sview((&narrow[0]).cast[cstr], 0, -1))
                     return

@@ -98,13 +98,13 @@ extend Json:
                     for index in 0..<length:
                         scratch[index.usize()] <- string_view_index(text, start + index).u8()
                     scratch[length.usize()] <- 0
-                    return strtod(&scratch[0], null)
+                    return json_strtod(&scratch[0], null)
                 in a:
                     digits: mutable darray[u8] = []
                     for index in 0..<length:
                         digits.push(string_view_index(text, start + index).u8())
                     digits.push(0)
-                    return strtod(&digits[0], null)
+                    return json_strtod(&digits[0], null)
 
         # ------------------------------------------------------------
         # Recursive descent

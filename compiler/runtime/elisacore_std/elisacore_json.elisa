@@ -99,9 +99,9 @@ module Json:
         # The arena must still outlive every value and view derived from it.
 
         @link_name("strtod")
-        extern strtod(nptr: u8&, endptr: u8&?) -> f64
+        extern json_strtod(nptr: u8&, endptr: u8&?) -> f64
         @link_name("snprintf")
-        extern snprintf(buffer: u8&?, buffer_size: usize, format: static u8&, ...) -> i32 can[Console.Format]
+        extern json_snprintf(buffer: u8&?, buffer_size: usize, format: static u8&, ...) -> i32 can[Console.Format]
 
         # ------------------------------------------------------------
         # Byte constants (the whole JSON alphabet)

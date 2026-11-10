@@ -19,6 +19,12 @@ GO_LDFLAGS := -X elisacore/src/smt.DefaultBinary=$(Z3)
 # metadata. Set ELISAC_BUILD_VCS=true to force a direct Go build instead; every
 # direct build embeds VCS metadata because it has no content receipt.
 ELISAC_BUILD_VCS ?= false
+# ELISAC_FULL_DEBUG=true keeps cgo's full -g for the LLVM wrapper layer. The default is
+# line tables only (src/backend/llvm_wrapper_debug_lines.go), which is faster to compile.
+# A full-debug build goes through the direct go-build path because the provenance recipe
+# has no tag input.
+ELISAC_FULL_DEBUG ?= false
+GO_TAGS := $(if $(filter true,$(ELISAC_FULL_DEBUG)),-tags elisac_full_debug,)
 
 # The bundled helper binds the default Stage0 product to the exact Go-selected
 # inputs without making a sibling self-host checkout part of the build recipe.
@@ -82,10 +88,10 @@ test-full:
 .PHONY: build
 build:
 	mkdir -p bin
-	@if [ "$(Z3)" = "z3" ] && [ "$(ELISAC_BUILD_VCS)" = "false" ] && [ "$(GO_LDFLAGS)" = "-X elisacore/src/smt.DefaultBinary=z3" ]; then \
-		"$(PYTHON_BIN)" "$(ELISA_STAGE0_PROVENANCE_SCRIPT)" build --root . --binary bin/elisac; \
+	@if [ "$(Z3)" = "z3" ] && [ "$(ELISAC_BUILD_VCS)" = "false" ] && [ "$(ELISAC_FULL_DEBUG)" = "false" ] && [ "$(GO_LDFLAGS)" = "-X elisacore/src/smt.DefaultBinary=z3" ]; then \
+		env -i HOME="$$HOME" PATH="$$PATH" TMPDIR="$${TMPDIR:-/tmp}" LANG=en_US.UTF-8 "$(PYTHON_BIN)" "$(ELISA_STAGE0_PROVENANCE_SCRIPT)" build --root . --binary bin/elisac; \
 	else \
-		go build -buildvcs=true -ldflags "$(GO_LDFLAGS)" -o bin/elisac ./src && rm -f bin/elisac.provenance.json; \
+		go build -buildvcs=false $(GO_TAGS) -ldflags "$(GO_LDFLAGS)" -o bin/elisac ./src && rm -f bin/elisac.provenance.json; \
 	fi
 
 # install: explicit opt-in installation for users who really want it.
@@ -95,10 +101,10 @@ build:
 # `elisac`: a script that wants a compiler names its stage.
 install:
 	mkdir -p "$${HOME}/.elisac"
-	@if [ "$(Z3)" = "z3" ] && [ "$(ELISAC_BUILD_VCS)" = "false" ] && [ "$(GO_LDFLAGS)" = "-X elisacore/src/smt.DefaultBinary=z3" ]; then \
-		"$(PYTHON_BIN)" "$(ELISA_STAGE0_PROVENANCE_SCRIPT)" build --root . --binary "$${HOME}/.elisac/elisac-stage0"; \
+	@if [ "$(Z3)" = "z3" ] && [ "$(ELISAC_BUILD_VCS)" = "false" ] && [ "$(ELISAC_FULL_DEBUG)" = "false" ] && [ "$(GO_LDFLAGS)" = "-X elisacore/src/smt.DefaultBinary=z3" ]; then \
+		env -i HOME="$$HOME" PATH="$$PATH" TMPDIR="$${TMPDIR:-/tmp}" LANG=en_US.UTF-8 "$(PYTHON_BIN)" "$(ELISA_STAGE0_PROVENANCE_SCRIPT)" build --root . --binary "$${HOME}/.elisac/elisac-stage0"; \
 	else \
-		go build -buildvcs=true -ldflags "$(GO_LDFLAGS)" -o "$${HOME}/.elisac/elisac-stage0" ./src && rm -f "$${HOME}/.elisac/elisac-stage0.provenance.json"; \
+		go build -buildvcs=false $(GO_TAGS) -ldflags "$(GO_LDFLAGS)" -o "$${HOME}/.elisac/elisac-stage0" ./src && rm -f "$${HOME}/.elisac/elisac-stage0.provenance.json"; \
 	fi
 	rm -f "$${HOME}/.elisac/elisac"
 

@@ -308,6 +308,10 @@ type PanicStmt struct {
 type ExprStmt struct {
 	Position lexer.Pos
 	Expr     Expr
+	// AnalysisOnly marks a compiler-synthesized pre-reserve kept only for semantic analysis (view
+	// invalidation and growth facts). Codegen must not emit it: the buffer is not provably private,
+	// and an eager reserve there writes into storage another header still aliases.
+	AnalysisOnly bool
 }
 type StaticIfStmt struct {
 	Position lexer.Pos

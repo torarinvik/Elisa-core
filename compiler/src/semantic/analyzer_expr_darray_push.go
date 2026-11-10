@@ -212,6 +212,8 @@ func (a *Analyzer) analyzeBuiltinDarrayExtendCall(expr *ast.CallExpr) (Type, boo
 	if !ok || darrayType == nil {
 		return nil, false
 	}
+	// Preserve builtin identity for ownership and reservation analyses.
+	a.recordCompilerBuiltinHelperCall(expr, "darray.extend")
 	if len(expr.Args) != 1 {
 		for _, arg := range expr.Args {
 			a.analyzeExpr(arg)

@@ -416,6 +416,7 @@ func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
 	for _, fact := range forExitFacts {
 		a.recordSMTAssertFact(fact)
 	}
+	delete(a.privateFreshDArrayCache, a.currentFuncDecl)
 	a.maybeAutoReserveCountingFill(stmt)
 }
 

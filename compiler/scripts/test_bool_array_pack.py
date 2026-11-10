@@ -38,7 +38,7 @@ define i32 @probe(i64 %write, i64 %read, i1 %v) {{
 '''
 with tempfile.TemporaryDirectory(prefix='bool-array-pack-') as tmp:
  d=Path(tmp);(d/'driver.cpp').write_text(DRIVER);bindir=Path(run([CONFIG,'--bindir']).stdout.strip())
- run([bindir/'clang++',*flags('--cxxflags'),'-I'+str(ROOT/'src/backend'),d/'driver.cpp',*flags('--ldflags','--libs','core','irreader','passes','--system-libs'),'-Wl,-rpath,'+run([CONFIG,'--libdir']).stdout.strip(),'-o',d/'driver'])
+ run([bindir/'clang++',*flags('--cxxflags'),'-I'+str(ROOT/'src/backend/llvm_wrappers'),'-I'+str(ROOT/'src/backend'),d/'driver.cpp',*flags('--ldflags','--libs','core','irreader','passes','--system-libs'),'-Wl,-rpath,'+run([CONFIG,'--libdir']).stdout.strip(),'-o',d/'driver'])
  for n,vol,wrap in [(64,False,False),(65,False,False),(100,False,False),(128,False,False),(129,False,False),(100,True,False),(100,False,True)]:
   # A two-byte partial clear requires an array of at least 65 elements.
   ir=fixture(n,vol,wrap) if n>=65 else fixture(n,vol,wrap).replace('i64 2, i1 false','i64 1, i1 false')

@@ -32,6 +32,20 @@ func SynthesizedPreReserveStmts(node Node) []Stmt {
 	return out
 }
 
+// EmittedPreReserveStmts is SynthesizedPreReserveStmts minus analysis-only reserves. Codegen uses
+// this; analysis and effect validation keep the full list.
+func EmittedPreReserveStmts(node Node) []Stmt {
+	all := SynthesizedPreReserveStmts(node)
+	out := all[:0:0]
+	for _, stmt := range all {
+		if es, ok := stmt.(*ExprStmt); ok && es.AnalysisOnly {
+			continue
+		}
+		out = append(out, stmt)
+	}
+	return out
+}
+
 func HasSynthesizedPreReserveStmts(node Node) bool {
 	switch n := node.(type) {
 	case *ForStmt:

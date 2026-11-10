@@ -18,7 +18,7 @@ func TestAutoReserveKeepsSuppressedLexicalReceiver(t *testing.T) {
 				scope.Define(&Symbol{Name: "flags", Kind: kind, Mutable: true})
 			}
 			a := &Analyzer{globalScope: globals, currentScope: scope, suppressDiagnostics: true}
-			stmt := a.semanticMakeReserveStmt(lexer.Pos{}, "flags", &ast.IntLit{Value: "4"})
+			stmt := a.semanticMakeReserveStmt(lexer.Pos{}, "flags", &ast.IntLit{Value: "4"}, false)
 			call := stmt.(*ast.ExprStmt).Expr.(*ast.CallExpr)
 			receiver := call.Func.(*ast.FieldExpr).Object
 			// Permission validation happens after the lexical scope is gone.

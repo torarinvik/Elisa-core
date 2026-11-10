@@ -152,7 +152,7 @@ func (s *privateFreshScan) markStoredBorrowRoots(root reflect.Value) {
 // These compiler-identified mutators preserve private buffer ownership when
 // their returned header reference is discarded. Unknown methods fail closed.
 func (s *privateFreshScan) isPrivateReceiverBuiltin(call *ast.CallExpr) bool {
-	return s.analyzer != nil && (s.analyzer.isCompilerBuiltinHelperCall(call, "darray.push") || s.analyzer.isCompilerBuiltinHelperCall(call, "darray.reserve"))
+	return s.analyzer != nil && (s.analyzer.isCompilerBuiltinHelperCall(call, "darray.push") || s.analyzer.isCompilerBuiltinHelperCall(call, "darray.reserve") || s.analyzer.isCompilerBuiltinHelperCall(call, "darray.extend"))
 }
 
 // An outer array allocation proves nothing about buffers of its elements.

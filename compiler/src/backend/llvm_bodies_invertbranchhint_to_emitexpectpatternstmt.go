@@ -289,7 +289,7 @@ func (s *functionState) emitWhile(stmt *ast.WhileStmt) error {
 	return nil
 }
 func (s *functionState) emitForStmt(stmt *ast.ForStmt) error {
-	for _, preReserve := range ast.SynthesizedPreReserveStmts(stmt) {
+	for _, preReserve := range ast.EmittedPreReserveStmts(stmt) {
 		if err := s.emitStmt(preReserve); err != nil {
 			return err
 		}

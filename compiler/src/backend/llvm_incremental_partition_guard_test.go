@@ -153,7 +153,7 @@ define i32 @main() {
 	if !ok {
 		t.Fatal("cannot locate partition guard test source")
 	}
-	helper := filepath.Join(filepath.Dir(testFile), "incremental_clone.cpp")
+	helper := filepath.Join(filepath.Dir(testFile), "llvm_wrappers", "incremental_clone.cpp")
 	args := append(flags("--cxxflags"), source, helper, "-o", binary)
 	args = append(args, flags("--ldflags", "--libs", "core", "asmparser", "transformutils", "ipo", "--system-libs")...)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

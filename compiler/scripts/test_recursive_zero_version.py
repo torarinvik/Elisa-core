@@ -54,7 +54,7 @@ exit:
 '''
 with tempfile.TemporaryDirectory(prefix='elisa-recursive-zero-') as tmp:
  d=Path(tmp);bindir=Path(run([CONFIG,'--bindir']));libdir=run([CONFIG,'--libdir']);(d/'driver.cpp').write_text(DRIVER)
- run([bindir/'clang++',*flags('--cxxflags'),'-I'+str(ROOT/'src/backend'),d/'driver.cpp',*flags('--ldflags','--libs','--system-libs'),'-Wl,-rpath,'+libdir,'-o',d/'driver'])
+ run([bindir/'clang++',*flags('--cxxflags'),'-I'+str(ROOT/'src/backend/llvm_wrappers'),'-I'+str(ROOT/'src/backend'),d/'driver.cpp',*flags('--ldflags','--libs','--system-libs'),'-Wl,-rpath,'+libdir,'-o',d/'driver'])
  cases={'eligible':(fixture(),'1 0'),'volatile effects':(fixture().replace('load i64, ptr %p','load volatile i64, ptr %p').replace('store i64 %new, ptr %p','store volatile i64 %new, ptr %p'),'1 0'),'variant argument':(fixture(variant=True),'0 0'),'callee noinline':(fixture(attrs='noinline'),'0 0'),'callee asan':(fixture(attrs='sanitize_address'),'0 0'),'caller asan':(fixture(caller_attrs='sanitize_address'),'0 0'),'callee returns_twice':(fixture(attrs='returns_twice'),'0 0')}
  for name,(ir,want) in cases.items():
   inp=d/(name.replace(' ','_')+'.ll');out=d/(name.replace(' ','_')+'.out.ll');inp.write_text(ir);got=run([d/'driver',inp,out]);assert got==want,(name,got,want);print('PASS',name,flush=True)

@@ -278,7 +278,7 @@ var syntaxFastTypes = map[reflect.Type][]string{
 	reflect.TypeOf(ExportGlobalDecl{}):          {"Position:lexer.Pos", "TargetName:string", "Alias:string"},
 	reflect.TypeOf(ExportTypeDecl{}):            {"Position:lexer.Pos", "ExportedType:ast.TypeExpr", "Alias:string"},
 	reflect.TypeOf(ExprBlock{}):                 {"Position:lexer.Pos", "Stmts:[]ast.Stmt", "Value:ast.Expr", "Captures:[]string"},
-	reflect.TypeOf(ExprStmt{}):                  {"Position:lexer.Pos", "Expr:ast.Expr"},
+	reflect.TypeOf(ExprStmt{}):                  {"Position:lexer.Pos", "Expr:ast.Expr", "AnalysisOnly:bool"},
 	reflect.TypeOf(ExternFuncDecl{}):            {"Position:lexer.Pos", "Annotations:[]ast.Annotation", "Override:bool", "Name:string", "TypeParams:[]string", "PermissionParams:[]string", "GenericParams:[]ast.GenericParam", "RegionParams:[]string", "Permissions:[]ast.PermissionRef", "Ensures:[]ast.EnsuresClause", "Requires:[]ast.Expr", "EnsureValues:[]ast.Expr", "Uses:[]*ast.ContractStmt", "Changes:[]ast.EnsuresPath", "Preserves:[]ast.EnsuresPath", "Fulfills:[]ast.FulfillsClause", "Params:[]ast.ParamDecl", "ReturnType:ast.TypeExpr", "Variadic:bool"},
 	reflect.TypeOf(ExternTypeDecl{}):            {"Position:lexer.Pos", "Annotations:[]ast.Annotation", "Name:string"},
 	reflect.TypeOf(ExternVarDecl{}):             {"Position:lexer.Pos", "Annotations:[]ast.Annotation", "Name:string", "Type:ast.TypeExpr"},

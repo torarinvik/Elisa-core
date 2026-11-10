@@ -54,6 +54,7 @@ func (a *Analyzer) maybeAutoReserveIterFill(stmt *ast.IterForStmt, sourceType Ty
 		if !isDArrayTypeMaybeRef(sym.Type) {
 			continue
 		}
+		analysisOnly := !a.privateFreshDArrayLocals()[name]
 		bound := semanticIterSourceCountBound(stmt, countField)
 		if bound == nil {
 			continue
@@ -64,7 +65,7 @@ func (a *Analyzer) maybeAutoReserveIterFill(stmt *ast.IterForStmt, sourceType Ty
 		if !a.reserveBoundResolvableHere(bound) {
 			continue
 		}
-		preReserves = append(preReserves, a.semanticMakeReserveStmt(stmt.Position, name, bound))
+		preReserves = append(preReserves, a.semanticMakeReserveStmt(stmt.Position, name, bound, analysisOnly))
 	}
 	if len(preReserves) == 0 {
 		a.lintUninferredAutoReserveIterFill(stmt, sourceName)
@@ -124,6 +125,7 @@ func (a *Analyzer) maybeAutoReserveCountingFill(stmt *ast.ForStmt) {
 		if !ok || !isDArrayTypeMaybeRef(sym.Type) {
 			continue
 		}
+		analysisOnly := !a.privateFreshDArrayLocals()[name]
 		bound := semanticCloneReserveBoundExpr(loopBound)
 		if bound == nil {
 			continue
@@ -134,7 +136,7 @@ func (a *Analyzer) maybeAutoReserveCountingFill(stmt *ast.ForStmt) {
 		if !a.reserveBoundResolvableHere(bound) {
 			continue
 		}
-		preReserves = append(preReserves, a.semanticMakeReserveStmt(stmt.Position, name, bound))
+		preReserves = append(preReserves, a.semanticMakeReserveStmt(stmt.Position, name, bound, analysisOnly))
 	}
 	if len(preReserves) == 0 {
 		return
@@ -197,7 +199,7 @@ func (a *Analyzer) reserveBoundResolvableHere(bound ast.Expr) bool {
 	return resolvable
 }
 
-func (a *Analyzer) semanticMakeReserveStmt(pos lexer.Pos, target string, bound ast.Expr) ast.Stmt {
+func (a *Analyzer) semanticMakeReserveStmt(pos lexer.Pos, target string, bound ast.Expr, analysisOnly bool) ast.Stmt {
 	receiver := &ast.Ident{Position: pos, Name: target}
 	// A pre-reserve can be retained from a diagnostics-suppressed analysis pass.
 	// Save its lexical receiver now: later effect validation may run outside
@@ -219,7 +221,7 @@ func (a *Analyzer) semanticMakeReserveStmt(pos lexer.Pos, target string, bound a
 		Args:     []ast.Expr{bound},
 	}
 	a.recordCompilerBuiltinHelperCall(call, "darray.reserve")
-	return &ast.ExprStmt{Position: pos, Expr: call}
+	return &ast.ExprStmt{Position: pos, Expr: call, AnalysisOnly: analysisOnly}
 }
 
 func (a *Analyzer) lintUninferredAutoReserveIterFill(stmt *ast.IterForStmt, srcName string) {

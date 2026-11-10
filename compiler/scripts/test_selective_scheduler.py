@@ -33,7 +33,7 @@ with tempfile.TemporaryDirectory(prefix='selective-scheduler-') as tmp:
     bindir = Path(run([CONFIG, '--bindir']).stdout.strip())
     plugin = d / 'scheduler.so'
     libdir = run([CONFIG, '--libdir']).stdout.strip()
-    run([bindir/'clang++', *flags('--cxxflags'), '-fPIC', '-shared', ROOT/'src/backend/llvm_selective_scheduler.cpp', *flags('--ldflags','--libs','--system-libs'), '-Wl,-rpath,'+libdir, '-o', plugin])
+    run([bindir/'clang++', *flags('--cxxflags'), '-fPIC', '-shared', ROOT/'src/backend/llvm_wrappers/llvm_selective_scheduler.cpp', *flags('--ldflags','--libs','--system-libs'), '-Wl,-rpath,'+libdir, '-o', plugin])
     def emit(tagged, scheduler, load, name):
         path = d / ('tagged.ll' if tagged else 'plain.ll')
         path.write_text(IR.replace('ATTR', '"elisa.ordered.ilp"' if tagged else ''))

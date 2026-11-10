@@ -369,6 +369,7 @@ F ExprBlock 4 Value
 T 60 ExprStmt
 F ExprStmt 1 Expr
 F ExprStmt 2 Position
+F ExprStmt 3 AnalysisOnly
 
 T 61 ExternFuncDecl
 F ExternFuncDecl 1 Annotations

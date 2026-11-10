@@ -203,7 +203,6 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 		}
 		info.ItemType = invalidType
 	}
-	a.maybeAutoReserveIterFill(stmt, sourceType)
 	if stmt.MovedSource {
 		// A move-drain is the sanctioned way to consume affine elements: it moves each
 		// element OUT and requires the body to consume it. It is only sound over a container
@@ -398,6 +397,10 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 	a.currentFunctionValues = mergedFunctionValues
 	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
 	a.currentStorageViewDeps = mergedStorageViewDeps
+	// Resolve the loop body before consulting the freshness scan, so builtin
+	// receiver calls carry their semantic identities.
+	delete(a.privateFreshDArrayCache, a.currentFuncDecl)
+	a.maybeAutoReserveIterFill(stmt, sourceType)
 	if stmt.MovedSource {
 		if movedElemSym != nil {
 			// Each iteration must have consumed the moved element; otherwise it is dropped.

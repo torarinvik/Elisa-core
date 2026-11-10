@@ -40,7 +40,7 @@ int main(int argc,char **argv) { llvm::LLVMContext c; llvm::SMDiagnostic d; auto
 '''
 with tempfile.TemporaryDirectory(prefix='elisa-signed16-scan-') as tmp:
     d=Path(tmp);bindir=Path(run([CONFIG,'--bindir']));libdir=run([CONFIG,'--libdir']);(d/'driver.cpp').write_text(DRIVER)
-    run([bindir/'clang++',*flags('--cxxflags'),d/'driver.cpp',ROOT/'src/backend/llvm_even_range.cpp',*flags('--ldflags','--libs','--system-libs'),'-Wl,-rpath,'+libdir,'-o',d/'driver'])
+    run([bindir/'clang++',*flags('--cxxflags'),d/'driver.cpp',ROOT/'src/backend/llvm_wrappers/llvm_even_range.cpp',*flags('--ldflags','--libs','--system-libs'),'-Wl,-rpath,'+libdir,'-o',d/'driver'])
     cases={'eligible':(fixture(),'8 0'),'short loop':(fixture(7),'0 0'),'wrong offset':(fixture(offset=-32767),'0 0'),'signed wrap':(fixture(wrap='nsw '),'0 0'),'unsigned wrap':(fixture(wrap='nuw '),'0 0'),'optsize':(fixture(attrs='optsize'),'0 0'),'asan':(fixture(attrs='sanitize_address'),'0 0')}
     for name,(ir,want) in cases.items():
         inp=d/(name.replace(' ','_')+'.ll');out=d/(name.replace(' ','_')+'.out.ll');inp.write_text(ir);got=run([d/'driver',inp,out]);assert got==want,(name,got,want);print('PASS',name,flush=True)
