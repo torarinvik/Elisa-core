@@ -2,14 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-
-void elisa_coreSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigned trueWeight, unsigned falseWeight);
-*/
-import "C"
-
 import (
 	"elisacore/src/semantic"
 	"fmt"
@@ -57,14 +49,14 @@ func isIterLoopRuntimeStringViewType(t semantic.Type) bool {
 	st, ok := t.(*semantic.StructType)
 	return ok && st != nil && st.Name == "StringView"
 }
-func (s *functionState) emitStoreRowsCarrierStorePtr(sourceAlloca C.LLVMValueRef, sourceType semantic.Type, sourceName string) (*semantic.StoreRowsViewType, C.LLVMValueRef, error) {
+func (s *functionState) emitStoreRowsCarrierStorePtr(sourceAlloca llvmIRValueRef, sourceType semantic.Type, sourceName string) (*semantic.StoreRowsViewType, llvmIRValueRef, error) {
 	switch tt := sourceType.(type) {
 	case *semantic.StoreRowsViewType:
 		carrierValue, err := s.loadValue(sourceAlloca, sourceType, sourceName+".rows")
 		if err != nil {
 			return nil, nil, err
 		}
-		storePtr := C.LLVMBuildExtractValue(s.builder, carrierValue, 0, cStringFree(sourceName+".rows.store"))
+		storePtr := llvmBuildExtractValue(s.builder, carrierValue, 0, cStringFree(sourceName+".rows.store"))
 		return tt, storePtr, nil
 	case *semantic.RefType:
 		rowsType, ok := tt.Elem.(*semantic.StoreRowsViewType)
@@ -82,7 +74,7 @@ func (s *functionState) emitStoreRowsCarrierStorePtr(sourceAlloca C.LLVMValueRef
 		if err != nil {
 			return nil, nil, err
 		}
-		storeFieldPtr := C.LLVMBuildStructGEP2(s.builder, rowsLLVMType, carrierPtr, 0, cStringFree(sourceName+".rows.store.ptr"))
+		storeFieldPtr := llvmBuildStructGEP2(s.builder, rowsLLVMType, carrierPtr, 0, cStringFree(sourceName+".rows.store.ptr"))
 		storePtr, err := s.loadValue(storeFieldPtr, &semantic.RefType{Elem: rowsType.Store, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}, sourceName+".rows.store")
 		if err != nil {
 			return nil, nil, err
@@ -92,7 +84,7 @@ func (s *functionState) emitStoreRowsCarrierStorePtr(sourceAlloca C.LLVMValueRef
 		return nil, nil, fmt.Errorf("unsupported store rows carrier %s", sourceType.String())
 	}
 }
-func (s *functionState) emitStoreRowsCount(sourceAlloca C.LLVMValueRef, sourceType semantic.Type, sourceName string) (C.LLVMValueRef, error) {
+func (s *functionState) emitStoreRowsCount(sourceAlloca llvmIRValueRef, sourceType semantic.Type, sourceName string) (llvmIRValueRef, error) {
 	rowsType, storePtr, err := s.emitStoreRowsCarrierStorePtr(sourceAlloca, sourceType, sourceName)
 	if err != nil {
 		return nil, err
@@ -102,7 +94,7 @@ func (s *functionState) emitStoreRowsCount(sourceAlloca C.LLVMValueRef, sourceTy
 		if err != nil {
 			return nil, err
 		}
-		return C.LLVMConstInt(usizeType, 0, 0), nil
+		return llvmConstInt(usizeType, 0, 0), nil
 	}
 	firstField := rowsType.Store.StoreFieldOrder[0]
 	columnPtr, darrayType, err := s.emitBuiltinStoreFieldDArrayPtr(storePtr, rowsType.Store, firstField)
@@ -115,7 +107,7 @@ func (s *functionState) emitStoreRowsCount(sourceAlloca C.LLVMValueRef, sourceTy
 	}
 	return s.loadValue(countPtr, usizeType, sourceName+".rows.count")
 }
-func (s *functionState) emitStoreRowItemValue(sourceAlloca C.LLVMValueRef, sourceType semantic.Type, indexValue C.LLVMValueRef, sourceName string) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitStoreRowItemValue(sourceAlloca llvmIRValueRef, sourceType semantic.Type, indexValue llvmIRValueRef, sourceName string) (llvmIRValueRef, semantic.Type, error) {
 	rowsType, storePtr, err := s.emitStoreRowsCarrierStorePtr(sourceAlloca, sourceType, sourceName)
 	if err != nil {
 		return nil, nil, err
@@ -125,8 +117,8 @@ func (s *functionState) emitStoreRowItemValue(sourceAlloca C.LLVMValueRef, sourc
 	if err != nil {
 		return nil, nil, err
 	}
-	rowValue := C.LLVMGetUndef(rowLLVMType)
-	rowValue = C.LLVMBuildInsertValue(s.builder, rowValue, storePtr, 0, cStringFree(sourceName+".row.store"))
-	rowValue = C.LLVMBuildInsertValue(s.builder, rowValue, indexValue, 1, cStringFree(sourceName+".row.index"))
+	rowValue := llvmGetUndef(rowLLVMType)
+	rowValue = llvmBuildInsertValue(s.builder, rowValue, storePtr, 0, cStringFree(sourceName+".row.store"))
+	rowValue = llvmBuildInsertValue(s.builder, rowValue, indexValue, 1, cStringFree(sourceName+".row.index"))
 	return rowValue, rowType, nil
 }

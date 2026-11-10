@@ -2,14 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-
-void elisa_coreSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigned trueWeight, unsigned falseWeight);
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -122,7 +114,7 @@ func (s *functionState) emitPoolStmt(stmt *ast.PoolStmt) error {
 	poolType := s.g.namedType("ThreadPool")
 	if stmt.BorrowedPool != "" {
 		binding, local := s.lookupBinding(stmt.BorrowedPool)
-		poolPtr := C.LLVMValueRef(nil)
+		poolPtr := llvmIRValueRef(nil)
 		boundType := semantic.Type(nil)
 		if local {
 			poolPtr, boundType = binding.ptr, binding.typ
@@ -166,7 +158,7 @@ func (s *functionState) emitPoolStmt(stmt *ast.PoolStmt) error {
 	if err != nil {
 		return err
 	}
-	poolValue := s.buildCall(poolNewLLVMType, poolNew, []C.LLVMValueRef{workersValue}, "pool.new")
+	poolValue := s.buildCall(poolNewLLVMType, poolNew, []llvmIRValueRef{workersValue}, "pool.new")
 	poolAlloca, err := s.createEntryAlloca(stmt.Name, poolType)
 	if err != nil {
 		return err
@@ -174,7 +166,7 @@ func (s *functionState) emitPoolStmt(stmt *ast.PoolStmt) error {
 	s.pushScope()
 	defer s.popScope()
 	s.defineBinding(stmt.Name, valueBinding{ptr: poolAlloca, typ: poolType, mutable: true})
-	C.LLVMBuildStore(s.builder, poolValue, poolAlloca)
+	llvmBuildStore(s.builder, poolValue, poolAlloca)
 	pool := scopedCleanupBinding{kind: scopedCleanupThreadPool, name: stmt.Name, ptr: poolAlloca, typ: poolType}
 	s.registerScopedCleanup(pool)
 	s.poolScopes = append(s.poolScopes, activePoolBinding{name: stmt.Name, ptr: poolAlloca, typ: poolType, workers: workersValue})

@@ -2,85 +2,13 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <string.h>
-#include <llvm-c/Core.h>
-
-static int elisacoreLLVMIsZeroValue(LLVMValueRef value) {
-	return LLVMIsAConstant(value) != NULL && LLVMIsNull(value);
-}
-
-static LLVMMetadataRef elisa_coreAliasMDString(LLVMContextRef ctx, const char* value) {
-	if (value == NULL) {
-		return LLVMMDStringInContext2(ctx, "", 0);
-	}
-	return LLVMMDStringInContext2(ctx, value, strlen(value));
-}
-
-static LLVMMetadataRef elisa_coreAliasMDNode(LLVMContextRef ctx, LLVMMetadataRef* operands, size_t count) {
-	return LLVMMDNodeInContext2(ctx, operands, count);
-}
-
-static unsigned elisa_coreMetadataKindID(LLVMContextRef ctx, const char* kindName) {
-	return LLVMGetMDKindIDInContext(ctx, kindName, strlen(kindName));
-}
-
-static void elisa_coreSetMetadataList(LLVMValueRef inst, LLVMContextRef ctx, const char* kindName, LLVMMetadataRef* scopes, size_t count) {
-	if (inst == NULL || ctx == NULL || kindName == NULL || count == 0) {
-		return;
-	}
-	LLVMMetadataRef list = elisa_coreAliasMDNode(ctx, scopes, count);
-	LLVMValueRef listValue = LLVMMetadataAsValue(ctx, list);
-	LLVMSetMetadata(inst, elisa_coreMetadataKindID(ctx, kindName), listValue);
-}
-
-static LLVMMetadataRef elisa_coreCreateAliasScopeDomain(LLVMContextRef ctx, const char* domainName) {
-	LLVMMetadataRef operands[1];
-	operands[0] = elisa_coreAliasMDString(ctx, domainName);
-	return elisa_coreAliasMDNode(ctx, operands, 1);
-}
-
-static LLVMMetadataRef elisa_coreCreateAliasScope(LLVMContextRef ctx, LLVMMetadataRef domain, const char* scopeName) {
-	LLVMMetadataRef operands[2];
-	operands[0] = elisa_coreAliasMDString(ctx, scopeName);
-	operands[1] = domain;
-	return elisa_coreAliasMDNode(ctx, operands, 2);
-}
-
-static void elisa_coreAttachAliasScopeMetadata(LLVMValueRef inst, LLVMContextRef ctx, const char* domainName, const char* aliasScopeName,
-	const char* noAliasScope1Name, int hasNoAliasScope1, const char* noAliasScope2Name, int hasNoAliasScope2) {
-	if (inst == NULL || ctx == NULL || domainName == NULL || aliasScopeName == NULL) {
-		return;
-	}
-	LLVMMetadataRef domain = elisa_coreCreateAliasScopeDomain(ctx, domainName);
-	LLVMMetadataRef aliasScope = elisa_coreCreateAliasScope(ctx, domain, aliasScopeName);
-	LLVMMetadataRef aliasScopes[1];
-	aliasScopes[0] = aliasScope;
-	elisa_coreSetMetadataList(inst, ctx, "alias.scope", aliasScopes, 1);
-
-	LLVMMetadataRef noAliasScopes[2];
-	size_t noAliasCount = 0;
-	if (hasNoAliasScope1 && noAliasScope1Name != NULL) {
-		noAliasScopes[noAliasCount++] = elisa_coreCreateAliasScope(ctx, domain, noAliasScope1Name);
-	}
-	if (hasNoAliasScope2 && noAliasScope2Name != NULL) {
-		noAliasScopes[noAliasCount++] = elisa_coreCreateAliasScope(ctx, domain, noAliasScope2Name);
-	}
-	if (noAliasCount != 0) {
-		elisa_coreSetMetadataList(inst, ctx, "noalias", noAliasScopes, noAliasCount);
-	}
-}
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
 )
 
-func (s *functionState) packedEnumFieldHandleValue(expr ast.Expr, objectType semantic.Type, enumType *semantic.EnumType) (C.LLVMValueRef, error) {
+func (s *functionState) packedEnumFieldHandleValue(expr ast.Expr, objectType semantic.Type, enumType *semantic.EnumType) (llvmIRValueRef, error) {
 	if refType, ok := objectType.(*semantic.RefType); ok {
 		if refEnum, ok := refType.Elem.(*semantic.EnumType); ok && refEnum == enumType {
 			refValue, _, err := s.emitExpr(expr, objectType)
@@ -96,7 +24,7 @@ func (s *functionState) packedEnumFieldHandleValue(expr ast.Expr, objectType sem
 	}
 	return handleValue, nil
 }
-func (s *functionState) emitRawMemcpy(dstPtr C.LLVMValueRef, srcPtr C.LLVMValueRef, byteCount uint64, name string) error {
+func (s *functionState) emitRawMemcpy(dstPtr llvmIRValueRef, srcPtr llvmIRValueRef, byteCount uint64, name string) error {
 	if byteCount == 0 {
 		return nil
 	}
@@ -115,11 +43,11 @@ func (s *functionState) emitRawMemcpy(dstPtr C.LLVMValueRef, srcPtr C.LLVMValueR
 	if err != nil {
 		return err
 	}
-	byteCountValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(byteCount), 0)
-	_ = s.buildCall(memcpyLLVMType, memcpyCallee, []C.LLVMValueRef{dstPtr, srcPtr, byteCountValue}, name)
+	byteCountValue := llvmConstInt(usizeLLVMType, llvmIRUnsignedLongLong(byteCount), 0)
+	_ = s.buildCall(memcpyLLVMType, memcpyCallee, []llvmIRValueRef{dstPtr, srcPtr, byteCountValue}, name)
 	return nil
 }
-func (s *functionState) emitByteOffsetPtr(basePtr C.LLVMValueRef, byteOffset uint64, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitByteOffsetPtr(basePtr llvmIRValueRef, byteOffset uint64, name string) (llvmIRValueRef, error) {
 	i8Type := s.g.namedType("u8")
 	i8LLVMType, err := s.g.lowerType(i8Type)
 	if err != nil {
@@ -129,10 +57,10 @@ func (s *functionState) emitByteOffsetPtr(basePtr C.LLVMValueRef, byteOffset uin
 	if err != nil {
 		return nil, err
 	}
-	indices := []C.LLVMValueRef{C.LLVMConstInt(usizeType, C.ulonglong(byteOffset), 0)}
-	return C.LLVMBuildGEP2(s.builder, i8LLVMType, basePtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree(name)), nil
+	indices := []llvmIRValueRef{llvmConstInt(usizeType, llvmIRUnsignedLongLong(byteOffset), 0)}
+	return llvmBuildGEP2(s.builder, i8LLVMType, basePtr, llvmValueSlicePtr(indices), llvmIRUnsigned(len(indices)), cStringFree(name)), nil
 }
-func (s *functionState) emitPackedSideTableFieldRead(handleValue C.LLVMValueRef, enumType *semantic.EnumType, store *packedStoreBinding, fieldType semantic.Type, sideWordOffset uint64, wordCount uint64, origin packedReadOriginKey, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitPackedSideTableFieldRead(handleValue llvmIRValueRef, enumType *semantic.EnumType, store *packedStoreBinding, fieldType semantic.Type, sideWordOffset uint64, wordCount uint64, origin packedReadOriginKey, name string) (llvmIRValueRef, error) {
 	if enumType == nil || !enumType.Packed {
 		return nil, fmt.Errorf("packed side-table field read requires packed enum metadata")
 	}
@@ -149,7 +77,7 @@ func (s *functionState) emitPackedSideTableFieldRead(handleValue C.LLVMValueRef,
 // emitPackedSideTableFieldReadWithOps is the ops-based core of the side-table read: it assembles the
 // field value from its parallel side column(s) given an already-resolved store ops. Callers that hold
 // a *packedStoreOps directly (the column scan) use it without a packedStoreBinding round-trip.
-func (s *functionState) emitPackedSideTableFieldReadWithOps(ops *packedStoreOps, handleValue C.LLVMValueRef, enumType *semantic.EnumType, fieldType semantic.Type, sideWordOffset uint64, wordCount uint64, origin packedReadOriginKey, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitPackedSideTableFieldReadWithOps(ops *packedStoreOps, handleValue llvmIRValueRef, enumType *semantic.EnumType, fieldType semantic.Type, sideWordOffset uint64, wordCount uint64, origin packedReadOriginKey, name string) (llvmIRValueRef, error) {
 	fieldSizeBytes, err := s.g.abiSizeOfType(fieldType)
 	if err != nil {
 		return nil, err
@@ -165,7 +93,7 @@ func (s *functionState) emitPackedSideTableFieldReadWithOps(ops *packedStoreOps,
 	if err != nil {
 		return nil, err
 	}
-	C.LLVMBuildStore(s.builder, C.LLVMConstNull(fieldLLVMType), fieldPtr)
+	llvmBuildStore(s.builder, llvmConstNull(fieldLLVMType), fieldPtr)
 	wordBytes := uint64(s.g.wordBits / 8)
 	if wordBytes == 0 {
 		wordBytes = 8
@@ -175,7 +103,7 @@ func (s *functionState) emitPackedSideTableFieldReadWithOps(ops *packedStoreOps,
 		if err != nil {
 			return nil, err
 		}
-		wordValue, err := ops.loadSideWordAtOrigin(handleValue, C.LLVMConstInt(wordOffsetValue, C.ulonglong(sideWordOffset+i), 0), origin, name+".word")
+		wordValue, err := ops.loadSideWordAtOrigin(handleValue, llvmConstInt(wordOffsetValue, llvmIRUnsignedLongLong(sideWordOffset+i), 0), origin, name+".word")
 		if err != nil {
 			return nil, err
 		}
@@ -183,7 +111,7 @@ func (s *functionState) emitPackedSideTableFieldReadWithOps(ops *packedStoreOps,
 		if err != nil {
 			return nil, err
 		}
-		C.LLVMBuildStore(s.builder, wordValue, wordPtr)
+		llvmBuildStore(s.builder, wordValue, wordPtr)
 		dstPtr, err := s.emitByteOffsetPtr(fieldPtr, i*wordBytes, name+".dst")
 		if err != nil {
 			return nil, err

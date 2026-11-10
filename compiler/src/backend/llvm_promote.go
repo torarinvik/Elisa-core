@@ -2,12 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"fmt"
 
@@ -50,7 +44,7 @@ func (s *functionState) emitPromoteStmt(n *ast.PromoteStmt) error {
 	if !ok {
 		return fmt.Errorf("unknown binding %q during promote lowering", target)
 	}
-	C.LLVMBuildStore(s.builder, relocated, binding.ptr)
+	llvmBuildStore(s.builder, relocated, binding.ptr)
 	return nil
 }
 
@@ -72,7 +66,7 @@ func promoteRebindIdent(expr ast.Expr) string {
 
 // emitPromoteRelocate copies the value's own backing storage into the region's arena
 // and returns the value re-pointed at the copy.
-func (s *functionState) emitPromoteRelocate(sourceValue C.LLVMValueRef, valueType semantic.Type, regionBinding valueBinding, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitPromoteRelocate(sourceValue llvmIRValueRef, valueType semantic.Type, regionBinding valueBinding, name string) (llvmIRValueRef, error) {
 	owner := treeAllocOwnerBinding{arenaRef: regionBinding.ptr}
 	switch t := semantic.StripAggregateStateType(valueType).(type) {
 	case *semantic.RefType:
@@ -105,7 +99,7 @@ func (s *functionState) emitPromoteRelocate(sourceValue C.LLVMValueRef, valueTyp
 // returns a header pointing at the relocated, trimmed-to-count buffer. The elements
 // are plain value data (the analyzer rejects interior region provenance), so a single
 // bulk copy of the live count*elem_size bytes is the whole relocation.
-func (s *functionState) emitPromoteDArray(sourceValue C.LLVMValueRef, t *semantic.DArrayType, owner treeAllocOwnerBinding, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitPromoteDArray(sourceValue llvmIRValueRef, t *semantic.DArrayType, owner treeAllocOwnerBinding, name string) (llvmIRValueRef, error) {
 	llvmResultType, err := s.g.lowerType(t)
 	if err != nil {
 		return nil, err
@@ -114,8 +108,8 @@ func (s *functionState) emitPromoteDArray(sourceValue C.LLVMValueRef, t *semanti
 	if err != nil {
 		return nil, err
 	}
-	items := C.LLVMBuildExtractValue(s.builder, sourceValue, 0, cStringFree(name+".src.items"))
-	count := C.LLVMBuildExtractValue(s.builder, sourceValue, 1, cStringFree(name+".src.count"))
+	items := llvmBuildExtractValue(s.builder, sourceValue, 0, cStringFree(name+".src.items"))
+	count := llvmBuildExtractValue(s.builder, sourceValue, 1, cStringFree(name+".src.count"))
 	byteCount, err := s.emitCheckedElemByteCount(count, elemSize, name)
 	if err != nil {
 		return nil, err
@@ -129,16 +123,16 @@ func (s *functionState) emitPromoteDArray(sourceValue C.LLVMValueRef, t *semanti
 	if err := s.emitArenaMemcpy(newBuf, items, byteCount, name+".memcpy"); err != nil {
 		return nil, err
 	}
-	materialized := C.LLVMGetUndef(llvmResultType)
-	materialized = C.LLVMBuildInsertValue(s.builder, materialized, newBuf, 0, cStringFree(name+".items"))
-	materialized = C.LLVMBuildInsertValue(s.builder, materialized, count, 1, cStringFree(name+".count"))
-	materialized = C.LLVMBuildInsertValue(s.builder, materialized, count, 2, cStringFree(name+".capacity"))
+	materialized := llvmGetUndef(llvmResultType)
+	materialized = llvmBuildInsertValue(s.builder, materialized, newBuf, 0, cStringFree(name+".items"))
+	materialized = llvmBuildInsertValue(s.builder, materialized, count, 1, cStringFree(name+".count"))
+	materialized = llvmBuildInsertValue(s.builder, materialized, count, 2, cStringFree(name+".capacity"))
 	return materialized, nil
 }
 
 // emitArenaMemcpy emits a runtime arena_memcpy(dst, src, byteCount) for a runtime-sized
 // bulk copy (LLVM's loop-idiom pass lowers the byte loop to a real memcpy).
-func (s *functionState) emitArenaMemcpy(dstPtr, srcPtr, byteCount C.LLVMValueRef, name string) error {
+func (s *functionState) emitArenaMemcpy(dstPtr, srcPtr, byteCount llvmIRValueRef, name string) error {
 	voidRefType := &semantic.RefType{Elem: s.g.namedType("void"), State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	usizeType := s.g.namedType("usize")
 	memcpyType := s.g.cachedRuntimeHelperType("arena_memcpy", func() *semantic.FuncType {
@@ -152,15 +146,15 @@ func (s *functionState) emitArenaMemcpy(dstPtr, srcPtr, byteCount C.LLVMValueRef
 	if err != nil {
 		return err
 	}
-	_ = s.buildCall(memcpyLLVMType, memcpyCallee, []C.LLVMValueRef{dstPtr, srcPtr, byteCount}, name)
+	_ = s.buildCall(memcpyLLVMType, memcpyCallee, []llvmIRValueRef{dstPtr, srcPtr, byteCount}, name)
 	return nil
 }
 
 // constUsize materializes a compile-time usize constant.
-func (s *functionState) constUsize(v uint64) (C.LLVMValueRef, error) {
+func (s *functionState) constUsize(v uint64) (llvmIRValueRef, error) {
 	usizeLLVMType, err := s.g.lowerType(s.g.namedType("usize"))
 	if err != nil {
 		return nil, err
 	}
-	return C.LLVMConstInt(usizeLLVMType, C.ulonglong(v), 0), nil
+	return llvmConstInt(usizeLLVMType, llvmIRUnsignedLongLong(v), 0), nil
 }

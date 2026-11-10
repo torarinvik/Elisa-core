@@ -2,12 +2,6 @@
 
 package backend
 
-/*
-#include <llvm-c/Core.h>
-#include "parallel_emit.h"
-*/
-import "C"
-
 import (
 	"encoding/json"
 	"fmt"
@@ -21,7 +15,7 @@ import (
 // A one-part worker retains exactly these definitions. Running LLVM optimization
 // in a child process avoids its process-global pass-state races; the parent owns
 // only the worker's finished object bytes, suitable for ordinary disk caching.
-func emitPreoptimizedPartition(bitcode []byte, pipeline string, triple, cpu, features *C.char, fragments ...*nativeFragmentContext) ([]byte, error) {
+func emitPreoptimizedPartition(bitcode []byte, pipeline string, triple, cpu, features *llvmIRChar, fragments ...*nativeFragmentContext) ([]byte, error) {
 	self, err := os.Executable()
 	if err != nil {
 		return nil, err
@@ -41,8 +35,8 @@ func emitPreoptimizedPartition(bitcode []byte, pipeline string, triple, cpu, fea
 	cmd := exec.Command(self)
 	cmd.Env = append(os.Environ(), partWorkerEnv+"=1", partWorkerBitcodeEnv+"="+input,
 		partWorkerJobsEnv+"=1", partWorkerIndexEnv+"=0", partWorkerPipelineEnv+"="+pipeline,
-		partWorkerImportEnv+"=0", partWorkerTripleEnv+"="+C.GoString(triple),
-		partWorkerCPUEnv+"="+C.GoString(cpu), partWorkerFeaturesEnv+"="+C.GoString(features), partWorkerOutputEnv+"="+output)
+		partWorkerImportEnv+"=0", partWorkerTripleEnv+"="+llvmGoString(triple),
+		partWorkerCPUEnv+"="+llvmGoString(cpu), partWorkerFeaturesEnv+"="+llvmGoString(features), partWorkerOutputEnv+"="+output)
 	var fragment *nativeFragmentContext
 	encoded := ""
 	if len(fragments) != 0 && fragments[0] != nil {

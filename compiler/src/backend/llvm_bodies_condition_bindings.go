@@ -2,14 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-
-void elisa_coreSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigned trueWeight, unsigned falseWeight);
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -484,9 +476,9 @@ func sameBackendPatternBindingTypeMap(left, right map[string]semantic.Type) bool
 	return true
 }
 
-func (s *functionState) emitConditionPatternTestAndBind(pattern ast.MatchPattern, actualValue C.LLVMValueRef, actualType semantic.Type, actualExpr ast.Expr, successBB C.LLVMBasicBlockRef, failureBB C.LLVMBasicBlockRef) error {
+func (s *functionState) emitConditionPatternTestAndBind(pattern ast.MatchPattern, actualValue llvmIRValueRef, actualType semantic.Type, actualExpr ast.Expr, successBB llvmIRBlockRef, failureBB llvmIRBlockRef) error {
 	if pattern == nil || actualType == nil {
-		C.LLVMBuildBr(s.builder, successBB)
+		llvmBuildBr(s.builder, successBB)
 		return nil
 	}
 	if actualExpr == nil {
@@ -498,10 +490,10 @@ func (s *functionState) emitConditionPatternTestAndBind(pattern ast.MatchPattern
 		}
 		if bindPattern.Name != "" && bindPattern.Name != "_" {
 			if binding, ok := s.lookupBinding(bindPattern.Name); ok && binding.ptr != nil {
-				C.LLVMBuildStore(s.builder, actualValue, binding.ptr)
+				llvmBuildStore(s.builder, actualValue, binding.ptr)
 			}
 		}
-		C.LLVMBuildBr(s.builder, successBB)
+		llvmBuildBr(s.builder, successBB)
 		return nil
 	}
 	if handled, err := s.emitCountMatchPatternTest(pattern, actualValue, actualType, actualExpr, successBB, failureBB); handled || err != nil {
@@ -519,15 +511,15 @@ func (s *functionState) emitConditionPatternTestAndBind(pattern ast.MatchPattern
 			}
 		}
 		if len(matchedIndexes) == 0 {
-			C.LLVMBuildBr(s.builder, successBB)
+			llvmBuildBr(s.builder, successBB)
 			return nil
 		}
 		for i, fieldIndex := range matchedIndexes {
 			arg := orderedArgs[fieldIndex]
-			fieldValue := C.LLVMBuildExtractValue(s.builder, actualValue, C.unsigned(fields[fieldIndex].Index), cStringFree("cond.struct.field"))
+			fieldValue := llvmBuildExtractValue(s.builder, actualValue, llvmIRUnsigned(fields[fieldIndex].Index), cStringFree("cond.struct.field"))
 			nextSuccess := successBB
 			if i != len(matchedIndexes)-1 {
-				nextSuccess = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("cond.struct.next"))
+				nextSuccess = llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("cond.struct.next"))
 			}
 			fieldExpr := ast.Expr(nil)
 			if actualExpr != nil {
@@ -537,7 +529,7 @@ func (s *functionState) emitConditionPatternTestAndBind(pattern ast.MatchPattern
 				return err
 			}
 			if i != len(matchedIndexes)-1 {
-				C.LLVMPositionBuilderAtEnd(s.builder, nextSuccess)
+				llvmPositionBuilderAtEnd(s.builder, nextSuccess)
 			}
 		}
 		return nil

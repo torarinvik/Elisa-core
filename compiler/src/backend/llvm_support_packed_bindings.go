@@ -2,12 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -49,7 +43,7 @@ func (s *functionState) lookupPackedStore(enumType *semantic.EnumType) (packedSt
 	}
 	return packedStoreBinding{}, false
 }
-func (s *functionState) bindPackedStoreValue(t semantic.Type, value C.LLVMValueRef) {
+func (s *functionState) bindPackedStoreValue(t semantic.Type, value llvmIRValueRef) {
 	storeType, ok := t.(*semantic.PackedEnumStoreType)
 	if !ok || storeType == nil || storeType.Enum == nil || value == nil {
 		return
@@ -79,7 +73,7 @@ func (s *functionState) invalidatePackedReadCaches() {
 	clear(s.packedDirectFieldReads)
 	clear(s.packedVariantPayloadReads)
 }
-func (s *functionState) lookupPackedStoreFieldValue(key packedStoreExtractCacheKey) (C.LLVMValueRef, bool) {
+func (s *functionState) lookupPackedStoreFieldValue(key packedStoreExtractCacheKey) (llvmIRValueRef, bool) {
 	if s == nil {
 		return nil, false
 	}
@@ -95,7 +89,7 @@ func (s *functionState) lookupPackedStoreFieldValue(key packedStoreExtractCacheK
 	value, ok := s.packedStoreValues[key]
 	return value, ok && value != nil
 }
-func (s *functionState) cachePackedStoreFieldValue(key packedStoreExtractCacheKey, value C.LLVMValueRef) {
+func (s *functionState) cachePackedStoreFieldValue(key packedStoreExtractCacheKey, value llvmIRValueRef) {
 	if s == nil || value == nil {
 		return
 	}
@@ -115,7 +109,7 @@ func (s *functionState) cachePackedStoreFieldValue(key packedStoreExtractCacheKe
 		return
 	}
 	if s.packedStoreValues == nil {
-		s.packedStoreValues = map[packedStoreExtractCacheKey]C.LLVMValueRef{}
+		s.packedStoreValues = map[packedStoreExtractCacheKey]llvmIRValueRef{}
 	}
 	s.packedStoreValues[key] = value
 }
@@ -272,7 +266,7 @@ func (s *functionState) packedReadOriginKey(expr ast.Expr) (packedReadOriginKey,
 		return packedReadOriginKey{}, false, nil
 	}
 }
-func (s *functionState) bindPackedEnumStorage(name string, enumType *semantic.EnumType, ptr C.LLVMValueRef) {
+func (s *functionState) bindPackedEnumStorage(name string, enumType *semantic.EnumType, ptr llvmIRValueRef) {
 	if name == "" || enumType == nil || !enumType.Packed || ptr == nil {
 		return
 	}
@@ -282,7 +276,7 @@ func (s *functionState) bindPackedEnumStorage(name string, enumType *semantic.En
 	if s.scope.packedEnumPtrs == nil {
 		s.scope.packedEnumPtrs = map[string]packedEnumStorageBinding{}
 	}
-	s.scope.packedEnumPtrs[name] = packedEnumStorageBinding{ptr: ptr, block: C.LLVMGetInsertBlock(s.builder), typ: enumType}
+	s.scope.packedEnumPtrs[name] = packedEnumStorageBinding{ptr: ptr, block: llvmGetInsertBlock(s.builder), typ: enumType}
 }
 func (s *functionState) bindPackedCommonFieldValues(name string, enumType *semantic.EnumType, values packedPayloadValueCache) {
 	if name == "" || enumType == nil || !enumType.Packed || values.empty() {
@@ -302,7 +296,7 @@ func (s *functionState) bindPackedCommonFieldValues(name string, enumType *seman
 	}
 	s.scope.packedCommonValues[name] = binding
 }
-func (s *functionState) lookupPackedCommonFieldValue(name string, enumType *semantic.EnumType, fieldName string) (C.LLVMValueRef, bool) {
+func (s *functionState) lookupPackedCommonFieldValue(name string, enumType *semantic.EnumType, fieldName string) (llvmIRValueRef, bool) {
 	if name == "" || enumType == nil || fieldName == "" {
 		return nil, false
 	}
@@ -335,7 +329,7 @@ func clonePackedPayloadValues(values packedPayloadValueCache) packedPayloadValue
 	if len(values.values) == 0 {
 		return cloned
 	}
-	cloned.values = make(map[string]C.LLVMValueRef, len(values.values))
+	cloned.values = make(map[string]llvmIRValueRef, len(values.values))
 	for key, value := range values.values {
 		if value != nil {
 			cloned.values[key] = value
@@ -349,7 +343,7 @@ func clonePackedPayloadValues(values packedPayloadValueCache) packedPayloadValue
 func (c packedPayloadValueCache) empty() bool {
 	return c.name1 == "" && c.name2 == "" && len(c.values) == 0
 }
-func (c *packedPayloadValueCache) add(name string, value C.LLVMValueRef) {
+func (c *packedPayloadValueCache) add(name string, value llvmIRValueRef) {
 	if c == nil || name == "" || value == nil {
 		return
 	}
@@ -364,14 +358,14 @@ func (c *packedPayloadValueCache) add(name string, value C.LLVMValueRef) {
 		return
 	}
 	if c.values == nil {
-		c.values = map[string]C.LLVMValueRef{
+		c.values = map[string]llvmIRValueRef{
 			c.name1: c.value1,
 			c.name2: c.value2,
 		}
 	}
 	c.values[name] = value
 }
-func (c packedPayloadValueCache) lookup(name string) (C.LLVMValueRef, bool) {
+func (c packedPayloadValueCache) lookup(name string) (llvmIRValueRef, bool) {
 	if name == "" {
 		return nil, false
 	}
@@ -384,13 +378,13 @@ func (c packedPayloadValueCache) lookup(name string) (C.LLVMValueRef, bool) {
 	value, ok := c.values[name]
 	return value, ok && value != nil
 }
-func (s *functionState) bindPackedVariantView(name string, viewType *semantic.PackedVariantViewType, ptr C.LLVMValueRef, handle C.LLVMValueRef, store packedStoreBinding, payloadValues packedPayloadValueCache) {
+func (s *functionState) bindPackedVariantView(name string, viewType *semantic.PackedVariantViewType, ptr llvmIRValueRef, handle llvmIRValueRef, store packedStoreBinding, payloadValues packedPayloadValueCache) {
 	s.bindPackedVariantViewInternal(name, viewType, ptr, handle, store, payloadValues, true)
 }
-func (s *functionState) bindPackedVariantViewOwned(name string, viewType *semantic.PackedVariantViewType, ptr C.LLVMValueRef, handle C.LLVMValueRef, store packedStoreBinding, payloadValues packedPayloadValueCache) {
+func (s *functionState) bindPackedVariantViewOwned(name string, viewType *semantic.PackedVariantViewType, ptr llvmIRValueRef, handle llvmIRValueRef, store packedStoreBinding, payloadValues packedPayloadValueCache) {
 	s.bindPackedVariantViewInternal(name, viewType, ptr, handle, store, payloadValues, false)
 }
-func (s *functionState) bindPackedVariantViewInternal(name string, viewType *semantic.PackedVariantViewType, ptr C.LLVMValueRef, handle C.LLVMValueRef, store packedStoreBinding, payloadValues packedPayloadValueCache, clonePayloads bool) {
+func (s *functionState) bindPackedVariantViewInternal(name string, viewType *semantic.PackedVariantViewType, ptr llvmIRValueRef, handle llvmIRValueRef, store packedStoreBinding, payloadValues packedPayloadValueCache, clonePayloads bool) {
 	if name == "" || viewType == nil || (ptr == nil && handle == nil) {
 		return
 	}
@@ -427,7 +421,7 @@ func (s *functionState) markPackedVariantViewHandleBlock(name string) {
 	if name == "" || s.scope == nil {
 		return
 	}
-	block := C.LLVMGetInsertBlock(s.builder)
+	block := llvmGetInsertBlock(s.builder)
 	if s.scope.packedViewName == name {
 		s.scope.packedViewBinding.handleBlock = block
 		return
@@ -441,7 +435,7 @@ func (s *functionState) lookupPackedVariantView(name string) (packedVariantViewB
 	if name == "" {
 		return packedVariantViewBinding{}, false
 	}
-	currentBlock := C.LLVMGetInsertBlock(s.builder)
+	currentBlock := llvmGetInsertBlock(s.builder)
 	// A memoized handle load from another block does not dominate this one (see handleBlock);
 	// drop it from the returned copy. The binding stays usable only if a decoded ptr remains.
 	usable := func(binding packedVariantViewBinding) (packedVariantViewBinding, bool) {

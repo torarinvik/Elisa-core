@@ -2,14 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-
-void elisa_coreSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigned trueWeight, unsigned falseWeight);
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -40,7 +32,7 @@ func (s *functionState) emitTupleBindStmt(stmt *ast.TupleBindStmt) error {
 	}
 	for i := 0; i < limit; i++ {
 		name := stmt.Names[i].Name
-		fieldValue := C.LLVMBuildExtractValue(s.builder, value, C.unsigned(i), cStringFree("tuple.field"))
+		fieldValue := llvmBuildExtractValue(s.builder, value, llvmIRUnsigned(i), cStringFree("tuple.field"))
 		if name == "_" {
 			continue
 		}
@@ -50,7 +42,7 @@ func (s *functionState) emitTupleBindStmt(stmt *ast.TupleBindStmt) error {
 				return err
 			}
 			s.defineBinding(name, valueBinding{ptr: alloca, typ: fields[i].Type, mutable: false})
-			C.LLVMBuildStore(s.builder, fieldValue, alloca)
+			llvmBuildStore(s.builder, fieldValue, alloca)
 			continue
 		}
 		target := &ast.Ident{Position: stmt.Names[i].Position, Name: name}
@@ -69,7 +61,7 @@ func (s *functionState) emitTupleBindStmt(stmt *ast.TupleBindStmt) error {
 		if err != nil {
 			return err
 		}
-		C.LLVMBuildStore(s.builder, coerced, binding.ptr)
+		llvmBuildStore(s.builder, coerced, binding.ptr)
 		s.bindPackedStoreValue(binding.typ, coerced)
 		s.invalidatePackedReadCaches()
 	}
@@ -96,7 +88,7 @@ func (s *functionState) emitLetDestructureStmt(stmt *ast.LetDestructureStmt) err
 			return err
 		}
 		s.defineBinding(tempName, valueBinding{ptr: tempAlloca, typ: valueType, mutable: false})
-		C.LLVMBuildStore(s.builder, value, tempAlloca)
+		llvmBuildStore(s.builder, value, tempAlloca)
 		tempIdent := &ast.Ident{Position: stmt.Position, Name: tempName}
 		for _, arg := range stmt.Pattern.Args {
 			fieldExpr := &ast.FieldExpr{Position: arg.Position, Object: tempIdent, Field: moveBindFieldName(arg)}
@@ -120,7 +112,7 @@ func (s *functionState) emitLetDestructureStmt(stmt *ast.LetDestructureStmt) err
 		if !ok {
 			return fmt.Errorf("unknown field %q in let destructuring", fieldName)
 		}
-		fieldValue := C.LLVMBuildExtractValue(s.builder, value, C.unsigned(field.Index), cStringFree("let.field"))
+		fieldValue := llvmBuildExtractValue(s.builder, value, llvmIRUnsigned(field.Index), cStringFree("let.field"))
 		if err := s.emitMoveBindLocal(arg.Name, field.Type, fieldValue); err != nil {
 			return err
 		}
@@ -162,7 +154,7 @@ func (s *functionState) emitMoveBindStmt(stmt *ast.MoveBindStmt) error {
 				if !ok {
 					return fmt.Errorf("unknown field %q in move-as destructuring", fieldName)
 				}
-				fieldValue := C.LLVMBuildExtractValue(s.builder, value, C.unsigned(field.Index), cStringFree("move.as.field"))
+				fieldValue := llvmBuildExtractValue(s.builder, value, llvmIRUnsigned(field.Index), cStringFree("move.as.field"))
 				if err := s.emitMoveBindLocal(arg.Name, field.Type, fieldValue); err != nil {
 					return err
 				}
@@ -174,7 +166,7 @@ func (s *functionState) emitMoveBindStmt(stmt *ast.MoveBindStmt) error {
 			limit = len(fields)
 		}
 		for i := 0; i < limit; i++ {
-			fieldValue := C.LLVMBuildExtractValue(s.builder, value, C.unsigned(i), cStringFree("move.as.field"))
+			fieldValue := llvmBuildExtractValue(s.builder, value, llvmIRUnsigned(i), cStringFree("move.as.field"))
 			if err := s.emitMoveBindLocal(p.Args[i].Name, fields[i].Type, fieldValue); err != nil {
 				return err
 			}
@@ -189,22 +181,22 @@ func (s *functionState) emitMoveBindStmt(stmt *ast.MoveBindStmt) error {
 		if err != nil {
 			return err
 		}
-		successBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("move.as.variant.ok"))
-		failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("move.as.variant.fail"))
-		contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("move.as.variant.cont"))
+		successBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("move.as.variant.ok"))
+		failBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("move.as.variant.fail"))
+		contBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("move.as.variant.cont"))
 		matchPattern := &ast.MatchVariantPattern{Position: p.Position, EnumName: p.EnumName, Variant: p.Variant, Args: append([]ast.MatchPatternArg(nil), p.Args...)}
 		if _, _, err := s.emitMatchPatternTest(matchPattern, value, nil, enumType, storeBinding, stmt.Value, nil, successBB, failBB); err != nil {
 			return err
 		}
-		C.LLVMPositionBuilderAtEnd(s.builder, successBB)
+		llvmPositionBuilderAtEnd(s.builder, successBB)
 		if !s.currentBlockTerminated() {
-			C.LLVMBuildBr(s.builder, contBB)
+			llvmBuildBr(s.builder, contBB)
 		}
-		C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+		llvmPositionBuilderAtEnd(s.builder, failBB)
 		if err := s.emitTrapUnreachable("move.as.variant.fail"); err != nil {
 			return err
 		}
-		C.LLVMPositionBuilderAtEnd(s.builder, contBB)
+		llvmPositionBuilderAtEnd(s.builder, contBB)
 		return nil
 	default:
 		return fmt.Errorf("unsupported move-as pattern %T", stmt.Pattern)
@@ -247,7 +239,7 @@ func (s *functionState) emitScopeStmt(stmt *ast.ScopeStmt) error {
 	if err != nil {
 		return err
 	}
-	C.LLVMBuildStore(s.builder, guardValue, guardAlloca)
+	llvmBuildStore(s.builder, guardValue, guardAlloca)
 	s.pushScope()
 	scope := s.scope
 	defer s.popScope()
@@ -279,12 +271,12 @@ func (s *functionState) emitBuiltinCheckpointDArray(target ast.Expr, targetType 
 	if err != nil {
 		return checkpointBinding{}, err
 	}
-	countValue := C.LLVMBuildLoad2(s.builder, usizeLLVMType, countPtr, cStringFree(name+".checkpoint.count"))
+	countValue := llvmBuildLoad2(s.builder, usizeLLVMType, countPtr, cStringFree(name+".checkpoint.count"))
 	markAlloca, err := s.createEntryAlloca(name+".checkpoint.mark", usizeType)
 	if err != nil {
 		return checkpointBinding{}, err
 	}
-	C.LLVMBuildStore(s.builder, countValue, markAlloca)
+	llvmBuildStore(s.builder, countValue, markAlloca)
 	return checkpointBinding{kind: checkpointBindingDArray, name: name, targetPtr: darrayPtr, targetType: darrayType, markPtr: markAlloca, markType: usizeType}, nil
 }
 func (s *functionState) emitRestoreCheckpointBinding(binding checkpointBinding) error {
@@ -308,7 +300,7 @@ func (s *functionState) emitRestoreCheckpointBinding(binding checkpointBinding) 
 		if err != nil {
 			return err
 		}
-		C.LLVMBuildStore(s.builder, markValue, countPtr)
+		llvmBuildStore(s.builder, markValue, countPtr)
 		return nil
 	default:
 		return fmt.Errorf("unsupported checkpoint kind %d", binding.kind)
@@ -330,7 +322,7 @@ func (s *functionState) emitCheckpointBindingFromTarget(name string, target ast.
 			if err != nil {
 				return checkpointBinding{}, err
 			}
-			C.LLVMBuildStore(s.builder, markValue, markAlloca)
+			llvmBuildStore(s.builder, markValue, markAlloca)
 			binding = checkpointBinding{kind: checkpointBindingRegion, name: name, targetPtr: regionBinding.ptr, targetType: regionBinding.typ, markPtr: markAlloca, markType: markType}
 		}
 	}
@@ -412,7 +404,7 @@ func (s *functionState) emitRestoreCheckpointStmt(stmt *ast.RestoreCheckpointStm
 	}
 	return s.emitRestoreCheckpointBinding(binding)
 }
-func (s *functionState) emitMoveBindLocal(name string, typ semantic.Type, value C.LLVMValueRef) error {
+func (s *functionState) emitMoveBindLocal(name string, typ semantic.Type, value llvmIRValueRef) error {
 	if name == "_" {
 		return nil
 	}
@@ -421,7 +413,7 @@ func (s *functionState) emitMoveBindLocal(name string, typ semantic.Type, value 
 		return err
 	}
 	s.defineBinding(name, valueBinding{ptr: alloca, typ: typ})
-	C.LLVMBuildStore(s.builder, value, alloca)
+	llvmBuildStore(s.builder, value, alloca)
 	s.bindPackedStoreValue(typ, value)
 	return nil
 }

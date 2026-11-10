@@ -2,10 +2,6 @@
 
 package backend
 
-// #include <stdlib.h>
-// #include "llvm-c/Core.h"
-import "C"
-
 import (
 	"fmt"
 
@@ -39,7 +35,7 @@ func (s *functionState) resolveColumnScanStore(colExpr *ast.EnumColumnExpr) (*se
 
 // emitEnumColumnScanCount returns the row count of the scanned store — the loop
 // bound for `for x in Expr of .field`.
-func (s *functionState) emitEnumColumnScanCount(colExpr *ast.EnumColumnExpr, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitEnumColumnScanCount(colExpr *ast.EnumColumnExpr, name string) (llvmIRValueRef, error) {
 	_, ops, err := s.resolveColumnScanStore(colExpr)
 	if err != nil {
 		return nil, err
@@ -50,7 +46,7 @@ func (s *functionState) emitEnumColumnScanCount(colExpr *ast.EnumColumnExpr, nam
 // emitEnumColumnScanElement reads the column value for the node at indexValue:
 // the tag, or a dense common(...) field. Per-variant payload fields are sparse
 // and rejected earlier in analysis.
-func (s *functionState) emitEnumColumnScanElement(colExpr *ast.EnumColumnExpr, indexValue C.LLVMValueRef, name string) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitEnumColumnScanElement(colExpr *ast.EnumColumnExpr, indexValue llvmIRValueRef, name string) (llvmIRValueRef, semantic.Type, error) {
 	enumType, ops, err := s.resolveColumnScanStore(colExpr)
 	if err != nil {
 		return nil, nil, err
@@ -121,7 +117,7 @@ func (s *functionState) emitEnumColumnScanElement(colExpr *ast.EnumColumnExpr, i
 // non-matching rows jump to the loop's step block. Root scans (and flat enums, which are their
 // own root) emit nothing. Returns true when a filter branch was emitted; the caller must then
 // position at the returned match block.
-func (s *functionState) emitEnumColumnScanCategoryFilter(colExpr *ast.EnumColumnExpr, indexValue C.LLVMValueRef, stepBB C.LLVMBasicBlockRef, name string) (bool, error) {
+func (s *functionState) emitEnumColumnScanCategoryFilter(colExpr *ast.EnumColumnExpr, indexValue llvmIRValueRef, stepBB llvmIRBlockRef, name string) (bool, error) {
 	enumType, ops, err := s.resolveColumnScanStore(colExpr)
 	if err != nil {
 		return false, err
@@ -142,8 +138,8 @@ func (s *functionState) emitEnumColumnScanCategoryFilter(colExpr *ast.EnumColumn
 	if err != nil {
 		return false, err
 	}
-	matchBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".col.filter.match"))
-	C.LLVMBuildCondBr(s.builder, inRange, matchBB, stepBB)
-	C.LLVMPositionBuilderAtEnd(s.builder, matchBB)
+	matchBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".col.filter.match"))
+	llvmBuildCondBr(s.builder, inRange, matchBB, stepBB)
+	llvmPositionBuilderAtEnd(s.builder, matchBB)
 	return true, nil
 }

@@ -2,19 +2,13 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
 )
 
-func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitCallExpr(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, error) {
 	if s != nil && s.g != nil && s.g.result != nil {
 		if info, ok := s.g.semanticReadView().LookupTaskGroupSubmits(expr); ok {
 			return s.emitVerifiedTaskGroupSubmit(expr, info)
@@ -27,7 +21,7 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 // part of a joined TaskGroup window. The same annotation relaxes the lifetime
 // check and adds the returned handle here, so the two stages cannot disagree
 // about whether the pool still owns the capture at function return.
-func (s *functionState) emitVerifiedTaskGroupSubmit(expr *ast.CallExpr, info semantic.TaskGroupSubmitInfo) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitVerifiedTaskGroupSubmit(expr *ast.CallExpr, info semantic.TaskGroupSubmitInfo) (llvmIRValueRef, semantic.Type, error) {
 	if expr == nil || info.GroupName == "" {
 		return nil, nil, fmt.Errorf("invalid verified TaskGroup submission")
 	}
@@ -63,11 +57,11 @@ func (s *functionState) emitVerifiedTaskGroupSubmit(expr *ast.CallExpr, info sem
 	if err != nil {
 		return nil, nil, err
 	}
-	s.buildCall(groupAddLLVMType, groupAdd, []C.LLVMValueRef{group.ptr, taskValue}, "")
+	s.buildCall(groupAddLLVMType, groupAdd, []llvmIRValueRef{group.ptr, taskValue}, "")
 	return nil, s.g.namedType("void"), nil
 }
 
-func (s *functionState) emitCallExprUnwrapped(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitCallExprUnwrapped(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, error) {
 	if err := s.emitCallArgRefinementChecks(expr); err != nil {
 		return nil, nil, err
 	}
@@ -236,7 +230,7 @@ func (s *functionState) emitCallExprUnwrapped(expr *ast.CallExpr) (C.LLVMValueRe
 		}
 	}
 	loweredArgs := backendLoweredCallArgsForFunc(expr, funcType)
-	args := make([]C.LLVMValueRef, 0, len(loweredArgs))
+	args := make([]llvmIRValueRef, 0, len(loweredArgs))
 	for i, arg := range loweredArgs {
 		var expected semantic.Type
 		if i < len(funcType.Params) {
@@ -265,7 +259,7 @@ func backendIsCVariadicTailArg(fnType *semantic.FuncType, index int) bool {
 	return fnType != nil && fnType.Variadic && index >= len(fnType.Params)
 }
 
-func (s *functionState) promoteCVariadicArg(value C.LLVMValueRef, actual semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) promoteCVariadicArg(value llvmIRValueRef, actual semantic.Type) (llvmIRValueRef, semantic.Type, error) {
 	if value == nil || actual == nil || s == nil || s.g == nil || s.g.result == nil {
 		return value, actual, nil
 	}
@@ -275,7 +269,7 @@ func (s *functionState) promoteCVariadicArg(value C.LLVMValueRef, actual semanti
 		if err != nil {
 			return nil, nil, err
 		}
-		return C.LLVMBuildZExt(s.builder, value, i32LLVM, cStringFree("vararg.bool")), i32Type, nil
+		return llvmBuildZExt(s.builder, value, i32LLVM, cStringFree("vararg.bool")), i32Type, nil
 	}
 	if builtin, ok := numericCastType(actual).(*semantic.BuiltinType); ok && builtin != nil && builtin.Name == "f32" {
 		f64Type := s.g.namedType("f64")
@@ -311,7 +305,7 @@ func backendLoweredCallArgsForFunc(expr *ast.CallExpr, funcType *semantic.FuncTy
 	return out
 }
 
-func (s *functionState) emitCastHookArgs(exprLabel string, operand ast.Expr, fnType *semantic.FuncType) ([]C.LLVMValueRef, error) {
+func (s *functionState) emitCastHookArgs(exprLabel string, operand ast.Expr, fnType *semantic.FuncType) ([]llvmIRValueRef, error) {
 	if fnType == nil || len(fnType.Params) == 0 {
 		return nil, fmt.Errorf("invalid semantic cast hook for %s", exprLabel)
 	}
@@ -319,7 +313,7 @@ func (s *functionState) emitCastHookArgs(exprLabel string, operand ast.Expr, fnT
 	if err != nil {
 		return nil, err
 	}
-	args := []C.LLVMValueRef{arg}
+	args := []llvmIRValueRef{arg}
 	if len(fnType.Params) > 1 {
 		// A cast hook can carry trailing IMPLICIT params (threaded region / packed store —
 		// e.g. its return type holds region-backed enum handles). Resolve them like any other

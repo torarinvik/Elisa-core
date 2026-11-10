@@ -2,12 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -21,8 +15,8 @@ import (
 
 var moduleCStringState struct {
 	sync.Mutex
-	owned  []*C.char
-	byName map[string]*C.char
+	owned  []*llvmIRChar
+	byName map[string]*llvmIRChar
 	users  int
 }
 
@@ -37,7 +31,7 @@ func beginModuleCStringLifetime() {
 	defer moduleCStringState.Unlock()
 	if moduleCStringState.users == 0 {
 		moduleCStringState.owned = nil
-		moduleCStringState.byName = make(map[string]*C.char)
+		moduleCStringState.byName = make(map[string]*llvmIRChar)
 	}
 	moduleCStringState.users++
 }
@@ -53,7 +47,7 @@ func endModuleCStringLifetime() {
 		return
 	}
 	for _, ptr := range moduleCStringState.owned {
-		C.free(unsafe.Pointer(ptr))
+		llvmFree(unsafe.Pointer(ptr))
 	}
 	moduleCStringState.owned = nil
 	moduleCStringState.byName = nil

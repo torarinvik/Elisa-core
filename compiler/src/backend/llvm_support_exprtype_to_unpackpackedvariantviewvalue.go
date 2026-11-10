@@ -2,12 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -303,7 +297,7 @@ func (s *functionState) resolvePackedVariantViewSurfaceTypeExpr(expr ast.TypeExp
 	return viewType, nil
 }
 
-func (s *functionState) materializePackedVariantViewValue(binding packedVariantViewBinding) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) materializePackedVariantViewValue(binding packedVariantViewBinding) (llvmIRValueRef, semantic.Type, error) {
 	if binding.typ == nil {
 		return nil, nil, fmt.Errorf("missing packedview binding type")
 	}
@@ -342,7 +336,7 @@ func (s *functionState) materializePackedVariantViewValue(binding packedVariantV
 	}
 	return value, binding.typ, nil
 }
-func (s *functionState) buildPackedVariantViewValue(viewType *semantic.PackedVariantViewType, handle C.LLVMValueRef, store *packedStoreBinding) (C.LLVMValueRef, error) {
+func (s *functionState) buildPackedVariantViewValue(viewType *semantic.PackedVariantViewType, handle llvmIRValueRef, store *packedStoreBinding) (llvmIRValueRef, error) {
 	if viewType == nil || viewType.Enum == nil {
 		return nil, fmt.Errorf("missing packedview type metadata")
 	}
@@ -350,10 +344,10 @@ func (s *functionState) buildPackedVariantViewValue(viewType *semantic.PackedVar
 	if err != nil {
 		return nil, err
 	}
-	value := C.LLVMGetUndef(llvmType)
-	value = C.LLVMBuildInsertValue(s.builder, value, handle, 0, cStringFree("packedview.handle"))
+	value := llvmGetUndef(llvmType)
+	value = llvmBuildInsertValue(s.builder, value, handle, 0, cStringFree("packedview.handle"))
 	if viewType.Enum.StoreType != nil {
-		storeValue := C.LLVMValueRef(nil)
+		storeValue := llvmIRValueRef(nil)
 		if store != nil && store.typ != nil && store.value != nil {
 			storeValue = store.value
 		}
@@ -363,7 +357,7 @@ func (s *functionState) buildPackedVariantViewValue(viewType *semantic.PackedVar
 				return nil, err
 			}
 		}
-		value = C.LLVMBuildInsertValue(s.builder, value, storeValue, 1, cStringFree("packedview.store"))
+		value = llvmBuildInsertValue(s.builder, value, storeValue, 1, cStringFree("packedview.store"))
 	}
 	return value, nil
 }
@@ -382,15 +376,15 @@ func (g *llvmGenerator) cachedPackedVariantViewType(enumType *semantic.EnumType,
 	}
 	return viewType
 }
-func (s *functionState) unpackPackedVariantViewValue(value C.LLVMValueRef, viewType *semantic.PackedVariantViewType) (packedVariantViewBinding, error) {
+func (s *functionState) unpackPackedVariantViewValue(value llvmIRValueRef, viewType *semantic.PackedVariantViewType) (packedVariantViewBinding, error) {
 	if viewType == nil || viewType.Enum == nil {
 		return packedVariantViewBinding{}, fmt.Errorf("missing packedview type metadata")
 	}
 	binding := packedVariantViewBinding{typ: viewType}
-	binding.handle = C.LLVMBuildExtractValue(s.builder, value, 0, cStringFree("packedview.handle.extract"))
+	binding.handle = llvmBuildExtractValue(s.builder, value, 0, cStringFree("packedview.handle.extract"))
 	if viewType.Enum.StoreType != nil {
 		binding.store = packedStoreBinding{
-			value: C.LLVMBuildExtractValue(s.builder, value, 1, cStringFree("packedview.store.extract")),
+			value: llvmBuildExtractValue(s.builder, value, 1, cStringFree("packedview.store.extract")),
 			typ:   viewType.Enum.StoreType,
 		}
 	}

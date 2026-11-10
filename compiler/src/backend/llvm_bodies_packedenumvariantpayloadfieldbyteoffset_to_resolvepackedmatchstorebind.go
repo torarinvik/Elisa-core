@@ -2,14 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-
-void elisa_coreSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigned trueWeight, unsigned falseWeight);
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -46,7 +38,7 @@ func (s *functionState) packedEnumVariantPayloadFieldByteOffset(enumType *semant
 	}
 	return baseOffsetBytes, true, nil
 }
-func (s *functionState) readPackedEnumTagWithStore(handleValue C.LLVMValueRef, enumType *semantic.EnumType, store *packedStoreBinding) (C.LLVMValueRef, error) {
+func (s *functionState) readPackedEnumTagWithStore(handleValue llvmIRValueRef, enumType *semantic.EnumType, store *packedStoreBinding) (llvmIRValueRef, error) {
 	ops, ok := s.packedStoreOpsFromBinding(store)
 	if !ok {
 		return nil, fmt.Errorf("packed enum %s tag read requires store context", enumType.Name)
@@ -76,7 +68,7 @@ func packedMatchHasWidePayloadAccess(arms []ast.MatchArm, minArgs int) bool {
 	}
 	return false
 }
-func (s *functionState) preloadPackedMatchCommonFieldValues(enumType *semantic.EnumType, matchValue ast.Expr, enumValue C.LLVMValueRef, decodedMatchValue C.LLVMValueRef, store *packedStoreBinding, arms []ast.MatchArm) (packedPayloadValueCache, error) {
+func (s *functionState) preloadPackedMatchCommonFieldValues(enumType *semantic.EnumType, matchValue ast.Expr, enumValue llvmIRValueRef, decodedMatchValue llvmIRValueRef, store *packedStoreBinding, arms []ast.MatchArm) (packedPayloadValueCache, error) {
 	var values packedPayloadValueCache
 	if s == nil || enumType == nil || !enumType.Packed || len(enumType.Common) == 0 || !packedEnumMatchCanUseTagSwitch(enumType, arms) {
 		return values, nil
@@ -109,7 +101,7 @@ func (s *functionState) preloadPackedMatchCommonFieldValues(enumType *semantic.E
 		}
 		fieldType := layout.Field.Type
 		cacheName := "packed.match.common.preload." + fieldName
-		var fieldValue C.LLVMValueRef
+		var fieldValue llvmIRValueRef
 		switch {
 		case !layout.StoredInline:
 			if store == nil {
@@ -124,7 +116,7 @@ func (s *functionState) preloadPackedMatchCommonFieldValues(enumType *semantic.E
 			if err != nil {
 				return values, err
 			}
-			fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerType, decodedMatchValue, C.unsigned(layout.RowFieldIndex), cStringFree(cacheName+".ptr"))
+			fieldPtr := llvmBuildStructGEP2(s.builder, containerType, decodedMatchValue, llvmIRUnsigned(layout.RowFieldIndex), cStringFree(cacheName+".ptr"))
 			fieldValue, err = s.loadValue(fieldPtr, fieldType, cacheName)
 			if err != nil {
 				return values, err
@@ -181,7 +173,7 @@ func packedMatchShouldEagerDecode(view semantic.CodegenReadView, abi packedEnumA
 	}
 	return readsMatchedValueField
 }
-func (s *functionState) enumPayloadPtr(enumPtr C.LLVMValueRef, enumType *semantic.EnumType) (C.LLVMValueRef, error) {
+func (s *functionState) enumPayloadPtr(enumPtr llvmIRValueRef, enumType *semantic.EnumType) (llvmIRValueRef, error) {
 	if enumIsTagOnly(enumType) {
 		return nil, fmt.Errorf("enum %s has no lowered payload storage", enumType.Name)
 	}
@@ -196,7 +188,7 @@ func (s *functionState) enumPayloadPtr(enumPtr C.LLVMValueRef, enumType *semanti
 			return nil, err
 		}
 	}
-	return C.LLVMBuildStructGEP2(s.builder, enumLLVMType, enumPtr, C.unsigned(payloadIndex), cStringFree("enum.payload.ptr")), nil
+	return llvmBuildStructGEP2(s.builder, enumLLVMType, enumPtr, llvmIRUnsigned(payloadIndex), cStringFree("enum.payload.ptr")), nil
 }
 func (s *functionState) resolvePackedViewStoreBinding(expr ast.Expr, enumType *semantic.EnumType) (*packedStoreBinding, bool, error) {
 	if expr == nil || enumType == nil {
@@ -379,5 +371,5 @@ func (s *functionState) syntheticPtrHandleStoreBinding(enumType *semantic.EnumTy
 	if err != nil {
 		return nil, err
 	}
-	return &packedStoreBinding{value: C.LLVMGetUndef(loweredStore), typ: enumType.StoreType}, nil
+	return &packedStoreBinding{value: llvmGetUndef(loweredStore), typ: enumType.StoreType}, nil
 }

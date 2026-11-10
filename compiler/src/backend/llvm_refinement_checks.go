@@ -2,11 +2,6 @@
 
 package backend
 
-/*
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import "elisacore/src/ast"
 
 // emitRefinementChecks discharges a refinement-typed var declaration (docs/85 Stage 1c-2). For each
@@ -31,14 +26,14 @@ func (s *functionState) emitRefinementChecks(n *ast.VarDeclStmt) error {
 		if err != nil {
 			return err
 		}
-		okBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("refine.ok"))
-		failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("refine.fail"))
-		C.LLVMBuildCondBr(s.builder, cond, okBB, failBB)
-		C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+		okBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("refine.ok"))
+		failBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("refine.fail"))
+		llvmBuildCondBr(s.builder, cond, okBB, failBB)
+		llvmPositionBuilderAtEnd(s.builder, failBB)
 		if err := s.emitTrapUnreachable("refine.trap"); err != nil {
 			return err
 		}
-		C.LLVMPositionBuilderAtEnd(s.builder, okBB)
+		llvmPositionBuilderAtEnd(s.builder, okBB)
 	}
 	return nil
 }
@@ -89,14 +84,14 @@ func (s *functionState) emitRefinementCheckCalls(checks []*ast.CallExpr, tag str
 		if err != nil {
 			return err
 		}
-		okBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(tag+".ok"))
-		failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(tag+".fail"))
-		C.LLVMBuildCondBr(s.builder, cond, okBB, failBB)
-		C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+		okBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(tag+".ok"))
+		failBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(tag+".fail"))
+		llvmBuildCondBr(s.builder, cond, okBB, failBB)
+		llvmPositionBuilderAtEnd(s.builder, failBB)
 		if err := s.emitTrapUnreachable(tag + ".trap"); err != nil {
 			return err
 		}
-		C.LLVMPositionBuilderAtEnd(s.builder, okBB)
+		llvmPositionBuilderAtEnd(s.builder, okBB)
 	}
 	return nil
 }

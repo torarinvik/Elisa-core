@@ -2,14 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-
-void elisa_coreSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigned trueWeight, unsigned falseWeight);
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -17,7 +9,7 @@ import (
 )
 
 type valueBinding struct {
-	ptr     C.LLVMValueRef
+	ptr     llvmIRValueRef
 	typ     semantic.Type
 	mutable bool
 }
@@ -60,19 +52,19 @@ type functionState struct {
 	indexMergeDepth    int
 	g                  *llvmGenerator
 	decl               *ast.FuncDecl
-	fnValue            C.LLVMValueRef
+	fnValue            llvmIRValueRef
 	fnType             *semantic.FuncType
-	builder            C.LLVMBuilderRef
+	builder            llvmIRBuilderRef
 	scope              *codegenScope
-	diScope            C.LLVMMetadataRef
-	traceNameGlobal    C.LLVMValueRef
+	diScope            llvmIRMetadataRef
+	traceNameGlobal    llvmIRValueRef
 	typeMap            map[string]semantic.Type
 	// specializedExprTypes overlays the expression types recorded by the TEMPLATE
 	// analysis with the ones a re-analysis produced for THIS instantiation. Empty for
 	// a non-generic body. See semantic.Result.SpecializedExprTypes.
 	specializedExprTypes map[ast.Expr]semantic.Type
 	specializedFuncTypes map[*semantic.FuncType]*semantic.FuncType
-	resultSlot           C.LLVMValueRef
+	resultSlot           llvmIRValueRef
 	sretReturn           bool
 	// A source-level `void main` retains its Elisa type but is emitted as the
 	// process entry point with an i32 return. Every void return path must therefore
@@ -90,15 +82,15 @@ type functionState struct {
 	// out of hot loops. Gated to scalar element types: a scalar buffer can never contain a darray
 	// header, so hdr != elt is always true (nested darray[darray[...]] is left untagged). All element
 	// accesses share ONE "elt" scope, so they remain may-alias to each other (no spurious vectorization).
-	aliasSafeElementPtrs map[C.LLVMValueRef]bool
+	aliasSafeElementPtrs map[llvmIRValueRef]bool
 	// elementDerivedPtrs: addresses inside a darray/view element buffer whose plain-struct type is not
 	// alias-safe as a whole; only their scalar leaf fields get the elt tag (propagateAliasSafeFieldPtr).
-	elementDerivedPtrs map[C.LLVMValueRef]bool
+	elementDerivedPtrs map[llvmIRValueRef]bool
 	// A compiler-generated fresh-result comprehension can prove that its source and
 	// destination darrays are distinct. Keep that fact scoped to the loop; self-extend
 	// and user-written loops remain conservative.
 	comprehensionAliasContext  *comprehensionAliasContext
-	comprehensionElementScopes map[C.LLVMValueRef]comprehensionAliasAccess
+	comprehensionElementScopes map[llvmIRValueRef]comprehensionAliasAccess
 	// disjointScopes carries the per-parameter alias.scope identities for proven-distinct
 	// container-ref params (docs/84 Increment 3b). Nil unless -fnoalias is on AND the
 	// analyzer's whole-program FuncDisjointParams proved a self-noalias group for this fn.
@@ -106,7 +98,7 @@ type functionState struct {
 	// disjointElementPtrs maps a GEP'd element address of a proven-distinct param to its
 	// scope, so the subsequent load/store in loadValue/storeValue is tagged with the
 	// per-param scope (replacing the shared elt scope) for that element.
-	disjointElementPtrs map[C.LLVMValueRef]*disjointParamScope
+	disjointElementPtrs map[llvmIRValueRef]*disjointParamScope
 	// pendingDisjointScope is the scope of the index-site object currently being lowered;
 	// set by emitIndexAddress and consumed once by emitRuntimePointerIndexedAddressWithType.
 	pendingDisjointScope *disjointParamScope
@@ -127,7 +119,7 @@ type functionState struct {
 	// statement -> the stack arenas to free right after it (their objects died and are not
 	// aliased), in stack-id order. Several stacks can die after the same statement. Populated at
 	// region entry, fired once and removed when the statement is emitted.
-	earlyFreeByOffset map[int][]C.LLVMValueRef
+	earlyFreeByOffset map[int][]llvmIRValueRef
 	packedStores      map[string]packedStoreBinding
 	// regionPackedStores caches the IMPLICIT region-backed packed store per (region, enum root)
 	// (getOrCreateRegionPackedStore). Unlike packedStores it is NOT scope-cloned/restored:
@@ -156,7 +148,7 @@ type functionState struct {
 	// a non-escaping local result (for example read_file's captured bytes) must not append a dead
 	// allocation after the caller's reserve/fixed report buffer. It is registered as a function
 	// cleanup, not as a region binding, because the adopted source region belongs to the caller.
-	scratchArena C.LLVMValueRef
+	scratchArena llvmIRValueRef
 	// adoptedEscapeNames contains locals whose storage may be observed outside the current adopted
 	// function (return values, copied call arguments, or assignment initializers). Such locals keep
 	// the caller-owned arena; all other fresh locals may use scratchArena.
@@ -168,7 +160,7 @@ type functionState struct {
 	// aggregate into a local auto region and immediately push it into a by-reference output parameter.
 	// In that case the result must be built in the output parameter's arena, or the auto region can be
 	// freed while the output still contains the nested backing.
-	callerStorageArenas map[string]C.LLVMValueRef
+	callerStorageArenas map[string]llvmIRValueRef
 	// activeInitializerName is set only while emitting a local initializer. It lets the implicit
 	// region argument for a storage-carrying call follow callerStorageArenas precisely, without
 	// routing unrelated temporary results to an output arena.
@@ -190,23 +182,23 @@ type functionState struct {
 	ambientGrownContainerRegion  string
 	currentSequenceRewrite       *sequenceRewriteCodegenContext
 	packedStoreValueKey1         packedStoreExtractCacheKey
-	packedStoreValue1            C.LLVMValueRef
+	packedStoreValue1            llvmIRValueRef
 	packedStoreValueKey2         packedStoreExtractCacheKey
-	packedStoreValue2            C.LLVMValueRef
+	packedStoreValue2            llvmIRValueRef
 	packedStoreValueKey3         packedStoreExtractCacheKey
-	packedStoreValue3            C.LLVMValueRef
-	packedStoreValues            map[packedStoreExtractCacheKey]C.LLVMValueRef
-	packedVariantSparseTagReads  map[packedVariantSparseTagReadCacheKey]C.LLVMValueRef
-	packedVariantSparseWordReads map[packedVariantSparseWordReadCacheKey]C.LLVMValueRef
-	packedDenseDArrayItemsReads  map[packedDenseDArrayItemsReadCacheKey]C.LLVMValueRef
-	packedDenseTagReads          map[packedDenseTagReadCacheKey]C.LLVMValueRef
-	packedDenseWordReads         map[packedDenseWordReadCacheKey]C.LLVMValueRef
-	packedDenseSideWordReads     map[packedDenseSideWordReadCacheKey]C.LLVMValueRef
-	packedDirectFieldReads       map[packedDirectFieldReadCacheKey]C.LLVMValueRef
-	packedVariantPayloadReads    map[packedVariantPayloadReadCacheKey][]C.LLVMValueRef
+	packedStoreValue3            llvmIRValueRef
+	packedStoreValues            map[packedStoreExtractCacheKey]llvmIRValueRef
+	packedVariantSparseTagReads  map[packedVariantSparseTagReadCacheKey]llvmIRValueRef
+	packedVariantSparseWordReads map[packedVariantSparseWordReadCacheKey]llvmIRValueRef
+	packedDenseDArrayItemsReads  map[packedDenseDArrayItemsReadCacheKey]llvmIRValueRef
+	packedDenseTagReads          map[packedDenseTagReadCacheKey]llvmIRValueRef
+	packedDenseWordReads         map[packedDenseWordReadCacheKey]llvmIRValueRef
+	packedDenseSideWordReads     map[packedDenseSideWordReadCacheKey]llvmIRValueRef
+	packedDirectFieldReads       map[packedDirectFieldReadCacheKey]llvmIRValueRef
+	packedVariantPayloadReads    map[packedVariantPayloadReadCacheKey][]llvmIRValueRef
 	// nonPackedEnumMatchTemps maps a match scrutinee SSA value to the single
 	// addressable copy emitted before its dispatch. The copy dominates every arm.
-	nonPackedEnumMatchTemps map[C.LLVMValueRef]C.LLVMValueRef
+	nonPackedEnumMatchTemps map[llvmIRValueRef]llvmIRValueRef
 	// straightLineBlockParent maps a basic block created purely as a straight-line continuation of
 	// another (e.g. the `wd.ok` arm of an index bounds-check, whose `wd.fail` arm always traps) to its
 	// predecessor. Such a block is only reachable from that predecessor, so a value live in the
@@ -214,12 +206,12 @@ type functionState struct {
 	// chain so repeated reads across trap-guard splits still share one cached read; real divergent
 	// blocks (if/match/loop arms) never register here and keep distinct keys (plus the explicit
 	// invalidatePackedReadCaches at mutations/binds), so cross-branch reuse stays blocked.
-	straightLineBlockParent map[C.LLVMBasicBlockRef]C.LLVMBasicBlockRef
+	straightLineBlockParent map[llvmIRBlockRef]llvmIRBlockRef
 	scopedCleanups          []scopedCleanupBinding
 	checkpoints             map[string]checkpointBinding
 	poolScopes              []activePoolBinding
-	breakTargets            []C.LLVMBasicBlockRef
-	continueTargets         []C.LLVMBasicBlockRef
+	breakTargets            []llvmIRBlockRef
+	continueTargets         []llvmIRBlockRef
 	loopCleanupFloors       []int
 	cleanupDepth            int
 	scopePool               []*codegenScope
@@ -239,11 +231,11 @@ type functionState struct {
 	// Large compiler-generated temporaries are heap-backed to keep debug/O0 stack
 	// frames bounded. They are allocated in the entry block and freed on every
 	// normal function exit after the return payload has been copied out.
-	heapTemps []C.LLVMValueRef
+	heapTemps []llvmIRValueRef
 }
 
 type oldCapture struct {
-	val C.LLVMValueRef
+	val llvmIRValueRef
 	typ semantic.Type
 }
 
@@ -376,13 +368,13 @@ const (
 type scopedCleanupBinding struct {
 	kind      scopedCleanupKind
 	name      string
-	ptr       C.LLVMValueRef
+	ptr       llvmIRValueRef
 	typ       semantic.Type
 	owner     *codegenScope
 	deferBody *deferredBodyBinding
 	// flagPtr is the i1 "still owns its value" slot for a scopedCleanupDrop binding:
 	// set at the declaration, cleared by any move, tested before the destructor runs.
-	flagPtr C.LLVMValueRef
+	flagPtr llvmIRValueRef
 	// dropHook is the mangled `__drop__` symbol to call for a scopedCleanupDrop binding.
 	dropHook string
 }
@@ -392,7 +384,7 @@ type deferredBodyBinding struct {
 }
 type regionBinding struct {
 	name  string
-	ptr   C.LLVMValueRef
+	ptr   llvmIRValueRef
 	typ   semantic.Type
 	owned bool
 }
@@ -406,113 +398,113 @@ const (
 type checkpointBinding struct {
 	kind       checkpointBindingKind
 	name       string
-	targetPtr  C.LLVMValueRef
+	targetPtr  llvmIRValueRef
 	targetType semantic.Type
-	markPtr    C.LLVMValueRef
+	markPtr    llvmIRValueRef
 	markType   semantic.Type
 }
 type packedStoreBinding struct {
-	value C.LLVMValueRef
+	value llvmIRValueRef
 	typ   *semantic.PackedEnumStoreType
 	// regionArena marks an IMPLICIT region-backed store (docs/74) with the arena it was built on.
 	// nil for an explicit or threaded store (those are reused unconditionally). An implicit store is
 	// reused only within its own region; entering a nested region (a different arena) builds a fresh
 	// one, so per-region trees are reclaimed with their region instead of leaking into an outer one.
-	regionArena C.LLVMValueRef
+	regionArena llvmIRValueRef
 }
 type treeAllocOwnerBinding struct {
-	arenaRef    C.LLVMValueRef
-	arenaRefPtr C.LLVMValueRef
+	arenaRef    llvmIRValueRef
+	arenaRefPtr llvmIRValueRef
 	// storeAnchorBlock/storeAnchorInstr mark the position right after this owner's arena
 	// became initialized. Implicit region-backed packed stores (getOrCreateRegionPackedStore)
 	// are emitted THERE, not at first use: a first use inside a loop body would otherwise
 	// re-execute ctx_aos_store_new every iteration (a fresh empty store per iteration), so a
 	// handle escaping one iteration decodes against a different store — the machine-from
 	// degenerate-darray SIGBUS. One hoisted store per (region, enum) dominates every use.
-	storeAnchorBlock C.LLVMBasicBlockRef
-	storeAnchorInstr C.LLVMValueRef
+	storeAnchorBlock llvmIRBlockRef
+	storeAnchorInstr llvmIRValueRef
 }
 
 // regionPackedStoreKey identifies an implicit region-backed packed store: the owning region's
 // stable arena identity (an alloca/param pointer) plus the enum root's name.
 type regionPackedStoreKey struct {
-	region C.LLVMValueRef
+	region llvmIRValueRef
 	enum   string
 }
 type packedStoreExtractCacheKey struct {
-	block C.LLVMBasicBlockRef
-	store C.LLVMValueRef
-	index C.unsigned
+	block llvmIRBlockRef
+	store llvmIRValueRef
+	index llvmIRUnsigned
 }
 type packedVariantSparseTagReadCacheKey struct {
-	block     C.LLVMBasicBlockRef
+	block     llvmIRBlockRef
 	storeType *semantic.PackedEnumStoreType
-	state     C.LLVMValueRef
-	handle    C.LLVMValueRef
+	state     llvmIRValueRef
+	handle    llvmIRValueRef
 }
 type packedVariantSparseWordReadCacheKey struct {
-	block     C.LLVMBasicBlockRef
+	block     llvmIRBlockRef
 	storeType *semantic.PackedEnumStoreType
-	state     C.LLVMValueRef
-	handle    C.LLVMValueRef
-	offset    C.LLVMValueRef
+	state     llvmIRValueRef
+	handle    llvmIRValueRef
+	offset    llvmIRValueRef
 }
 type packedReadOriginKey struct {
-	root C.LLVMValueRef
+	root llvmIRValueRef
 	path string
 }
 type packedDenseTagReadCacheKey struct {
-	block     C.LLVMBasicBlockRef
+	block     llvmIRBlockRef
 	storeType *semantic.PackedEnumStoreType
-	state     C.LLVMValueRef
+	state     llvmIRValueRef
 	origin    packedReadOriginKey
-	handle    C.LLVMValueRef
+	handle    llvmIRValueRef
 }
 type packedDenseDArrayItemsReadCacheKey struct {
-	block            C.LLVMBasicBlockRef
+	block            llvmIRBlockRef
 	storeType        *semantic.PackedEnumStoreType
-	state            C.LLVMValueRef
+	state            llvmIRValueRef
 	fieldOffsetBytes uint64
 }
 type packedDenseWordReadCacheKey struct {
-	block     C.LLVMBasicBlockRef
+	block     llvmIRBlockRef
 	storeType *semantic.PackedEnumStoreType
-	state     C.LLVMValueRef
+	state     llvmIRValueRef
 	origin    packedReadOriginKey
-	handle    C.LLVMValueRef
-	offset    C.LLVMValueRef
+	handle    llvmIRValueRef
+	offset    llvmIRValueRef
 }
 type packedDenseSideWordReadCacheKey struct {
-	block     C.LLVMBasicBlockRef
+	block     llvmIRBlockRef
 	storeType *semantic.PackedEnumStoreType
-	state     C.LLVMValueRef
+	state     llvmIRValueRef
 	origin    packedReadOriginKey
-	index     C.LLVMValueRef
-	offset    C.LLVMValueRef
+	index     llvmIRValueRef
+	offset    llvmIRValueRef
 }
 type packedDirectFieldReadCacheKey struct {
-	block    C.LLVMBasicBlockRef
-	store    C.LLVMValueRef
+	block    llvmIRBlockRef
+	store    llvmIRValueRef
 	enumType *semantic.EnumType
 	origin   packedReadOriginKey
-	handle   C.LLVMValueRef
+	handle   llvmIRValueRef
 	offset   uint64
 	size     uint64
 	typeKey  string
 }
 type packedVariantPayloadReadCacheKey struct {
-	block    C.LLVMBasicBlockRef
-	store    C.LLVMValueRef
+	block    llvmIRBlockRef
+	store    llvmIRValueRef
 	enumType *semantic.EnumType
 	variant  *semantic.EnumVariant
 	origin   packedReadOriginKey
-	handle   C.LLVMValueRef
+	handle   llvmIRValueRef
 }
 type packedEnumStorageBinding struct {
-	ptr C.LLVMValueRef
+	ptr llvmIRValueRef
 	// block is where ptr (the decoded record address) was computed; reuse is only sound
 	// from the same basic block (a sibling branch is not dominated by it).
-	block C.LLVMBasicBlockRef
+	block llvmIRBlockRef
 	typ   *semantic.EnumType
 }
 type packedCommonFieldValueBinding struct {
@@ -520,33 +512,33 @@ type packedCommonFieldValueBinding struct {
 	values packedPayloadValueCache
 }
 type packedVariantViewBinding struct {
-	ptr C.LLVMValueRef
+	ptr llvmIRValueRef
 	// ptrBlock is the basic block where ptr (the decoded record address) was computed. A
 	// memoized decode is only safe to reuse from the SAME block — a sibling branch is not
 	// dominated by it (LLVM "instruction does not dominate all uses"). Other blocks re-decode.
-	ptrBlock C.LLVMBasicBlockRef
-	handle   C.LLVMValueRef
+	ptrBlock llvmIRBlockRef
+	handle   llvmIRValueRef
 	// handleBlock is the basic block where a MEMOIZED handle load was emitted (emitIdent's
 	// load-and-rebind path). Like ptrBlock, the cached SSA value is only safe to reuse from the
 	// same block — a sibling branch is not dominated by it. nil means the handle is valid
 	// wherever the binding is visible (e.g. a pattern-dispatch extract that dominates the arm).
-	handleBlock   C.LLVMBasicBlockRef
+	handleBlock   llvmIRBlockRef
 	store         packedStoreBinding
 	typ           *semantic.PackedVariantViewType
 	payloadValues packedPayloadValueCache
 }
 type packedPayloadValueCache struct {
 	name1  string
-	value1 C.LLVMValueRef
+	value1 llvmIRValueRef
 	name2  string
-	value2 C.LLVMValueRef
-	values map[string]C.LLVMValueRef
+	value2 llvmIRValueRef
+	values map[string]llvmIRValueRef
 }
 type activePoolBinding struct {
 	name    string
-	ptr     C.LLVMValueRef
+	ptr     llvmIRValueRef
 	typ     semantic.Type
-	workers C.LLVMValueRef
+	workers llvmIRValueRef
 }
 
 const (

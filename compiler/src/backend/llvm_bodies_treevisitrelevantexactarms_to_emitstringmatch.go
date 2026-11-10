@@ -2,14 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-
-void elisa_coreSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigned trueWeight, unsigned falseWeight);
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -36,22 +28,22 @@ func (s *functionState) emitStringMatch(stmt *ast.MatchStmt) error {
 	if err != nil {
 		return err
 	}
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.end"))
-	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.fail"))
+	mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.end"))
+	failBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.fail"))
 	allTerminated := true
 	for i, arm := range stmt.Arms {
-		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.arm"))
-		var nextBB C.LLVMBasicBlockRef
+		bodyBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.arm"))
+		var nextBB llvmIRBlockRef
 		if i == len(stmt.Arms)-1 {
 			nextBB = failBB
 		} else {
-			nextBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.next"))
+			nextBB = llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.next"))
 		}
 		if err := s.emitStringMatchPatternTest(arm.Pattern, actualValue, stmt.Value, actualType, bodyBB, nextBB); err != nil {
 			return err
 		}
 
-		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
+		llvmPositionBuilderAtEnd(s.builder, bodyBB)
 		s.pushScope()
 		if err := s.emitMatchArmGuard(arm.Guard, nextBB); err != nil {
 			s.popScope()
@@ -64,25 +56,25 @@ func (s *functionState) emitStringMatch(stmt *ast.MatchStmt) error {
 		s.popScope()
 		if !s.currentBlockTerminated() {
 			allTerminated = false
-			C.LLVMBuildBr(s.builder, mergeBB)
+			llvmBuildBr(s.builder, mergeBB)
 		}
 
 		if nextBB != mergeBB {
-			C.LLVMPositionBuilderAtEnd(s.builder, nextBB)
+			llvmPositionBuilderAtEnd(s.builder, nextBB)
 		}
 	}
 
 	hasWildcard := matchHasWildcard(stmt.Arms)
-	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+	llvmPositionBuilderAtEnd(s.builder, failBB)
 	if hasWildcard {
-		C.LLVMBuildUnreachable(s.builder)
+		llvmBuildUnreachable(s.builder)
 	} else {
-		C.LLVMBuildBr(s.builder, mergeBB)
+		llvmBuildBr(s.builder, mergeBB)
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	llvmPositionBuilderAtEnd(s.builder, mergeBB)
 	if allTerminated && hasWildcard {
-		C.LLVMBuildUnreachable(s.builder)
+		llvmBuildUnreachable(s.builder)
 	}
 	return nil
 }

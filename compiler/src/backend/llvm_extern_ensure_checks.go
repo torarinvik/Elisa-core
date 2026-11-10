@@ -2,11 +2,6 @@
 
 package backend
 
-/*
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/semantic"
 )
@@ -32,7 +27,7 @@ func (s *functionState) externEnsureChecksEnabled(fn *semantic.FuncType) bool {
 	return !isUnion
 }
 
-func (s *functionState) emitExternEnsureChecks(fn *semantic.FuncType, args []C.LLVMValueRef, result C.LLVMValueRef, resultType semantic.Type) error {
+func (s *functionState) emitExternEnsureChecks(fn *semantic.FuncType, args []llvmIRValueRef, result llvmIRValueRef, resultType semantic.Type) error {
 	if !s.externEnsureChecksEnabled(fn) {
 		return nil
 	}
@@ -46,7 +41,7 @@ func (s *functionState) emitExternEnsureChecks(fn *semantic.FuncType, args []C.L
 		if err != nil {
 			return err
 		}
-		C.LLVMBuildStore(s.builder, args[i], alloca)
+		llvmBuildStore(s.builder, args[i], alloca)
 		s.defineBinding(name, valueBinding{ptr: alloca, typ: fn.Params[i], mutable: false})
 	}
 	if result != nil && resultType != nil && !isVoidType(resultType) {
@@ -54,7 +49,7 @@ func (s *functionState) emitExternEnsureChecks(fn *semantic.FuncType, args []C.L
 		if err != nil {
 			return err
 		}
-		C.LLVMBuildStore(s.builder, result, alloca)
+		llvmBuildStore(s.builder, result, alloca)
 		s.defineBinding("result", valueBinding{ptr: alloca, typ: resultType, mutable: false})
 	}
 	for _, cond := range fn.ExternEnsureValues {

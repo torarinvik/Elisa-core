@@ -2,33 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-
-static void elisacoreAddAlwaysInlineAttr(LLVMContextRef Ctx, LLVMValueRef Fn, const char* Name, size_t NameLen) {
-	unsigned Kind = LLVMGetEnumAttributeKindForName(Name, NameLen);
-	if (Kind == 0) {
-		return;
-	}
-	LLVMAttributeRef Attr = LLVMCreateEnumAttribute(Ctx, Kind, 0);
-	LLVMAddAttributeAtIndex(Fn, LLVMAttributeFunctionIndex, Attr);
-}
-
-static LLVMTypeRef elisacoreGlobalValueType(LLVMValueRef Value) {
-	return LLVMGlobalGetValueType(Value);
-}
-
-static void elisacoreSetAlignment(LLVMValueRef Value, unsigned Bytes) {
-	LLVMSetAlignment(Value, Bytes);
-}
-
-static char* elisacorePrintType(LLVMTypeRef Type) {
-	return LLVMPrintTypeToString(Type);
-}
-*/
-import "C"
-
 import (
 	"crypto/sha256"
 	"elisacore/src/ast"
@@ -484,36 +457,36 @@ func sanitizeIdentifier(s string) string {
 	}
 	return value
 }
-func boolToLLVMBool(v bool) C.LLVMBool {
+func boolToLLVMBool(v bool) llvmIRBool {
 	if v {
 		return 1
 	}
 	return 0
 }
-func cString(s string) *C.char {
-	return C.CString(s)
+func cString(s string) *llvmIRChar {
+	return llvmCString(s)
 }
-func llvmTypeSlicePtr(types []C.LLVMTypeRef) *C.LLVMTypeRef {
+func llvmTypeSlicePtr(types []llvmIRTypeRef) *llvmIRTypeRef {
 	if len(types) == 0 {
 		return nil
 	}
-	return (*C.LLVMTypeRef)(unsafe.Pointer(&types[0]))
+	return (*llvmIRTypeRef)(unsafe.Pointer(&types[0]))
 }
 func declIsExternVar(decl ast.Decl) bool {
 	_, ok := decl.(*ast.ExternVarDecl)
 	return ok
 }
-func llvmValueSlicePtr(values []C.LLVMValueRef) *C.LLVMValueRef {
+func llvmValueSlicePtr(values []llvmIRValueRef) *llvmIRValueRef {
 	if len(values) == 0 {
 		return nil
 	}
-	return (*C.LLVMValueRef)(unsafe.Pointer(&values[0]))
+	return (*llvmIRValueRef)(unsafe.Pointer(&values[0]))
 }
-func llvmBlockSlicePtr(blocks []C.LLVMBasicBlockRef) *C.LLVMBasicBlockRef {
+func llvmBlockSlicePtr(blocks []llvmIRBlockRef) *llvmIRBlockRef {
 	if len(blocks) == 0 {
 		return nil
 	}
-	return (*C.LLVMBasicBlockRef)(unsafe.Pointer(&blocks[0]))
+	return (*llvmIRBlockRef)(unsafe.Pointer(&blocks[0]))
 }
 func (g *llvmGenerator) exprType(expr ast.Expr) semantic.Type {
 	if g.result == nil || expr == nil {

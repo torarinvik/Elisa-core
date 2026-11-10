@@ -2,14 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-
-void elisa_coreSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigned trueWeight, unsigned falseWeight);
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -18,12 +10,12 @@ import (
 
 const backendStaticEvalLoopIterationLimit = 100000
 
-func (s *functionState) enumTagConstant(enumType *semantic.EnumType, tag uint32) (C.LLVMValueRef, error) {
+func (s *functionState) enumTagConstant(enumType *semantic.EnumType, tag uint32) (llvmIRValueRef, error) {
 	tagType, err := s.g.lowerEnumTagType(enumType)
 	if err != nil {
 		return nil, err
 	}
-	return C.LLVMConstInt(tagType, C.ulonglong(tag), 0), nil
+	return llvmConstInt(tagType, llvmIRUnsignedLongLong(tag), 0), nil
 }
 func (s *functionState) emitStaticIf(stmt *ast.StaticIfStmt) error {
 	branch, err := s.activeStmtBranch(stmt)

@@ -2,11 +2,6 @@
 
 package backend
 
-/*
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/semantic"
 )
@@ -94,13 +89,13 @@ func externViewLLVMParamPos(fn *semantic.FuncType, semanticIndex int) int {
 // convertExternViewArgs reorders and splits the explicit arguments of a C-ABI extern call
 // into its C parameter order, and remaps the byval index map to the new positions. Returns
 // the caller's slices unchanged when the order is the identity.
-func (s *functionState) convertExternViewArgs(fn *semantic.FuncType, args []C.LLVMValueRef, byval map[int]C.LLVMTypeRef) ([]C.LLVMValueRef, map[int]C.LLVMTypeRef) {
+func (s *functionState) convertExternViewArgs(fn *semantic.FuncType, args []llvmIRValueRef, byval map[int]llvmIRTypeRef) ([]llvmIRValueRef, map[int]llvmIRTypeRef) {
 	parts := externCParts(fn)
 	if parts == nil {
 		return args, byval
 	}
-	out := make([]C.LLVMValueRef, 0, len(parts)+len(args))
-	var remapped map[int]C.LLVMTypeRef
+	out := make([]llvmIRValueRef, 0, len(parts)+len(args))
+	var remapped map[int]llvmIRTypeRef
 	for _, part := range parts {
 		if part.Param >= len(args) {
 			continue
@@ -108,13 +103,13 @@ func (s *functionState) convertExternViewArgs(fn *semantic.FuncType, args []C.LL
 		arg := args[part.Param]
 		switch part.Part {
 		case semantic.CParamViewPtr:
-			out = append(out, C.LLVMBuildExtractValue(s.builder, arg, 0, cStringFree("extern.view.ptr")))
+			out = append(out, llvmBuildExtractValue(s.builder, arg, 0, cStringFree("extern.view.ptr")))
 		case semantic.CParamViewLen:
-			out = append(out, C.LLVMBuildExtractValue(s.builder, arg, 1, cStringFree("extern.view.len")))
+			out = append(out, llvmBuildExtractValue(s.builder, arg, 1, cStringFree("extern.view.len")))
 		default:
 			if ty, ok := byval[part.Param]; ok {
 				if remapped == nil {
-					remapped = map[int]C.LLVMTypeRef{}
+					remapped = map[int]llvmIRTypeRef{}
 				}
 				remapped[len(out)] = ty
 			}

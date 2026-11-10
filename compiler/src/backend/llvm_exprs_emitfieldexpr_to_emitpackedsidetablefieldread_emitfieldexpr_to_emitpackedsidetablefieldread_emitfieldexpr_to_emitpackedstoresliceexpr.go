@@ -2,78 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <string.h>
-#include <llvm-c/Core.h>
-
-static int elisacoreLLVMIsZeroValue(LLVMValueRef value) {
-	return LLVMIsAConstant(value) != NULL && LLVMIsNull(value);
-}
-
-static LLVMMetadataRef elisa_coreAliasMDString(LLVMContextRef ctx, const char* value) {
-	if (value == NULL) {
-		return LLVMMDStringInContext2(ctx, "", 0);
-	}
-	return LLVMMDStringInContext2(ctx, value, strlen(value));
-}
-
-static LLVMMetadataRef elisa_coreAliasMDNode(LLVMContextRef ctx, LLVMMetadataRef* operands, size_t count) {
-	return LLVMMDNodeInContext2(ctx, operands, count);
-}
-
-static unsigned elisa_coreMetadataKindID(LLVMContextRef ctx, const char* kindName) {
-	return LLVMGetMDKindIDInContext(ctx, kindName, strlen(kindName));
-}
-
-static void elisa_coreSetMetadataList(LLVMValueRef inst, LLVMContextRef ctx, const char* kindName, LLVMMetadataRef* scopes, size_t count) {
-	if (inst == NULL || ctx == NULL || kindName == NULL || count == 0) {
-		return;
-	}
-	LLVMMetadataRef list = elisa_coreAliasMDNode(ctx, scopes, count);
-	LLVMValueRef listValue = LLVMMetadataAsValue(ctx, list);
-	LLVMSetMetadata(inst, elisa_coreMetadataKindID(ctx, kindName), listValue);
-}
-
-static LLVMMetadataRef elisa_coreCreateAliasScopeDomain(LLVMContextRef ctx, const char* domainName) {
-	LLVMMetadataRef operands[1];
-	operands[0] = elisa_coreAliasMDString(ctx, domainName);
-	return elisa_coreAliasMDNode(ctx, operands, 1);
-}
-
-static LLVMMetadataRef elisa_coreCreateAliasScope(LLVMContextRef ctx, LLVMMetadataRef domain, const char* scopeName) {
-	LLVMMetadataRef operands[2];
-	operands[0] = elisa_coreAliasMDString(ctx, scopeName);
-	operands[1] = domain;
-	return elisa_coreAliasMDNode(ctx, operands, 2);
-}
-
-static void elisa_coreAttachAliasScopeMetadata(LLVMValueRef inst, LLVMContextRef ctx, const char* domainName, const char* aliasScopeName,
-	const char* noAliasScope1Name, int hasNoAliasScope1, const char* noAliasScope2Name, int hasNoAliasScope2) {
-	if (inst == NULL || ctx == NULL || domainName == NULL || aliasScopeName == NULL) {
-		return;
-	}
-	LLVMMetadataRef domain = elisa_coreCreateAliasScopeDomain(ctx, domainName);
-	LLVMMetadataRef aliasScope = elisa_coreCreateAliasScope(ctx, domain, aliasScopeName);
-	LLVMMetadataRef aliasScopes[1];
-	aliasScopes[0] = aliasScope;
-	elisa_coreSetMetadataList(inst, ctx, "alias.scope", aliasScopes, 1);
-
-	LLVMMetadataRef noAliasScopes[2];
-	size_t noAliasCount = 0;
-	if (hasNoAliasScope1 && noAliasScope1Name != NULL) {
-		noAliasScopes[noAliasCount++] = elisa_coreCreateAliasScope(ctx, domain, noAliasScope1Name);
-	}
-	if (hasNoAliasScope2 && noAliasScope2Name != NULL) {
-		noAliasScopes[noAliasCount++] = elisa_coreCreateAliasScope(ctx, domain, noAliasScope2Name);
-	}
-	if (noAliasCount != 0) {
-		elisa_coreSetMetadataList(inst, ctx, "noalias", noAliasScopes, noAliasCount);
-	}
-}
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -83,7 +11,7 @@ import (
 // emitConstStringLenExpr lowers `.len` on a compile-time string — the only `.len` a `u8&` receiver
 // has (the analyzer's constStringLenField rejects every receiver that does not const-evaluate to a
 // string) — to its byte length. A `u8&` carries no length, so nothing is computed at runtime.
-func (s *functionState) emitConstStringLenExpr(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitConstStringLenExpr(expr *ast.FieldExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if expr == nil || expr.Field != "len" {
 		return nil, nil, false, nil
 	}
@@ -116,7 +44,7 @@ func (s *functionState) nameIsRuntimeBinding(name string) bool {
 	return ok
 }
 
-func (s *functionState) emitFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitFieldExpr(expr *ast.FieldExpr) (llvmIRValueRef, semantic.Type, error) {
 	if value, fieldType, handled, err := s.emitStaticInterfaceMethodExpr(expr); handled {
 		return value, fieldType, err
 	}
@@ -175,10 +103,10 @@ func (s *functionState) emitFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, sema
 	if pointerLike {
 		return nil, nil, fmt.Errorf("field %s requires an addressable object (base %T: %v)", expr.Field, expr.Object, addressErr)
 	}
-	value := C.LLVMBuildExtractValue(s.builder, objValue, C.unsigned(index), cStringFree(expr.Field))
+	value := llvmBuildExtractValue(s.builder, objValue, llvmIRUnsigned(index), cStringFree(expr.Field))
 	return value, fieldType, nil
 }
-func (s *functionState) emitPackedStoreCountExpr(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitPackedStoreCountExpr(expr *ast.FieldExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if expr == nil || expr.Field != "count" {
 		return nil, nil, false, nil
 	}
@@ -195,10 +123,10 @@ func (s *functionState) emitPackedStoreCountExpr(expr *ast.FieldExpr) (C.LLVMVal
 	}
 	return value, s.g.namedType("usize"), true, nil
 }
-func (s *functionState) emitPackedStoreCountValue(storeValue C.LLVMValueRef, storeType *semantic.PackedEnumStoreType, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitPackedStoreCountValue(storeValue llvmIRValueRef, storeType *semantic.PackedEnumStoreType, name string) (llvmIRValueRef, error) {
 	return (&packedStoreOps{s: s, storeValue: storeValue, storeType: storeType}).storeCount(name)
 }
-func (s *functionState) emitPackedStoreTagsExpr(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitPackedStoreTagsExpr(expr *ast.FieldExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if expr == nil || expr.Field != "tags" {
 		return nil, nil, false, nil
 	}
@@ -221,11 +149,11 @@ func (s *functionState) emitPackedStoreTagsExpr(expr *ast.FieldExpr) (C.LLVMValu
 	if err != nil {
 		return nil, nil, true, err
 	}
-	zeroValue := C.LLVMConstInt(zeroType, 0, 0)
+	zeroValue := llvmConstInt(zeroType, 0, 0)
 	value, actualType, err := ops.storeTagsView(zeroValue, totalValue, resultType, "packed.store.tags")
 	return value, actualType, true, err
 }
-func (s *functionState) emitPackedVariantViewFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitPackedVariantViewFieldExpr(expr *ast.FieldExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	name, hasName := packedVariantViewName(expr.Object)
 	binding, ok := s.lookupPackedVariantView(name)
 	if !ok {
@@ -276,7 +204,7 @@ func (s *functionState) emitPackedVariantViewFieldExpr(expr *ast.FieldExpr) (C.L
 			value, err := s.emitPackedSideTableFieldRead(binding.handle, binding.typ.Enum, &binding.store, fieldType, layout.SideWordOffset, layout.WordCount, origin, "packed.view.common.side")
 			return value, fieldType, true, err
 		}
-		if (binding.ptr == nil || (binding.ptrBlock != nil && binding.ptrBlock != C.LLVMGetInsertBlock(s.builder))) && binding.handle != nil && binding.store.typ != nil {
+		if (binding.ptr == nil || (binding.ptrBlock != nil && binding.ptrBlock != llvmGetInsertBlock(s.builder))) && binding.handle != nil && binding.store.typ != nil {
 			binding.ptr = nil // stale cross-block decode: recompute in the current block
 			ops, ok := s.packedStoreOpsFromBinding(&binding.store)
 			if ok && ops.canDirectWordRead() {
@@ -297,7 +225,7 @@ func (s *functionState) emitPackedVariantViewFieldExpr(expr *ast.FieldExpr) (C.L
 				return nil, nil, true, err
 			}
 			binding.ptr = decodedPtr
-			binding.ptrBlock = C.LLVMGetInsertBlock(s.builder)
+			binding.ptrBlock = llvmGetInsertBlock(s.builder)
 			if hasName {
 				s.updatePackedVariantViewDecodedPtr(name, decodedPtr)
 			}
@@ -306,14 +234,14 @@ func (s *functionState) emitPackedVariantViewFieldExpr(expr *ast.FieldExpr) (C.L
 		if err != nil {
 			return nil, nil, true, err
 		}
-		fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerType, binding.ptr, C.unsigned(layout.RowFieldIndex), cStringFree("view.common.field"))
+		fieldPtr := llvmBuildStructGEP2(s.builder, containerType, binding.ptr, llvmIRUnsigned(layout.RowFieldIndex), cStringFree("view.common.field"))
 		value, err := s.loadValue(fieldPtr, fieldType, expr.Field)
 		return value, fieldType, true, err
 	}
 	if cachedValue, ok := binding.payloadValues.lookup(expr.Field); ok && cachedValue != nil {
 		return cachedValue, field.Type, true, nil
 	}
-	if (binding.ptr == nil || (binding.ptrBlock != nil && binding.ptrBlock != C.LLVMGetInsertBlock(s.builder))) && binding.handle != nil && binding.store.typ != nil {
+	if (binding.ptr == nil || (binding.ptrBlock != nil && binding.ptrBlock != llvmGetInsertBlock(s.builder))) && binding.handle != nil && binding.store.typ != nil {
 		binding.ptr = nil // stale cross-block decode: recompute in the current block
 		ops, ok := s.packedStoreOpsFromBinding(&binding.store)
 		if ok && ops.canDirectWordRead() {
@@ -334,7 +262,7 @@ func (s *functionState) emitPackedVariantViewFieldExpr(expr *ast.FieldExpr) (C.L
 			return nil, nil, true, err
 		}
 		binding.ptr = decodedPtr
-		binding.ptrBlock = C.LLVMGetInsertBlock(s.builder)
+		binding.ptrBlock = llvmGetInsertBlock(s.builder)
 		if hasName {
 			s.updatePackedVariantViewDecodedPtr(name, decodedPtr)
 		}
@@ -388,7 +316,7 @@ func packedVariantViewName(expr ast.Expr) (string, bool) {
 		return "", false
 	}
 }
-func (s *functionState) emitPackedCommonFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitPackedCommonFieldExpr(expr *ast.FieldExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	objectType := s.exprType(expr.Object)
 	if objectType == nil {
 		return nil, nil, false, nil
@@ -492,7 +420,7 @@ func (s *functionState) emitPackedCommonFieldExpr(expr *ast.FieldExpr) (C.LLVMVa
 	}
 	return coerced, fieldType, true, nil
 }
-func (s *functionState) emitPackedStoreValueAtDenseKey(ops *packedStoreOps, keyIndex C.LLVMValueRef, name string) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitPackedStoreValueAtDenseKey(ops *packedStoreOps, keyIndex llvmIRValueRef, name string) (llvmIRValueRef, semantic.Type, error) {
 	if ops == nil || ops.storeType == nil || ops.storeType.Enum == nil {
 		return nil, nil, fmt.Errorf("dense-key packed store read requires store metadata")
 	}
@@ -507,7 +435,7 @@ func (s *functionState) emitPackedStoreValueAtDenseKey(ops *packedStoreOps, keyI
 		return nil, nil, fmt.Errorf("unsupported packed enum ABI mode %d", s.g.packedModeForEnum(ops.storeType.Enum))
 	}
 }
-func (s *functionState) emitPackedStoreIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitPackedStoreIndexExpr(expr *ast.IndexExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if expr == nil {
 		return nil, nil, false, nil
 	}
@@ -532,7 +460,7 @@ func (s *functionState) emitPackedStoreIndexExpr(expr *ast.IndexExpr) (C.LLVMVal
 	value, actualType, err := ops.storeValueAt(indexValue, "packed.store.index")
 	return value, actualType, true, err
 }
-func (s *functionState) emitPackedStoreSliceExpr(expr *ast.SliceExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitPackedStoreSliceExpr(expr *ast.SliceExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if expr == nil {
 		return nil, nil, false, nil
 	}

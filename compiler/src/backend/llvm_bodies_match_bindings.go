@@ -2,14 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-
-void elisa_coreSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigned trueWeight, unsigned falseWeight);
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -17,7 +9,7 @@ import (
 	"sort"
 )
 
-func (s *functionState) bindMatchedPackedVariantView(name string, pattern ast.MatchPattern, enumValue C.LLVMValueRef, decodedValue C.LLVMValueRef, enumType *semantic.EnumType, store *packedStoreBinding, payloadValues packedPayloadValueCache) {
+func (s *functionState) bindMatchedPackedVariantView(name string, pattern ast.MatchPattern, enumValue llvmIRValueRef, decodedValue llvmIRValueRef, enumType *semantic.EnumType, store *packedStoreBinding, payloadValues packedPayloadValueCache) {
 	if enumType == nil || !enumType.Packed {
 		return
 	}
@@ -163,28 +155,28 @@ func (s *functionState) emitExpectPatternStmt(stmt *ast.ExpectPatternStmt) error
 			s.defineBinding(name, valueBinding{ptr: alloca, typ: bindings[name], mutable: false})
 		}
 	}
-	successBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("expect.ok"))
-	failureBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("expect.fail"))
+	successBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("expect.ok"))
+	failureBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("expect.fail"))
 	if len(stmt.Patterns) == 0 {
-		C.LLVMBuildBr(s.builder, successBB)
+		llvmBuildBr(s.builder, successBB)
 	} else {
 		for i, pattern := range stmt.Patterns {
 			nextFailure := failureBB
 			if i != len(stmt.Patterns)-1 {
-				nextFailure = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("expect.next"))
+				nextFailure = llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("expect.next"))
 			}
 			if err := s.emitConditionPatternTestAndBind(pattern, actualValue, actualType, stmt.Value, successBB, nextFailure); err != nil {
 				return err
 			}
 			if i != len(stmt.Patterns)-1 {
-				C.LLVMPositionBuilderAtEnd(s.builder, nextFailure)
+				llvmPositionBuilderAtEnd(s.builder, nextFailure)
 			}
 		}
 	}
-	C.LLVMPositionBuilderAtEnd(s.builder, failureBB)
+	llvmPositionBuilderAtEnd(s.builder, failureBB)
 	if err := s.emitPanicWithBacktrace(stmt.Position, &ast.StringLit{Position: stmt.Position, Value: "expect pattern failed"}); err != nil {
 		return err
 	}
-	C.LLVMPositionBuilderAtEnd(s.builder, successBB)
+	llvmPositionBuilderAtEnd(s.builder, successBB)
 	return nil
 }
