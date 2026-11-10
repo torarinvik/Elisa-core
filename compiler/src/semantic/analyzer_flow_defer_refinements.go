@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"maps"
 )
 
 func (a *Analyzer) analyzeDeferStmt(stmt *ast.DeferStmt) {
@@ -287,14 +288,7 @@ func (a *Analyzer) validateDeferStmtBodyExpr(expr ast.Expr) {
 }
 
 func (a *Analyzer) clonePackedVariantViewBindings() map[*Symbol]*PackedVariantViewType {
-	if a.currentPackedVariantViews == nil {
-		return nil
-	}
-	cloned := make(map[*Symbol]*PackedVariantViewType, len(a.currentPackedVariantViews))
-	for sym, viewType := range a.currentPackedVariantViews {
-		cloned[sym] = viewType
-	}
-	return cloned
+	return maps.Clone(a.currentPackedVariantViews)
 }
 
 func unwrapPackedVariantViewExpr(expr ast.Expr) ast.Expr {

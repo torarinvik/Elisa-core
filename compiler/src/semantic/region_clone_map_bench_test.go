@@ -62,3 +62,32 @@ func BenchmarkCloneRegionDependencyStates(b *testing.B) {
 		})
 	}
 }
+
+var packedDependencyCloneBenchSink map[*Symbol]packedStoreDependencyState
+
+func BenchmarkClonePackedStoreDependencies(b *testing.B) {
+	for _, n := range []int{1, 8, 32, 128} {
+		b.Run(fmt.Sprint(n), func(b *testing.B) {
+			source := make(map[*Symbol]packedStoreDependencyState, n)
+			for i := 0; i < n; i++ {
+				source[&Symbol{Name: fmt.Sprint(i)}] = packedStoreDependencyState{}
+			}
+			b.Run("entry-loop", func(b *testing.B) {
+				b.ReportAllocs()
+				for i := 0; i < b.N; i++ {
+					cloned := make(map[*Symbol]packedStoreDependencyState, len(source))
+					for symbol, state := range source {
+						cloned[symbol] = state
+					}
+					packedDependencyCloneBenchSink = cloned
+				}
+			})
+			b.Run("runtime-clone", func(b *testing.B) {
+				b.ReportAllocs()
+				for i := 0; i < b.N; i++ {
+					packedDependencyCloneBenchSink = clonePackedStoreDependencyStates(source)
+				}
+			})
+		})
+	}
+}

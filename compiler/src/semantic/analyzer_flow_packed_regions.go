@@ -1,27 +1,16 @@
 package semantic
 
-import "elisacore/src/ast"
+import (
+	"elisacore/src/ast"
+	"maps"
+)
 
 func (a *Analyzer) clonePackedStores() map[string]*PackedEnumStoreType {
-	if a.currentPackedStores == nil {
-		return nil
-	}
-	cloned := make(map[string]*PackedEnumStoreType, len(a.currentPackedStores))
-	for name, store := range a.currentPackedStores {
-		cloned[name] = store
-	}
-	return cloned
+	return maps.Clone(a.currentPackedStores)
 }
 
 func (a *Analyzer) clonePackedStoreResolutions() map[*Symbol]packedStoreResolution {
-	if a.currentPackedStoreResolutions == nil {
-		return nil
-	}
-	cloned := make(map[*Symbol]packedStoreResolution, len(a.currentPackedStoreResolutions))
-	for sym, resolution := range a.currentPackedStoreResolutions {
-		cloned[sym] = resolution
-	}
-	return cloned
+	return maps.Clone(a.currentPackedStoreResolutions)
 }
 
 func (a *Analyzer) bindActivePackedStoreType(t Type) {

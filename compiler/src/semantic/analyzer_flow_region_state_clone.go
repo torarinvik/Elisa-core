@@ -80,25 +80,11 @@ func cloneRegionStateMap(src map[*Symbol]regionState) map[*Symbol]regionState {
 }
 
 func (a *Analyzer) cloneRegionMarkStates() map[*Symbol]regionMarkState {
-	if a.currentRegionMarks == nil {
-		return nil
-	}
-	cloned := make(map[*Symbol]regionMarkState, len(a.currentRegionMarks))
-	for sym, state := range a.currentRegionMarks {
-		cloned[sym] = state
-	}
-	return cloned
+	return maps.Clone(a.currentRegionMarks)
 }
 
 func (a *Analyzer) cloneCheckpointStates() map[*Symbol]checkpointState {
-	if a.currentCheckpoints == nil {
-		return nil
-	}
-	cloned := make(map[*Symbol]checkpointState, len(a.currentCheckpoints))
-	for sym, state := range a.currentCheckpoints {
-		cloned[sym] = state
-	}
-	return cloned
+	return maps.Clone(a.currentCheckpoints)
 }
 
 // Scoped analysis keeps its caller's map read-only. Restore the caller's borrowed
@@ -160,11 +146,7 @@ func clonePackedStoreDependencyStates(src map[*Symbol]packedStoreDependencyState
 	if len(src) == 0 {
 		return nil
 	}
-	cloned := make(map[*Symbol]packedStoreDependencyState, len(src))
-	for store, dep := range src {
-		cloned[store] = dep
-	}
-	return cloned
+	return maps.Clone(src)
 }
 
 func cloneRegionParamDeps(src IntBitSet) IntBitSet {
