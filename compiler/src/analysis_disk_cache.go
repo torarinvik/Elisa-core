@@ -412,6 +412,10 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 	}
 	if result == nil {
 		coldStart := time.Now()
+		var pristine *ast.File
+		if pending != nil {
+			pristine = pending.coldPristine
+		}
 		if analysisDiskBootstrapEnabled() {
 			if os.Getenv("ELISACORE_ANALYSIS_BOOTSTRAP") == "" {
 				if err := analysisDiskCheckpointStorageAvailable(artifact); err != nil {
@@ -423,10 +427,12 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 					return semantic.AnalyzeWithOptions(file, options)
 				}
 			}
-			result, state = advanceAnalysisDiskBuildWithCheckpoint(program, file, options, artifact, stderr, analysisDiskResumeCheckpoint(buildCheckpoint, pending), checkpointTried)
+			result, state = advanceAnalysisDiskBuildWithCheckpoint(program, file, pristine, options, artifact, stderr, analysisDiskResumeCheckpoint(buildCheckpoint, pending), checkpointTried)
 		} else {
-			pristine, ok := parseProgram(program.filename, program.source, io.Discard)
-			if !ok {
+			if pristine == nil {
+				pristine, _ = parseAnalysisBuildPristine(program)
+			}
+			if pristine == nil {
 				return semantic.AnalyzeWithOptions(file, options)
 			}
 			result, state = semantic.AnalyzeRetained(file, pristine, program.source, options)

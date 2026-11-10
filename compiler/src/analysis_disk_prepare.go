@@ -26,6 +26,7 @@ type analysisDiskRestoration struct {
 	buildTried   bool
 	buildErr     error
 	preparation  analysisScratchPreparation
+	coldPristine *ast.File
 	err          error
 	loaded       bool
 	familyReplay bool
@@ -102,7 +103,11 @@ func startAnalysisDiskRestoration(program *loadedProgram, options semantic.Analy
 		}
 		if err != nil {
 			pending.err = err
-			return
+			if !pending.loaded && os.IsNotExist(err) {
+				// No state to replay. Parse the independent tree alongside
+				// the caller's primary parse, borrowing the same tokens.
+				pending.coldPristine, _ = parseAnalysisBuildPristine(program)
+			}
 		}
 	}()
 	return pending

@@ -203,7 +203,7 @@ func buildCacheEnvKey() []string {
 func compilerCacheEnvKey() []string {
 	ignored := map[string]bool{
 		"ELISA_STAGE1_SEED_MAX_RSS_KB": true, "ELISA_STAGE1_SEED_OPT_LEVEL": true,
-		"ELISA_STAGE1_RSS_POLL_SECONDS":   true,
+		"ELISA_STAGE1_RSS_POLL_SECONDS": true, "ELISA_STAGE1_SEED_TIMEOUT_WRAPPED": true,
 		"ELISA_STAGE1_SEED_BOOTSTRAP_BIN": true, "ELISA_STAGE1_SEED_BOOTSTRAP_KIND": true,
 		"ELISA_STAGE1_SEED_CLANG": true, "ELISA_STAGE0_SOURCE_ROOT": true,
 		"ELISA_STAGE1_BIN": true, "ELISA_STAGE1_OBJECT": true, "ELISA_RUNTIME_OBJ": true,

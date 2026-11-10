@@ -142,10 +142,10 @@ func parseAnalysisBuildPristine(program *loadedProgram) (*ast.File, bool) {
 // progress, never a semantic error or artifact. The same normal command resumes
 // in a fresh process; no background worker or child orchestration is started.
 func advanceAnalysisDiskBuild(program *loadedProgram, file *ast.File, options semantic.AnalyzeOptions, complete analysisDiskArtifact, stderr io.Writer) (*semantic.Result, *semantic.RetainedAnalysis) {
-	return advanceAnalysisDiskBuildWithCheckpoint(program, file, options, complete, stderr, nil, false)
+	return advanceAnalysisDiskBuildWithCheckpoint(program, file, nil, options, complete, stderr, nil, false)
 }
 
-func advanceAnalysisDiskBuildWithCheckpoint(program *loadedProgram, file *ast.File, options semantic.AnalyzeOptions, complete analysisDiskArtifact, stderr io.Writer, checkpoint *analysisDiskBuildCheckpoint, checkpointTried bool) (*semantic.Result, *semantic.RetainedAnalysis) {
+func advanceAnalysisDiskBuildWithCheckpoint(program *loadedProgram, file, pristine *ast.File, options semantic.AnalyzeOptions, complete analysisDiskArtifact, stderr io.Writer, checkpoint *analysisDiskBuildCheckpoint, checkpointTried bool) (*semantic.Result, *semantic.RetainedAnalysis) {
 	artifact := analysisBuildArtifact(complete, program.source)
 	// Snapshot the cache-identity inputs. The publish check recomputes the
 	// identity after analysis; if it drifts, these snapshots say which input
@@ -196,9 +196,11 @@ func advanceAnalysisDiskBuildWithCheckpoint(program *loadedProgram, file *ast.Fi
 	if build == nil {
 		// A new build needs an independent syntax tree, but the invocation's
 		// immutable token snapshot can be shared with the primary parse.
-		pristine, ok := parseAnalysisBuildPristine(program)
-		if !ok {
-			return semantic.AnalyzeWithOptions(file, options), nil
+		if pristine == nil {
+			pristine, _ = parseAnalysisBuildPristine(program)
+			if pristine == nil {
+				return semantic.AnalyzeWithOptions(file, options), nil
+			}
 		}
 		var err error
 		build, err = semantic.BeginAnalysisBuild(file, pristine, program.source, options)

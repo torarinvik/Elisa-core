@@ -398,7 +398,7 @@ func TestAnalysisDiskBuildCheckpointRevalidatesAtHandoff(t *testing.T) {
 		t.Fatal("changed handoff source did not parse")
 	}
 	var debug bytes.Buffer
-	advanceAnalysisDiskBuildWithCheckpoint(changedSource, changedFile, options, complete, &debug, valid, true)
+	advanceAnalysisDiskBuildWithCheckpoint(changedSource, changedFile, nil, options, complete, &debug, valid, true)
 	if !strings.Contains(debug.String(), "declined checkpoint: checkpoint artifact changed before handoff") || !strings.Contains(debug.String(), "bootstrap restore completed=") {
 		t.Fatalf("handoff did not reject the old checkpoint and load the current source checkpoint: %s", debug.String())
 	}
