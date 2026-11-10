@@ -213,7 +213,8 @@ var autoRegionVarDeclType = reflect.TypeFor[*ast.VarDeclStmt]()
 func bodyForwardsConstructedStructLocalInfo(stmts []ast.Stmt) (bool, bool) {
 	constructed := map[string]bool{}
 	callConstructed := map[string]bool{}
-	var declarations []*ast.VarDeclStmt
+	type alias struct{ name, target string }
+	var aliases []alias
 	var collect func(v reflect.Value)
 	collect = func(v reflect.Value) {
 		switch v.Kind() {
@@ -224,8 +225,11 @@ func bodyForwardsConstructedStructLocalInfo(stmts []ast.Stmt) (bool, bool) {
 			if v.Type() == autoRegionVarDeclType {
 				vd := v.Interface().(*ast.VarDeclStmt)
 				if vd.Name != "" {
-					declarations = append(declarations, vd)
-					switch unwrapParenExprAST(vd.Value).(type) {
+					switch value := unwrapParenExprAST(vd.Value).(type) {
+					case *ast.Ident:
+						if value != nil {
+							aliases = append(aliases, alias{vd.Name, value.Name})
+						}
 					case *ast.StructLitExpr:
 						constructed[vd.Name] = true
 					case *ast.CallExpr:
@@ -259,21 +263,17 @@ func bodyForwardsConstructedStructLocalInfo(stmts []ast.Stmt) (bool, bool) {
 	// purpose of deciding whether the function needs an ambient region. Semantic analysis
 	// records and validates the actual source symbol's region before threading it, so this
 	// syntax-only prepass cannot grant a borrow or bypass reassignment/liveness checks.
+	if len(constructed) == 0 {
+		return false, false
+	}
 	for changed := true; changed; {
 		changed = false
-		for _, vd := range declarations {
-			if vd == nil || constructed[vd.Name] || vd.Value == nil {
-				continue
-			}
-			value := unwrapParenExprAST(vd.Value)
-			if id, ok := value.(*ast.Ident); ok && id != nil && constructed[id.Name] {
-				constructed[vd.Name] = true
+		for _, binding := range aliases {
+			if !constructed[binding.name] && constructed[binding.target] {
+				constructed[binding.name] = true
 				changed = true
 			}
 		}
-	}
-	if len(constructed) == 0 {
-		return false, false
 	}
 	argForwardsConstructed := func(args []ast.Expr) bool {
 		for _, arg := range args {
