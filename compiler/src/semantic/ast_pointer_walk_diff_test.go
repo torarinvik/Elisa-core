@@ -26,7 +26,7 @@ func walkNodesReflect(root any) []any {
 func walkNodesTyped(t *testing.T, root any) []any {
 	var nodes []any
 	seen := map[uintptr]bool{}
-	if !fillMayAdoptWalkTyped(root, func(n any) { nodes = append(nodes, n) }, seen) {
+	if !astscan.WalkPointers(root, func(n any) { nodes = append(nodes, n) }, seen) {
 		t.Fatalf("typed walker declined root %T", root)
 	}
 	return nodes

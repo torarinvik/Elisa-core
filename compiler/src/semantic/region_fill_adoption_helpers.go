@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/astscan"
 	"elisacore/src/lexer"
 	"reflect"
 )
@@ -204,7 +205,7 @@ func fillMayAdoptWalk(v reflect.Value, visit func(any)) {
 // otherwise. Both visit exactly the same pointers in the same order; reflection cost ~7 s plus
 // garbage in a stage1 build.
 func fillMayAdoptWalkSeen(v reflect.Value, visit func(any), seen map[uintptr]bool) {
-	if v.IsValid() && v.CanInterface() && fillMayAdoptWalkTyped(v.Interface(), visit, seen) {
+	if v.IsValid() && v.CanInterface() && astscan.WalkPointers(v.Interface(), visit, seen) {
 		return
 	}
 	fillMayAdoptWalkReflect(v, visit, seen)
@@ -212,35 +213,7 @@ func fillMayAdoptWalkSeen(v reflect.Value, visit func(any), seen map[uintptr]boo
 
 // fillMayAdoptWalkReflect is the reflective walker: the specification the generated one follows.
 func fillMayAdoptWalkReflect(v reflect.Value, visit func(any), seen map[uintptr]bool) {
-	if !v.IsValid() {
-		return
-	}
-	switch v.Kind() {
-	case reflect.Pointer:
-		if v.IsNil() || !v.CanInterface() || seen[v.Pointer()] {
-			return
-		}
-		seen[v.Pointer()] = true
-		visit(v.Interface())
-		fillMayAdoptWalkReflect(v.Elem(), visit, seen)
-	case reflect.Interface:
-		if !v.IsNil() {
-			fillMayAdoptWalkReflect(v.Elem(), visit, seen)
-		}
-	case reflect.Struct:
-		for _, i := range fillMayAdoptExportedFields(v.Type()) {
-			fillMayAdoptWalkReflect(v.Field(i), visit, seen)
-		}
-	case reflect.Slice, reflect.Array:
-		for i := 0; i < v.Len(); i++ {
-			fillMayAdoptWalkReflect(v.Index(i), visit, seen)
-		}
-	case reflect.Map:
-		iter := v.MapRange()
-		for iter.Next() {
-			fillMayAdoptWalkReflect(iter.Value(), visit, seen)
-		}
-	}
+	astscan.WalkPointersReflect(v, visit, seen)
 }
 
 func fillMayAdoptExportedFields(t reflect.Type) []int {

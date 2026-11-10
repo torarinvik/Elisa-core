@@ -93,7 +93,7 @@ type walkMode struct {
 }
 
 var modes = []walkMode{
-	{File: "src/semantic/ast_pointer_walk_gen.go", Maps: true, Prefix: "astWalk", Reflect: "fillMayAdoptWalkReflect", Entry: "fillMayAdoptWalkTyped", Describe: "fillMayAdoptWalk"},
+	{File: "src/astscan/ast_pointer_walk_gen.go", Package: "astscan", Maps: true, Prefix: "astWalk", Reflect: "WalkPointersReflect", Entry: "WalkPointers", Describe: "fillMayAdoptWalk"},
 	{File: "src/astscan/ast_scan_walk_gen.go", Package: "astscan", Maps: false, Prefix: "astScanWalk", Reflect: "WalkReflect", Entry: "Walk", Describe: "walkStoreScanNodes"},
 	{File: "src/astscan/ast_prune_walk_gen.go", Package: "astscan", Maps: false, Prefix: "astPruneWalk", Reflect: "pruneWalkReflect", Entry: "walkPruneTyped", Describe: "walkPruned", Prune: true},
 	{File: "src/semantic/ast_canonical_walk_gen.go", Maps: true, Prefix: "astCanonicalWalk", Reflect: "canonicalASTWalkOpaque", Entry: "canonicalASTWalkTyped", Describe: "canonical AST membership", Prune: true, OpaqueFields: true},
