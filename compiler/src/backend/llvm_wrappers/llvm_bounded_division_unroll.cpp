@@ -385,6 +385,7 @@ extern "C" unsigned elisacoreUnrollLaggedRecurrences(LLVMModuleRef Ref) {
 #include "llvm_power_position.cpp"
 #include "llvm_range_and.cpp"
 #include "llvm_scalar_loop_idioms.cpp"
+#include "llvm_shift_xor.cpp"
 #include "llvm_edge_division_reuse.cpp"
 #include "llvm_factored_unsigned_division.cpp"
 #include "llvm_remainder_recurrence.cpp"
@@ -405,6 +406,7 @@ extern "C" unsigned elisacoreOptimizeBoundedDivisionLoops(LLVMModuleRef M, LLVMT
     Changed += elisacoreFoldPowerPosition(*llvm::unwrap(M));
     Changed += elisacoreFoldRangeAndLoops(*llvm::unwrap(M));
     Changed += elisacoreFoldScalarLoopIdioms(*llvm::unwrap(M));
+    Changed += elisacoreFoldShiftXorLoops(*llvm::unwrap(M));
   }
 #endif
   if (Changed) {
