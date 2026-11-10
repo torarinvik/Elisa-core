@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"elisacore/src/ast"
+	"elisacore/src/astscan"
 	"elisacore/src/lexer"
 	"elisacore/src/parser"
 )
@@ -33,13 +34,13 @@ func walkNodesTyped(t *testing.T, root any) []any {
 
 func scanNodesReflect(stmts []ast.Stmt) []any {
 	var nodes []any
-	storeScanWalkReflect(reflect.ValueOf(stmts), func(n any) { nodes = append(nodes, n) }, map[uintptr]bool{})
+	astscan.WalkReflect(reflect.ValueOf(stmts), func(n any) { nodes = append(nodes, n) }, map[uintptr]bool{})
 	return nodes
 }
 
 func scanNodesTyped(t *testing.T, stmts []ast.Stmt) []any {
 	var nodes []any
-	if !storeScanWalkTyped(stmts, func(n any) { nodes = append(nodes, n) }, map[uintptr]bool{}) {
+	if !astscan.Walk(stmts, func(n any) { nodes = append(nodes, n) }, map[uintptr]bool{}) {
 		t.Fatal("typed scan walker declined []ast.Stmt")
 	}
 	return nodes

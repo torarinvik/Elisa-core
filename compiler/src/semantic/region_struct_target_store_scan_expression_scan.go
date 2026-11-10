@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"elisacore/src/ast"
+	"elisacore/src/astscan"
 )
 
 // storeScanMentionsHeader reports whether an expression may evaluate to (or view) a HEADER name
@@ -157,16 +158,10 @@ func storeScanMentionsHeaderWalk(v reflect.Value, names map[string]bool, seen ma
 func walkStoreScanNodes(stmts []ast.Stmt, visit func(any)) {
 	// Desugaring shares subtrees (a nested guard chain reuses its operands), so an unmemoized
 	// walk is exponential in nesting depth. Each node is visited once. The generated typed walker
-	// (ast_scan_walk_gen.go) visits exactly what storeScanWalkReflect does, without reflection.
+	// visits exactly what the reflective fallback does, without reflection.
 	seen := borrowStoreScanSeen()
 	defer releaseStoreScanSeen(seen)
-	// This root is always a statement slice; dispatch directly to the same
-	// generated cases without boxing the slice into an interface.
-	for _, stmt := range stmts {
-		if stmt != nil {
-			astScanWalkIface_ast_Stmt(stmt, visit, seen)
-		}
-	}
+	astscan.WalkStatements(stmts, visit, seen)
 }
 
 // The pre-body passes walk every function body dozens of times; a fresh visited set
@@ -193,34 +188,6 @@ func releaseStoreScanSeen(seen map[uintptr]bool) {
 // storeScanWalkReflect is the reflective store-scan walk, the specification the generated walker
 // follows: every non-nil pointer reachable through interfaceable struct fields, slices, arrays and
 // interfaces (not map values), each address once.
-func storeScanWalkReflect(v reflect.Value, visit func(any), seen map[uintptr]bool) {
-	if !v.IsValid() || !v.CanInterface() {
-		return
-	}
-	switch v.Kind() {
-	case reflect.Pointer:
-		if v.IsNil() || seen[v.Pointer()] {
-			return
-		}
-		seen[v.Pointer()] = true
-		visit(v.Interface())
-		storeScanWalkReflect(v.Elem(), visit, seen)
-	case reflect.Interface:
-		if v.IsNil() {
-			return
-		}
-		storeScanWalkReflect(v.Elem(), visit, seen)
-	case reflect.Struct:
-		for i := 0; i < v.NumField(); i++ {
-			storeScanWalkReflect(v.Field(i), visit, seen)
-		}
-	case reflect.Slice, reflect.Array:
-		for i := 0; i < v.Len(); i++ {
-			storeScanWalkReflect(v.Index(i), visit, seen)
-		}
-	}
-}
-
 // exprMentionsAny reports whether any identifier in the node (or a string-valued binder field
 // of it) names a member of names.
 func storeScanMentions(node any, names map[string]bool) bool {

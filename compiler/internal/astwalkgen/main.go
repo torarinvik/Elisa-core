@@ -76,6 +76,7 @@ func (im *srcImporter) Import(path string) (*types.Package, error) {
 // reflective walkStoreScanNodes) does not descend into map values.
 type walkMode struct {
 	File     string // output path, relative to compiler/
+	Package  string // output package override
 	Maps     bool
 	Prefix   string // per-type function prefix
 	Reflect  string // reflective fallback (same semantics)
@@ -93,7 +94,7 @@ type walkMode struct {
 
 var modes = []walkMode{
 	{File: "src/semantic/ast_pointer_walk_gen.go", Maps: true, Prefix: "astWalk", Reflect: "fillMayAdoptWalkReflect", Entry: "fillMayAdoptWalkTyped", Describe: "fillMayAdoptWalk"},
-	{File: "src/semantic/ast_scan_walk_gen.go", Maps: false, Prefix: "astScanWalk", Reflect: "storeScanWalkReflect", Entry: "storeScanWalkTyped", Describe: "walkStoreScanNodes"},
+	{File: "src/astscan/ast_scan_walk_gen.go", Package: "astscan", Maps: false, Prefix: "astScanWalk", Reflect: "WalkReflect", Entry: "Walk", Describe: "walkStoreScanNodes"},
 	{File: "src/semantic/ast_prune_walk_gen.go", Maps: false, Prefix: "astPruneWalk", Reflect: "pruneWalkReflect", Entry: "pruneWalkTyped", Describe: "walkPruned", Prune: true},
 	{File: "src/semantic/ast_canonical_walk_gen.go", Maps: true, Prefix: "astCanonicalWalk", Reflect: "canonicalASTWalkOpaque", Entry: "canonicalASTWalkTyped", Describe: "canonical AST membership", Prune: true, OpaqueFields: true},
 	{File: "src/semantic/proof_binding_walk_gen.go", Describe: "proof-binding source syntax", ProofBinding: true},
@@ -413,6 +414,9 @@ func generate(m walkMode) ([]byte, error) {
 	file.Write(entry.Bytes())
 	file.Write(g.out.Bytes())
 	text := file.String()
+	if m.Package != "" {
+		text = strings.Replace(text, "package semantic", "package "+m.Package, 1)
+	}
 	text = strings.ReplaceAll(text, "astWalk", m.Prefix)
 	text = strings.ReplaceAll(text, "fillMayAdoptWalkReflect", m.Reflect)
 	text = strings.ReplaceAll(text, "fillMayAdoptWalkTyped", m.Entry)

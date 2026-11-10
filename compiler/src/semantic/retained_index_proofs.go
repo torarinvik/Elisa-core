@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/astscan"
 	"elisacore/src/unparse"
 	"regexp"
 )
@@ -253,7 +254,7 @@ func retainedIndexProofNonBodyDefaultUses(decl ast.Decl, names map[string]bool, 
 		}
 	default:
 		found := false
-		storeScanWalkTyped(decl, func(node any) {
+		astscan.Walk(decl, func(node any) {
 			child, ok := node.(ast.Decl)
 			if !ok || child == decl {
 				return
