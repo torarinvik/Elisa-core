@@ -103,7 +103,12 @@ def _validate_go_build_context(root: Path) -> dict[str, str]:
 def _source_candidates(
     root: Path, environment: dict[str, str], *, closures: dict[str, set[Path]] | None = None,
 ) -> list[tuple[str, Path]]:
-    command = ["go", "list", "-deps", "-json", "./src"]
+    # The full JSON also asks Go for build-cache staleness, which can hash
+    # much of the dependency graph before we read its sources ourselves.
+    fields = ("Dir", "ImportPath", "Module", "Error", "DepsErrors", "Incomplete", *GO_LIST_FILE_FIELDS)
+    if closures is not None:
+        fields += ("Deps",)
+    command = ["go", "list", "-deps", "-json=" + ",".join(fields), "./src"]
     try:
         result = subprocess.run(
             command,
