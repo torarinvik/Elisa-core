@@ -145,9 +145,15 @@ static bool foldPowerPositionChain(BasicBlock &Entry) {
   IRBuilder<> B(Enter);
   Value *Stable = B.CreateFreeze(Input);
   Enter->setCondition(B.CreateICmpSLT(Stable, B.getInt64(2)));
-  Position->addIncoming(powerPosition(B, Stable, Position->getType()), &Entry);
-  Enter->setSuccessor(1, Join);
-  DeleteDeadBlocks(Chain);
+  // Preserve the first comparison so inputs 2 and 3 keep the constant path.
+  cast<ICmpInst>(First->getCondition())->setOperand(0, Stable);
+  auto *Compute = BasicBlock::Create(Entry.getContext(), "power.position.compute",
+                                     Entry.getParent(), Join);
+  B.SetInsertPoint(Compute);
+  Position->addIncoming(powerPosition(B, Stable, Position->getType()), Compute);
+  B.CreateBr(Join);
+  First->setSuccessor(1, Compute);
+  DeleteDeadBlocks(ArrayRef(Chain).drop_front());
   return true;
 }
 } // namespace
