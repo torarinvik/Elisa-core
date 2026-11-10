@@ -175,6 +175,7 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type, impls map[s
 			FreshReturnShapeParams: append([]string(nil), tt.FreshReturnShapeParams...),
 			InlineMode:             tt.InlineMode,
 			HasInlineMode:          tt.HasInlineMode,
+			FastMath:               tt.FastMath,
 			HasNoRecurse:           tt.HasNoRecurse,
 			HasAsyncEntry:          tt.HasAsyncEntry,
 			HasSegmentAgnostic:     tt.HasSegmentAgnostic,

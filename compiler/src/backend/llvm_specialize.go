@@ -419,6 +419,7 @@ func specializeFuncType(base *semantic.FuncType, typeBindings map[string]semanti
 		FreshReturnShapeParams:      append([]string(nil), base.FreshReturnShapeParams...),
 		InlineMode:                  base.InlineMode,
 		HasInlineMode:               base.HasInlineMode,
+		FastMath:                    base.FastMath,
 		HasNoRecurse:                base.HasNoRecurse,
 		HasAsyncEntry:               base.HasAsyncEntry,
 		HasSegmentAgnostic:          base.HasSegmentAgnostic,

@@ -320,6 +320,7 @@ func specializeExportFuncType(a *Analyzer, base *FuncType, bindings map[string]T
 		FreshReturnShapeParams:      append([]string(nil), specialized.FreshReturnShapeParams...),
 		InlineMode:                  specialized.InlineMode,
 		HasInlineMode:               specialized.HasInlineMode,
+		FastMath:                    specialized.FastMath,
 		HasNoRecurse:                specialized.HasNoRecurse,
 		HasAsyncEntry:               specialized.HasAsyncEntry,
 		HasSegmentAgnostic:          specialized.HasSegmentAgnostic,
