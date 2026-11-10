@@ -105,6 +105,64 @@ declare {i64, i1} @llvm.smul.with.overflow.i64(i64, i64)
 	}
 }
 
+func TestCheckedSquareOuterLoopRange(t *testing.T) {
+	if !boundedDivisionUnrollSupported() {
+		t.Skip("requires LLVM 23")
+	}
+	const body = `define i64 @square_loop() {
+entry:
+ br label %outer
+outer:
+ %i = phi i64 [0, %entry], [%next, %latch]
+ %square = call {i64, i1} @llvm.smul.with.overflow.i64(i64 %i, i64 %i)
+ %overflow = extractvalue {i64, i1} %square, 1
+ br i1 %overflow, label %bad, label %preinner
+preinner:
+ %value = extractvalue {i64, i1} %square, 0
+ br label %inner
+inner:
+ %j = phi i64 [0, %preinner], [%jnext, %inner]
+ %jnext = add i64 %j, 1
+ %innermore = icmp ult i64 %jnext, 4
+ br i1 %innermore, label %inner, label %latch
+latch:
+ %next = add nuw nsw i64 %i, 1
+ %done = icmp eq i64 %next, LIMIT
+ br i1 %done, label %exit, label %outer
+bad:
+ ret i64 -1
+exit:
+ ret i64 %value
+}
+declare {i64, i1} @llvm.smul.with.overflow.i64(i64, i64)
+`
+	for _, tt := range []struct {
+		name, limit string
+		fold        bool
+	}{
+		{"largest safe factor", "3037000500", true},
+		{"first overflowing factor", "3037000501", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			g, err := parseLLVMIRForSplitHalfTest(boolArrayHeader + strings.ReplaceAll(body, "LIMIT", tt.limit))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer g.dispose()
+			if n := fastCheckedMul(g); (n == 1) != tt.fold || n > 1 {
+				t.Fatalf("unexpected pass status %d", n)
+			}
+			if err := g.verify(); err != nil {
+				t.Fatal(err)
+			}
+			ir := g.printModule()
+			if strings.Contains(ir, "call { i64, i1 } @llvm.smul.with.overflow") == tt.fold {
+				t.Fatalf("incorrect overflow check in transformed IR:\n%s", ir)
+			}
+		})
+	}
+}
+
 func TestCheckedMulFastPathNativeSignedBoundariesAndPrefixWrites(t *testing.T) {
 	if runtime.GOARCH != "arm64" {
 		t.Skip("AArch64 optimization")

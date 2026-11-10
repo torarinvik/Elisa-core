@@ -9,6 +9,8 @@
 #include <llvm/Analysis/AssumptionCache.h>
 #include <llvm/Analysis/LazyValueInfo.h>
 #include <llvm/Analysis/LoopInfo.h>
+#include <llvm/Analysis/ScalarEvolution.h>
+#include <llvm/Analysis/TargetLibraryInfo.h>
 #include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/ConstantRange.h>
 #include <llvm/IR/Dominators.h>
@@ -20,14 +22,12 @@ using namespace llvm;
 #include "llvm_checked_initialization.cpp"
 #include "llvm_checked_power.cpp"
 namespace {
-static bool checkedMulCandidate(IntrinsicInst &C, LoopInfo &LI) {
+static bool checkedMulCandidate(IntrinsicInst &C) {
   if (C.getIntrinsicID() != Intrinsic::smul_with_overflow ||
       !C.getArgOperand(0)->getType()->isIntegerTy(64) ||
       C.hasOperandBundles() || C.isConvergent() || C.cannotDuplicate() ||
       C.isUsedByMetadata() || C.hasMetadataOtherThanDebugLoc() ||
       isa<Constant>(C.getArgOperand(0)) || isa<Constant>(C.getArgOperand(1))) return false;
-  Loop *L = LI.getLoopFor(C.getParent());
-  if (!L || !L->getSubLoops().empty()) return false;
   auto *Guard = dyn_cast<BranchInst>(C.getParent()->getTerminator());
   auto *Flag = Guard && Guard->isConditional() ? dyn_cast<ExtractValueInst>(Guard->getCondition()) : nullptr;
   if (!Flag || Flag->getAggregateOperand() != &C || Flag->getNumIndices() != 1 ||
@@ -48,6 +48,34 @@ static bool checkedMulCandidate(IntrinsicInst &C, LoopInfo &LI) {
 
 #if LLVM_VERSION_MAJOR >= 23
 constexpr uint64_t CheckedSquareMaxRoot = 3037000499; // floor(sqrt(INT64_MAX))
+
+// A bounded induction variable can make a checked square redundant even
+// when the loop contains another loop. Only version innermost loops.
+static bool foldRangeProvenSquares(Function &F, LoopInfo &LI, DominatorTree &DT,
+                                  ArrayRef<IntrinsicInst *> Squares) {
+  if (Squares.empty()) return false;
+  AssumptionCache AC(F);
+  TargetLibraryInfoImpl TLII(F.getParent()->getTargetTriple());
+  TargetLibraryInfo TLI(TLII);
+  ScalarEvolution SE(F, TLI, AC, DT, LI);
+  SmallVector<IntrinsicInst *, 8> Proven;
+  for (auto *Square : Squares) {
+    auto Bound = SE.getSignedRange(SE.getSCEV(Square->getArgOperand(0)));
+    if (!Bound.isEmptySet() && !Bound.getSignedMin().isNegative() &&
+        Bound.getSignedMax().ule(CheckedSquareMaxRoot))
+      Proven.push_back(Square);
+  }
+  for (auto *Square : Proven) {
+    IRBuilder<> B(Square);
+    B.SetCurrentDebugLocation(Square->getDebugLoc());
+    Value *Factor = Square->getArgOperand(0);
+    Value *Result = B.CreateNSWMul(Factor, Factor);
+    Value *Pair = B.CreateInsertValue(PoisonValue::get(Square->getType()), Result, 0);
+    Square->replaceAllUsesWith(B.CreateInsertValue(Pair, B.getFalse(), 1));
+    Square->eraseFromParent();
+  }
+  return !Proven.empty();
+}
 static bool hasSafeSquareLimit(const ConstantRange &Range) {
   constexpr uint64_t MaxPrevious = CheckedSquareMaxRoot - 1;
   return !Range.isEmptySet() && Range.getSignedMax().sle(APInt(64, MaxPrevious * MaxPrevious));
@@ -214,10 +242,31 @@ extern "C" unsigned elisacoreFastCheckedMul(LLVMModuleRef ref, LLVMTargetMachine
     DominatorTree DT(F);
     LoopInfo LI(DT);
     // Snapshot candidates before changing the CFG.
-    for (BasicBlock &BB : F) for (Instruction &I : BB)
-      if (auto *C = dyn_cast<IntrinsicInst>(&I))
-        if (checkedMulCandidate(*C, LI)) work.push_back(C);
+#if LLVM_VERSION_MAJOR >= 23
+    SmallVector<IntrinsicInst *, 8> OuterSquares;
+#endif
+    for (BasicBlock &BB : F) for (Instruction &I : BB) {
+      auto *C = dyn_cast<IntrinsicInst>(&I);
+      if (!C || C->getIntrinsicID() != Intrinsic::smul_with_overflow) continue;
+      Loop *L = LI.getLoopFor(&BB);
+      if (!L) continue;
+      if (L->getSubLoops().empty()) {
+        if (checkedMulCandidate(*C)) work.push_back(C);
+        continue;
+      }
+#if LLVM_VERSION_MAJOR >= 23
+      auto *Counter = dyn_cast<PHINode>(C->getArgOperand(0));
+      if (Counter && C->getArgOperand(1) == Counter &&
+          Counter->getParent() == L->getHeader() && &BB == L->getHeader() &&
+          checkedMulCandidate(*C))
+        OuterSquares.push_back(C);
+#endif
+    }
     if (work.size() > 32) continue;
+#if LLVM_VERSION_MAJOR >= 23
+    if (OuterSquares.size() <= 8)
+      changed |= foldRangeProvenSquares(F, LI, DT, OuterSquares);
+#endif
     // These proofs change instructions only, leaving the CFG analyses valid.
 #if LLVM_VERSION_MAJOR >= 23
     llvm::erase_if(work, [&](IntrinsicInst *C) {
