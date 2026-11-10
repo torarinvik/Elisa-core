@@ -390,6 +390,7 @@ extern "C" unsigned elisacoreUnrollLaggedRecurrences(LLVMModuleRef Ref) {
 #include "llvm_factored_unsigned_division.cpp"
 #include "llvm_remainder_recurrence.cpp"
 #include "llvm_constant_paths.cpp"
+#include "llvm_bounded_carry.cpp"
 
 #else
 extern "C" unsigned elisacoreUnrollLaggedRecurrences(LLVMModuleRef) { return 0; }
@@ -422,6 +423,7 @@ extern "C" unsigned elisacoreOptimizeBoundedDivisionLoops(LLVMModuleRef M, LLVMT
     Changed += elisacoreSplitFactoredDivisions(*llvm::unwrap(M));
     Changed += elisacoreSplitRemainderRecurrences(*llvm::unwrap(M));
     Changed += elisacoreFoldConstantIntegerPaths(*llvm::unwrap(M));
+    Changed += elisacoreNarrowBoundedCarries(*llvm::unwrap(M));
   }
 #endif
   return Changed ? 1 : 0;
