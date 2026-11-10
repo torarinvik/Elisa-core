@@ -1,10 +1,5 @@
 package backend
 
-/*
-#include "llvm-c/Core.h"
-*/
-import "C"
-
 import (
 	"fmt"
 
@@ -19,7 +14,7 @@ const permArenaGlobalName = "__elisa_perm_arena"
 
 // permArenaGlobal lazily defines (once per module) the Arena global that backs the
 // perm region and returns a pointer to it.
-func (g *llvmGenerator) permArenaGlobal() (C.LLVMValueRef, error) {
+func (g *llvmGenerator) permArenaGlobal() (llvmIRValueRef, error) {
 	if value, ok := g.globals[permArenaGlobalName]; ok {
 		return value, nil
 	}
@@ -35,8 +30,8 @@ func (g *llvmGenerator) permArenaGlobal() (C.LLVMValueRef, error) {
 	if err != nil {
 		return nil, err
 	}
-	C.LLVMSetInitializer(value, zero)
-	C.LLVMSetLinkage(value, C.LLVMInternalLinkage)
+	llvmSetInitializer(value, zero)
+	llvmSetLinkage(value, llvmInternalLinkage)
 	g.globals[permArenaGlobalName] = value
 	return value, nil
 }

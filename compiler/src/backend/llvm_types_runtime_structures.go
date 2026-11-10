@@ -2,18 +2,12 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/semantic"
 	"fmt"
 )
 
-func (g *llvmGenerator) ensureRuntimeDynArray(elem semantic.Type) (C.LLVMTypeRef, error) {
+func (g *llvmGenerator) ensureRuntimeDynArray(elem semantic.Type) (llvmIRTypeRef, error) {
 	name, err := g.runtimeDynArrayName(elem)
 	if err != nil {
 		return nil, err
@@ -29,19 +23,19 @@ func (g *llvmGenerator) ensureRuntimeDynArray(elem semantic.Type) (C.LLVMTypeRef
 	if err != nil {
 		return nil, err
 	}
-	fields := []C.LLVMTypeRef{
-		C.LLVMPointerTypeInContext(g.context, 0),
+	fields := []llvmIRTypeRef{
+		llvmPointerTypeInContext(g.context, 0),
 		countType,
 		countType,
 	}
-	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
+	llvmStructSetBody(ty, llvmTypeSlicePtr(fields), llvmIRUnsigned(len(fields)), 0)
 	g.structBodies[name] = true
 	return ty, nil
 }
-func (g *llvmGenerator) ensureRuntimeDynArrayView() (C.LLVMTypeRef, error) {
+func (g *llvmGenerator) ensureRuntimeDynArrayView() (llvmIRTypeRef, error) {
 	return g.ensureRuntimeSizedStruct("DynArrayView", 2)
 }
-func (g *llvmGenerator) ensureRuntimeSizedStruct(name string, fieldCount int) (C.LLVMTypeRef, error) {
+func (g *llvmGenerator) ensureRuntimeSizedStruct(name string, fieldCount int) (llvmIRTypeRef, error) {
 	ty, err := g.ensureNamedStructType(name)
 	if err != nil {
 		return nil, err
@@ -53,16 +47,16 @@ func (g *llvmGenerator) ensureRuntimeSizedStruct(name string, fieldCount int) (C
 	if err != nil {
 		return nil, err
 	}
-	fields := make([]C.LLVMTypeRef, 0, fieldCount)
-	fields = append(fields, C.LLVMPointerTypeInContext(g.context, 0))
+	fields := make([]llvmIRTypeRef, 0, fieldCount)
+	fields = append(fields, llvmPointerTypeInContext(g.context, 0))
 	for i := 1; i < fieldCount; i++ {
 		fields = append(fields, countType)
 	}
-	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
+	llvmStructSetBody(ty, llvmTypeSlicePtr(fields), llvmIRUnsigned(len(fields)), 0)
 	g.structBodies[name] = true
 	return ty, nil
 }
-func (g *llvmGenerator) ensureErrorUnionType(unionType *semantic.ErrorUnionType) (C.LLVMTypeRef, error) {
+func (g *llvmGenerator) ensureErrorUnionType(unionType *semantic.ErrorUnionType) (llvmIRTypeRef, error) {
 	if unionType == nil || unionType.Errors == nil {
 		return nil, fmt.Errorf("missing error union metadata")
 	}
@@ -86,8 +80,8 @@ func (g *llvmGenerator) ensureErrorUnionType(unionType *semantic.ErrorUnionType)
 	if _, err := g.lowerType(unionType.Value); err != nil {
 		return nil, err
 	}
-	fields := []C.LLVMTypeRef{errType, C.LLVMPointerTypeInContext(g.context, 0)}
-	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
+	fields := []llvmIRTypeRef{errType, llvmPointerTypeInContext(g.context, 0)}
+	llvmStructSetBody(ty, llvmTypeSlicePtr(fields), llvmIRUnsigned(len(fields)), 0)
 	g.structBodies[name] = true
 	return ty, nil
 }
@@ -117,7 +111,7 @@ func llvmTypeSymbolName(t semantic.Type) string {
 	}
 }
 
-func (g *llvmGenerator) ensureErrorSetType(errorSet *semantic.ErrorSetType) (C.LLVMTypeRef, error) {
+func (g *llvmGenerator) ensureErrorSetType(errorSet *semantic.ErrorSetType) (llvmIRTypeRef, error) {
 	if errorSet == nil {
 		return nil, fmt.Errorf("missing error set metadata")
 	}
@@ -133,7 +127,7 @@ func (g *llvmGenerator) ensureErrorSetType(errorSet *semantic.ErrorSetType) (C.L
 	if err != nil {
 		return nil, err
 	}
-	fields := []C.LLVMTypeRef{codeType}
+	fields := []llvmIRTypeRef{codeType}
 	for _, tag := range errorSet.Tags {
 		for _, payloadType := range errorSet.PayloadForTag(tag) {
 			loweredPayload, err := g.lowerType(payloadType)
@@ -143,12 +137,12 @@ func (g *llvmGenerator) ensureErrorSetType(errorSet *semantic.ErrorSetType) (C.L
 			fields = append(fields, loweredPayload)
 		}
 	}
-	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
+	llvmStructSetBody(ty, llvmTypeSlicePtr(fields), llvmIRUnsigned(len(fields)), 0)
 	g.structBodies[name] = true
 	return ty, nil
 }
 
-func (g *llvmGenerator) ensureOptionalType(optionalType *semantic.OptionalType) (C.LLVMTypeRef, error) {
+func (g *llvmGenerator) ensureOptionalType(optionalType *semantic.OptionalType) (llvmIRTypeRef, error) {
 	if optionalType == nil || optionalType.Value == nil {
 		return nil, fmt.Errorf("missing optional metadata")
 	}
@@ -168,12 +162,12 @@ func (g *llvmGenerator) ensureOptionalType(optionalType *semantic.OptionalType) 
 	if err != nil {
 		return nil, err
 	}
-	fields := []C.LLVMTypeRef{tagType, valueType}
-	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
+	fields := []llvmIRTypeRef{tagType, valueType}
+	llvmStructSetBody(ty, llvmTypeSlicePtr(fields), llvmIRUnsigned(len(fields)), 0)
 	g.structBodies[name] = true
 	return ty, nil
 }
-func (g *llvmGenerator) ensureGenericInstanceStruct(inst *semantic.GenericInstanceType) (C.LLVMTypeRef, error) {
+func (g *llvmGenerator) ensureGenericInstanceStruct(inst *semantic.GenericInstanceType) (llvmIRTypeRef, error) {
 	qualifiedBase := inst.Name
 	if base, ok := inst.Base.(*semantic.StructType); ok && base.Namespace != "" {
 		qualifiedBase = base.Namespace + "::" + base.Name
@@ -207,7 +201,7 @@ func (g *llvmGenerator) ensureGenericInstanceStruct(inst *semantic.GenericInstan
 	if base.Decl == nil {
 		return nil, fmt.Errorf("generic struct %s is missing declaration metadata", base.Name)
 	}
-	fields := make([]C.LLVMTypeRef, 0, len(base.Decl.Fields))
+	fields := make([]llvmIRTypeRef, 0, len(base.Decl.Fields))
 	for _, fieldDecl := range base.Decl.Fields {
 		field, ok := base.Fields[fieldDecl.Name]
 		if !ok {
@@ -219,12 +213,12 @@ func (g *llvmGenerator) ensureGenericInstanceStruct(inst *semantic.GenericInstan
 		}
 		fields = append(fields, fieldType)
 	}
-	packed := C.LLVMBool(0)
+	packed := llvmIRBool(0)
 	if base.PackedLayout {
-		packed = C.LLVMBool(1)
+		packed = llvmIRBool(1)
 		g.hasPackedRecords = true
 	}
-	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), packed)
+	llvmStructSetBody(ty, llvmTypeSlicePtr(fields), llvmIRUnsigned(len(fields)), packed)
 	g.structBodies[name] = true
 	return ty, nil
 }

@@ -2,19 +2,13 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
 )
 
-func (s *functionState) emitCastExpr(expr *ast.CastExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitCastExpr(expr *ast.CastExpr) (llvmIRValueRef, semantic.Type, error) {
 	// A postfix-shorthand cast `recv.Name()` whose target was not a type is lowered
 	// by the analyzer to the call `Name(recv)`; emit that call instead.
 	if s != nil && s.g != nil && s.g.result != nil && s.g.semanticReadView().HasOwnPostfixShorthandCallsMap() {
@@ -53,7 +47,7 @@ func (s *functionState) emitCastExpr(expr *ast.CastExpr) (C.LLVMValueRef, semant
 		operandExpected = targetType
 	}
 	var (
-		value      C.LLVMValueRef
+		value      llvmIRValueRef
 		actualType semantic.Type
 		err        error
 	)
@@ -80,12 +74,12 @@ func (s *functionState) emitCastExpr(expr *ast.CastExpr) (C.LLVMValueRef, semant
 	// every integer target behave like the established `.uintptr()` idiom.
 	if value != nil && expr.Origin == ast.CastExprOriginExplicitCast &&
 		isReferenceLikeOperand(actualType) && isIntegerCastTarget(targetType) &&
-		C.LLVMGetTypeKind(C.LLVMTypeOf(value)) == C.LLVMPointerTypeKind {
+		llvmGetTypeKind(llvmTypeOf(value)) == llvmPointerTypeKind {
 		expectedLLVM, err := s.g.lowerType(targetType)
 		if err != nil {
 			return nil, nil, err
 		}
-		return C.LLVMBuildPtrToInt(s.builder, value, expectedLLVM, cStringFree("cast.addr")), targetType, nil
+		return llvmBuildPtrToInt(s.builder, value, expectedLLVM, cStringFree("cast.addr")), targetType, nil
 	}
 	coerced, err := s.coerceValue(value, actualType, targetType)
 	if err != nil {
@@ -111,7 +105,7 @@ func isReferenceLikeOperand(t semantic.Type) bool {
 	}
 	return isPointerLikeType(t)
 }
-func (s *functionState) emitSizeofExpr(expr *ast.SizeofExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitSizeofExpr(expr *ast.SizeofExpr) (llvmIRValueRef, semantic.Type, error) {
 	t, err := s.resolveTypeExpr(expr.Type)
 	if err != nil {
 		return nil, nil, err
@@ -124,10 +118,10 @@ func (s *functionState) emitSizeofExpr(expr *ast.SizeofExpr) (C.LLVMValueRef, se
 	if err != nil {
 		return nil, nil, err
 	}
-	return C.LLVMConstInt(usizeType, C.ulonglong(size), 0), s.g.namedType("usize"), nil
+	return llvmConstInt(usizeType, llvmIRUnsignedLongLong(size), 0), s.g.namedType("usize"), nil
 }
 
-func (s *functionState) emitAlignofExpr(expr *ast.AlignofExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitAlignofExpr(expr *ast.AlignofExpr) (llvmIRValueRef, semantic.Type, error) {
 	t, err := s.resolveTypeExpr(expr.Type)
 	if err != nil {
 		return nil, nil, err
@@ -140,10 +134,10 @@ func (s *functionState) emitAlignofExpr(expr *ast.AlignofExpr) (C.LLVMValueRef, 
 	if err != nil {
 		return nil, nil, err
 	}
-	return C.LLVMConstInt(usizeType, C.ulonglong(alignment), 0), s.g.namedType("usize"), nil
+	return llvmConstInt(usizeType, llvmIRUnsignedLongLong(alignment), 0), s.g.namedType("usize"), nil
 }
 
-func (s *functionState) emitOffsetofExpr(expr *ast.OffsetofExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitOffsetofExpr(expr *ast.OffsetofExpr) (llvmIRValueRef, semantic.Type, error) {
 	t, err := s.resolveTypeExpr(expr.Type)
 	if err != nil {
 		return nil, nil, err
@@ -164,7 +158,7 @@ func (s *functionState) emitOffsetofExpr(expr *ast.OffsetofExpr) (C.LLVMValueRef
 	if err != nil {
 		return nil, nil, err
 	}
-	return C.LLVMConstInt(usizeType, C.ulonglong(offset), 0), s.g.namedType("usize"), nil
+	return llvmConstInt(usizeType, llvmIRUnsignedLongLong(offset), 0), s.g.namedType("usize"), nil
 }
 
 // castOperandAddrOf returns the `&x` a cast operand is, peeling parentheses.

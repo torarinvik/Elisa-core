@@ -2,11 +2,6 @@
 
 package backend
 
-/*
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -147,7 +142,7 @@ func matchedRegionName(formal, actual semantic.Type, regionParam string) string 
 	return ""
 }
 
-func (s *functionState) regionArenaPointer(region string) C.LLVMValueRef {
+func (s *functionState) regionArenaPointer(region string) llvmIRValueRef {
 	if s == nil || region == "" {
 		return nil
 	}
@@ -159,8 +154,8 @@ func (s *functionState) regionArenaPointer(region string) C.LLVMValueRef {
 	}
 	if binding, ok := s.lookupBinding(region); ok && semantic.IsArenaValueOrRefType(binding.typ) {
 		if ref, isRef := binding.typ.(*semantic.RefType); isRef && ref != nil && semantic.IsArenaValueOrRefType(ref.Elem) {
-			ptrType := C.LLVMPointerTypeInContext(s.g.context, 0)
-			return C.LLVMBuildLoad2(s.builder, ptrType, binding.ptr, cStringFree("region.arena."+region))
+			ptrType := llvmPointerTypeInContext(s.g.context, 0)
+			return llvmBuildLoad2(s.builder, ptrType, binding.ptr, cStringFree("region.arena."+region))
 		}
 		return binding.ptr
 	}

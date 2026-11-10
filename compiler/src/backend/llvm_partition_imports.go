@@ -2,11 +2,6 @@
 
 package backend
 
-/*
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -15,8 +10,8 @@ import (
 
 // Experimental bounded imports preserve a single emitted owner. Exact current
 // module bitcode, including every imported body, remains the cache authority.
-func (g *llvmGenerator) importPartitionFunction(name string, fn *semantic.FuncType, value C.LLVMValueRef) error {
-	if g.partBody == nil || g.optLevel == OptimizationLevel0 || g.bodyDepth == 0 || g.bodyDepth > 3 || !configuredCodegenFlag("ELISACORE_IR_IMPORTS", g.partitionImportDefaults) || C.LLVMCountBasicBlocks(value) != 0 || g.partBody(llvmValueName(value)) {
+func (g *llvmGenerator) importPartitionFunction(name string, fn *semantic.FuncType, value llvmIRValueRef) error {
+	if g.partBody == nil || g.optLevel == OptimizationLevel0 || g.bodyDepth == 0 || g.bodyDepth > 3 || !configuredCodegenFlag("ELISACORE_IR_IMPORTS", g.partitionImportDefaults) || llvmCountBasicBlocks(value) != 0 || g.partBody(llvmValueName(value)) {
 		return nil
 	}
 	if fn == nil || fn.Static || fn.IsNativeExtern || len(fn.TypeParams) != 0 || len(fn.GenericParams) != 0 || fn.IntrinsicName != "" || (fn.HasInlineMode && fn.InlineMode == semantic.FuncInlineModeNever) {
@@ -54,7 +49,7 @@ func (g *llvmGenerator) importPartitionFunction(name string, fn *semantic.FuncTy
 	if err := g.defineFunctionBody(decl, fn, value); err != nil {
 		return err
 	}
-	C.LLVMSetLinkage(value, C.LLVMAvailableExternallyLinkage)
+	llvmSetLinkage(value, llvmAvailableExternallyLinkage)
 	return nil
 }
 

@@ -2,13 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-void elisa_coreSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigned trueWeight, unsigned falseWeight);
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -63,7 +56,7 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 		if err != nil {
 			return err
 		}
-		C.LLVMBuildStore(s.builder, markValue, alloca)
+		llvmBuildStore(s.builder, markValue, alloca)
 		s.defineBinding(n.Name, valueBinding{ptr: alloca, typ: markType})
 		return nil
 	case *ast.CheckpointStmt:
@@ -319,7 +312,7 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 		if err != nil {
 			return err
 		}
-		C.LLVMBuildStore(s.builder, result, ptr)
+		llvmBuildStore(s.builder, result, ptr)
 		s.invalidatePackedCommonFieldValuesExpr(n.Target)
 		s.invalidatePackedReadCaches()
 		return nil
@@ -356,14 +349,14 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 				if err != nil {
 					return err
 				}
-				C.LLVMBuildRet(s.builder, successValue)
+				llvmBuildRet(s.builder, successValue)
 				return nil
 			}
 			if s.mainReturnsStatus {
-				zero := C.LLVMConstInt(C.LLVMInt32TypeInContext(s.g.context), 0, 0)
-				C.LLVMBuildRet(s.builder, zero)
+				zero := llvmConstInt(llvmInt32TypeInContext(s.g.context), 0, 0)
+				llvmBuildRet(s.builder, zero)
 			} else {
-				C.LLVMBuildRetVoid(s.builder)
+				llvmBuildRetVoid(s.builder)
 			}
 			return nil
 		}
@@ -400,7 +393,7 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 			return err
 		}
 		if !s.currentBlockTerminated() {
-			C.LLVMBuildBr(s.builder, s.breakTargets[len(s.breakTargets)-1])
+			llvmBuildBr(s.builder, s.breakTargets[len(s.breakTargets)-1])
 		}
 		return nil
 	case *ast.ContinueStmt:
@@ -411,7 +404,7 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 			return err
 		}
 		if !s.currentBlockTerminated() {
-			C.LLVMBuildBr(s.builder, s.continueTargets[len(s.continueTargets)-1])
+			llvmBuildBr(s.builder, s.continueTargets[len(s.continueTargets)-1])
 		}
 		return nil
 	case *ast.IfStmt:

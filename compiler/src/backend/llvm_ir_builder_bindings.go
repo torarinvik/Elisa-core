@@ -81,3 +81,17 @@ func llvmConstNull(typ llvmIRTypeRef) llvmIRValueRef {
 func llvmBuildGEP2(builder llvmIRBuilderRef, typ llvmIRTypeRef, pointer llvmIRValueRef, indices *llvmIRValueRef, count llvmIRUnsigned, name *llvmIRChar) llvmIRValueRef {
 	return C.LLVMBuildGEP2(builder, typ, pointer, indices, count, name)
 }
+
+func llvmBuildUDiv(builder llvmIRBuilderRef, left, right llvmIRValueRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildUDiv(builder, left, right, name)
+}
+
+func llvmBuildRet(builder llvmIRBuilderRef, value llvmIRValueRef) llvmIRValueRef {
+	return C.LLVMBuildRet(builder, value)
+}
+
+func llvmBuildRetVoid(builder llvmIRBuilderRef) llvmIRValueRef { return C.LLVMBuildRetVoid(builder) }
+
+func llvmBuildPtrToInt(builder llvmIRBuilderRef, value llvmIRValueRef, typ llvmIRTypeRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildPtrToInt(builder, value, typ, name)
+}

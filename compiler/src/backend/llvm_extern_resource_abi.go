@@ -2,11 +2,6 @@
 
 package backend
 
-/*
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/semantic"
 )
@@ -37,22 +32,22 @@ func externReturnsResource(fn *semantic.FuncType) bool {
 
 // convertExternResourceArgs replaces each resource argument with its handle. Runs before
 // the aggregate/byval and view conversions, one arg per param still.
-func (s *functionState) convertExternResourceArgs(fn *semantic.FuncType, args []C.LLVMValueRef) []C.LLVMValueRef {
-	var out []C.LLVMValueRef
-	ptrType := C.LLVMPointerTypeInContext(s.g.context, 0)
+func (s *functionState) convertExternResourceArgs(fn *semantic.FuncType, args []llvmIRValueRef) []llvmIRValueRef {
+	var out []llvmIRValueRef
+	ptrType := llvmPointerTypeInContext(s.g.context, 0)
 	for i := 0; i < len(fn.Params) && i < len(args); i++ {
 		byRef, ok := externResourceParam(fn, fn.Params[i])
 		if !ok {
 			continue
 		}
 		if out == nil {
-			out = make([]C.LLVMValueRef, len(args))
+			out = make([]llvmIRValueRef, len(args))
 			copy(out, args)
 		}
 		if byRef {
-			out[i] = C.LLVMBuildLoad2(s.builder, ptrType, args[i], cStringFree("extern.resource.handle"))
+			out[i] = llvmBuildLoad2(s.builder, ptrType, args[i], cStringFree("extern.resource.handle"))
 		} else {
-			out[i] = C.LLVMBuildExtractValue(s.builder, args[i], 0, cStringFree("extern.resource.handle"))
+			out[i] = llvmBuildExtractValue(s.builder, args[i], 0, cStringFree("extern.resource.handle"))
 		}
 	}
 	if out == nil {
@@ -62,11 +57,11 @@ func (s *functionState) convertExternResourceArgs(fn *semantic.FuncType, args []
 }
 
 // emitResourceFromHandle wraps a native handle into the resource struct.
-func (s *functionState) emitResourceFromHandle(handle C.LLVMValueRef, resource semantic.Type) (C.LLVMValueRef, error) {
+func (s *functionState) emitResourceFromHandle(handle llvmIRValueRef, resource semantic.Type) (llvmIRValueRef, error) {
 	structType, err := s.g.lowerType(resource)
 	if err != nil {
 		return nil, err
 	}
-	value := C.LLVMGetUndef(structType)
-	return C.LLVMBuildInsertValue(s.builder, value, handle, 0, cStringFree("extern.resource.wrap")), nil
+	value := llvmGetUndef(structType)
+	return llvmBuildInsertValue(s.builder, value, handle, 0, cStringFree("extern.resource.wrap")), nil
 }

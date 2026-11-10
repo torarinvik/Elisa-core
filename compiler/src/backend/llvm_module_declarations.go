@@ -2,15 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Analysis.h>
-#include <llvm-c/Core.h>
-#include <llvm-c/Target.h>
-#include <llvm-c/TargetMachine.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -309,9 +300,9 @@ func (g *llvmGenerator) emitDeclInNamespace(decl ast.Decl, namespace string) err
 				if err != nil {
 					return err
 				}
-				C.LLVMSetInitializer(globalValue, initializer)
-				C.LLVMSetGlobalConstant(globalValue, 1)
-				C.LLVMSetLinkage(globalValue, C.LLVMInternalLinkage)
+				llvmSetInitializer(globalValue, initializer)
+				llvmSetGlobalConstant(globalValue, 1)
+				llvmSetLinkage(globalValue, llvmInternalLinkage)
 			}
 		}
 		return nil

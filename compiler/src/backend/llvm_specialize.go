@@ -2,12 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -16,7 +10,7 @@ import (
 	"sort"
 )
 
-func (g *llvmGenerator) ensureSpecializedFunction(decl *ast.FuncDecl, base *semantic.FuncType, typeBindings map[string]semantic.Type) (C.LLVMValueRef, *semantic.FuncType, error) {
+func (g *llvmGenerator) ensureSpecializedFunction(decl *ast.FuncDecl, base *semantic.FuncType, typeBindings map[string]semantic.Type) (llvmIRValueRef, *semantic.FuncType, error) {
 	if decl == nil || base == nil {
 		return nil, nil, fmt.Errorf("generic specialization requires a function declaration and type")
 	}
@@ -85,7 +79,7 @@ func (g *llvmGenerator) ensureSpecializedFunction(decl *ast.FuncDecl, base *sema
 				return nil, nil, errPartitionDeclined
 			}
 			if g.partBody == nil || g.partBody(specializedName) {
-				if C.LLVMCountBasicBlocks(existing) == 0 {
+				if llvmCountBasicBlocks(existing) == 0 {
 					if err := g.defineFunctionBodyWithBindings(decl, specializedType, existing, typeBindings); err != nil {
 						return nil, nil, err
 					}
@@ -95,7 +89,7 @@ func (g *llvmGenerator) ensureSpecializedFunction(decl *ast.FuncDecl, base *sema
 		}
 		return existing, specializedType, nil
 	}
-	if localCapture && C.LLVMGetNamedFunction(g.module, cStringFree(specializedName)) != nil {
+	if localCapture && llvmGetNamedFunction(g.module, cStringFree(specializedName)) != nil {
 		return nil, nil, errPartitionDeclined
 	}
 	fnValue, err := g.addFunction(specializedName, specializedType)
@@ -104,7 +98,7 @@ func (g *llvmGenerator) ensureSpecializedFunction(decl *ast.FuncDecl, base *sema
 	}
 	g.setDefinedFunctionLinkage(specializedName, fnValue, specializedType)
 	if localCapture {
-		C.LLVMSetLinkage(fnValue, C.LLVMPrivateLinkage)
+		llvmSetLinkage(fnValue, llvmPrivateLinkage)
 		if g.partLocalHelpers == nil {
 			g.partLocalHelpers = make(map[string]bool)
 		}
@@ -129,7 +123,7 @@ func (g *llvmGenerator) ensureSpecializedFunction(decl *ast.FuncDecl, base *sema
 // ensureSpecializedFunction: mangle a per-binding name, specialize the signature, and emit
 // the body with the bindings in scope so references to T resolve. Returns the specialized
 // symbol name so callers can declare/call it.
-func (g *llvmGenerator) ensureSpecializedImplMethod(decl *ast.FuncDecl, base *semantic.FuncType, implTypeParams []string, owner *semantic.StaticImpl, methodName string, typeBindings map[string]semantic.Type) (C.LLVMValueRef, string, *semantic.FuncType, error) {
+func (g *llvmGenerator) ensureSpecializedImplMethod(decl *ast.FuncDecl, base *semantic.FuncType, implTypeParams []string, owner *semantic.StaticImpl, methodName string, typeBindings map[string]semantic.Type) (llvmIRValueRef, string, *semantic.FuncType, error) {
 	if decl == nil || base == nil {
 		return nil, "", nil, fmt.Errorf("impl-method specialization requires a function declaration and type")
 	}
@@ -198,7 +192,7 @@ func (g *llvmGenerator) ensureSpecializedImplMethod(decl *ast.FuncDecl, base *se
 				return nil, "", nil, errPartitionDeclined
 			}
 			if g.partBody == nil || g.partBody(specializedName) {
-				if C.LLVMCountBasicBlocks(existing) == 0 {
+				if llvmCountBasicBlocks(existing) == 0 {
 					if err := g.defineFunctionBodyWithBindings(decl, specializedType, existing, typeBindings); err != nil {
 						return nil, "", nil, err
 					}
@@ -208,7 +202,7 @@ func (g *llvmGenerator) ensureSpecializedImplMethod(decl *ast.FuncDecl, base *se
 		}
 		return existing, specializedName, specializedType, nil
 	}
-	if localCapture && C.LLVMGetNamedFunction(g.module, cStringFree(specializedName)) != nil {
+	if localCapture && llvmGetNamedFunction(g.module, cStringFree(specializedName)) != nil {
 		return nil, "", nil, errPartitionDeclined
 	}
 	fnValue, err := g.addFunction(specializedName, specializedType)
@@ -217,7 +211,7 @@ func (g *llvmGenerator) ensureSpecializedImplMethod(decl *ast.FuncDecl, base *se
 	}
 	g.setDefinedFunctionLinkage(specializedName, fnValue, specializedType)
 	if localCapture {
-		C.LLVMSetLinkage(fnValue, C.LLVMPrivateLinkage)
+		llvmSetLinkage(fnValue, llvmPrivateLinkage)
 		if g.partLocalHelpers == nil {
 			g.partLocalHelpers = make(map[string]bool)
 		}
@@ -236,7 +230,7 @@ func (g *llvmGenerator) ensureSpecializedImplMethod(decl *ast.FuncDecl, base *se
 	return fnValue, specializedName, specializedType, nil
 }
 
-func (g *llvmGenerator) ensureSpecializedExternFunction(decl *ast.ExternFuncDecl, base *semantic.FuncType, typeBindings map[string]semantic.Type) (C.LLVMValueRef, *semantic.FuncType, error) {
+func (g *llvmGenerator) ensureSpecializedExternFunction(decl *ast.ExternFuncDecl, base *semantic.FuncType, typeBindings map[string]semantic.Type) (llvmIRValueRef, *semantic.FuncType, error) {
 	if decl == nil || base == nil {
 		return nil, nil, fmt.Errorf("generic extern specialization requires a function declaration and type")
 	}

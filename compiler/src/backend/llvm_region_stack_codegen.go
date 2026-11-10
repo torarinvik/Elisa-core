@@ -2,13 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-void elisa_coreSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigned trueWeight, unsigned falseWeight);
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -107,7 +100,7 @@ func (s *functionState) emitScopedArenaStmt(n *ast.RegionStmt) error {
 // after arena_da_reserve's power-of-two growth is at most nextPow2(N) <= 2N elements, so the
 // reservation is sized to 2*N*sizeof(elem) bytes plus headroom (in uintptr slots). reserve_commit
 // commits pages lazily, so over-reserving costs only virtual address space.
-func (s *functionState) emitReserveCommitStackInit(arenaPtr C.LLVMValueRef, arenaType semantic.Type, boundExpr ast.Expr, elemType semantic.Type) error {
+func (s *functionState) emitReserveCommitStackInit(arenaPtr llvmIRValueRef, arenaType semantic.Type, boundExpr ast.Expr, elemType semantic.Type) error {
 	if boundExpr == nil || elemType == nil {
 		return fmt.Errorf("reserve_commit stack missing bound or element type")
 	}
@@ -127,20 +120,20 @@ func (s *functionState) emitReserveCommitStackInit(arenaPtr C.LLVMValueRef, aren
 	if elemBytes == 0 {
 		elemBytes = 1
 	}
-	twoN, err := s.emitCheckedUSizeMul(nValue, C.LLVMConstInt(usizeLLVM, 2, 0), "rc.2n")
+	twoN, err := s.emitCheckedUSizeMul(nValue, llvmConstInt(usizeLLVM, 2, 0), "rc.2n")
 	if err != nil {
 		return err
 	}
-	bytes, err := s.emitCheckedUSizeMul(twoN, C.LLVMConstInt(usizeLLVM, C.ulonglong(elemBytes), 0), "rc.bytes")
+	bytes, err := s.emitCheckedUSizeMul(twoN, llvmConstInt(usizeLLVM, llvmIRUnsignedLongLong(elemBytes), 0), "rc.bytes")
 	if err != nil {
 		return err
 	}
-	bytes, err = s.emitCheckedUSizeAdd(bytes, C.LLVMConstInt(usizeLLVM, 4096, 0), "rc.bytes.headroom")
+	bytes, err = s.emitCheckedUSizeAdd(bytes, llvmConstInt(usizeLLVM, 4096, 0), "rc.bytes.headroom")
 	if err != nil {
 		return err
 	}
-	slots := C.LLVMBuildUDiv(s.builder, bytes, C.LLVMConstInt(usizeLLVM, 8, 0), cStringFree("rc.slots"))
-	slots, err = s.emitCheckedUSizeAdd(slots, C.LLVMConstInt(usizeLLVM, 8, 0), "rc.slots.pad")
+	slots := llvmBuildUDiv(s.builder, bytes, llvmConstInt(usizeLLVM, 8, 0), cStringFree("rc.slots"))
+	slots, err = s.emitCheckedUSizeAdd(slots, llvmConstInt(usizeLLVM, 8, 0), "rc.slots.pad")
 	if err != nil {
 		return err
 	}
@@ -152,7 +145,7 @@ func (s *functionState) emitReserveCommitStackInit(arenaPtr C.LLVMValueRef, aren
 // arena_alloc reserves the default contiguous range on first allocation (ARENA_DEFAULT_RESERVE_
 // COMMIT_SLOTS), so an empty or never-grown region costs nothing — not even an mmap. The base is
 // still stable (one contiguous reservation, grows in place) and overflow still panics.
-func (s *functionState) emitDefaultReserveCommitStackInit(arenaPtr C.LLVMValueRef, arenaType semantic.Type) error {
+func (s *functionState) emitDefaultReserveCommitStackInit(arenaPtr llvmIRValueRef, arenaType semantic.Type) error {
 	arenaLLVMType, err := s.g.lowerType(arenaType)
 	if err != nil {
 		return err
@@ -162,8 +155,8 @@ func (s *functionState) emitDefaultReserveCommitStackInit(arenaPtr C.LLVMValueRe
 	if err != nil {
 		return err
 	}
-	strategyPtr := C.LLVMBuildStructGEP2(s.builder, arenaLLVMType, arenaPtr, 3, cStringFree("region.strategy.lazy"))
-	C.LLVMBuildStore(s.builder, C.LLVMConstInt(intLLVM, 2 /* ARENA_STRATEGY_RESERVE_COMMIT */, 0), strategyPtr)
+	strategyPtr := llvmBuildStructGEP2(s.builder, arenaLLVMType, arenaPtr, 3, cStringFree("region.strategy.lazy"))
+	llvmBuildStore(s.builder, llvmConstInt(intLLVM, 2 /* ARENA_STRATEGY_RESERVE_COMMIT */, 0), strategyPtr)
 	return nil
 }
 
@@ -189,10 +182,10 @@ func (s *functionState) emitRegionExtraStacksWithAssignment(n *ast.RegionStmt, l
 	if arenaType == nil {
 		return noop, fmt.Errorf("missing builtin Arena type for region %s", n.Name)
 	}
-	allocaByStack := map[int]C.LLVMValueRef{}
+	allocaByStack := map[int]llvmIRValueRef{}
 	for k := 1; k < asn.StackCount; k++ {
 		name := fmt.Sprintf("%s#%d", n.Name, k)
-		var alloca C.LLVMValueRef
+		var alloca llvmIRValueRef
 		var err error
 		if loopReset {
 			alloca, err = s.createEntryAllocaZeroed(name, arenaType)
@@ -271,10 +264,10 @@ func (s *functionState) emitRegionExtraStacksWithAssignment(n *ast.RegionStmt, l
 	// rather than joining it; the exit restores that entry, so the enclosing arenas still wait
 	// for the enclosing statement.
 	if s.earlyFreeByOffset == nil {
-		s.earlyFreeByOffset = map[int][]C.LLVMValueRef{}
+		s.earlyFreeByOffset = map[int][]llvmIRValueRef{}
 	}
 	type prevFree struct {
-		value []C.LLVMValueRef
+		value []llvmIRValueRef
 		had   bool
 	}
 	savedFree := map[int]prevFree{}
