@@ -64,10 +64,17 @@ type resolvedTypeNamePointer struct {
 	ptr uintptr
 }
 
+type resolvedTypeNameOwnershipField struct {
+	index     int
+	name      string
+	published bool
+}
+
 var (
 	resolvedTypeNameASTPackage    = reflect.TypeOf((*ast.File)(nil)).Elem().PkgPath()
 	resolvedTypeNamePositionType  = reflect.TypeOf(lexer.Pos{})
 	resolvedTypeNameASTFieldCache sync.Map
+	resolvedTypeNameOwnershipPlan sync.Map
 )
 
 // retainedPreBodyFunctionKeys must stay in lockstep with capturePreBody's
@@ -170,17 +177,11 @@ func captureResolvedTypeNameContributions(rows map[ast.TypeExpr]string, decls []
 			if typ.PkgPath() != resolvedTypeNameASTPackage {
 				return nil
 			}
-			fields := reflectFields(typ)
-			for i := 0; i < value.NumField(); i++ {
-				field := &fields[i]
-				child := value.Field(i)
-				if !child.CanInterface() {
-					return fmt.Errorf("unpublished AST ownership field %s.%s", typ, field.Name)
+			for _, field := range resolvedTypeNameOwnershipFields(typ) {
+				if !field.published {
+					return fmt.Errorf("unpublished AST ownership field %s.%s", typ, field.name)
 				}
-				if !resolvedTypeNameFieldMayContainAST(field.Type) {
-					continue
-				}
-				if err := walk(child, owner, region, append(append(path, '.'), field.Name...), skipNestedFunctions, depth+1); err != nil {
+				if err := walk(value.Field(field.index), owner, region, append(append(path, '.'), field.name...), skipNestedFunctions, depth+1); err != nil {
 					return err
 				}
 			}
@@ -377,6 +378,21 @@ func collectResolvedTypeNameFunctionPaths(walk func(reflect.Value, string, strin
 		return err
 	}
 	return nil
+}
+
+func resolvedTypeNameOwnershipFields(typ reflect.Type) []resolvedTypeNameOwnershipField {
+	if cached, ok := resolvedTypeNameOwnershipPlan.Load(typ); ok {
+		return cached.([]resolvedTypeNameOwnershipField)
+	}
+	var plan []resolvedTypeNameOwnershipField
+	for i, field := range reflectFields(typ) {
+		published := field.IsExported()
+		if !published || resolvedTypeNameFieldMayContainAST(field.Type) {
+			plan = append(plan, resolvedTypeNameOwnershipField{index: i, name: field.Name, published: published})
+		}
+	}
+	actual, _ := resolvedTypeNameOwnershipPlan.LoadOrStore(typ, plan)
+	return actual.([]resolvedTypeNameOwnershipField)
 }
 
 func resolvedTypeNameFieldMayContainAST(typ reflect.Type) bool {
