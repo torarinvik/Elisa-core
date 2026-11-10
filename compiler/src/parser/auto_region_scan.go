@@ -208,38 +208,40 @@ func bodyForwardsConstructedStructLocal(stmts []ast.Stmt) bool {
 	return found
 }
 
+var autoRegionVarDeclType = reflect.TypeFor[*ast.VarDeclStmt]()
+
 func bodyForwardsConstructedStructLocalInfo(stmts []ast.Stmt) (bool, bool) {
 	constructed := map[string]bool{}
 	callConstructed := map[string]bool{}
 	var declarations []*ast.VarDeclStmt
 	var collect func(v reflect.Value)
 	collect = func(v reflect.Value) {
-		if !v.IsValid() || !v.CanInterface() {
-			return
-		}
 		switch v.Kind() {
 		case reflect.Pointer:
 			if v.IsNil() {
 				return
 			}
-			if vd, ok := v.Interface().(*ast.VarDeclStmt); ok && vd != nil && vd.Name != "" {
-				declarations = append(declarations, vd)
-				if _, isLit := unwrapParenExprAST(vd.Value).(*ast.StructLitExpr); isLit {
-					constructed[vd.Name] = true
-				} else if _, isCall := unwrapParenExprAST(vd.Value).(*ast.CallExpr); isCall && typeExprIsNamedAggregate(vd.Type) {
-					// `t: mutable T = make_t(..)`: a by-value aggregate produced by a call owns
-					// its container fields exactly like a literal-constructed one. Only an
-					// explicit `&t` forwarding counts for it (see argForwardsConstructed): a
-					// by-value pass of a call result (a handle, a generic `B.Node`) grows nothing.
-					constructed[vd.Name] = true
-					callConstructed[vd.Name] = true
+			if v.Type() == autoRegionVarDeclType {
+				vd := v.Interface().(*ast.VarDeclStmt)
+				if vd.Name != "" {
+					declarations = append(declarations, vd)
+					switch unwrapParenExprAST(vd.Value).(type) {
+					case *ast.StructLitExpr:
+						constructed[vd.Name] = true
+					case *ast.CallExpr:
+						if typeExprIsNamedAggregate(vd.Type) {
+							// `t: mutable T = make_t(..)`: a by-value aggregate produced by a call owns
+							// its container fields exactly like a literal-constructed one. Only an
+							// explicit `&t` forwarding counts for it (see argForwardsConstructed): a
+							// by-value pass of a call result (a handle, a generic `B.Node`) grows nothing.
+							constructed[vd.Name] = true
+							callConstructed[vd.Name] = true
+						}
+					}
 				}
 			}
 			collect(v.Elem())
 		case reflect.Interface:
-			if v.IsNil() {
-				return
-			}
 			collect(v.Elem())
 		case reflect.Struct:
 			for _, i := range autoRegionChildFields(v.Type()) {
@@ -318,7 +320,7 @@ func bodyForwardsConstructedStructLocalInfo(stmts []ast.Stmt) (bool, bool) {
 	found := false
 	var scan func(v reflect.Value)
 	scan = func(v reflect.Value) {
-		if found || !v.IsValid() || !v.CanInterface() {
+		if found {
 			return
 		}
 		switch v.Kind() {
@@ -326,7 +328,11 @@ func bodyForwardsConstructedStructLocalInfo(stmts []ast.Stmt) (bool, bool) {
 			if v.IsNil() {
 				return
 			}
-			if expr, ok := v.Interface().(ast.Expr); ok {
+			// Parentheses are walked through their child, so only actual calls
+			// and call-shaped literals need to be converted to an Expr here.
+			kind := v.Type()
+			if kind == autoRegionCallExprType || kind == autoRegionStructLitExprType {
+				expr := v.Interface().(ast.Expr)
 				_, args, isCall := ast.PrepassCallShape(expr)
 				if isCall && argForwardsConstructed(args) {
 					found = true
@@ -367,9 +373,6 @@ func bodyForwardsConstructedStructLocalInfo(stmts []ast.Stmt) (bool, bool) {
 			}
 			scan(v.Elem())
 		case reflect.Interface:
-			if v.IsNil() {
-				return
-			}
 			scan(v.Elem())
 		case reflect.Struct:
 			for _, i := range autoRegionChildFields(v.Type()) {
@@ -413,6 +416,7 @@ func bodyContainsAutoRegionAllocation(stmts []ast.Stmt) bool {
 
 var (
 	autoRegionAllocExprType     = reflect.TypeFor[*ast.AllocExpr]()
+	autoRegionCallExprType      = reflect.TypeFor[*ast.CallExpr]()
 	autoRegionStructLitExprType = reflect.TypeFor[*ast.StructLitExpr]()
 )
 
