@@ -166,9 +166,9 @@ func (a *Analyzer) classifyRegionPolymorphicFunctions(decls []scopedDecl) {
 	// docs/76: compute each function's TRANSITIVE region-backed store needs (signature ∪ what its
 	// callees need) so mutually-recursive enum groups thread every required store across the call
 	// graph, not just the one in each function's own signature.
-	var storeNeeds map[*FuncType]map[string]*EnumType
+	var storeNeeds, signatureStoreNeeds map[*FuncType]map[string]*EnumType
 	if len(regionBackedPacked) != 0 {
-		storeNeeds = a.computeTransitiveStoreNeeds(funcs, regionBackedPacked)
+		storeNeeds, signatureStoreNeeds = a.computeTransitiveStoreNeeds(funcs, regionBackedPacked)
 	} else {
 		// No hierarchy can need a threaded store. Clear prior classification
 		// state while retaining ordinary region-polymorphic parameter injection.
@@ -232,8 +232,8 @@ func (a *Analyzer) classifyRegionPolymorphicFunctions(decls []scopedDecl) {
 		// threaded (the data flowing across its boundary), never the transitive callee set. Only
 		// region-LESS functions (pure consumers/builders like sumT/sumF/leaf) receive the full
 		// transitive set, because they have no region in which to create a callee's store themselves.
-		if funcIsRegionStoreEntryPoint(fn) || a.funcOwnsRegion(fn) {
-			a.injectInferredPackedStoreParams(fnType, regionBackedPacked)
+		if decision.Entry || decision.OwnsRegion {
+			a.injectStoreNeeds(fnType, signatureStoreNeeds[fnType])
 			if needsStoreHost {
 				wrapFuncBodyInLazyAutoRegion(fn)
 			}

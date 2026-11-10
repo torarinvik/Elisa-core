@@ -45,49 +45,6 @@ func packedStoreImplicitParamName(enumName string) string {
 	return "__packed_store_" + sanitizeImplicitTempBase(enumName)
 }
 
-// injectInferredPackedStoreParams threads an implicit `E.Store[Local]` parameter into a function that
-// exposes a packed enum E in its signature (an explicit parameter or its return type). A bare packed
-// handle is a u32 index that is only meaningful against one PackedStoreState, so any function that
-// builds or consumes such a handle must share that store — this injects it as a hidden param,
-// threaded at call sites (the root call creates the region-backed store; the rest reuse it).
-//
-// It deliberately does NOT fire when the function already threads an EXPLICIT `E.Store` param: that
-// is the legacy explicit-store style, which must keep working unchanged. Idempotent.
-func (a *Analyzer) injectInferredPackedStoreParams(fnType *FuncType, regionBacked map[string]bool) {
-	if fnType == nil || len(regionBacked) == 0 {
-		return
-	}
-	enums := map[string]*EnumType{}
-	collectPackedEnumsInSignature(fnType, true, enums)
-	if len(enums) == 0 {
-		return
-	}
-	names := make([]string, 0, len(enums))
-	for name := range enums {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, enumName := range names {
-		if !regionBacked[enumName] {
-			continue // explicit-store enum — never thread an implicit store (would regress legacy code)
-		}
-		enumType := enums[enumName]
-		if enumType == nil || enumType.StoreType == nil {
-			continue
-		}
-		if enumType.HandleIsPointer() {
-			continue // docs/82: ptr handles are self-contained; no boundary store needed
-		}
-		paramName := packedStoreImplicitParamName(enumName)
-		if funcTypeHasImplicitParam(fnType, paramName) || funcTypeHasExplicitPackedStoreParam(fnType, enumName) {
-			continue
-		}
-		storeType := PackedEnumStoreWithState(enumType.StoreType, a.namedTypes["Local"])
-		fnType.Params = append(fnType.Params, storeType)
-		fnType.ImplicitParamNames = append(fnType.ImplicitParamNames, paramName)
-	}
-}
-
 // computeTransitiveStoreNeeds computes, for each region-poly candidate function, the full set of
 // region-backed packed enums whose implicit store it must carry: its own signature enums PLUS, via a
 // call-graph fixpoint, every store needed by a function it calls. This is what makes MUTUAL recursion
@@ -95,8 +52,9 @@ func (a *Analyzer) injectInferredPackedStoreParams(fnType *FuncType, regionBacke
 // Forest's store threaded in; a builder `forest()->Forest` calls `leaf()->Tree`, so it must thread
 // Tree's store down. Entry points (which own a region) create the stores on demand and are excluded
 // from injection by the caller; every other function in the chain receives them threaded.
-func (a *Analyzer) computeTransitiveStoreNeeds(funcs []*ast.FuncDecl, regionBacked map[string]bool) map[*FuncType]map[string]*EnumType {
-	needs := map[*FuncType]map[string]*EnumType{}
+func (a *Analyzer) computeTransitiveStoreNeeds(funcs []*ast.FuncDecl, regionBacked map[string]bool) (needs, signatureNeeds map[*FuncType]map[string]*EnumType) {
+	needs = map[*FuncType]map[string]*EnumType{}
+	signatureNeeds = map[*FuncType]map[string]*EnumType{}
 	callees := map[*FuncType]map[*FuncType]bool{}
 	// builds: the roots each function constructs nodes of, directly or through a callee. A worker
 	// submitted to another thread with a captured store must build none (analyzer_submit_store_capture.go).
@@ -112,14 +70,19 @@ func (a *Analyzer) computeTransitiveStoreNeeds(funcs []*ast.FuncDecl, regionBack
 			needs[ft] = map[string]*EnumType{}
 			callees[ft] = map[*FuncType]bool{}
 			order = append(order, ft)
-		}
-		sig := map[string]*EnumType{}
-		collectPackedEnumsInSignature(ft, true, sig)
-		for name, et := range sig {
-			// docs/82 `handle: ptr`: the handle is the record address, so signature exposure
-			// alone needs no store — reads are self-contained. Construction still does (below).
-			if regionBacked[name] && !et.HandleIsPointer() {
+			sig := map[string]*EnumType{}
+			collectPackedEnumsInSignature(ft, true, sig)
+			for name, et := range sig {
+				// Pointer handles are self-contained for reads. Construction
+				// can still require a store, which is recorded below.
+				if !regionBacked[name] || et.HandleIsPointer() {
+					delete(sig, name)
+					continue
+				}
 				needs[ft][name] = et
+			}
+			if len(sig) != 0 {
+				signatureNeeds[ft] = sig
 			}
 		}
 		constructors, bareVariants := a.scanPackedStoreBody(fn, callees[ft])
@@ -166,7 +129,7 @@ func (a *Analyzer) computeTransitiveStoreNeeds(funcs []*ast.FuncDecl, regionBack
 		}
 	}
 	a.packedStoreBuilders = builds
-	return needs
+	return needs, signatureNeeds
 }
 
 // injectStoreNeeds threads an implicit packed-store parameter for each region-backed enum in `needs`
