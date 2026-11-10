@@ -110,18 +110,18 @@ func retainedPreBodyFunctionKeySet(decls []scopedDecl) map[string]bool {
 // An analyzer-created key with no source-node identity is not authorized by a
 // matching position; admission declines it, while cleanup preserves it.
 func captureResolvedTypeNameContributions(rows map[ast.TypeExpr]string, decls []scopedDecl, functionKeys map[*ast.FuncDecl]string, failUnknown bool) (certificate resolvedTypeNameContributions, locations map[ast.TypeExpr]resolvedTypeNameLocation) {
+	if functionKeys == nil {
+		functionKeys = retainedPreBodyFunctionKeys(decls)
+	}
 	certificate = resolvedTypeNameContributions{
-		functions:    map[string]resolvedTypeNameFunctionContribution{},
+		functions:    make(map[string]resolvedTypeNameFunctionContribution, len(functionKeys)),
 		declarations: map[string]string{},
 	}
-	locations = map[ast.TypeExpr]resolvedTypeNameLocation{}
+	locations = make(map[ast.TypeExpr]resolvedTypeNameLocation, len(rows))
 	ambiguous := map[ast.TypeExpr]bool{}
 	active := map[resolvedTypeNamePointer]bool{}
 	work := 0
 	defer func() { certificate.walkWork = work }()
-	if functionKeys == nil {
-		functionKeys = retainedPreBodyFunctionKeys(decls)
-	}
 
 	// Siblings reuse the traversal buffer. Only a retained type-name path
 	// needs its own immutable string.
@@ -220,8 +220,8 @@ func captureResolvedTypeNameContributions(rows map[ast.TypeExpr]string, decls []
 		return nil
 	}
 
-	functionOwners := map[string]bool{}
-	functionPaths := map[*ast.FuncDecl]bool{}
+	functionOwners := make(map[string]bool, len(functionKeys))
+	functionPaths := make(map[*ast.FuncDecl]bool, len(functionKeys))
 	declarationOccurrence := map[string]int{}
 	for _, scoped := range decls {
 		root := scoped.Decl
