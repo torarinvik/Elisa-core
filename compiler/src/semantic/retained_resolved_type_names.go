@@ -46,7 +46,8 @@ func cloneResolvedTypeNameContributions(in resolvedTypeNameContributions) resolv
 type resolvedTypeNameLocation struct {
 	owner     string
 	region    string
-	paths     map[string]bool
+	firstPath string
+	morePaths map[string]bool
 	ambiguous bool
 }
 
@@ -164,10 +165,15 @@ func captureResolvedTypeNameContributions(rows map[ast.TypeExpr]string, decls []
 				location := locations[expr]
 				if location.owner != "" && (location.owner != owner || location.region != region) {
 					ambiguous[expr] = true
-				} else if location.paths == nil {
-					location = resolvedTypeNameLocation{owner: owner, region: region, paths: map[string]bool{}}
 				}
-				location.paths[string(path)] = true
+				if location.firstPath == "" {
+					location = resolvedTypeNameLocation{owner: owner, region: region, firstPath: string(path)}
+				} else if location.firstPath != string(path) {
+					if location.morePaths == nil {
+						location.morePaths = map[string]bool{}
+					}
+					location.morePaths[string(path)] = true
+				}
 				locations[expr] = location
 			}
 			err := walk(value.Elem(), owner, region, path, skipNestedFunctions, depth+1)
@@ -309,11 +315,13 @@ func captureResolvedTypeNameContributions(rows map[ast.TypeExpr]string, decls []
 			return certificate, locations
 		}
 		typeDigest := hex.EncodeToString(digest[:])
-		pathList := make([]string, 0, len(location.paths))
-		for path := range location.paths {
-			pathList = append(pathList, path)
+		pathList := []string{location.firstPath}
+		if len(location.morePaths) != 0 {
+			for path := range location.morePaths {
+				pathList = append(pathList, path)
+			}
+			sort.Strings(pathList)
 		}
-		sort.Strings(pathList)
 		pathBytes, _ := json.Marshal(pathList)
 		row := fmt.Sprintf("%s\x00%s\x00%s\x00%s", string(pathBytes), reflect.TypeOf(expr), typeDigest, canonical)
 		key := location.owner + "\x00" + location.region
@@ -543,12 +551,10 @@ func resolvedTypeNameSourceOwners(locations map[ast.TypeExpr]resolvedTypeNameLoc
 		owner := resolvedTypeNameSourceOwner{
 			owner:     location.owner,
 			region:    location.region,
-			ambiguous: location.ambiguous || len(location.paths) != 1,
+			ambiguous: location.ambiguous || location.firstPath == "" || len(location.morePaths) != 0,
 		}
-		if len(location.paths) == 1 {
-			for path := range location.paths {
-				owner.path = path
-			}
+		if len(location.morePaths) == 0 {
+			owner.path = location.firstPath
 		}
 		owners[expr] = owner
 	}
