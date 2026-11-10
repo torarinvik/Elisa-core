@@ -31,7 +31,8 @@ type sourceTokenCache struct {
 	requestOnly                 bool
 	requestOnce                 sync.Once
 	requestKey                  sourceTokenKey
-	requestLexed                *lexer.SourceTokens
+	requestLexed                []lexer.Token
+	requestErrors               []string
 	mu                          sync.Mutex
 	entries                     map[sourceTokenKey]sourceTokenEntry
 	maxEntries, maxBytes, bytes int
@@ -54,6 +55,7 @@ func (c *sourceTokenCache) releaseRequestTokens() {
 		return
 	}
 	c.requestLexed = nil
+	c.requestErrors = nil
 }
 
 func newSourceTokenCache(maxEntries, maxBytes int) *sourceTokenCache {
@@ -86,11 +88,15 @@ func (c *sourceTokenCache) lexBorrowedWithKey(key sourceTokenKey, source []byte)
 	if c.requestOnly {
 		c.requestOnce.Do(func() {
 			c.requestKey = key
-			c.requestLexed = lexer.TokenizeSource(filename, source, nil)
+			// The invocation owns its source bytes and never replays a later edit.
+			// Use the plain lexer without checkpoints or an owned source copy.
+			l := lexer.New(filename, source)
+			c.requestLexed = l.Tokenize()
+			c.requestErrors = l.Errors()
 		})
 		if c.requestLexed != nil && c.requestKey == key {
 			_ = lexer.New(filename, source)
-			return c.requestLexed.BorrowReadOnlyTokens(), c.requestLexed.CopyErrors()
+			return c.requestLexed, append([]string(nil), c.requestErrors...)
 		}
 		// Unexpected reuse for another source must retain normal lexer behavior.
 		l := lexer.New(filename, source)
