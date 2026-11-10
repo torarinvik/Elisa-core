@@ -14,6 +14,17 @@ func collectionAppendCall(n *ast.AugAssignStmt) *ast.CallExpr {
 // spelling for typed container updates so they reuse the existing caller-region
 // inference. Numeric updates remain untouched; full checking still owns validity.
 func (a *Analyzer) prepareCollectionAppends(fn *ast.FuncDecl) {
+	// Most bodies never use +=. Avoid resolving their locals and parameters
+	// in this prepass, including inside nested statement lists and expressions.
+	hasAppendSyntax := false
+	walkStoreScanNodes(fn.Body, func(node any) {
+		if stmt, ok := node.(*ast.AugAssignStmt); ok && stmt.Op == lexer.TOKEN_PLUSEQ {
+			hasAppendSyntax = true
+		}
+	})
+	if !hasAppendSyntax {
+		return
+	}
 	proofProbe := a.beginProofReportProbe()
 	defer proofProbe.restore()
 	saved := a.suppressDiagnostics
