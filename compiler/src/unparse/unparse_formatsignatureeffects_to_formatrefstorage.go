@@ -271,10 +271,14 @@ func formatTypeExpr(typ ast.TypeExpr) string {
 	}
 }
 func formatErrorTagExpr(tag ast.ErrorTagExpr) string {
-	if tag.Tag == "" {
-		return tag.SetName
+	family := ast.ModulePathSpelling(tag.SetName)
+	if tag.Family {
+		return "*" + family
 	}
-	return tag.SetName + "." + tag.Tag
+	if tag.Tag == "" {
+		return family
+	}
+	return family + "." + tag.Tag
 }
 func formatRefStorage(storage ast.RefStorage) string {
 	switch storage {
