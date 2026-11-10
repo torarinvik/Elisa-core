@@ -77,6 +77,33 @@ static bool ACE_Marker(const Instruction *I) {
   auto *C = dyn_cast<IntrinsicInst>(I);
   return (C && C->isLifetimeStartOrEnd()) || ACE_IsFree(I);
 }
+// A loop result may be copied through a temporary before it is rebound to
+// the loop state. Bypass a private temporary that is used only by the copies.
+static bool ACE_BypassCopyTemporary(Instruction *U, const DataLayout &DL) {
+  if (!isa<AllocaInst>(U) || !U->hasNUses(2)) return false;
+  MemCpyInst *Into = nullptr, *Out = nullptr;
+  for (User *User : U->users()) {
+    auto *Copy = dyn_cast<MemCpyInst>(User);
+    if (!Copy || Copy->isVolatile() || Copy->hasOperandBundles()) return false;
+    if (Copy->getRawDest() == U) Into = Copy;
+    else if (Copy->getRawSource() == U) Out = Copy;
+  }
+  if (!Into || !Out || Into->getNextNode() != Out) return false;
+  auto *Source = dyn_cast<AllocaInst>(Into->getRawSource());
+  auto *Dest = dyn_cast<AllocaInst>(Out->getRawDest());
+  auto *Length = dyn_cast<ConstantInt>(Into->getLength());
+  auto Size = ACE_Size(U, DL);
+  if (!Source || !Dest || Source == Dest || Source == U || Dest == U ||
+      !Length || Out->getLength() != Length || !Size || !Length->equalsInt(*Size))
+    return false;
+
+  IRBuilder<> B(Out);
+  B.CreateMemCpy(Dest, Out->getDestAlign(), Source, Into->getSourceAlign(), Length);
+  Out->eraseFromParent();
+  Into->eraseFromParent();
+  U->eraseFromParent();
+  return true;
+}
 static bool ACE_Writes(Instruction *I, const SmallPtrSetImpl<Instruction *> &Same, Value *Base) {
   if (isa<StoreInst>(I) || isa<MemSetInst>(I)) return true;
   if (auto *M = dyn_cast<MemTransferInst>(I)) {
@@ -287,7 +314,8 @@ extern "C" unsigned elisacoreElideArrayRoundTrips(LLVMModuleRef Ref) {
       bool Any = false;
       for (Instruction *B : Blocks)
         if (!Erased.contains(B) &&
-            (ACE_Try(B, M.getDataLayout(), DT) || ACE_TryForward(B, M.getDataLayout(), DT))) {
+            (ACE_BypassCopyTemporary(B, M.getDataLayout()) ||
+             ACE_Try(B, M.getDataLayout(), DT) || ACE_TryForward(B, M.getDataLayout(), DT))) {
           Erased.insert(B);
           Any = true;
           ++Changed;
