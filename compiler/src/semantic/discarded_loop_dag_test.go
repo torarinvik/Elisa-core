@@ -75,7 +75,8 @@ func TestBarePackedVariantWalkHandlesSharedResolvedArguments(t *testing.T) {
 		for i := 0; i < 128; i++ {
 			expr = &ast.CallExpr{Func: &ast.Ident{Name: "ident"}, Args: []ast.Expr{expr}, ResolvedArgsValid: true, ResolvedArgs: []ast.Expr{expr}}
 		}
-		got := analyzer.funcBarePackedVariantRoots(&ast.FuncDecl{Body: []ast.Stmt{&ast.ExprStmt{Expr: expr}}})
+		fn := &ast.FuncDecl{Body: []ast.Stmt{&ast.ExprStmt{Expr: expr}}}
+		_, got := analyzer.scanPackedStoreBody(fn, map[*FuncType]bool{})
 		if got["Tree"] != !payload || len(got) != map[bool]int{false: 1, true: 0}[payload] {
 			t.Fatalf("payload=%v roots=%v", payload, got)
 		}

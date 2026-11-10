@@ -117,22 +117,3 @@ func (a *Analyzer) checkStoreCapturingSubmitWorker(arg ast.Expr, worker *FuncTyp
 		a.errorf(arg.Pos(), "%q is submitted to another thread and shares the submitting scope's %s store, but it builds %s nodes%s; a submitted worker may only read a captured store", worker.Name, ast.ModulePathSpelling(root), ast.ModulePathSpelling(root), via)
 	}
 }
-
-// funcBarePackedVariantRoots returns the hierarchy roots of the payload-less packed variants a
-// function uses as values (`Expr.Absent`): such a value is a fresh node allocated in the store
-// just like a constructor call, so a store-capturing worker must not produce one either.
-func (a *Analyzer) funcBarePackedVariantRoots(fn *ast.FuncDecl) map[string]bool {
-	out := map[string]bool{}
-	if fn == nil {
-		return out
-	}
-	// Resolved call arguments can revisit the same source variant node.
-	walkStoreScanNodes(fn.Body, func(node any) {
-		if field, ok := node.(*ast.FieldExpr); ok && field != nil {
-			if enumType, variant, ok := a.enumConstructorInfoFromFieldExpr(field); ok && enumType != nil && variant != nil && enumType.Packed && len(variant.Payload) == 0 {
-				out[enumType.Root().Name] = true
-			}
-		}
-	})
-	return out
-}

@@ -260,9 +260,9 @@ func (r *RetainedAnalysis) localFactDigest(a *Analyzer, live, fn *ast.FuncDecl, 
 		fmt.Fprintf(&b, "alloc=%v;callsPoly=%v;", bodyAllocatesInferredContainers(fn.Body), a.bodyCallsRegionPolyOutsideRegion(fn.Body))
 		backed := a.collectRegionBackedPackedEnums([]*ast.FuncDecl{fn})
 		fmt.Fprintf(&b, "backed=%v;", slices.Sorted(maps.Keys(backed)))
-		fmt.Fprintf(&b, "builds=%v;bare=%v;", slices.Sorted(maps.Keys(a.funcConstructsPackedEnumRoots(fn))), slices.Sorted(maps.Keys(a.funcBarePackedVariantRoots(fn))))
 		callees := map[*FuncType]bool{}
-		a.collectCalleeFuncTypes(fn.Body, callees)
+		constructors, bareVariants := a.scanPackedStoreBody(fn, callees)
+		fmt.Fprintf(&b, "builds=%v;bare=%v;", slices.Sorted(maps.Keys(constructors)), slices.Sorted(maps.Keys(bareVariants)))
 		names := []string{}
 		for c := range callees {
 			id, known := tables.funcTypeIDs[c]

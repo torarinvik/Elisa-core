@@ -92,34 +92,6 @@ func (a *Analyzer) injectInferredPackedStoreParams(fnType *FuncType, regionBacke
 	}
 }
 
-// funcConstructsPackedEnumRoots returns the hierarchy roots (by name) of every region-backed packed
-// enum the function CONSTRUCTS in its body — `new`/`new[auto]` constructor allocations plus bare
-// constructors of recursive-plain enums (pre-rewrite CallExprs). docs/82: for `handle: ptr` enums
-// this is the store-threading seed — reads are self-contained (the handle is the record address),
-// so only construction pulls the store in.
-func (a *Analyzer) funcConstructsPackedEnumRoots(fn *ast.FuncDecl) map[string]*EnumType {
-	out := map[string]*EnumType{}
-	if fn == nil {
-		return out
-	}
-	// Resolved call arguments can share source nodes; each node contributes once.
-	walkStoreScanNodes(fn.Body, func(node any) {
-		switch n := node.(type) {
-		case *ast.AllocExpr:
-			if n != nil {
-				if enumType, _, ok := a.packedAllocConstructorInfo(n.Value); ok && enumType != nil && enumType.Packed {
-					out[enumType.Root().Name] = enumType.Root()
-				}
-			}
-		case *ast.CallExpr:
-			if et, ok := a.regionBackedEnumConstructor(n); ok && et != nil {
-				out[et.Root().Name] = et.Root()
-			}
-		}
-	})
-	return out
-}
-
 // computeTransitiveStoreNeeds computes, for each region-poly candidate function, the full set of
 // region-backed packed enums whose implicit store it must carry: its own signature enums PLUS, via a
 // call-graph fixpoint, every store needed by a function it calls. This is what makes MUTUAL recursion
@@ -158,7 +130,8 @@ func (a *Analyzer) computeTransitiveStoreNeeds(funcs []*ast.FuncDecl, regionBack
 				needs[ft][name] = et
 			}
 		}
-		for name, et := range a.funcConstructsPackedEnumRoots(fn) {
+		constructors, bareVariants := a.scanPackedStoreBody(fn, callees[ft])
+		for name, et := range constructors {
 			if regionBacked[name] && et.HandleIsPointer() {
 				needs[ft][name] = et
 			}
@@ -169,7 +142,7 @@ func (a *Analyzer) computeTransitiveStoreNeeds(funcs []*ast.FuncDecl, regionBack
 				builds[ft][name] = fn.Name
 			}
 		}
-		for name := range a.funcBarePackedVariantRoots(fn) {
+		for name := range bareVariants {
 			if regionBacked[name] {
 				if builds[ft] == nil {
 					builds[ft] = map[string]string{}
@@ -177,12 +150,6 @@ func (a *Analyzer) computeTransitiveStoreNeeds(funcs []*ast.FuncDecl, regionBack
 				builds[ft][name] = fn.Name
 			}
 		}
-		// regionPolyFn supplies the generic-param protocol bounds so `B.method(...)`
-		// dispatches contribute call-graph edges to every impl (union over impls —
-		// the concrete target is specialization-dependent).
-		a.regionPolyFn = fn
-		a.collectCalleeFuncTypes(fn.Body, callees[ft])
-		a.regionPolyFn = nil
 	}
 	for changed := true; changed; {
 		changed = false
@@ -208,40 +175,6 @@ func (a *Analyzer) computeTransitiveStoreNeeds(funcs []*ast.FuncDecl, regionBack
 	}
 	a.packedStoreBuilders = builds
 	return needs
-}
-
-// collectCalleeFuncTypes records the FuncTypes of every directly-called function in a body (resolving
-// plain-identifier calls to their visible global). Used to build the call-graph edges for the
-// transitive store-need fixpoint.
-func (a *Analyzer) collectCalleeFuncTypes(body []ast.Stmt, out map[*FuncType]bool) {
-	// Resolved call arguments can share source nodes; each node contributes once.
-	walkStoreScanNodes(body, func(node any) {
-		if call, ok := node.(*ast.CallExpr); ok && call != nil {
-			if ft := a.regionPolyCalleeFuncType(call); ft != nil {
-				out[ft] = true
-			}
-			if fieldExpr, ok := unwrapParenForRegionPoly(call.Func).(*ast.FieldExpr); ok {
-				for _, ft := range a.regionPolyProtocolMethodImplFuncTypes(fieldExpr) {
-					out[ft] = true
-				}
-				// Extension-method callee: impl methods live in the per-receiver registry, not
-				// the global namespace, so the name-based resolution above misses them. The
-				// receiver type isn't analyzed yet in this pre-pass, so union over every
-				// registered method with this name — the same conservative shape as the
-				// protocol-impl union (extra edges only thread extra store params).
-				for _, candidate := range a.visibleNameCandidates(fieldExpr.Field) {
-					for _, method := range a.extensionMethodsByName[candidate] {
-						if method == nil || method.Symbol == nil {
-							continue
-						}
-						if ft, ok := method.Symbol.Type.(*FuncType); ok && ft != nil {
-							out[ft] = true
-						}
-					}
-				}
-			}
-		}
-	})
 }
 
 // injectStoreNeeds threads an implicit packed-store parameter for each region-backed enum in `needs`
