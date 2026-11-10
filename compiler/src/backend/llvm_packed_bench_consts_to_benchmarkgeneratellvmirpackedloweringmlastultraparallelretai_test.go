@@ -6,7 +6,6 @@ import (
 	"elisacore/src/lexer"
 	"elisacore/src/parser"
 	"elisacore/src/semantic"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -414,70 +413,6 @@ func parseAndAnalyzeBackendBenchmarkSource(b *testing.B, filename string, src st
 		b.Fatalf("semantic errors:\n%s", strings.Join(errs, "\n"))
 	}
 	return result
-}
-func repoRootFromPackedBench(b *testing.B) string {
-	b.Helper()
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		b.Fatal("failed to determine backend benchmark file path")
-	}
-	return filepath.Join(filepath.Dir(thisFile), "..", "..", "..")
-}
-func parsePackedBenchIncludeDirective(line string) (string, bool) {
-	for _, prefix := range []string{"# include ", "include "} {
-		if !strings.HasPrefix(line, prefix) {
-			continue
-		}
-		rest := strings.TrimSpace(line[len(prefix):])
-		if len(rest) < 2 || rest[0] != '"' || rest[len(rest)-1] != '"' {
-			return "", false
-		}
-		return rest[1 : len(rest)-1], true
-	}
-	return "", false
-}
-func readPackedBenchSourceWithIncludes(path string, seen map[string]bool) ([]byte, error) {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return nil, err
-	}
-	if seen[abs] {
-		return nil, nil
-	}
-	seen[abs] = true
-
-	raw, err := os.ReadFile(abs)
-	if err != nil {
-		return nil, err
-	}
-
-	var out strings.Builder
-	lines := strings.SplitAfter(string(raw), "\n")
-	for _, line := range lines {
-		includePath, ok := parsePackedBenchIncludeDirective(strings.TrimSpace(line))
-		if !ok {
-			out.WriteString(line)
-			continue
-		}
-		expanded, err := readPackedBenchSourceWithIncludes(filepath.Join(filepath.Dir(abs), includePath), seen)
-		if err != nil {
-			return nil, err
-		}
-		out.Write(expanded)
-	}
-	return []byte(out.String()), nil
-}
-func loadPackedBenchSourceFromFile(b *testing.B, relativePath string) string {
-	b.Helper()
-	sourcePath := filepath.Join(repoRootFromPackedBench(b), relativePath)
-	expanded, err := readPackedBenchSourceWithIncludes(sourcePath, map[string]bool{})
-	if err != nil {
-		b.Fatalf("failed to read benchmark source %s: %v", sourcePath, err)
-	}
-	if len(expanded) == 0 {
-		b.Fatalf("expected benchmark source %s to contain input", sourcePath)
-	}
-	return string(expanded)
 }
 func benchmarkPackedLowering(b *testing.B, filename string, src string, profile PackedLoweringProfile) {
 	b.Helper()
