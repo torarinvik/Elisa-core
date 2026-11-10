@@ -71,7 +71,7 @@ with tempfile.TemporaryDirectory(prefix='guarded-divisor-') as temp:
     bindir = Path(run([CONFIG, '--bindir']).stdout.strip())
     clang = str(bindir/'clang')
     run([str(bindir/'clang++'), '-Wno-deprecated-declarations', *flags('--cxxflags'),
-         '-I'+str(ROOT/'src/backend/llvm_wrappers'),'-I'+str(ROOT/'src/backend'), str(d/'driver.cpp'),
+         '-I'+str(ROOT/'src/backend/llvmnative/llvm_wrappers'),'-I'+str(ROOT/'src/backend/llvmnative'), str(d/'driver.cpp'),
          *flags('--ldflags', '--libs', 'core', 'irreader', 'analysis', 'transformutils', '--system-libs'),
          '-Wl,-rpath,'+run([CONFIG, '--libdir']).stdout.strip(), '-o', str(d/'driver')])
     for name, (ir, expected) in cases.items():

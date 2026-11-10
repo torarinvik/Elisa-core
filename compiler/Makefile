@@ -20,7 +20,7 @@ GO_LDFLAGS := -X elisacore/src/smt.DefaultBinary=$(Z3)
 # direct build embeds VCS metadata because it has no content receipt.
 ELISAC_BUILD_VCS ?= false
 # ELISAC_FULL_DEBUG=true keeps cgo's full -g for the LLVM wrapper layer. The default is
-# line tables only (src/backend/llvm_wrapper_debug_lines.go), which is faster to compile.
+# line tables only (src/backend/llvmnative/llvm_wrapper_debug_lines.go), which is faster to compile.
 # A full-debug build goes through the direct go-build path because the provenance recipe
 # has no tag input.
 ELISAC_FULL_DEBUG ?= false

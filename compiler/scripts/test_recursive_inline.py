@@ -55,7 +55,7 @@ cases={
 }
 with tempfile.TemporaryDirectory(prefix='recursive-inline-') as tmp:
  d=Path(tmp);(d/'driver.cpp').write_text(DRIVER);clang=Path(run([CONFIG,'--bindir']).stdout.strip())/'clang++'
- run([str(clang),*flags('--cxxflags'),'-I'+str(ROOT/'src/backend/llvm_wrappers'),'-I'+str(ROOT/'src/backend'),str(d/'driver.cpp'),*flags('--ldflags','--libs','core','irreader','passes','native','--system-libs'),'-Wl,-rpath,'+run([CONFIG,'--libdir']).stdout.strip(),'-o',str(d/'driver')])
+ run([str(clang),*flags('--cxxflags'),'-I'+str(ROOT/'src/backend/llvmnative/llvm_wrappers'),'-I'+str(ROOT/'src/backend/llvmnative'),str(d/'driver.cpp'),*flags('--ldflags','--libs','core','irreader','passes','native','--system-libs'),'-Wl,-rpath,'+run([CONFIG,'--libdir']).stdout.strip(),'-o',str(d/'driver')])
  for name,(ir,expected) in cases.items():
   p=d/(name+'.ll');p.write_text(ir);output=run([str(d/'driver'),str(p)]).stdout;assert int(output.strip())==expected,(name,output);print('PASS',name)
  p=d/'positive.ll';p.write_text(BASE)

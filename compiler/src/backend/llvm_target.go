@@ -90,6 +90,7 @@ int elisacoreUnrollConstantTableLoops(LLVMModuleRef Module, LLVMTargetMachineRef
 import "C"
 
 import (
+	"elisacore/src/backend/llvmnative"
 	"elisacore/src/semantic"
 	"fmt"
 	"os"
@@ -429,7 +430,7 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 			}
 		}
 		C.elisacoreCompactEvenRanges(g.module)
-		biasValidationReturns(g)
+		llvmnative.BiasValidationReturns(unsafe.Pointer(g.module))
 		C.elisacoreCsscAbsoluteRangeChecks(g.module, g.targetMachine)
 		C.elisacoreInlineSmallRecursiveFunctions(g.module, g.targetMachine)
 		C.elisacoreUnrollGuardedReductions(g.module)

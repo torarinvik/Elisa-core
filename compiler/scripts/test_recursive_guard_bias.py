@@ -48,7 +48,7 @@ exit:
 ''' + ('!0 = !{!"branch_weights", i32 9, i32 7}\n' if prof else '')
 with tempfile.TemporaryDirectory(prefix='elisa-recursive-bias-') as tmp:
  d=Path(tmp);bindir=Path(run([CONFIG,'--bindir']));libdir=run([CONFIG,'--libdir']);(d/'driver.cpp').write_text(DRIVER)
- run([bindir/'clang++',*flags('--cxxflags'),'-I'+str(ROOT/'src/backend/llvm_wrappers'),'-I'+str(ROOT/'src/backend'),d/'driver.cpp',*flags('--ldflags','--libs','--system-libs'),'-Wl,-rpath,'+libdir,'-o',d/'driver'])
+ run([bindir/'clang++',*flags('--cxxflags'),'-I'+str(ROOT/'src/backend/llvmnative/llvm_wrappers'),'-I'+str(ROOT/'src/backend/llvmnative'),d/'driver.cpp',*flags('--ldflags','--libs','--system-libs'),'-Wl,-rpath,'+libdir,'-o',d/'driver'])
  cases={'eligible':(fixture(),'1 0'),'existing profile':(fixture(prof=True),'0 0'),'unmarked callee':(fixture(callee_attr=False),'0 0'),'caller asan':(fixture(attrs='sanitize_address'),'0 0'),'linux target':(fixture(triple='aarch64-unknown-linux-gnu'),'0 0')}
  for name,(ir,want) in cases.items():
   inp=d/(name.replace(' ','_')+'.ll');out=d/(name.replace(' ','_')+'.out.ll');inp.write_text(ir);got=run([d/'driver',inp,out]);assert got==want,(name,got,want);print('PASS',name,flush=True)

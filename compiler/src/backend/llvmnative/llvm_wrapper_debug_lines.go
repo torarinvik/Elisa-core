@@ -1,6 +1,6 @@
 //go:build cgo && !elisac_full_debug
 
-package backend
+package llvmnative
 
 // The LLVM C++ wrapper unity file is built with line tables only by default. This keeps
 // file:line in backtraces and skips variable debug info, which measured ~0.9 s of the cold

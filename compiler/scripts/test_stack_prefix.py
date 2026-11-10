@@ -30,6 +30,6 @@ CASES={
 }
 with tempfile.TemporaryDirectory(prefix='stack-prefix-') as tmp:
  d=Path(tmp);(d/'driver.cpp').write_text(DRIVER);bindir=Path(run([CONFIG,'--bindir']).stdout.strip())
- run([bindir/'clang++',*flags('--cxxflags'),'-I'+str(ROOT/'src/backend/llvm_wrappers'),'-I'+str(ROOT/'src/backend'),d/'driver.cpp',*flags('--ldflags','--libs','core','irreader','passes','--system-libs'),'-Wl,-rpath,'+run([CONFIG,'--libdir']).stdout.strip(),'-o',d/'driver'])
+ run([bindir/'clang++',*flags('--cxxflags'),'-I'+str(ROOT/'src/backend/llvmnative/llvm_wrappers'),'-I'+str(ROOT/'src/backend/llvmnative'),d/'driver.cpp',*flags('--ldflags','--libs','core','irreader','passes','--system-libs'),'-Wl,-rpath,'+run([CONFIG,'--libdir']).stdout.strip(),'-o',d/'driver'])
  for name,(body,want) in CASES.items():
   (d/'input.ll').write_text(HEAD+body+'\n ret i64 %v\n}\n');r=run([d/'driver',d/'input.ll']);got=int(r.stderr.strip());assert got==want,(name,got);print('PASS',name)

@@ -29,7 +29,7 @@ def fixture(attrs='',other_literal=False,external=False):
  return '\n'.join(body)+'\n'
 with tempfile.TemporaryDirectory(prefix='elisa-recursive-literal-') as tmp:
  d=Path(tmp);bindir=Path(run([CONFIG,'--bindir']));libdir=run([CONFIG,'--libdir']);(d/'driver.cpp').write_text(DRIVER)
- run([bindir/'clang++',*flags('--cxxflags'),'-I'+str(ROOT/'src/backend/llvm_wrappers'),'-I'+str(ROOT/'src/backend'),d/'driver.cpp',*flags('--ldflags','--libs','--system-libs'),'-Wl,-rpath,'+libdir,'-o',d/'driver'])
+ run([bindir/'clang++',*flags('--cxxflags'),'-I'+str(ROOT/'src/backend/llvmnative/llvm_wrappers'),'-I'+str(ROOT/'src/backend/llvmnative'),d/'driver.cpp',*flags('--ldflags','--libs','--system-libs'),'-Wl,-rpath,'+libdir,'-o',d/'driver'])
  cases={'eligible':(fixture(),'1 0'),'different literals':(fixture(other_literal=True),'0 0'),'noinline':(fixture(attrs='noinline'),'0 0'),'optsize':(fixture(attrs='optsize'),'0 0'),'asan':(fixture(attrs='sanitize_address'),'0 0'),'noduplicate':(fixture(attrs='noduplicate'),'0 0'),'returns_twice':(fixture(attrs='returns_twice'),'0 0'),'external':(fixture(external=True),'0 0')}
  for name,(ir,want) in cases.items():
   inp=d/(name.replace(' ','_')+'.ll');out=d/(name.replace(' ','_')+'.out.ll');inp.write_text(ir);got=run([d/'driver',inp,out]);assert got==want,(name,got,want);print('PASS',name,flush=True)

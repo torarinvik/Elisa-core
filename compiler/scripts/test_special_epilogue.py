@@ -52,7 +52,7 @@ int main(int argc, char **argv) {
 with tempfile.TemporaryDirectory(prefix="elisa-epilogue-") as tmp:
     d=Path(tmp); bindir=Path(run([CONFIG,"--bindir"]));libdir=run([CONFIG,"--libdir"])
     (d/'driver.cpp').write_text(DRIVER)
-    run([bindir/'clang++',*flags('--cxxflags'),d/'driver.cpp',ROOT/'src/backend/llvm_wrappers/llvm_special_epilogue.cpp',*flags('--ldflags','--libs','--system-libs'),'-Wl,-rpath,'+libdir,'-o',d/'driver'])
+    run([bindir/'clang++',*flags('--cxxflags'),d/'driver.cpp',ROOT/'src/backend/llvmnative/llvm_wrappers/llvm_special_epilogue.cpp',*flags('--ldflags','--libs','--system-libs'),'-Wl,-rpath,'+libdir,'-o',d/'driver'])
     source=fixture()
     negatives={
         'volatile':source.replace('%v3 = load i64','%v3 = load volatile i64'),
