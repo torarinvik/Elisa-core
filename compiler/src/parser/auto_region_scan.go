@@ -34,7 +34,8 @@ func (scan *autoRegionScan) exprBlockBodyNeedsAutoRegion(block *ast.ExprBlock) b
 }
 
 func (scan *autoRegionScan) functionBodyNeedsAutoRegion(stmts []ast.Stmt) bool {
-	if scan.bodyContainsAutoRegionAllocation(stmts) {
+	var hasExprBlocks bool
+	if scan.containsAutoRegionAllocation(reflect.ValueOf(stmts), &hasExprBlocks) {
 		return true
 	}
 	// Value blocks (docs/119): a loop EXPRESSION (`for … |acc| -> acc:`), a multi-line
@@ -45,7 +46,7 @@ func (scan *autoRegionScan) functionBodyNeedsAutoRegion(stmts []ast.Stmt) bool {
 	// Statement-position loop headers desugar to IfStmt/WhileStmt and are walked
 	// directly; this covers the value forms. Over-wrap (a block nested inside its own
 	// region scope) is a harmless lazy no-op region, same as the whole-body prepass above.
-	if scan.exprBlocksNeedAutoRegion(stmts) {
+	if hasExprBlocks && scan.exprBlocksNeedAutoRegion(stmts) {
 		return true
 	}
 	return scan.statementBodyNeedsAutoRegion(stmts, true)
@@ -404,33 +405,24 @@ func isAutoAllocValue(value ast.Expr) bool {
 	return ok && alloc != nil && (alloc.AutoRegion || alloc.Owner == nil)
 }
 
-// bodyContainsAutoRegionAllocation reports whether any expression in the body contains an
-// ownerless `new` or a struct construction with allocating container fields.
-// Comprehensions and `each` queries need their statement/tail context: an expected
-// region on the declared result type can supply their owner without an outer scope. Used to trigger the function-scope auto region; an over-wrap around a nested
-// explicit owner is a harmless lazy no-op.
-func bodyContainsAutoRegionAllocation(stmts []ast.Stmt) bool {
-	var scan autoRegionScan
-	return scan.bodyContainsAutoRegionAllocation(stmts)
-}
-
 var (
 	autoRegionAllocExprType     = reflect.TypeFor[*ast.AllocExpr]()
 	autoRegionCallExprType      = reflect.TypeFor[*ast.CallExpr]()
+	autoRegionExprBlockType     = reflect.TypeFor[*ast.ExprBlock]()
 	autoRegionStructLitExprType = reflect.TypeFor[*ast.StructLitExpr]()
 )
 
-func (scan *autoRegionScan) bodyContainsAutoRegionAllocation(stmts []ast.Stmt) bool {
-	return scan.containsAutoRegionAllocation(reflect.ValueOf(stmts))
-}
-
-func (scan *autoRegionScan) containsAutoRegionAllocation(value reflect.Value) bool {
+// Remember value blocks during the allocation walk so ordinary bodies do not
+// need another whole-tree scan to look for them.
+func (scan *autoRegionScan) containsAutoRegionAllocation(value reflect.Value, hasExprBlocks *bool) bool {
 	switch value.Kind() {
 	case reflect.Pointer:
 		if value.IsNil() {
 			return false
 		}
 		switch value.Type() {
+		case autoRegionExprBlockType:
+			*hasExprBlocks = true
 		case autoRegionAllocExprType:
 			alloc := value.Interface().(*ast.AllocExpr)
 			if alloc.AutoRegion || alloc.Owner == nil {
@@ -441,20 +433,20 @@ func (scan *autoRegionScan) containsAutoRegionAllocation(value reflect.Value) bo
 				return true
 			}
 		}
-		return scan.containsAutoRegionAllocation(value.Elem())
+		return scan.containsAutoRegionAllocation(value.Elem(), hasExprBlocks)
 	case reflect.Interface:
-		return scan.containsAutoRegionAllocation(value.Elem())
+		return scan.containsAutoRegionAllocation(value.Elem(), hasExprBlocks)
 	case reflect.Struct:
 		// Child plans contain only exported fields, so the pointer cases
 		// can convert matching nodes to their AST type directly.
 		for _, index := range autoRegionChildFields(value.Type()) {
-			if scan.containsAutoRegionAllocation(value.Field(index)) {
+			if scan.containsAutoRegionAllocation(value.Field(index), hasExprBlocks) {
 				return true
 			}
 		}
 	case reflect.Slice, reflect.Array:
 		for index := 0; index < value.Len(); index++ {
-			if scan.containsAutoRegionAllocation(value.Index(index)) {
+			if scan.containsAutoRegionAllocation(value.Index(index), hasExprBlocks) {
 				return true
 			}
 		}
@@ -465,7 +457,7 @@ func (scan *autoRegionScan) containsAutoRegionAllocation(value reflect.Value) bo
 // exprBlocksNeedAutoRegion reports whether any value-position ExprBlock nested anywhere
 // in stmts needs an ambient auto region. ExprBlocks live in EXPRESSION position (a
 // decl/assign RHS, an ExprStmt, a match-expression arm), so the reflect walk mirrors
-// bodyContainsAutoRegionAllocation: find every block wherever it hides, scan its statement list,
+// the allocation prepass: find every block wherever it hides, scan its statement list,
 // then check its tail expression and any nested blocks.
 func exprBlocksNeedAutoRegion(stmts []ast.Stmt) bool {
 	var scan autoRegionScan
