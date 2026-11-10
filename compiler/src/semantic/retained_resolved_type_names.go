@@ -282,7 +282,8 @@ func captureResolvedTypeNameContributions(rows map[ast.TypeExpr]string, decls []
 
 	// Every certified key must be an actual source TypeExpr pointer. Position
 	// similarity cannot establish which declaration produced a synthetic key.
-	rowsByOwner := map[string][]string{}
+	type ownerRegion struct{ owner, region string }
+	rowsByOwner := map[ownerRegion][]string{}
 	for expr, canonical := range rows {
 		typ := reflect.TypeOf(expr)
 		if expr == nil || typ == nil || typ.Kind() != reflect.Pointer || reflect.ValueOf(expr).IsNil() {
@@ -323,20 +324,18 @@ func captureResolvedTypeNameContributions(rows map[ast.TypeExpr]string, decls []
 			sort.Strings(pathList)
 		}
 		pathBytes, _ := json.Marshal(pathList)
-		row := fmt.Sprintf("%s\x00%s\x00%s\x00%s", string(pathBytes), reflect.TypeOf(expr), typeDigest, canonical)
-		key := location.owner + "\x00" + location.region
+		row := string(pathBytes) + "\x00" + typ.String() + "\x00" + typeDigest + "\x00" + canonical
+		key := ownerRegion{owner: location.owner, region: location.region}
 		rowsByOwner[key] = append(rowsByOwner[key], row)
-		locations[expr] = location
 	}
-	for ownerRegion, ownerRows := range rowsByOwner {
+	for key, ownerRows := range rowsByOwner {
 		sort.Strings(ownerRows)
 		encoded, err := json.Marshal(ownerRows)
 		if err != nil {
 			certificate.failure = "could not encode resolved type name contribution"
 			return certificate, locations
 		}
-		separator := strings.LastIndex(ownerRegion, "\x00")
-		owner, region := ownerRegion[:separator], ownerRegion[separator+1:]
+		owner, region := key.owner, key.region
 		if strings.HasPrefix(owner, "fn:") {
 			key := strings.TrimPrefix(owner, "fn:")
 			contribution := certificate.functions[key]
