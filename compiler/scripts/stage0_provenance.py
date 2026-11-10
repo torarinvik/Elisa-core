@@ -491,19 +491,15 @@ def build(root: Path, binary: Path) -> Path:
         staged_binary = Path(staging_dir) / binary.name
         analysis_stamp = analysis_source_digest(root, environment, files=source_files, directories=closures["semantic"], file_digests=file_digests)
         smt_stamp = smt_source_digest(root, environment, files=source_files, directories=closures["smt"], file_digests=file_digests)
-        stamps = []
+        # The Darwin release executable retains Go symbols for profiling and
+        # stack traces. Omitting DWARF avoids a second large debug link.
+        stamps = ["-w"] if environment.get("GOOS") == "darwin" else []
         if analysis_stamp:
             stamps.append(f"-X main.analysisSourceStamp={analysis_stamp}")
         if smt_stamp:
             stamps.append(f"-X main.smtSourceStamp={smt_stamp}")
         ldflags = ["-ldflags", " ".join(stamps)] if stamps else []
         command = [
-            sys.executable,
-            str(Path(__file__).with_name("run_with_timeout.py")),
-            "5",
-            "--grace-seconds",
-            "0",
-            "--",
             "go",
             "build",
             "-buildvcs=false",
@@ -512,6 +508,13 @@ def build(root: Path, binary: Path) -> Path:
             str(staged_binary),
             "./src",
         ]
+        # The parity supervisor already guards this invocation and its children.
+        # Keep Go in that group so it cannot outlive the outer rebuild deadline.
+        if os.environ.get("ELISA_REBUILD_SUPERVISED") != "1":
+            command[:0] = [
+                sys.executable, str(Path(__file__).with_name("run_with_timeout.py")),
+                "5", "--grace-seconds", "0", "--",
+            ]
         try:
             result = subprocess.run(command, cwd=root, check=False, capture_output=True, text=True)
         except OSError as error:
