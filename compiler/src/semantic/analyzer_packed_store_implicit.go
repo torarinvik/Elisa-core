@@ -191,7 +191,7 @@ func (a *Analyzer) funcOwnsRegion(fn *ast.FuncDecl) bool {
 		return !found
 	}
 	for _, stmt := range fn.Body {
-		astPruneWalkIface_ast_Stmt(stmt, visit, seen)
+		walkPruned(stmt, visit)
 		if found {
 			break
 		}
