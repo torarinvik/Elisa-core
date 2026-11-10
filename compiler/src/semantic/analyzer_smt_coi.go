@@ -237,26 +237,33 @@ func smtSliceQueryCommands(exprs []string, goalAssert string, requireQuantifiedD
 	}
 	// Union-find over declared symbols: every assert and every definition (name + body) joins
 	// the symbols it mentions.
-	parent := map[string]string{}
-	var find func(string) string
-	find = func(x string) string {
-		if p, ok := parent[x]; ok && p != x {
-			r := find(p)
-			parent[x] = r
-			return r
+	// Resolve symbol names once; component traversal uses compact integer IDs.
+	ids := make(map[string]int, len(declared))
+	parents := make([]int, len(declared))
+	sizes := make([]int, len(declared))
+	for symbol := range declared {
+		id := len(ids)
+		ids[symbol] = id
+		parents[id], sizes[id] = id, 1
+	}
+	find := func(symbol string) int {
+		id := ids[symbol]
+		for parents[id] != id {
+			parents[id] = parents[parents[id]]
+			id = parents[id]
 		}
-		parent[x] = x
-		return x
+		return id
 	}
 	union := func(a, b string) {
 		ra, rb := find(a), find(b)
-		if ra != rb {
-			if ra < rb {
-				parent[rb] = ra
-			} else {
-				parent[ra] = rb
-			}
+		if ra == rb {
+			return
 		}
+		if sizes[ra] < sizes[rb] {
+			ra, rb = rb, ra
+		}
+		parents[rb] = ra
+		sizes[ra] += sizes[rb]
 	}
 	for i := range cmds {
 		group := cmds[i].syms
@@ -271,7 +278,7 @@ func smtSliceQueryCommands(exprs []string, goalAssert string, requireQuantifiedD
 	if len(goalSyms) == 0 {
 		return "", "", false
 	}
-	goalRoots := map[string]bool{}
+	goalRoots := make(map[int]bool, len(goalSyms))
 	for _, s := range goalSyms {
 		goalRoots[find(s)] = true
 	}
