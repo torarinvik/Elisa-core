@@ -60,6 +60,8 @@ func (a *Analyzer) computeTransitiveStoreNeeds(funcs []*ast.FuncDecl, regionBack
 	// submitted to another thread with a captured store must build none (analyzer_submit_store_capture.go).
 	// The value names the function that constructs the nodes (the diagnostic's witness).
 	builds := map[*FuncType]map[string]string{}
+	// All signatures in this pass read the same declaration shapes.
+	fieldOrders := map[*StructType][]string{}
 	var order []*FuncType
 	for _, fn := range funcs {
 		ft := a.funcTypeForRegionPoly(fn)
@@ -71,7 +73,7 @@ func (a *Analyzer) computeTransitiveStoreNeeds(funcs []*ast.FuncDecl, regionBack
 			callees[ft] = map[*FuncType]bool{}
 			order = append(order, ft)
 			sig := map[string]*EnumType{}
-			collectPackedEnumsInSignature(ft, true, sig)
+			collectPackedEnumsInSignatureWithOrder(ft, true, sig, fieldOrders)
 			for name, et := range sig {
 				// Pointer handles are self-contained for reads. Construction
 				// can still require a store, which is recorded below.
@@ -363,21 +365,30 @@ func FuncTypeConsumesPackedEnumRoot(ft *FuncType, rootName string) bool {
 var packedTypeSeenPool = sync.Pool{New: func() any { return make(map[Type]int, 32) }}
 
 func collectPackedEnumsInSignature(ft *FuncType, includeReturn bool, out map[string]*EnumType) {
-	seen := packedTypeSeenPool.Get().(map[Type]int)
+	collectPackedEnumsInSignatureWithOrder(ft, includeReturn, out, nil)
+}
+
+type packedTypeWalk struct {
+	seen        map[Type]int
+	fieldOrders map[*StructType][]string
+}
+
+func collectPackedEnumsInSignatureWithOrder(ft *FuncType, includeReturn bool, out map[string]*EnumType, fieldOrders map[*StructType][]string) {
+	walk := packedTypeWalk{seen: packedTypeSeenPool.Get().(map[Type]int), fieldOrders: fieldOrders}
 	explicitCount := min(funcTypeExplicitParamCount(ft), len(ft.Params))
 	for i := 0; i < explicitCount; i++ {
-		collectPackedEnumsInTypeDepth(ft.Params[i], out, 0, seen)
+		walk.collect(ft.Params[i], out, 0)
 	}
 	if includeReturn {
-		collectPackedEnumsInTypeDepth(ft.Return, out, 0, seen)
+		walk.collect(ft.Return, out, 0)
 	}
-	releasePackedTypeSeen(seen)
+	releasePackedTypeSeen(walk.seen)
 }
 
 func collectPackedEnumsInType(t Type, out map[string]*EnumType) {
-	seen := packedTypeSeenPool.Get().(map[Type]int)
-	collectPackedEnumsInTypeDepth(t, out, 0, seen)
-	releasePackedTypeSeen(seen)
+	walk := packedTypeWalk{seen: packedTypeSeenPool.Get().(map[Type]int)}
+	walk.collect(t, out, 0)
+	releasePackedTypeSeen(walk.seen)
 }
 
 func releasePackedTypeSeen(seen map[Type]int) {
@@ -389,25 +400,30 @@ func releasePackedTypeSeen(seen map[Type]int) {
 
 const collectPackedEnumsMaxDepth = 8 // guard against infinite recursion in recursive types
 
-func collectPackedEnumsInTypeDepth(t Type, out map[string]*EnumType, depth int, seen map[Type]int) {
+func (walk packedTypeWalk) collect(t Type, out map[string]*EnumType, depth int) {
 	if depth > collectPackedEnumsMaxDepth {
 		return
 	}
 	t = StripAggregateStateType(t)
+	switch t.(type) {
+	case *RefType, *OptionalType, *ErrorUnionType, *EnumType, *PackedVariantViewType, *DArrayType, *StructType, *TupleType:
+	default:
+		return
+	}
 	// Shared type graphs are DAGs as well as cycles. A revisit at an equal or
 	// greater depth cannot expose another root. Keep the shallowest depth so a
 	// later shorter path still gets the full remaining traversal budget.
-	if previousDepth, visited := seen[t]; visited && previousDepth <= depth {
+	if previousDepth, visited := walk.seen[t]; visited && previousDepth <= depth {
 		return
 	}
-	seen[t] = depth
+	walk.seen[t] = depth
 	switch tt := t.(type) {
 	case *RefType:
-		collectPackedEnumsInTypeDepth(tt.Elem, out, depth+1, seen)
+		walk.collect(tt.Elem, out, depth+1)
 	case *OptionalType:
-		collectPackedEnumsInTypeDepth(tt.Value, out, depth+1, seen)
+		walk.collect(tt.Value, out, depth+1)
 	case *ErrorUnionType:
-		collectPackedEnumsInTypeDepth(tt.Value, out, depth+1, seen)
+		walk.collect(tt.Value, out, depth+1)
 	case *EnumType:
 		if tt == nil {
 			break
@@ -433,11 +449,11 @@ func collectPackedEnumsInTypeDepth(t Type, out map[string]*EnumType, depth int, 
 				continue
 			}
 			for _, payload := range variant.Payload {
-				collectPackedEnumsInTypeDepth(payload, out, depth+1, seen)
+				walk.collect(payload, out, depth+1)
 			}
 		}
 		for _, child := range tt.Children {
-			collectPackedEnumsInTypeDepth(child, out, depth+1, seen)
+			walk.collect(child, out, depth+1)
 		}
 	case *PackedVariantViewType:
 		if tt != nil && tt.Enum != nil && tt.Enum.Packed {
@@ -446,19 +462,26 @@ func collectPackedEnumsInTypeDepth(t Type, out map[string]*EnumType, depth int, 
 		}
 	case *DArrayType:
 		if tt != nil {
-			collectPackedEnumsInTypeDepth(tt.Elem, out, depth+1, seen)
+			walk.collect(tt.Elem, out, depth+1)
 		}
 	case *StructType:
 		if tt != nil {
-			for _, name := range orderedStructFieldNames(tt) { // map: declaration order so the depth guard cuts the same payloads every run
-				field := tt.Fields[name]
-				collectPackedEnumsInTypeDepth(field.Type, out, depth+1, seen)
+			// Preserve declaration order so the depth limit cuts the same payloads every run.
+			names, cached := walk.fieldOrders[tt]
+			if !cached {
+				names = orderedStructFieldNames(tt)
+				if walk.fieldOrders != nil {
+					walk.fieldOrders[tt] = names
+				}
+			}
+			for _, name := range names {
+				walk.collect(tt.Fields[name].Type, out, depth+1)
 			}
 		}
 	case *TupleType:
 		if tt != nil {
 			for _, field := range tt.Fields {
-				collectPackedEnumsInTypeDepth(field.Type, out, depth+1, seen)
+				walk.collect(field.Type, out, depth+1)
 			}
 		}
 	}
