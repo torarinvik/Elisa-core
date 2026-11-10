@@ -351,20 +351,28 @@ func (a *Analyzer) containerParamGrownWithRegionValue(fn *ast.FuncDecl, name str
 	if fn == nil {
 		return false
 	}
-	baseRegionValued := a.regionValueTester(fn, funcByName, funcScopes)
-	// A body local built from a struct literal (`path: Path = Path{}` whose container fields the
-	// body then grows) is region-valued too: inserting it hands its fresh backings to the target.
-	structLitLocals := map[string]bool{}
-	walkStoreScanNodes(fn.Body, func(node any) {
-		if vd, ok := node.(*ast.VarDeclStmt); ok && vd != nil && vd.Name != "" {
-			if _, isLit := stripParenExpr(vd.Value).(*ast.StructLitExpr); isLit {
-				structLitLocals[vd.Name] = true
+	var baseRegionValued func(ast.Expr) bool
+	var structLitLocals map[string]bool
+	argIsRegionValued := func(arg ast.Expr) bool {
+		if id, ok := stripParenExpr(arg).(*ast.Ident); ok && id != nil {
+			// A struct literal can give a local container fields with fresh backing.
+			// Only an inserted identifier needs the local declaration index.
+			if structLitLocals == nil {
+				structLitLocals = map[string]bool{}
+				walkStoreScanNodes(fn.Body, func(node any) {
+					if vd, ok := node.(*ast.VarDeclStmt); ok && vd != nil && vd.Name != "" {
+						if _, isLit := stripParenExpr(vd.Value).(*ast.StructLitExpr); isLit {
+							structLitLocals[vd.Name] = true
+						}
+					}
+				})
+			}
+			if structLitLocals[id.Name] {
+				return true
 			}
 		}
-	})
-	argIsRegionValued := func(arg ast.Expr) bool {
-		if id, ok := stripParenExpr(arg).(*ast.Ident); ok && id != nil && structLitLocals[id.Name] {
-			return true
+		if baseRegionValued == nil {
+			baseRegionValued = a.regionValueTester(fn, funcByName, funcScopes)
 		}
 		return baseRegionValued(arg)
 	}
