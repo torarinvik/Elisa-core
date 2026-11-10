@@ -100,7 +100,9 @@ def _validate_go_build_context(root: Path) -> dict[str, str]:
     return environment
 
 
-def _source_candidates(root: Path, environment: dict[str, str]) -> list[tuple[str, Path]]:
+def _source_candidates(
+    root: Path, environment: dict[str, str], *, closures: dict[str, set[Path]] | None = None,
+) -> list[tuple[str, Path]]:
     command = ["go", "list", "-deps", "-json", "./src"]
     try:
         result = subprocess.run(
@@ -140,11 +142,17 @@ def _source_candidates(root: Path, environment: dict[str, str]) -> list[tuple[st
     root = root.resolve()
     goroot = Path(environment["GOROOT"]).resolve()
     selected: dict[str, Path] = {}
+    package_directories: dict[str, Path] = {}
+    closure_packages: dict[str, dict[str, object]] = {}
     for package in packages:
         directory_value = package.get("Dir")
         if not isinstance(directory_value, str) or not directory_value:
             raise RuntimeError(f"Go package has no source directory: {package.get('ImportPath', 'unknown')}")
         directory = Path(directory_value).resolve()
+        if closures is not None:
+            package_directories[str(package["ImportPath"])] = directory
+            if directory.parent == root / "src" and directory.name in closures:
+                closure_packages[directory.name] = package
         module = package.get("Module")
         module = module if isinstance(module, dict) else {}
         module_directory_value = module.get("Dir")
@@ -199,6 +207,15 @@ def _source_candidates(root: Path, environment: dict[str, str]) -> list[tuple[st
             selected[entry] = path
     if not any(identity.startswith("module/src/") and path.suffix == ".go" for identity, path in selected.items()):
         raise RuntimeError(f"Stage0 source tree has no Go files under {root / 'src'}")
+    if closures is not None:
+        for name, package in closure_packages.items():
+            dependencies = package.get("Deps", [])
+            if not isinstance(dependencies, list) or any(
+                not isinstance(dep, str) or dep not in package_directories for dep in dependencies
+            ):
+                raise RuntimeError(f"Go returned incomplete Stage0 {name} dependency metadata")
+            closures[name].update(package_directories[dep] for dep in dependencies)
+            closures[name].add(package_directories[str(package["ImportPath"])])
     return sorted(selected.items(), key=lambda item: item[0])
 
 
@@ -208,8 +225,10 @@ def source_digest(root: Path, environment: dict[str, str] | None = None) -> str:
         raise RuntimeError(f"Stage0 Go module file is missing: {root / 'go.mod'}")
     if environment is None:
         environment = _validate_go_build_context(root)
-    files = _source_candidates(root, environment)
+    return _digest_sources(_source_candidates(root, environment))
 
+
+def _digest_sources(files: list[tuple[str, Path]]) -> str:
     digest = hashlib.sha256()
     for identity, path in files:
         logical_name = identity.encode("utf-8")
@@ -238,20 +257,28 @@ ANALYSIS_MAIN_FILES = (
 )
 
 
-def analysis_source_digest(root: Path, environment: dict[str, str] | None = None) -> str | None:
+def analysis_source_digest(
+    root: Path, environment: dict[str, str] | None = None, *, files: list[tuple[str, Path]] | None = None,
+    directories: set[Path] | None = None,
+) -> str | None:
     """None when the tree lacks the analysis packages (not the full compiler); the
     build then embeds no stamp and the analysis cache keys on the executable."""
-    return _closure_digest(root, environment, "semantic", ANALYSIS_MAIN_FILES, b"stage0-analysis-source-v1")
+    return _closure_digest(root, environment, "semantic", ANALYSIS_MAIN_FILES, b"stage0-analysis-source-v1", files, directories)
 
 
-def smt_source_digest(root: Path, environment: dict[str, str] | None = None) -> str | None:
+def smt_source_digest(
+    root: Path, environment: dict[str, str] | None = None, *, files: list[tuple[str, Path]] | None = None,
+    directories: set[Path] | None = None,
+) -> str | None:
     """Digest of the code that turns an SMT query into a verdict (./src/smt and its
     dependencies). Unsat proof records key on it, so analyzer changes keep them."""
-    return _closure_digest(root, environment, "smt", (), b"stage0-smt-source-v1")
+    return _closure_digest(root, environment, "smt", (), b"stage0-smt-source-v1", files, directories)
 
 
 def _closure_digest(
-    root: Path, environment: dict[str, str] | None, package: str, main_files: tuple[str, ...], tag: bytes
+    root: Path, environment: dict[str, str] | None, package: str, main_files: tuple[str, ...], tag: bytes,
+    files: list[tuple[str, Path]] | None,
+    directories: set[Path] | None,
 ) -> str | None:
     root = root.resolve()
     main_dir = (root / "src").resolve()
@@ -259,22 +286,27 @@ def _closure_digest(
         return None
     if environment is None:
         environment = _validate_go_build_context(root)
-    try:
-        result = subprocess.run(
-            ["go", "list", "-deps", "-f", "{{.Dir}}", f"./src/{package}"],
-            cwd=root, check=False, capture_output=True, text=True, timeout=30,
-        )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise RuntimeError(f"cannot enumerate Stage0 analysis inputs: {error}") from error
-    if result.returncode != 0:
-        raise RuntimeError(f"cannot enumerate Stage0 analysis inputs: {result.stderr.strip()}")
-    directories = {Path(line).resolve() for line in result.stdout.splitlines() if line.strip()}
+    if not directories:
+        try:
+            result = subprocess.run(
+                ["go", "list", "-deps", "-f", "{{.Dir}}", f"./src/{package}"],
+                cwd=root, check=False, capture_output=True, text=True, timeout=30,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise RuntimeError(f"cannot enumerate Stage0 analysis inputs: {error}") from error
+        if result.returncode != 0:
+            raise RuntimeError(f"cannot enumerate Stage0 analysis inputs: {result.stderr.strip()}")
+        directories = {Path(line).resolve() for line in result.stdout.splitlines() if line.strip()}
     digest = hashlib.sha256()
     digest.update(tag + b"\0")
     digest.update(environment.get("GOVERSION", "").encode("utf-8") + b"\0")
     count = 0
-    for identity, path in _source_candidates(root, environment):
-        parent = path.parent.resolve()
+    parent_paths: dict[Path, Path] = {}
+    for identity, path in files if files is not None else _source_candidates(root, environment):
+        directory = path.parent
+        parent = parent_paths.get(directory)
+        if parent is None:
+            parent = parent_paths[directory] = directory.resolve()
         selected = parent in directories or (parent == main_dir and path.name in main_files) or identity in INPUT_FILES
         if not selected:
             continue
@@ -358,8 +390,7 @@ def build_manifest(
     binary_sha256 = sha256_file(binary)
     go_build = go_build_metadata(binary)
     # Verify the source after reading the binary and its metadata, so this final
-    # check also covers changes during those operations without a second Go
-    # dependency enumeration in the build path.
+    # check also covers files added to the Go build after its initial input listing.
     current_source_sha256 = source_digest(root, environment)
     if source_sha256 is not None and current_source_sha256 != source_sha256:
         raise RuntimeError("Stage0 source inputs changed while the compiler was being built")
@@ -434,12 +465,14 @@ def build(root: Path, binary: Path) -> Path:
         raise RuntimeError(f"Stage0 compiler root does not exist: {root}")
     binary.parent.mkdir(parents=True, exist_ok=True)
     environment = _validate_go_build_context(root)
-    source_before = source_digest(root, environment)
+    closures: dict[str, set[Path]] = {"semantic": set(), "smt": set()}
+    source_files = _source_candidates(root, environment, closures=closures)
+    source_before = _digest_sources(source_files)
 
     with tempfile.TemporaryDirectory(prefix=f".{binary.name}.stage0-", dir=binary.parent) as staging_dir:
         staged_binary = Path(staging_dir) / binary.name
-        analysis_stamp = analysis_source_digest(root, environment)
-        smt_stamp = smt_source_digest(root, environment)
+        analysis_stamp = analysis_source_digest(root, environment, files=source_files, directories=closures["semantic"])
+        smt_stamp = smt_source_digest(root, environment, files=source_files, directories=closures["smt"])
         stamps = []
         if analysis_stamp:
             stamps.append(f"-X main.analysisSourceStamp={analysis_stamp}")
