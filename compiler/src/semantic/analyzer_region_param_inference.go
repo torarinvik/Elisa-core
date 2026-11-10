@@ -294,7 +294,7 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, 
 					ambientGrownParam = p.Name
 				}
 			}
-		} else if sstamp, ok := regionlessRefStruct(p.Type); ok && !a.paramStructIsProgramLivedIn(funcScopes[fn], p.Type) && !a.paramStructHasExplicitBackingIn(funcScopes[fn], fn, p.Type) {
+		} else if sstamp, ok := regionlessRefStruct(p.Type); ok {
 			// docs/91 S4 Stage 1: a region-less by-ref STRUCT param whose CONTAINER FIELD is grown
 			// (`def fill(m: mutable Mod&): m.bits.push(..)`), or which is forwarded to a region-
 			// requiring callee. Stamp the inferred region onto the struct ref (`Mod& @r`): the
@@ -311,14 +311,22 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, 
 				facts.fieldGrownKnown = true
 			}
 			assignedFresh := facts.fieldAssignedFresh
-			if assignedFresh || facts.fieldGrown || a.forwardTargetsRequireRegion(forwarding.fields[p.Name]) || a.forwardTargetsRequireRegion(forwarding.direct[p.Name]) {
-				stamp = sstamp
-				// A body-built value stored into the sole writable struct target adopts the same
-				// way -- but only onto a region this param already threads (never a new region
-				// param just for adoption: that would change the signature callers must infer).
-				if !assignedFresh && containerParamCount == 0 && paramIsWritableStructRef(p) && cachedParamStoresBodyLocal(facts, fn, p.Name) && !a.hasOtherFreshFieldTarget(fn, p.Name) {
-					assignedFresh = true
-				}
+			if !assignedFresh && !facts.fieldGrown &&
+				!a.forwardTargetsRequireRegion(forwarding.fields[p.Name]) &&
+				!a.forwardTargetsRequireRegion(forwarding.direct[p.Name]) {
+				continue
+			}
+			// The backing type matters only if the body would infer a region.
+			scoped := funcScopes[fn]
+			if a.paramStructIsProgramLivedIn(scoped, p.Type) ||
+				a.paramStructHasExplicitBackingIn(scoped, fn, p.Type) {
+				continue
+			}
+			stamp = sstamp
+			// A body-built value stored into the sole writable struct target adopts the same
+			// way, but only onto a region this parameter already threads.
+			if !assignedFresh && containerParamCount == 0 && paramIsWritableStructRef(p) && cachedParamStoresBodyLocal(facts, fn, p.Name) && !a.hasOtherFreshFieldTarget(fn, p.Name) {
+				assignedFresh = true
 			}
 			// The fresh backing stored into the field is allocated by this body, so the
 			// function's ambient region must be the caller's (the field's) region. Same

@@ -25,6 +25,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -144,14 +145,30 @@ func aoEachChild(v reflect.Value, visit func(interface{})) {
 	if v.Kind() != reflect.Struct {
 		return
 	}
-	rfs := reflectFields(v.Type())
-	for i := 0; i < v.NumField(); i++ {
-		field := &rfs[i]
-		if field.PkgPath != "" || strings.HasPrefix(field.Name, "Resolved") || strings.HasPrefix(field.Name, "Lowered") || field.Name == "AsOverlayCall" || field.Name == "CollectionAppend" {
-			continue
-		}
+	for _, i := range appendOnlyChildFields(v.Type()) {
 		aoVisitValue(v.Field(i), visit)
 	}
+}
+
+var appendOnlyChildFieldPlans sync.Map // reflect.Type -> immutable []int
+
+func appendOnlyChildFields(typ reflect.Type) []int {
+	if cached, ok := appendOnlyChildFieldPlans.Load(typ); ok {
+		return cached.([]int)
+	}
+	var indexes []int
+	fields := reflectFields(typ)
+	for _, i := range syntaxWalkFields(typ) {
+		field := &fields[i]
+		if field.PkgPath != "" || strings.HasPrefix(field.Name, "Resolved") ||
+			strings.HasPrefix(field.Name, "Lowered") || field.Name == "AsOverlayCall" ||
+			field.Name == "CollectionAppend" {
+			continue
+		}
+		indexes = append(indexes, i)
+	}
+	cached, _ := appendOnlyChildFieldPlans.LoadOrStore(typ, indexes)
+	return cached.([]int)
 }
 
 func aoVisitValue(fv reflect.Value, visit func(interface{})) {
@@ -160,8 +177,8 @@ func aoVisitValue(fv reflect.Value, visit func(interface{})) {
 		if fv.IsNil() {
 			return
 		}
-		if _, ok := fv.Interface().(ast.Node); ok {
-			visit(fv.Interface())
+		if node, ok := fv.Interface().(ast.Node); ok {
+			visit(node)
 			return
 		}
 		aoEachChild(fv, visit)
