@@ -347,7 +347,7 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 	case *semantic.AggregateStateType:
 		return g.lowerType(tt.Base)
 	case *semantic.OpaqueType:
-		return C.LLVMPointerTypeInContext(g.context, 0), nil
+		return g.lowerOpaqueType(tt)
 	case *semantic.GenericInstanceType:
 		return g.ensureGenericInstanceStruct(tt)
 	case *semantic.FuncType:
