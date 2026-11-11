@@ -27,8 +27,15 @@ func TestSMTDeduplicateAssertions(t *testing.T) {
 			t.Fatalf("unsafe query changed: %q", suffix)
 		}
 	}
+	query := pad + "(assert true)\n\n(assert true)"
+	if got, want := smtDeduplicateAssertions(query, ""), pad+"(assert true)\n\n"; got != want {
+		t.Fatal("duplicate without a final newline changed the surrounding text")
+	}
+	if query := q + "(assert true) (assert false)\n"; smtDeduplicateAssertions(query, goal) != query {
+		t.Fatal("multiple commands on a line must leave the input unchanged")
+	}
 	named := "(assert (! (= x 1) :named n))\n"
-	query := pad + named + named
+	query = pad + named + named
 	if got := smtDeduplicateAssertions(query, goal); got != query {
 		t.Fatal("named assertions must remain intact")
 	}

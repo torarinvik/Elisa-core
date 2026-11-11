@@ -41,6 +41,12 @@ func smtSplitTopLevel(text string) ([]string, bool) {
 	if lines := strings.Count(text, "\n"); lines > 1 {
 		out = make([]string, 0, min(lines, 4096))
 	}
+	return smtScanTopLevel(text, out, 0)
+}
+
+// A positive limit lets single-command callers provide stack storage and
+// decline as soon as the input would require another command.
+func smtScanTopLevel(text string, out []string, limit int) ([]string, bool) {
 	depth := 0
 	start := -1
 	for i := 0; i < len(text); i++ {
@@ -85,6 +91,9 @@ func smtSplitTopLevel(text string) ([]string, bool) {
 				return nil, false
 			}
 			if depth == 0 {
+				if limit > 0 && len(out) == limit {
+					return nil, false
+				}
 				out = append(out, text[start:i+1])
 				start = -1
 			}

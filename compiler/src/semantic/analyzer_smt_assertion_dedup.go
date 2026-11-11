@@ -10,21 +10,29 @@ func smtDeduplicateAssertions(query, goal string) string {
 	if len(query) < 4096 {
 		return query
 	}
-	lines := strings.SplitAfter(query, "\n")
 	seen := make(map[string]struct{})
-	var duplicate []int
-	for i, line := range lines {
+	var compact strings.Builder
+	var single [1]string
+	start, kept := 0, 0
+	for line := range strings.Lines(query) {
+		end := start + len(line)
 		text := strings.TrimSpace(line)
+		lineStart := start
+		start = end
 		if text == "" {
 			continue
 		}
 		// A previously validated identical assertion needs no second parse.
 		// Unsafe commands later in the query still cancel the entire rewrite.
 		if _, exists := seen[text]; exists {
-			duplicate = append(duplicate, i)
+			if kept == 0 {
+				compact.Grow(len(query) - len(line))
+			}
+			compact.WriteString(query[kept:lineStart])
+			kept = end
 			continue
 		}
-		commands, ok := smtSplitTopLevel(text)
+		commands, ok := smtScanTopLevel(text, single[:0], 1)
 		if !ok || len(commands) != 1 || commands[0] != text {
 			return query
 		}
@@ -40,18 +48,9 @@ func smtDeduplicateAssertions(query, goal string) string {
 			return query
 		}
 	}
-	if len(duplicate) == 0 {
+	if kept == 0 {
 		return query
 	}
-	var compact strings.Builder
-	compact.Grow(len(query))
-	d := 0
-	for i, line := range lines {
-		if d < len(duplicate) && duplicate[d] == i {
-			d++
-			continue
-		}
-		compact.WriteString(line)
-	}
+	compact.WriteString(query[kept:])
 	return compact.String()
 }
