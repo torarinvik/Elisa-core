@@ -64,3 +64,38 @@ module B:
 		t.Fatalf("expected the private overload to be private to module A, got %v", result.Diagnostics)
 	}
 }
+
+func TestPrivateSelectiveImportDiagnosticRequiresMatchingArguments(t *testing.T) {
+	src := `module A:
+    private:
+        def pick[T](value: T, second: T) -> i64:
+            return 1
+
+from A import pick
+
+def pick(value: bool) -> i64:
+    return 2
+
+def public_match() -> i64:
+    return pick(true)
+
+def private_match() -> i64:
+    return pick(true, false)
+
+def neither_matches() -> i64:
+    return pick(true, 1)
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "private_selective_import.elisa", src, AnalyzeOptions{})
+	privacyErrors := 0
+	for _, diagnostic := range result.Diagnostics {
+		if strings.Contains(diagnostic.Message, "is private to module") {
+			privacyErrors++
+			if diagnostic.Pos.Line != 15 {
+				t.Errorf("privacy diagnostic should identify only the matching private signature: %v", diagnostic)
+			}
+		}
+	}
+	if privacyErrors != 1 {
+		t.Fatalf("expected one privacy diagnostic, got %v", result.Diagnostics)
+	}
+}

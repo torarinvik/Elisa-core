@@ -27,10 +27,13 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 		return invalidType
 	}
 	explicitParamCount := funcTypeExplicitParamCount(ft)
+	argumentMismatch := false
 	if !ft.Variadic && len(orderedArgs) != explicitParamCount {
+		argumentMismatch = true
 		a.errorf(expr.Pos(), "function %q expects %d arguments, got %d%s", ft.Name, explicitParamCount, len(orderedArgs), boundsLengthHint(ft))
 	}
 	if ft.Variadic && len(orderedArgs) < explicitParamCount {
+		argumentMismatch = true
 		a.errorf(expr.Pos(), "variadic function %q expects at least %d arguments, got %d", ft.Name, explicitParamCount, len(orderedArgs))
 	}
 	bindings := map[string]Type{}
@@ -105,6 +108,7 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 				a.checkStoreCapturingSubmitWorker(orderedArgs[i], argType.(*FuncType))
 			}
 			if !storeCapture && !AssignableTo(expectedType, argType) && !assignableThreadingRegionParam(expectedType, argType, regionParams) && !a.assignableArenaRegionParam(ft.Params[i], argType, orderedArgs[i], regionParams) {
+				argumentMismatch = true
 				a.errorf(orderedArgs[i].Pos(), "argument %d to %q expects %s, got %s", i+1, ft.Name, expectedType, argType)
 				if !writableRefAssignableIgnoringMutability(expectedType, argType) || !a.reportRebindableReadOnlyRefNote(orderedArgs[i].Pos(), orderedArgs[i]) {
 					a.reportMutableRefArgumentNote(orderedArgs[i].Pos(), expectedType, argType)
@@ -176,6 +180,9 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 		if i == 0 {
 			a.warnOnLegacyRawAtomicCall(expr.Pos(), ft.Name, argType)
 		}
+	}
+	if argumentMismatch {
+		a.reportPrivateSelectiveCallCandidate(expr, orderedArgs)
 	}
 	// docs/91 S4 W5: a by-value struct grown in a local region, passed to a callee that stores it into
 	// a longer-lived argument, dangles when the local region frees — caught at the call site.
