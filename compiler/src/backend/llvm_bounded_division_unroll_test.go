@@ -206,3 +206,54 @@ invalid:
 		})
 	}
 }
+
+func TestMaskedSingleBitFoldRequiresMaskWithoutSignBit(t *testing.T) {
+	if !boundedDivisionUnrollSupported() {
+		t.Skip("requires LLVM 23")
+	}
+	const source = `
+target triple = "arm64-apple-macosx"
+declare i64 @llvm.ctpop.i64(i64)
+define i64 @masked_bit(i64 %value) {
+entry:
+  %positive = icmp sgt i64 %value, 0
+  %count = call i64 @llvm.ctpop.i64(i64 %value)
+  %small = icmp ult i64 %count, 2
+  %valid = select i1 %positive, i1 %small, i1 false
+  br i1 %valid, label %mask, label %exit
+mask:
+  %bits = and i64 %value, 1431655765
+  %present = icmp ne i64 %bits, 0
+  %answer = zext i1 %present to i64
+  br label %exit
+exit:
+  %result = phi i64 [ 0, %entry ], [ %answer, %mask ]
+  ret i64 %result
+}
+`
+	for _, test := range []struct {
+		name string
+		ir   string
+		want int
+	}{
+		{"low bits only", source, 1},
+		{"sign bit included", strings.Replace(source, "1431655765", "-9223372036854775808", 1), 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			g, err := parseLLVMIRForSplitHalfTest(test.ir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer g.dispose()
+			if err := g.ensureTargetMachine(); err != nil {
+				t.Fatal(err)
+			}
+			if got := unrollBoundedDivisionLoops(g); got != test.want {
+				t.Fatalf("cleanup status %d, want %d", got, test.want)
+			}
+			if err := g.verify(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

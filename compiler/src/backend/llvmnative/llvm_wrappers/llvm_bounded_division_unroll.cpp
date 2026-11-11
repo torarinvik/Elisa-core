@@ -395,6 +395,7 @@ static unsigned elisacoreFoldPowerPosition(Module &M) {
 }
 #include "llvm_range_and.cpp"
 #include "llvm_scalar_loop_idioms.cpp"
+#include "llvm_masked_single_bit.cpp"
 #include "llvm_shift_xor.cpp"
 extern "C" bool elisacoreReuseEdgeDivisionsInFunction(LLVMValueRef);
 
@@ -428,6 +429,7 @@ extern "C" unsigned elisacoreOptimizeBoundedDivisionLoops(LLVMModuleRef M, LLVMT
     Changed += elisacoreFoldPowerPosition(*llvm::unwrap(M));
     Changed += elisacoreFoldRangeAndLoops(*llvm::unwrap(M));
     Changed += elisacoreFoldScalarLoopIdioms(*llvm::unwrap(M));
+    Changed += elisacoreFoldMaskedSingleBits(*llvm::unwrap(M));
     Changed += elisacoreFoldShiftXorLoops(*llvm::unwrap(M));
   }
 #endif
