@@ -211,56 +211,32 @@ func bodyForwardsConstructedStructLocal(stmts []ast.Stmt) bool {
 	return found
 }
 
-var autoRegionVarDeclType = reflect.TypeFor[*ast.VarDeclStmt]()
-
 func bodyForwardsConstructedStructLocalInfo(stmts []ast.Stmt) (bool, bool) {
 	constructed := map[string]bool{}
 	callConstructed := map[string]bool{}
 	type alias struct{ name, target string }
 	var aliases []alias
-	var collect func(v reflect.Value)
-	collect = func(v reflect.Value) {
-		switch v.Kind() {
-		case reflect.Pointer:
-			if v.IsNil() {
-				return
+	astscan.WalkPruned(stmts, func(node any) bool {
+		decl, ok := node.(*ast.VarDeclStmt)
+		if !ok || decl.Name == "" {
+			return true
+		}
+		switch value := unwrapParenExprAST(decl.Value).(type) {
+		case *ast.Ident:
+			if value != nil {
+				aliases = append(aliases, alias{decl.Name, value.Name})
 			}
-			if v.Type() == autoRegionVarDeclType {
-				vd := v.Interface().(*ast.VarDeclStmt)
-				if vd.Name != "" {
-					switch value := unwrapParenExprAST(vd.Value).(type) {
-					case *ast.Ident:
-						if value != nil {
-							aliases = append(aliases, alias{vd.Name, value.Name})
-						}
-					case *ast.StructLitExpr:
-						constructed[vd.Name] = true
-					case *ast.CallExpr:
-						if typeExprIsNamedAggregate(vd.Type) {
-							// `t: mutable T = make_t(..)`: a by-value aggregate produced by a call owns
-							// its container fields exactly like a literal-constructed one. Only an
-							// explicit `&t` forwarding counts for it (see argForwardsConstructed): a
-							// by-value pass of a call result (a handle, a generic `B.Node`) grows nothing.
-							constructed[vd.Name] = true
-							callConstructed[vd.Name] = true
-						}
-					}
-				}
-			}
-			collect(v.Elem())
-		case reflect.Interface:
-			collect(v.Elem())
-		case reflect.Struct:
-			for _, i := range autoRegionChildFields(v.Type()) {
-				collect(v.Field(i))
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				collect(v.Index(i))
+		case *ast.StructLitExpr:
+			constructed[decl.Name] = true
+		case *ast.CallExpr:
+			if typeExprIsNamedAggregate(decl.Type) {
+				// Call-produced aggregates need an explicit address for whole-local forwarding.
+				constructed[decl.Name] = true
+				callConstructed[decl.Name] = true
 			}
 		}
-	}
-	collect(reflect.ValueOf(stmts))
+		return true
+	})
 	// A by-value local copy of a constructed struct still carries the same container
 	// backing regions. Treat simple identifier/parenthesized copies as aliases for the
 	// purpose of deciding whether the function needs an ambient region. Semantic analysis
@@ -321,74 +297,48 @@ func bodyForwardsConstructedStructLocalInfo(stmts []ast.Stmt) (bool, bool) {
 		return false
 	}
 	found := false
-	var scan func(v reflect.Value)
-	scan = func(v reflect.Value) {
+	astscan.WalkPruned(stmts, func(node any) bool {
 		if found {
-			return
+			return false
 		}
-		switch v.Kind() {
-		case reflect.Pointer:
-			if v.IsNil() {
-				return
-			}
-			// Parentheses are walked through their child, so only actual calls
-			// and call-shaped literals need to be converted to an Expr here.
-			kind := v.Type()
-			if kind == autoRegionCallExprType || kind == autoRegionStructLitExprType {
-				expr := v.Interface().(ast.Expr)
-				_, args, isCall := ast.PrepassCallShape(expr)
-				if isCall && argForwardsConstructed(args) {
-					found = true
-					return
-				}
-				if call, ok := expr.(*ast.CallExpr); ok && call != nil && fieldArgForwardsConstructed(call.Args) {
-					found = true
-					return
-				}
-				// Direct growth of a constructed local's container FIELD (`x.items.push(v)`,
-				// `x.a.b.reserve(n)`, `x.rows[i].push(v)`): the field's default `[]` backing is
-				// region-less and needs the same ambient region as a bare container local.
-				// Without it the backend reports "has no region to grow into" for an ordinary
-				// struct-builder function unless some unrelated bare local happens to allocate.
-				if call, ok := expr.(*ast.CallExpr); ok && call != nil {
-					if growth, ok := call.Func.(*ast.FieldExpr); ok && growth != nil && constructedFieldGrowthMethods[growth.Field] {
-						obj := unwrapParenExprAST(growth.Object)
-						isPath := false
-						for {
-							switch o := obj.(type) {
-							case *ast.FieldExpr:
-								isPath = true
-								obj = unwrapParenExprAST(o.Object)
-								continue
-							case *ast.IndexExpr:
-								isPath = true
-								obj = unwrapParenExprAST(o.Object)
-								continue
-							}
-							break
-						}
-						if id, ok := obj.(*ast.Ident); ok && id != nil && isPath && constructed[id.Name] {
-							found = true
-							return
-						}
-					}
-				}
-			}
-			scan(v.Elem())
-		case reflect.Interface:
-			scan(v.Elem())
-		case reflect.Struct:
-			for _, i := range autoRegionChildFields(v.Type()) {
-				scan(v.Field(i))
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				scan(v.Index(i))
-			}
+		switch expr := node.(type) {
+		case *ast.CallExpr:
+			_, args, isCall := ast.PrepassCallShape(expr)
+			found = (isCall && argForwardsConstructed(args)) ||
+				fieldArgForwardsConstructed(expr.Args) ||
+				callGrowsConstructedField(expr, constructed)
+		case *ast.StructLitExpr:
+			_, args, isCall := ast.PrepassCallShape(expr)
+			found = isCall && argForwardsConstructed(args)
+		}
+		return !found
+	})
+	return found, true
+}
+
+// Direct growth of a constructed local's field needs the same ambient region
+// as growth of a bare container local. The path can include indexed elements.
+func callGrowsConstructedField(call *ast.CallExpr, constructed map[string]bool) bool {
+	growth, ok := call.Func.(*ast.FieldExpr)
+	if !ok || growth == nil || !constructedFieldGrowthMethods[growth.Field] {
+		return false
+	}
+	obj := unwrapParenExprAST(growth.Object)
+	isPath := false
+	for {
+		switch node := obj.(type) {
+		case *ast.FieldExpr:
+			isPath = true
+			obj = unwrapParenExprAST(node.Object)
+		case *ast.IndexExpr:
+			isPath = true
+			obj = unwrapParenExprAST(node.Object)
+		case *ast.Ident:
+			return node != nil && isPath && constructed[node.Name]
+		default:
+			return false
 		}
 	}
-	scan(reflect.ValueOf(stmts))
-	return found, true
 }
 
 // isAutoAllocValue reports whether an initializer is a `new[auto] T(...)` allocation — a fresh
@@ -407,11 +357,7 @@ func isAutoAllocValue(value ast.Expr) bool {
 	return ok && alloc != nil && (alloc.AutoRegion || alloc.Owner == nil)
 }
 
-var (
-	autoRegionCallExprType      = reflect.TypeFor[*ast.CallExpr]()
-	autoRegionExprBlockType     = reflect.TypeFor[*ast.ExprBlock]()
-	autoRegionStructLitExprType = reflect.TypeFor[*ast.StructLitExpr]()
-)
+var autoRegionExprBlockType = reflect.TypeFor[*ast.ExprBlock]()
 
 // Remember value blocks during the allocation walk so ordinary bodies do not
 // need another whole-tree scan to look for them.
