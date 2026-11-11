@@ -133,6 +133,14 @@ func TestAnalysisBootstrapBudgetNeverRestartsOrClampsPastDeadline(t *testing.T) 
 	if first <= 0 || second > first {
 		t.Fatal("continuation reset global process deadline")
 	}
+	t.Setenv("ELISACORE_ANALYSIS_BOOTSTRAP_SECONDS", "0.05")
+	if got := analysisBootstrapBudget(0, true); got != 50*time.Millisecond {
+		t.Fatalf("subsecond final-check budget = %v, want 50ms", got)
+	}
+	processStartTime = time.Now().Add(-analysisBootstrapDeadline)
+	if got := analysisBootstrapBudget(0, true); got != 0 {
+		t.Fatalf("subsecond override reset the expired deadline: %v", got)
+	}
 }
 
 func TestDefaultDiskUnwritableCacheDoesNotBreakCompletedSmallBuild(t *testing.T) {

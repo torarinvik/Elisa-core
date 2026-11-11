@@ -367,7 +367,7 @@ func advanceAnalysisDiskBuildWithCheckpoint(program *loadedProgram, file, pristi
 // Analysis stops between
 // declarations, so one slow body can still overrun its share; the margin
 // absorbs typical bodies and a timed-out step is simply rerun.
-// ELISACORE_ANALYSIS_BOOTSTRAP_SECONDS (1-15) keeps a fixed per-step budget.
+// ELISACORE_ANALYSIS_BOOTSTRAP_SECONDS (0.001–15) caps the per-step budget.
 const (
 	analysisBootstrapDeadline    = 30 * time.Second
 	analysisBootstrapMargin      = 6 * time.Second
@@ -390,8 +390,8 @@ func analysisBootstrapBudget(stateBytes int, finalChecks bool) time.Duration {
 	if budget <= 0 {
 		return 0
 	}
-	if seconds, err := strconv.Atoi(os.Getenv("ELISACORE_ANALYSIS_BOOTSTRAP_SECONDS")); err == nil && seconds >= 1 && seconds <= 15 {
-		requested := time.Duration(seconds) * time.Second
+	if seconds, err := strconv.ParseFloat(os.Getenv("ELISACORE_ANALYSIS_BOOTSTRAP_SECONDS"), 64); err == nil && seconds >= 0.001 && seconds <= 15 {
+		requested := time.Duration(seconds * float64(time.Second))
 		if requested < budget {
 			return requested
 		}
