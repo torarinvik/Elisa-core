@@ -149,3 +149,60 @@ int main(void) {
 	run(clang, "-O0", filepath.Join(dir, "loops.ll"), filepath.Join(dir, "main.c"), "-o", filepath.Join(dir, "check"))
 	run(filepath.Join(dir, "check"))
 }
+
+func TestJoinedSignedQuotientRequiresNonnegativeShiftInput(t *testing.T) {
+	if !boundedDivisionUnrollSupported() {
+		t.Skip("requires LLVM 23")
+	}
+	const source = `
+target triple = "arm64-apple-macosx"
+define i64 @quotient(i64 %input, i64 %other, i1 %again) {
+entry:
+  %stable = freeze i64 %input
+  %guard = icmp samesign ult i64 %stable, 4
+  br i1 %guard, label %invalid, label %initial
+initial:
+  %first = lshr i64 %stable, 1
+  br label %join
+join:
+  %n = phi i64 [ %stable, %initial ], [ %other, %backedge ]
+  %d = phi i64 [ 2, %initial ], [ 3, %backedge ]
+  %q = phi i64 [ %first, %initial ], [ %next, %backedge ]
+  br i1 %again, label %backedge, label %result
+backedge:
+  %next = sdiv i64 %other, 3
+  br label %join
+result:
+  %repeat = sdiv i64 %n, %d
+  %sum = add i64 %repeat, %q
+  ret i64 %sum
+invalid:
+  ret i64 0
+}
+`
+	for _, test := range []struct {
+		name string
+		ir   string
+		want int
+	}{
+		{"nonnegative", source, 1},
+		{"signed-input-unknown", strings.Replace(source, "icmp samesign ult", "icmp ult", 1), 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			g, err := parseLLVMIRForSplitHalfTest(test.ir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer g.dispose()
+			if err := g.ensureTargetMachine(); err != nil {
+				t.Fatal(err)
+			}
+			if got := unrollBoundedDivisionLoops(g); got != test.want {
+				t.Fatalf("cleanup status %d, want %d", got, test.want)
+			}
+			if err := g.verify(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

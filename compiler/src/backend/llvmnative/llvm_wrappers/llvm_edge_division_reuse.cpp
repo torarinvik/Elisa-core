@@ -29,6 +29,66 @@ static int nonnegativeDivisionShift(const BinaryOperator &Div, Value *Dividend,
   return K->getValue().exactLogBase2();
 }
 
+// A preheader can carry an already computed quotient through its predecessor's
+// PHI, even when the incoming dividend and divisor are themselves PHIs.
+static bool reuseJoinedQuotient(BasicBlock &Block) {
+  auto *Div = dyn_cast<BinaryOperator>(&*Block.getFirstNonPHIIt());
+  BasicBlock *Join = Block.getSinglePredecessor();
+  if (!Join || Join == &Block || !Div || Div->getOpcode() != Instruction::SDiv ||
+      !Div->getType()->isIntegerTy(64) || Div->isExact() ||
+      Div->hasMetadataOtherThanDebugLoc())
+    return false;
+
+  for (PHINode &Phi : Join->phis()) {
+    if (Phi.getType() != Div->getType() || Phi.getNumIncomingValues() != 2)
+      continue;
+    bool Matches = true;
+    for (unsigned I = 0; I < 2; ++I) {
+      BasicBlock *Pred = Phi.getIncomingBlock(I);
+      if (Pred == Join || Pred == Phi.getIncomingBlock(1 - I)) {
+        Matches = false;
+        break;
+      }
+      Value *Dividend = divisionOperandOnEdge(Div->getOperand(0), *Join, Pred);
+      Value *Divisor = divisionOperandOnEdge(Div->getOperand(1), *Join, Pred);
+      auto *Quotient = dyn_cast<BinaryOperator>(Phi.getIncomingValue(I));
+      if (!Dividend || !Divisor || !Quotient || Quotient->isExact() ||
+          Quotient->getOperand(0) != Dividend) {
+        Matches = false;
+        break;
+      }
+      if (Quotient->getOpcode() == Instruction::SDiv && Quotient->getOperand(1) == Divisor)
+        continue;
+
+      auto *Shift = dyn_cast<ConstantInt>(Quotient->getOperand(1));
+      auto *Denominator = dyn_cast<ConstantInt>(Divisor);
+      // In the shift case require a stable dividend and a guard dominating
+      // the incoming edge. A samesign comparison with a nonnegative constant
+      // is poison for negative dividends, so any taken branch proves the sign.
+      auto *Entry = dyn_cast<UncondBrInst>(Pred->getTerminator());
+      BasicBlock *GuardBlock = Entry && Entry->getSuccessor() == Join
+                                  ? Pred->getSinglePredecessor() : nullptr;
+      auto *Branch = GuardBlock ? dyn_cast<CondBrInst>(GuardBlock->getTerminator()) : nullptr;
+      auto *Guard = Branch ? dyn_cast<ICmpInst>(Branch->getCondition()) : nullptr;
+      auto *Bound = Guard ? dyn_cast<ConstantInt>(Guard->getOperand(1)) : nullptr;
+      if (Quotient->getOpcode() != Instruction::LShr || !Shift || !Denominator ||
+          !Denominator->getValue().isStrictlyPositive() ||
+          !Denominator->getValue().isPowerOf2() ||
+          !Shift->equalsInt(Denominator->getValue().exactLogBase2()) ||
+          !isa<FreezeInst>(Dividend) || !Guard || !Guard->hasSameSign() ||
+          Guard->getOperand(0) != Dividend || !Bound || Bound->isNegative()) {
+        Matches = false;
+        break;
+      }
+    }
+    if (!Matches) continue;
+    Div->replaceAllUsesWith(&Phi);
+    Div->eraseFromParent();
+    return true;
+  }
+  return false;
+}
+
 static bool reuseEdgeDivision(BasicBlock &Join) {
   auto *Div = dyn_cast<BinaryOperator>(&*Join.getFirstNonPHIIt());
   if (!Div || (Div->getOpcode() != Instruction::SDiv &&
@@ -106,7 +166,7 @@ static unsigned elisacoreReuseEdgeDivisions(Module &M) {
   for (Function &F : M) {
     if (BDU_SkipFunction(F, M) || F.size() > 128) continue;
     for (BasicBlock &B : F) {
-      if (!reuseEdgeDivision(B)) continue;
+      if (!reuseJoinedQuotient(B) && !reuseEdgeDivision(B)) continue;
       ++Changed;
       break;
     }
