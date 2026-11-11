@@ -14,12 +14,13 @@ func (a *Analyzer) functionReturnsRegionAllocatedValue(fn *ast.FuncDecl) bool {
 	// retCarriesRegionStorage gates the struct-literal-field rule below: it only fires when the
 	// return type can actually hold region-backed storage (a container, view, or struct with
 	// such a field), so a function returning a scalar field copy is never mis-classified.
-	retCarriesRegionStorage := false
+	var returnType Type
 	if fn != nil {
 		if ft := a.funcTypeForRegionPoly(fn); ft != nil {
-			retCarriesRegionStorage = typeCarriesRegionStorage(ft.Return)
+			returnType = ft.Return
 		}
 	}
+	retCarriesRegionStorage := returnType != nil && typeCarriesRegionStorage(returnType)
 	// Locals fed by region-allocated values (a `result` accumulated across branches from
 	// region-polymorphic calls / bare region-backed constructors): returning one is returning a
 	// region-allocated value — the same local-tracking functionBuildsAndReturnsLocalContainer
@@ -63,29 +64,35 @@ func (a *Analyzer) functionReturnsRegionAllocatedValue(fn *ast.FuncDecl) bool {
 	// not change; treating the container as sharing its region with the result made every
 	// caller of a `path_text(names, table)`-style helper adopt a region it never touched.
 	viewElementLocals := map[string]bool{}
-	if fn != nil && retCarriesRegionStorage {
-		if ft := a.funcTypeForRegionPoly(fn); ft != nil {
-			blocked := map[string]bool{}
-			for _, param := range fn.Params {
-				blocked[param.Name] = true
-			}
-			fillMayAdoptWalk(reflect.ValueOf(fn.Body), func(node any) {
-				switch s := node.(type) {
-				case *ast.VarDeclStmt:
-					if elem, ok := headerOnlyDarrayElemName(s.Type); ok && !typeMayReachDarrayStorage(ft.Return, elem) {
-						viewElementLocals[s.Name] = true
-					} else {
-						blocked[s.Name] = true
+	if retCarriesRegionStorage {
+		blocked := map[string]bool{}
+		for _, param := range fn.Params {
+			blocked[param.Name] = true
+		}
+		reachesStorage := map[string]bool{}
+		fillMayAdoptWalk(reflect.ValueOf(fn.Body), func(node any) {
+			switch s := node.(type) {
+			case *ast.VarDeclStmt:
+				if elem, ok := headerOnlyDarrayElemName(s.Type); ok {
+					reaches, known := reachesStorage[elem]
+					if !known {
+						reaches = typeMayReachDarrayStorage(returnType, elem)
+						reachesStorage[elem] = reaches
 					}
-				case *ast.TupleBindStmt:
-					for _, nm := range s.Names {
-						blocked[nm.Name] = true
+					if !reaches {
+						viewElementLocals[s.Name] = true
+						return
 					}
 				}
-			})
-			for name := range blocked {
-				delete(viewElementLocals, name)
+				blocked[s.Name] = true
+			case *ast.TupleBindStmt:
+				for _, nm := range s.Names {
+					blocked[nm.Name] = true
+				}
 			}
+		})
+		for name := range blocked {
+			delete(viewElementLocals, name)
 		}
 	}
 	callSharesRegionLocal := func(callee ast.Expr, args []ast.Expr) bool {

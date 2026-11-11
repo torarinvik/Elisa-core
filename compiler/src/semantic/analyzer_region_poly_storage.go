@@ -1,62 +1,28 @@
 package semantic
 
-import (
-	"elisacore/src/ast"
-	"reflect"
-)
+import "elisacore/src/ast"
 
 // bodyAllocatesInferredContainers reports whether the statements contain a region-less
 // container literal or comprehension outside any explicit region/in-store scope — the
 // allocations a synthesized ambient region would capture.
 func bodyAllocatesInferredContainers(stmts []ast.Stmt) bool {
 	found := false
-	var rec func(v reflect.Value)
-	rec = func(v reflect.Value) {
-		if found || !v.IsValid() || !v.CanInterface() {
-			return
+	walkPruned(stmts, func(node any) bool {
+		if found {
+			return false
 		}
-		switch v.Kind() {
-		case reflect.Pointer:
-			if v.IsNil() {
-				return
-			}
-			switch n := v.Interface().(type) {
-			case *ast.RegionStmt:
-				if len(n.Body) != 0 {
-					return
-				}
-			case *ast.InStoreStmt:
-				return
-			case *ast.LambdaExpr:
-				return
-			case *ast.ListLitExpr:
-				if n.Owner == nil {
-					found = true
-					return
-				}
-			case *ast.ListComprehensionExpr:
-				if n.Owner == nil {
-					found = true
-					return
-				}
-			}
-			rec(v.Elem())
-		case reflect.Interface:
-			if v.IsNil() {
-				return
-			}
-			rec(v.Elem())
-		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
-				rec(v.Field(i))
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				rec(v.Index(i))
-			}
+		switch n := node.(type) {
+		case *ast.RegionStmt:
+			return len(n.Body) == 0
+		case *ast.InStoreStmt, *ast.LambdaExpr:
+			return false
+		case *ast.ListLitExpr:
+			found = n.Owner == nil
+		case *ast.ListComprehensionExpr:
+			found = n.Owner == nil
 		}
-	}
-	rec(reflect.ValueOf(stmts))
+		return !found
+	})
 	return found
 }
 
