@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -96,6 +97,27 @@ func TestSMTInMemoryCacheHitDoesNotStartSolver(t *testing.T) {
 				t.Fatalf("cached decline not counted: %+v", a.smtStats)
 			}
 		})
+	}
+}
+
+func TestSMTLargeQueryCacheUsesCompactExactKey(t *testing.T) {
+	a := &Analyzer{}
+	hyps := strings.Repeat("; exact query cache fixture\n", 200)
+	_, query := smtQueryForCacheTest(a, hyps, "true")
+	want := smtQueryResult{ce: "x=1"}
+	a.cacheSMTQuery(query, want)
+	if _, stored := a.smtQueryCache[query]; stored {
+		t.Fatal("cache retained the full large query")
+	}
+	if got, hit, _, _ := a.smtCachedQuery(query); !hit || got != want {
+		t.Fatalf("same query got %#v, hit %v", got, hit)
+	}
+	_, different := smtQueryForCacheTest(a, hyps, "false")
+	if smtQueryMemoryKey(query) == smtQueryMemoryKey(different) {
+		t.Fatal("different obligations share a key")
+	}
+	if smtQueryMemoryKey(query) == smtQueryMemoryKey(smtQueryMemoryKey(query)) {
+		t.Fatal("raw input aliases the digest key")
 	}
 }
 

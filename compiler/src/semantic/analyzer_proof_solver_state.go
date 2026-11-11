@@ -18,11 +18,11 @@ type analyzerProofSolverState struct {
 	// across retained updates because unaffected bodies may retain those results.
 	smtSnapshotTainted bool
 	smtStats           SMTStats
-	// smtQueryCache memoizes solver verdicts keyed on the FULL query string (VC IR brick 5). z3 is
+	// smtQueryCache memoizes solver verdicts keyed on the exact query (VC IR brick 5). z3 is
 	// deterministic for a given query + timeout, so an identical query — same preamble, hypotheses, and
 	// negated obligation — has the same verdict and counterexample; reusing it is sound and skips the
 	// round-trip. Lazily created; lives for one analysis pass (a query embeds its function's facts, so a
-	// cross-function key collision means a byte-identical proof).
+	// cross-function cache hit represents the same query).
 	smtQueryCache map[string]smtQueryResult
 	// smtEscalation > 0 while withSMTEscalation re-runs a failed obligation.
 	smtEscalation int

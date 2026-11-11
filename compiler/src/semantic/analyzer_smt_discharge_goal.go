@@ -332,7 +332,7 @@ func (a *Analyzer) smtCachedQuery(query string) (smtQueryResult, bool, *smtFligh
 	// solver call. Attempts and Proven/Declined still count (the obligation was discharged), but no solver
 	// time accrues — the cache hit is the whole point. SolverProven is left to mean "proven by an actual
 	// solver run", so a cached proof does NOT bump it.
-	if hit, ok := a.smtQueryCache[query]; ok {
+	if hit, ok := a.smtQueryCache[smtQueryMemoryKey(query)]; ok {
 		a.recordSMTAttempt(query)
 		a.smtStats.CacheHits++
 		if hit.proven {
@@ -443,7 +443,7 @@ func (a *Analyzer) cacheSMTQuery(query string, result smtQueryResult) {
 	if a.smtQueryCache == nil {
 		a.smtQueryCache = map[string]smtQueryResult{}
 	}
-	a.smtQueryCache[query] = result
+	a.smtQueryCache[smtQueryMemoryKey(query)] = result
 	a.resolveSMTFlight(query, result)
 }
 
