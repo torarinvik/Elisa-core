@@ -71,7 +71,12 @@ func retainedShiftLocalGensyms(text string, shift int) string {
 	})
 }
 
-func retainedNormalized(text string) string { return retainedGensym.ReplaceAllString(text, "${1}_") }
+func retainedNormalized(text string) string {
+	if !strings.Contains(text, "__") {
+		return text
+	}
+	return retainedGensym.ReplaceAllString(text, "${1}_")
+}
 
 // retainedSharedGensyms lists the offset-named identifiers a body mentions that
 // may name declarations outside it. A spliced body keeps its new names while the
@@ -92,23 +97,32 @@ func retainedSharedGensyms(text string) string {
 func retainedHeader(fn *ast.FuncDecl) string {
 	c := *fn
 	c.Body = nil
+	header := unparse.FormatDecl(&c)
 	var b strings.Builder
-	b.WriteString(unparse.FormatDecl(&c))
-	for _, part := range []struct {
-		name string
-		v    any
-	}{
-		{"requires", fn.Requires}, {"requires-proofs", fn.RequiresProofs},
-		{"ensure", fn.EnsureValues}, {"ensure-proofs", fn.EnsureProofs},
-		{"ensures", fn.Ensures}, {"decreases", fn.Decreases}, {"decreases-wild", fn.DecreasesWild},
-		{"changes", fn.Changes}, {"preserves", fn.Preserves}, {"fulfills", fn.Fulfills},
-		{"contract-includes", fn.ContractIncludes}, {"uses", fn.Uses}, {"param-contracts", fn.ParamContracts},
-		{"forbids", fn.Forbids},
-	} {
-		b.WriteString("\n" + part.name + ": ")
-		retainedWriteSyntax(&b, reflect.ValueOf(part.v))
-	}
+	// Most contracts are empty, but their labels are always part of the fingerprint.
+	b.Grow(len(header) + 224)
+	b.WriteString(header)
+	writeRetainedContractPart(&b, "\nrequires: ", fn.Requires)
+	writeRetainedContractPart(&b, "\nrequires-proofs: ", fn.RequiresProofs)
+	writeRetainedContractPart(&b, "\nensure: ", fn.EnsureValues)
+	writeRetainedContractPart(&b, "\nensure-proofs: ", fn.EnsureProofs)
+	writeRetainedContractPart(&b, "\nensures: ", fn.Ensures)
+	writeRetainedContractPart(&b, "\ndecreases: ", fn.Decreases)
+	b.WriteString("\ndecreases-wild: ")
+	b.WriteString(fn.DecreasesWild)
+	writeRetainedContractPart(&b, "\nchanges: ", fn.Changes)
+	writeRetainedContractPart(&b, "\npreserves: ", fn.Preserves)
+	writeRetainedContractPart(&b, "\nfulfills: ", fn.Fulfills)
+	writeRetainedContractPart(&b, "\ncontract-includes: ", fn.ContractIncludes)
+	writeRetainedContractPart(&b, "\nuses: ", fn.Uses)
+	writeRetainedContractPart(&b, "\nparam-contracts: ", fn.ParamContracts)
+	writeRetainedContractPart(&b, "\nforbids: ", fn.Forbids)
 	return b.String()
+}
+
+func writeRetainedContractPart(b *strings.Builder, label string, value any) {
+	b.WriteString(label)
+	retainedWriteSyntax(b, reflect.ValueOf(value))
 }
 
 // retainedWriteSyntax prints v without source positions: expressions and statements
