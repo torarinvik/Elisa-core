@@ -15,6 +15,7 @@ package scalarloops
 #cgo windows LDFLAGS: -LC:/msys64/mingw64/lib -lLLVM-22
 struct LLVMOpaqueModule;
 unsigned elisacoreFoldConditionalDoubling(struct LLVMOpaqueModule *);
+unsigned elisacoreFoldSignedRangeMasks(struct LLVMOpaqueModule *);
 */
 import "C"
 
@@ -23,4 +24,9 @@ import "unsafe"
 // FoldConditionalDoubling exposes native shift and subtract operations in wrapping recurrences.
 func FoldConditionalDoubling(module unsafe.Pointer) {
 	C.elisacoreFoldConditionalDoubling((*C.struct_LLVMOpaqueModule)(module))
+}
+
+// FoldSignedRangeMasks simplifies checked signed normalization in loops.
+func FoldSignedRangeMasks(module unsafe.Pointer) {
+	C.elisacoreFoldSignedRangeMasks((*C.struct_LLVMOpaqueModule)(module))
 }

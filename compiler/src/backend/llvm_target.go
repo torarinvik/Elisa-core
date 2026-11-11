@@ -478,6 +478,7 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 		C.elisacoreInlineSmallRecursiveFunctions(g.module, g.targetMachine)
 		C.elisacoreUnrollGuardedReductions(g.module)
 		scalarloops.FoldConditionalDoubling(unsafe.Pointer(g.module))
+		scalarloops.FoldSignedRangeMasks(unsafe.Pointer(g.module))
 		boundedremainder.Fold(unsafe.Pointer(g.module))
 	}
 	if err := g.verify(); err != nil {
