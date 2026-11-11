@@ -12,8 +12,10 @@ import (
 // no-op (`for i in 0..<len step 2:` stepped by 1 — a silent miscompile). Anything the
 // expression grammar leaves behind is now a parse error at the first leftover token.
 func (p *Parser) parseForHeaderSlice(end int, boundaryPos lexer.Pos) ast.Expr {
-	subTokens := append([]lexer.Token(nil), p.tokenSpan(p.pos, end)...)
-	subTokens = append(subTokens, lexer.Token{Kind: lexer.TOKEN_EOF, Pos: boundaryPos})
+	tokens := p.tokenSpan(p.pos, end)
+	subTokens := make([]lexer.Token, len(tokens)+1)
+	copy(subTokens, tokens)
+	subTokens[len(tokens)] = lexer.Token{Kind: lexer.TOKEN_EOF, Pos: boundaryPos}
 	sub := New(subTokens)
 	sub.poolScopes = append(sub.poolScopes, p.poolScopes...)
 	expr := sub.parseExpr()
