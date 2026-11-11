@@ -171,3 +171,29 @@ func llvmGetIntrinsicDeclaration(module llvmIRModuleRef, id llvmIRUnsigned, type
 func llvmPrintTypeToString(typ llvmIRTypeRef) *llvmIRChar {
 	return C.LLVMPrintTypeToString(typ)
 }
+
+const llvmWeakAnyLinkage = C.LLVMWeakAnyLinkage
+
+func llvmGetLinkage(global llvmIRValueRef) llvmIRLinkage {
+	return C.LLVMGetLinkage(global)
+}
+
+func llvmGetValueName(value llvmIRValueRef) *llvmIRChar {
+	return C.LLVMGetValueName(value)
+}
+
+func llvmConstIntGetZExtValue(value llvmIRValueRef) llvmIRUnsignedLongLong {
+	return C.LLVMConstIntGetZExtValue(value)
+}
+
+func llvmConstStringInContext(context llvmIRContextRef, data *llvmIRChar, length llvmIRUnsigned, noNull llvmIRBool) llvmIRValueRef {
+	return C.LLVMConstStringInContext(context, data, length, noNull)
+}
+
+func llvmConstIntToPtr(value llvmIRValueRef, typ llvmIRTypeRef) llvmIRValueRef {
+	return C.LLVMConstIntToPtr(value, typ)
+}
+
+func llvmConstPtrToInt(value llvmIRValueRef, typ llvmIRTypeRef) llvmIRValueRef {
+	return C.LLVMConstPtrToInt(value, typ)
+}

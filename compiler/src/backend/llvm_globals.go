@@ -2,12 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"fmt"
 	"strconv"
@@ -41,7 +35,7 @@ func llvmVisibleGlobalNames(namespace string, name string) []string {
 	return []string{namespace + "." + name, name}
 }
 
-func (g *llvmGenerator) defineGlobal(name string, decl *ast.GlobalDecl, typ semantic.Type, global C.LLVMValueRef) error {
+func (g *llvmGenerator) defineGlobal(name string, decl *ast.GlobalDecl, typ semantic.Type, global llvmIRValueRef) error {
 	if decl == nil || global == nil {
 		return nil
 	}
@@ -52,29 +46,29 @@ func (g *llvmGenerator) defineGlobal(name string, decl *ast.GlobalDecl, typ sema
 	// default runtime object and by a program that includes a runtime fragment
 	// directly. Weak linkage dedupes them to one definition at link time.
 	if strings.HasPrefix(name, "__elisa_") {
-		C.LLVMSetLinkage(global, C.LLVMWeakAnyLinkage)
+		llvmSetLinkage(global, llvmWeakAnyLinkage)
 	}
 	if decl.Value == nil {
 		zero, err := g.constZero(typ)
 		if err != nil {
 			return err
 		}
-		C.LLVMSetInitializer(global, zero)
+		llvmSetInitializer(global, zero)
 		return nil
 	}
 	value, err := g.constExprValueInNamespace(decl.Value, typ, llvmNamespaceFromName(name))
 	if err != nil {
 		return err
 	}
-	C.LLVMSetInitializer(global, value)
+	llvmSetInitializer(global, value)
 	return nil
 }
 
-func (g *llvmGenerator) constExprValue(expr ast.Expr, expected semantic.Type) (C.LLVMValueRef, error) {
+func (g *llvmGenerator) constExprValue(expr ast.Expr, expected semantic.Type) (llvmIRValueRef, error) {
 	return g.constExprValueInNamespace(expr, expected, "")
 }
 
-func (g *llvmGenerator) constExprValueInNamespace(expr ast.Expr, expected semantic.Type, namespace string) (C.LLVMValueRef, error) {
+func (g *llvmGenerator) constExprValueInNamespace(expr ast.Expr, expected semantic.Type, namespace string) (llvmIRValueRef, error) {
 	actual := expected
 	if actual == nil {
 		actual = g.exprType(expr)
@@ -98,7 +92,7 @@ func (g *llvmGenerator) constExprValueInNamespace(expr ast.Expr, expected semant
 		if err != nil {
 			return nil, err
 		}
-		return C.LLVMConstInt(llvmType, C.ulonglong(value), boolToLLVMBool(value < 0)), nil
+		return llvmConstInt(llvmType, llvmIRUnsignedLongLong(value), boolToLLVMBool(value < 0)), nil
 	case *ast.FloatLit:
 		llvmType, err := g.lowerType(actual)
 		if err != nil {
@@ -108,23 +102,23 @@ func (g *llvmGenerator) constExprValueInNamespace(expr ast.Expr, expected semant
 		if err != nil {
 			return nil, err
 		}
-		return C.LLVMConstReal(llvmType, C.double(value)), nil
+		return llvmConstReal(llvmType, llvmIRDouble(value)), nil
 	case *ast.BoolLit:
 		llvmType, err := g.lowerBuiltin("bool")
 		if err != nil {
 			return nil, err
 		}
-		var raw C.ulonglong
+		var raw llvmIRUnsignedLongLong
 		if n.Value {
 			raw = 1
 		}
-		return C.LLVMConstInt(llvmType, raw, 0), nil
+		return llvmConstInt(llvmType, raw, 0), nil
 	case *ast.NullLit:
 		llvmType, err := g.lowerType(expected)
 		if err != nil {
 			return nil, err
 		}
-		return C.LLVMConstNull(llvmType), nil
+		return llvmConstNull(llvmType), nil
 	case *ast.ZeroedLit:
 		return g.constZero(expected)
 	case *ast.StringLit:
@@ -138,7 +132,7 @@ func (g *llvmGenerator) constExprValueInNamespace(expr ast.Expr, expected semant
 		if !ok {
 			return nil, fmt.Errorf("failed to parse char literal %q", n.Value)
 		}
-		return C.LLVMConstInt(llvmType, C.ulonglong(value), 0), nil
+		return llvmConstInt(llvmType, llvmIRUnsignedLongLong(value), 0), nil
 	case *ast.Ident:
 		for _, candidate := range llvmVisibleGlobalNames(namespace, n.Name) {
 			if value, ok := g.constValue(candidate); ok {
@@ -228,7 +222,7 @@ func (g *llvmGenerator) constExprValueInNamespace(expr ast.Expr, expected semant
 		if err != nil {
 			return nil, err
 		}
-		values := make([]C.LLVMValueRef, 0, len(fields))
+		values := make([]llvmIRValueRef, 0, len(fields))
 		args := n.LoweredArgs()
 		for i, arg := range args {
 			if i >= len(fields) {
@@ -243,7 +237,7 @@ func (g *llvmGenerator) constExprValueInNamespace(expr ast.Expr, expected semant
 			}
 			values = append(values, fieldValue)
 		}
-		return C.LLVMConstNamedStruct(llvmType, llvmValueSlicePtr(values), C.unsigned(len(values))), nil
+		return llvmConstNamedStruct(llvmType, llvmValueSlicePtr(values), llvmIRUnsigned(len(values))), nil
 	case *ast.ListLitExpr:
 		literalType := expected
 		if literalType == nil {
@@ -260,7 +254,7 @@ func (g *llvmGenerator) constExprValueInNamespace(expr ast.Expr, expected semant
 		if err != nil {
 			return nil, err
 		}
-		values := make([]C.LLVMValueRef, 0, len(n.Elems))
+		values := make([]llvmIRValueRef, 0, len(n.Elems))
 		for _, elem := range n.Elems {
 			elemValue, err := g.constExprValueInNamespace(elem, fixedArray.Elem, namespace)
 			if err != nil {
@@ -268,7 +262,7 @@ func (g *llvmGenerator) constExprValueInNamespace(expr ast.Expr, expected semant
 			}
 			values = append(values, elemValue)
 		}
-		return C.LLVMConstArray2(elemLLVMType, llvmValueSlicePtr(values), C.uint64_t(len(values))), nil
+		return llvmConstArray2(elemLLVMType, llvmValueSlicePtr(values), llvmIRUint64(len(values))), nil
 	case *ast.CastExpr:
 		if value, ok := g.evalConstExpr(expr); ok {
 			coercedType := expected
@@ -286,10 +280,10 @@ func (g *llvmGenerator) constExprValueInNamespace(expr ast.Expr, expected semant
 			return nil, err
 		}
 		if isNumericCastType(g.exprType(n.Operand)) && isPointerLikeType(expected) {
-			return C.LLVMConstIntToPtr(inner, targetType), nil
+			return llvmConstIntToPtr(inner, targetType), nil
 		}
 		if isPointerLikeType(g.exprType(n.Operand)) && isNumericCastType(expected) {
-			return C.LLVMConstPtrToInt(inner, targetType), nil
+			return llvmConstPtrToInt(inner, targetType), nil
 		}
 		return inner, nil
 	case *ast.ParenExpr:
@@ -311,7 +305,7 @@ func (g *llvmGenerator) constExprValueInNamespace(expr ast.Expr, expected semant
 	}
 }
 
-func (g *llvmGenerator) constEnumFieldExprValue(expr *ast.FieldExpr, expected semantic.Type) (C.LLVMValueRef, bool, error) {
+func (g *llvmGenerator) constEnumFieldExprValue(expr *ast.FieldExpr, expected semantic.Type) (llvmIRValueRef, bool, error) {
 	constEnumType, ok := semantic.StripAggregateStateType(expected).(*semantic.ConstEnumType)
 	if !ok || constEnumType == nil {
 		return nil, false, nil
@@ -330,7 +324,7 @@ func (g *llvmGenerator) constEnumFieldExprValue(expr *ast.FieldExpr, expected se
 		if err != nil {
 			return nil, false, err
 		}
-		return C.LLVMConstInt(llvmType, C.ulonglong(member.Value), boolToLLVMBool(member.Value < 0)), true, nil
+		return llvmConstInt(llvmType, llvmIRUnsignedLongLong(member.Value), boolToLLVMBool(member.Value < 0)), true, nil
 	}
 	return nil, false, nil
 }
@@ -470,42 +464,42 @@ func constAggregateIndexedArrayType(t semantic.Type) (*semantic.ArrayType, bool)
 	return nil, false
 }
 
-func (g *llvmGenerator) constZero(t semantic.Type) (C.LLVMValueRef, error) {
+func (g *llvmGenerator) constZero(t semantic.Type) (llvmIRValueRef, error) {
 	llvmType, err := g.lowerType(t)
 	if err != nil {
 		return nil, err
 	}
-	return C.LLVMConstNull(llvmType), nil
+	return llvmConstNull(llvmType), nil
 }
 
-func (g *llvmGenerator) constGlobalStringPtr(value string) (C.LLVMValueRef, error) {
+func (g *llvmGenerator) constGlobalStringPtr(value string) (llvmIRValueRef, error) {
 	bytes := append([]byte(value), 0)
-	arrayType := C.LLVMArrayType2(C.LLVMInt8TypeInContext(g.context), C.uint64_t(len(bytes)))
-	data := C.CBytes(bytes)
-	defer C.free(data)
+	arrayType := llvmArrayType2(llvmInt8TypeInContext(g.context), llvmIRUint64(len(bytes)))
+	data := llvmCBytes(bytes)
+	defer llvmFree(data)
 	// `bytes` already includes the trailing NUL and `arrayType` is sized to len(bytes),
 	// so the constant data array must also span len(bytes) (DontNullTerminate=1, since the
 	// NUL is already present). Using len(bytes)-1 produced a [len-1 x i8] initializer for a
 	// [len x i8] global — an off-by-one that the verifier rejects (notably for "" -> [0 x i8]
 	// vs [1 x i8]).
-	initializer := C.LLVMConstStringInContext(g.context, (*C.char)(data), C.unsigned(len(bytes)), 1)
+	initializer := llvmConstStringInContext(g.context, (*llvmIRChar)(data), llvmIRUnsigned(len(bytes)), 1)
 	name := cString(".str")
-	defer C.free(unsafe.Pointer(name))
-	global := C.LLVMAddGlobal(g.module, arrayType, name)
-	C.LLVMSetLinkage(global, C.LLVMPrivateLinkage)
-	C.LLVMSetGlobalConstant(global, 1)
-	C.LLVMSetUnnamedAddress(global, C.LLVMGlobalUnnamedAddr)
-	C.LLVMSetInitializer(global, initializer)
-	zero32 := C.LLVMConstInt(C.LLVMInt32TypeInContext(g.context), 0, 0)
-	indices := []C.LLVMValueRef{zero32, zero32}
-	return C.LLVMConstInBoundsGEP2(arrayType, global, llvmValueSlicePtr(indices), C.unsigned(len(indices))), nil
+	defer llvmFree(unsafe.Pointer(name))
+	global := llvmAddGlobal(g.module, arrayType, name)
+	llvmSetLinkage(global, llvmPrivateLinkage)
+	llvmSetGlobalConstant(global, 1)
+	llvmSetUnnamedAddress(global, llvmGlobalUnnamedAddr)
+	llvmSetInitializer(global, initializer)
+	zero32 := llvmConstInt(llvmInt32TypeInContext(g.context), 0, 0)
+	indices := []llvmIRValueRef{zero32, zero32}
+	return llvmConstInBoundsGEP2(arrayType, global, llvmValueSlicePtr(indices), llvmIRUnsigned(len(indices))), nil
 }
 
 // constStringLiteralValue lowers a string literal in a constant initializer. A `u8&`/cstr target
 // takes the bare pointer; an sview target (`global gk: sview = ""`) needs the two-field
 // StringView {data, len} value, exactly as emitStringLiteral builds it in a function body --
 // handing LLVM the bare pointer made the initializer type disagree with the global's.
-func (g *llvmGenerator) constStringLiteralValue(value string, expected semantic.Type) (C.LLVMValueRef, error) {
+func (g *llvmGenerator) constStringLiteralValue(value string, expected semantic.Type) (llvmIRValueRef, error) {
 	data, err := g.constGlobalStringPtr(value)
 	if err != nil {
 		return nil, err
@@ -524,34 +518,34 @@ func (g *llvmGenerator) constStringLiteralValue(value string, expected semantic.
 	if err != nil {
 		return nil, err
 	}
-	fields := []C.LLVMValueRef{data, C.LLVMConstInt(i64Type, C.ulonglong(len(value)), 0)}
-	return C.LLVMConstNamedStruct(viewType, llvmValueSlicePtr(fields), C.unsigned(len(fields))), nil
+	fields := []llvmIRValueRef{data, llvmConstInt(i64Type, llvmIRUnsignedLongLong(len(value)), 0)}
+	return llvmConstNamedStruct(viewType, llvmValueSlicePtr(fields), llvmIRUnsigned(len(fields))), nil
 }
 
-func (g *llvmGenerator) constValueAsLLVM(value semantic.ConstValue, expected semantic.Type) (C.LLVMValueRef, error) {
+func (g *llvmGenerator) constValueAsLLVM(value semantic.ConstValue, expected semantic.Type) (llvmIRValueRef, error) {
 	switch value.Kind {
 	case semantic.ConstInt:
 		llvmType, err := g.lowerType(expected)
 		if err != nil {
 			return nil, err
 		}
-		return C.LLVMConstInt(llvmType, C.ulonglong(value.Int), boolToLLVMBool(value.Int < 0)), nil
+		return llvmConstInt(llvmType, llvmIRUnsignedLongLong(value.Int), boolToLLVMBool(value.Int < 0)), nil
 	case semantic.ConstFloat:
 		llvmType, err := g.lowerType(expected)
 		if err != nil {
 			return nil, err
 		}
-		return C.LLVMConstReal(llvmType, C.double(value.Float)), nil
+		return llvmConstReal(llvmType, llvmIRDouble(value.Float)), nil
 	case semantic.ConstBool:
 		llvmType, err := g.lowerBuiltin("bool")
 		if err != nil {
 			return nil, err
 		}
-		var raw C.ulonglong
+		var raw llvmIRUnsignedLongLong
 		if value.Bool {
 			raw = 1
 		}
-		return C.LLVMConstInt(llvmType, raw, 0), nil
+		return llvmConstInt(llvmType, raw, 0), nil
 	case semantic.ConstString:
 		return g.constStringLiteralValue(value.String, expected)
 	default:

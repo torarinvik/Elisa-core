@@ -2,14 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-
-void elisa_coreSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigned trueWeight, unsigned falseWeight);
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -17,7 +9,7 @@ import (
 	"unsafe"
 )
 
-func (g *llvmGenerator) defineFunctionBody(decl *ast.FuncDecl, fnType *semantic.FuncType, fnValue C.LLVMValueRef) error {
+func (g *llvmGenerator) defineFunctionBody(decl *ast.FuncDecl, fnType *semantic.FuncType, fnValue llvmIRValueRef) error {
 	return g.defineFunctionBodyWithBindings(decl, fnType, fnValue, nil)
 }
 func backendExplicitParamCount(fnType *semantic.FuncType, decl *ast.FuncDecl) int {
@@ -35,15 +27,15 @@ func backendExplicitParamCount(fnType *semantic.FuncType, decl *ast.FuncDecl) in
 	}
 	return len(fnType.Params)
 }
-func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnType *semantic.FuncType, fnValue C.LLVMValueRef, typeBindings map[string]semantic.Type) error {
+func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnType *semantic.FuncType, fnValue llvmIRValueRef, typeBindings map[string]semantic.Type) error {
 	if decl == nil || fnType == nil || fnValue == nil {
 		return fmt.Errorf("cannot define function body without declaration, type, and value")
 	}
-	if C.LLVMCountBasicBlocks(fnValue) != 0 {
+	if llvmCountBasicBlocks(fnValue) != 0 {
 		return nil
 	}
 	if g.bodyDepth == 0 && g.partBody != nil {
-		if C.LLVMGetLinkage(fnValue) == C.LLVMExternalLinkage && !g.partBody(llvmValueName(fnValue)) {
+		if llvmGetLinkage(fnValue) == llvmExternalLinkage && !g.partBody(llvmValueName(fnValue)) {
 			return nil
 		}
 	}
@@ -67,13 +59,13 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 	}
 	bodyStatements := g.functionBodyForInputRead(decl, "function-emission")
 
-	builder := C.LLVMCreateBuilderInContext(g.context)
-	defer C.LLVMDisposeBuilder(builder)
+	builder := llvmCreateBuilderInContext(g.context)
+	defer llvmDisposeBuilder(builder)
 
 	entryName := cString("entry")
-	defer C.free(unsafe.Pointer(entryName))
-	entry := C.LLVMAppendBasicBlockInContext(g.context, fnValue, entryName)
-	C.LLVMPositionBuilderAtEnd(builder, entry)
+	defer llvmFree(unsafe.Pointer(entryName))
+	entry := llvmAppendBasicBlockInContext(g.context, fnValue, entryName)
+	llvmPositionBuilderAtEnd(builder, entry)
 
 	state := &functionState{
 		g:                 g,
@@ -83,7 +75,7 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 		builder:           builder,
 		typeMap:           typeBindings,
 		adoptedEscapeBody: bodyStatements,
-		mainReturnsStatus: decl.Name == "main" && isVoidType(fnType.Return) && C.GoString(C.LLVMGetValueName(fnValue)) == "main",
+		mainReturnsStatus: decl.Name == "main" && isVoidType(fnType.Return) && llvmGoString(llvmGetValueName(fnValue)) == "main",
 	}
 	// A signature-level `can[Scalar]` grants the whole body; `can Scalar:` blocks nest on top
 	// (see the CanStmt case in emitStmt).
@@ -109,10 +101,10 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 	abiCABI := funcTypeIsCABI(fnType)
 	paramOffset := abiLayout.paramBase()
 	if abiLayout.errorUnionOut {
-		state.resultSlot = C.LLVMGetParam(fnValue, 0)
+		state.resultSlot = llvmGetParam(fnValue, 0)
 	}
 	if abiLayout.sret {
-		state.resultSlot = C.LLVMGetParam(fnValue, C.unsigned(abiLayout.sretParamPos()))
+		state.resultSlot = llvmGetParam(fnValue, llvmIRUnsigned(abiLayout.sretParamPos()))
 		state.sretReturn = true
 	}
 
@@ -122,7 +114,7 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 			return nil
 		}
 		paramType := fnType.Params[typeIndex]
-		paramValue := C.LLVMGetParam(fnValue, C.unsigned(llvmIndex+paramOffset))
+		paramValue := llvmGetParam(fnValue, llvmIRUnsigned(llvmIndex+paramOffset))
 		// docs/126 D1: a drop-typed parameter was MOVED in, so this frame owns it and
 		// must run its `__drop__` on the way out. Give it a private alloca even in the
 		// memory class, where the binding would otherwise alias the caller's copy —
@@ -142,7 +134,7 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 					return err
 				}
 			} else {
-				C.LLVMBuildStore(builder, paramValue, alloca)
+				llvmBuildStore(builder, paramValue, alloca)
 			}
 			state.defineBinding(name, valueBinding{ptr: alloca, typ: paramType, mutable: mutable})
 			if _, err := state.registerDropCleanup(name, alloca, paramType); err != nil {
@@ -161,7 +153,7 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 		if err != nil {
 			return err
 		}
-		C.LLVMBuildStore(builder, paramValue, alloca)
+		llvmBuildStore(builder, paramValue, alloca)
 		state.defineBinding(name, valueBinding{ptr: alloca, typ: paramType, mutable: mutable})
 		state.bindPackedStoreValue(paramType, paramValue)
 		state.bindImplicitTreeOwnerParam(name, paramType, alloca, paramValue)
@@ -199,7 +191,7 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 		arenaType := g.namedType("Arena")
 		base := paramOffset + len(fnType.Params)
 		for j, regionName := range fnType.RegionParams {
-			arenaParam := C.LLVMGetParam(fnValue, C.unsigned(base+j))
+			arenaParam := llvmGetParam(fnValue, llvmIRUnsigned(base+j))
 			state.regions = append(state.regions, regionBinding{name: regionName, ptr: arenaParam, typ: arenaType, owned: false})
 		}
 	}
@@ -255,10 +247,10 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 				return err
 			}
 			if state.mainReturnsStatus {
-				zero := C.LLVMConstInt(C.LLVMInt32TypeInContext(g.context), 0, 0)
-				C.LLVMBuildRet(builder, zero)
+				zero := llvmConstInt(llvmInt32TypeInContext(g.context), 0, 0)
+				llvmBuildRet(builder, zero)
 			} else {
-				C.LLVMBuildRetVoid(builder)
+				llvmBuildRetVoid(builder)
 			}
 		} else if retUnion, ok := fnType.Return.(*semantic.ErrorUnionType); ok && isVoidType(retUnion.Value) {
 			zeroCode, err := state.errorCodeConstant(0)
@@ -272,11 +264,11 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 			if err := state.emitHeapTempCleanup(); err != nil {
 				return err
 			}
-			C.LLVMBuildRet(builder, successValue)
-		} else if block := C.LLVMGetInsertBlock(builder); block != nil && block != C.LLVMGetEntryBasicBlock(fnValue) && !blockReachableFromEntry(fnValue, block) {
+			llvmBuildRet(builder, successValue)
+		} else if block := llvmGetInsertBlock(builder); block != nil && block != llvmGetEntryBasicBlock(fnValue) && !blockReachableFromEntry(fnValue, block) {
 			// Nothing reaches here (the body ends in a `while true` that only leaves by `return`):
 			// the fall-through point is dead code, not a missing return.
-			C.LLVMBuildUnreachable(builder)
+			llvmBuildUnreachable(builder)
 		} else {
 			return fmt.Errorf("function %s may fall through without returning a value", decl.Name)
 		}
@@ -285,7 +277,7 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 	state.elideUnusedAutoArenas()
 	return nil
 }
-func (s *functionState) emitFunctionReturn(value C.LLVMValueRef, actual semantic.Type) error {
+func (s *functionState) emitFunctionReturn(value llvmIRValueRef, actual semantic.Type) error {
 	if err := s.emitPostconditionChecks(value, actual); err != nil {
 		return err
 	}
@@ -323,14 +315,14 @@ func (s *functionState) emitFunctionReturn(value C.LLVMValueRef, actual semantic
 // materializeFunctionReturn coerces the returned value and writes any out-slot (sret or
 // error-union payload) at the current insertion point, returning the terminator to emit
 // once cleanups have run.
-func (s *functionState) materializeFunctionReturn(value C.LLVMValueRef, actual semantic.Type) (func(), error) {
+func (s *functionState) materializeFunctionReturn(value llvmIRValueRef, actual semantic.Type) (func(), error) {
 	if retUnion, ok := s.fnType.Return.(*semantic.ErrorUnionType); ok {
 		coerced, err := s.coerceValue(value, actual, retUnion)
 		if err != nil {
 			return nil, err
 		}
 		if isVoidType(retUnion.Value) {
-			return func() { C.LLVMBuildRet(s.builder, coerced) }, nil
+			return func() { llvmBuildRet(s.builder, coerced) }, nil
 		}
 		if s.resultSlot == nil {
 			return nil, fmt.Errorf("function %s is missing a hidden return slot for %s", s.decl.Name, retUnion.String())
@@ -350,7 +342,7 @@ func (s *functionState) materializeFunctionReturn(value C.LLVMValueRef, actual s
 		if err := s.storeValue(s.resultSlot, payload, retUnion.Value, "errunion.ret"); err != nil {
 			return nil, err
 		}
-		return func() { C.LLVMBuildRet(s.builder, errorCode) }, nil
+		return func() { llvmBuildRet(s.builder, errorCode) }, nil
 	}
 	if isVoidType(s.fnType.Return) {
 		// `return <void-expr>` (e.g. `return void_fn()`): the value expression was
@@ -358,10 +350,10 @@ func (s *functionState) materializeFunctionReturn(value C.LLVMValueRef, actual s
 		// terminate with RetVoid — building a value `ret` here yields an invalid
 		// `ret void <badref>` that the module verifier rejects.
 		if s.mainReturnsStatus {
-			zero := C.LLVMConstInt(C.LLVMInt32TypeInContext(s.g.context), 0, 0)
-			return func() { C.LLVMBuildRet(s.builder, zero) }, nil
+			zero := llvmConstInt(llvmInt32TypeInContext(s.g.context), 0, 0)
+			return func() { llvmBuildRet(s.builder, zero) }, nil
 		}
-		return func() { C.LLVMBuildRetVoid(s.builder) }, nil
+		return func() { llvmBuildRetVoid(s.builder) }, nil
 	}
 	coerced, err := s.coerceValue(value, actual, s.fnType.Return)
 	if err != nil {
@@ -376,9 +368,9 @@ func (s *functionState) materializeFunctionReturn(value C.LLVMValueRef, actual s
 		if err := s.storeValue(s.resultSlot, coerced, s.fnType.Return, "sret.ret"); err != nil {
 			return nil, err
 		}
-		return func() { C.LLVMBuildRetVoid(s.builder) }, nil
+		return func() { llvmBuildRetVoid(s.builder) }, nil
 	}
-	return func() { C.LLVMBuildRet(s.builder, coerced) }, nil
+	return func() { llvmBuildRet(s.builder, coerced) }, nil
 }
 func (s *functionState) emitRegionCleanup() error {
 	for i := len(s.regions) - 1; i >= 0; i-- {
@@ -397,7 +389,7 @@ func (s *functionState) emitRegionCleanup() error {
 // only run cleanups registered INSIDE the loop body (indices >= floor); firing an enclosing
 // scope's cleanup (e.g. a function-body region that wraps the loop) on a continue that stays
 // within the loop would free a still-live region — a use-after-free.
-func (s *functionState) pushLoopTargets(breakBB, continueBB C.LLVMBasicBlockRef) {
+func (s *functionState) pushLoopTargets(breakBB, continueBB llvmIRBlockRef) {
 	s.breakTargets = append(s.breakTargets, breakBB)
 	s.continueTargets = append(s.continueTargets, continueBB)
 	s.loopCleanupFloors = append(s.loopCleanupFloors, len(s.scopedCleanups))

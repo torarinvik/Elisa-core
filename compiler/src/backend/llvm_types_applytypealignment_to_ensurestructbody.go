@@ -2,16 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-
-static void elisacoreSetAlignment(LLVMValueRef Value, unsigned Bytes) {
-	LLVMSetAlignment(Value, Bytes);
-}
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -22,14 +12,14 @@ import (
 // AoS slot-narrowing path: records at a narrowed (e.g. 12-byte) stride are only slot-aligned, so
 // stores/loads of 8-byte payload fields must be told their pointer is slot-aligned (align 4) rather
 // than letting LLVM assume the value type's natural 8-byte alignment.
-func (g *llvmGenerator) setInstrAlignment(value C.LLVMValueRef, bytes uint64) {
+func (g *llvmGenerator) setInstrAlignment(value llvmIRValueRef, bytes uint64) {
 	if g == nil || value == nil || bytes == 0 {
 		return
 	}
-	C.elisacoreSetAlignment(value, C.uint(bytes))
+	llvmSetAlignment(value, llvmIRUnsigned(bytes))
 }
 
-func (g *llvmGenerator) applyTypeAlignment(value C.LLVMValueRef, t semantic.Type) {
+func (g *llvmGenerator) applyTypeAlignment(value llvmIRValueRef, t semantic.Type) {
 	if g == nil || value == nil {
 		return
 	}
@@ -37,9 +27,9 @@ func (g *llvmGenerator) applyTypeAlignment(value C.LLVMValueRef, t semantic.Type
 	if !ok || alignment == 0 {
 		return
 	}
-	C.elisacoreSetAlignment(value, C.uint(alignment))
+	llvmSetAlignment(value, llvmIRUnsigned(alignment))
 }
-func (g *llvmGenerator) lowerFunctionType(fn *semantic.FuncType) (C.LLVMTypeRef, error) {
+func (g *llvmGenerator) lowerFunctionType(fn *semantic.FuncType) (llvmIRTypeRef, error) {
 	return g.lowerFunctionTypeInternal(fn, false)
 }
 
@@ -48,14 +38,14 @@ func (g *llvmGenerator) lowerFunctionType(fn *semantic.FuncType) (C.LLVMTypeRef,
 // Elisa callers, but the externally visible C entry point must return an i32 status.
 // Keeping this override at the declaration boundary preserves the language type while
 // making the process exit status deterministic.
-func (g *llvmGenerator) lowerFunctionTypeForSymbol(name string, fn *semantic.FuncType) (C.LLVMTypeRef, error) {
+func (g *llvmGenerator) lowerFunctionTypeForSymbol(name string, fn *semantic.FuncType) (llvmIRTypeRef, error) {
 	if name == "main" && fn != nil && isVoidType(fn.Return) {
 		return g.lowerFunctionTypeInternal(fn, true)
 	}
 	return g.lowerFunctionType(fn)
 }
 
-func (g *llvmGenerator) lowerFunctionTypeInternal(fn *semantic.FuncType, entryStatus bool) (C.LLVMTypeRef, error) {
+func (g *llvmGenerator) lowerFunctionTypeInternal(fn *semantic.FuncType, entryStatus bool) (llvmIRTypeRef, error) {
 	if g == nil || fn == nil {
 		return nil, fmt.Errorf("missing function type for LLVM lowering")
 	}
@@ -74,11 +64,11 @@ func (g *llvmGenerator) lowerFunctionTypeInternal(fn *semantic.FuncType, entrySt
 	// See externOptionalABI.
 	_, nicheOptionalReturn := externNicheOptionalPayload(fn, fn.Return)
 	if nicheOptionalReturn {
-		returnType = C.LLVMPointerTypeInContext(g.context, 0)
+		returnType = llvmPointerTypeInContext(g.context, 0)
 	}
 	// An `extern resource` crosses as its bare handle (llvm_extern_resource_abi.go).
 	if externReturnsResource(fn) {
-		returnType = C.LLVMPointerTypeInContext(g.context, 0)
+		returnType = llvmPointerTypeInContext(g.context, 0)
 	}
 	// Large aggregate returns are returned via an sret out-pointer (return void),
 	// mirroring the error-union out-param mechanism. (Error-union returns already
@@ -86,12 +76,12 @@ func (g *llvmGenerator) lowerFunctionTypeInternal(fn *semantic.FuncType, entrySt
 	cabi := funcTypeIsCABI(fn)
 	sretReturn := !isErrorUnionReturn && !nicheOptionalReturn && g.aggregateIsMemoryClassABI(fn.Return, cabi)
 	if sretReturn {
-		returnType = C.LLVMVoidTypeInContext(g.context)
+		returnType = llvmVoidTypeInContext(g.context)
 	}
 	if entryStatus {
-		returnType = C.LLVMInt32TypeInContext(g.context)
+		returnType = llvmInt32TypeInContext(g.context)
 	}
-	params := make([]C.LLVMTypeRef, 0, len(fn.Params)+1)
+	params := make([]llvmIRTypeRef, 0, len(fn.Params)+1)
 	if unionType, ok := nonVoidErrorUnion(fn.Return); ok {
 		outParamType, err := g.lowerErrorUnionOutParamType(unionType)
 		if err != nil {
@@ -100,7 +90,7 @@ func (g *llvmGenerator) lowerFunctionTypeInternal(fn *semantic.FuncType, entrySt
 		params = append(params, outParamType)
 	}
 	if sretReturn {
-		params = append(params, C.LLVMPointerTypeInContext(g.context, 0))
+		params = append(params, llvmPointerTypeInContext(g.context, 0))
 	}
 	// A C-ABI extern's C parameter order may differ from its semantic one: each `view[T]`
 	// is (ptr, len), placed adjacently or where `@bounds` says (llvm_extern_view_abi.go).
@@ -112,21 +102,21 @@ func (g *llvmGenerator) lowerFunctionTypeInternal(fn *semantic.FuncType, entrySt
 		for _, part := range parts {
 			switch part.Part {
 			case semantic.CParamViewPtr:
-				params = append(params, C.LLVMPointerTypeInContext(g.context, 0))
+				params = append(params, llvmPointerTypeInContext(g.context, 0))
 			case semantic.CParamViewLen:
 				params = append(params, lengthType)
 			default:
 				param := fn.Params[part.Param]
 				if _, ok := externNicheOptionalPayload(fn, param); ok {
-					params = append(params, C.LLVMPointerTypeInContext(g.context, 0))
+					params = append(params, llvmPointerTypeInContext(g.context, 0))
 					continue
 				}
 				if _, ok := externResourceParam(fn, param); ok {
-					params = append(params, C.LLVMPointerTypeInContext(g.context, 0))
+					params = append(params, llvmPointerTypeInContext(g.context, 0))
 					continue
 				}
 				if g.aggregateIsMemoryClassABI(param, cabi) {
-					params = append(params, C.LLVMPointerTypeInContext(g.context, 0))
+					params = append(params, llvmPointerTypeInContext(g.context, 0))
 					continue
 				}
 				paramType, err := g.lowerType(param)
@@ -144,16 +134,16 @@ func (g *llvmGenerator) lowerFunctionTypeInternal(fn *semantic.FuncType, entrySt
 		}
 		if _, ok := externNicheOptionalPayload(fn, param); ok {
 			// `T?` at a C boundary is the bare nullable pointer; see externOptionalABI.
-			params = append(params, C.LLVMPointerTypeInContext(g.context, 0))
+			params = append(params, llvmPointerTypeInContext(g.context, 0))
 			continue
 		}
 		if _, ok := externResourceParam(fn, param); ok {
-			params = append(params, C.LLVMPointerTypeInContext(g.context, 0))
+			params = append(params, llvmPointerTypeInContext(g.context, 0))
 			continue
 		}
 		if g.aggregateIsMemoryClassABI(param, cabi) {
 			// Memory-class params are passed by pointer (byval / indirect).
-			params = append(params, C.LLVMPointerTypeInContext(g.context, 0))
+			params = append(params, llvmPointerTypeInContext(g.context, 0))
 			continue
 		}
 		paramType, err := g.lowerType(param)
@@ -167,40 +157,40 @@ func (g *llvmGenerator) lowerFunctionTypeInternal(fn *semantic.FuncType, entrySt
 	// reads these into its region environment; callers pass the bound region's
 	// arena. Inert for every existing function (none declare region params).
 	for range fn.RegionParams {
-		params = append(params, C.LLVMPointerTypeInContext(g.context, 0))
+		params = append(params, llvmPointerTypeInContext(g.context, 0))
 	}
-	lowered := C.LLVMFunctionType(returnType, llvmTypeSlicePtr(params), C.unsigned(len(params)), boolToLLVMBool(fn.Variadic))
+	lowered := llvmFunctionType(returnType, llvmTypeSlicePtr(params), llvmIRUnsigned(len(params)), boolToLLVMBool(fn.Variadic))
 	if !entryStatus {
 		g.functionTypes[fn] = lowered
 	}
 	return lowered, nil
 }
-func (g *llvmGenerator) lowerFunctionReturnType(t semantic.Type) (C.LLVMTypeRef, error) {
+func (g *llvmGenerator) lowerFunctionReturnType(t semantic.Type) (llvmIRTypeRef, error) {
 	if unionType, ok := nonVoidErrorUnion(t); ok {
 		return g.lowerType(unionType.Errors)
 	}
 	return g.lowerType(t)
 }
-func (g *llvmGenerator) lowerErrorUnionOutParamType(unionType *semantic.ErrorUnionType) (C.LLVMTypeRef, error) {
+func (g *llvmGenerator) lowerErrorUnionOutParamType(unionType *semantic.ErrorUnionType) (llvmIRTypeRef, error) {
 	if unionType == nil || isVoidType(unionType.Value) {
 		return nil, fmt.Errorf("missing value-carrying error union metadata")
 	}
 	if _, err := g.lowerType(unionType.Value); err != nil {
 		return nil, err
 	}
-	return C.LLVMPointerTypeInContext(g.context, 0), nil
+	return llvmPointerTypeInContext(g.context, 0), nil
 }
-func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
+func (g *llvmGenerator) lowerType(t semantic.Type) (llvmIRTypeRef, error) {
 	if t == nil {
-		return C.LLVMVoidTypeInContext(g.context), nil
+		return llvmVoidTypeInContext(g.context), nil
 	}
 	switch tt := t.(type) {
 	case *semantic.InvalidType:
-		return C.LLVMVoidTypeInContext(g.context), nil
+		return llvmVoidTypeInContext(g.context), nil
 	case *semantic.NeverType:
-		return C.LLVMVoidTypeInContext(g.context), nil
+		return llvmVoidTypeInContext(g.context), nil
 	case *semantic.NullType:
-		return C.LLVMPointerTypeInContext(g.context, 0), nil
+		return llvmPointerTypeInContext(g.context, 0), nil
 	case *semantic.BuiltinType:
 		return g.lowerBuiltin(tt.Name)
 	case *semantic.BitIntType:
@@ -237,7 +227,7 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		}
 		return g.ensureOptionalType(tt)
 	case *semantic.TupleType:
-		fields := make([]C.LLVMTypeRef, 0, len(tt.Fields))
+		fields := make([]llvmIRTypeRef, 0, len(tt.Fields))
 		for _, field := range tt.Fields {
 			fieldType, err := g.lowerType(field.Type)
 			if err != nil {
@@ -245,13 +235,13 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 			}
 			fields = append(fields, fieldType)
 		}
-		return C.LLVMStructTypeInContext(g.context, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0), nil
+		return llvmStructTypeInContext(g.context, llvmTypeSlicePtr(fields), llvmIRUnsigned(len(fields)), 0), nil
 	case *semantic.BitGroupType:
 		return g.lowerBitInt(tt.BackingWidth), nil
 	case *semantic.TypeParamType:
-		return C.LLVMPointerTypeInContext(g.context, 0), nil
+		return llvmPointerTypeInContext(g.context, 0), nil
 	case *semantic.RefType:
-		return C.LLVMPointerTypeInContext(g.context, 0), nil
+		return llvmPointerTypeInContext(g.context, 0), nil
 	case *semantic.PackedEnumStoreType:
 		return g.lowerPackedEnumStoreType(tt)
 	case *semantic.PackedVariantViewType:
@@ -262,7 +252,7 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 			return nil, err
 		}
 		if tt.HasConstSize {
-			return C.LLVMArrayType2(elemType, C.uint64_t(tt.ConstSize)), nil
+			return llvmArrayType2(elemType, llvmIRUint64(tt.ConstSize)), nil
 		}
 		return nil, fmt.Errorf("array type %s is missing a compile-time constant size", tt.String())
 	case *semantic.DArrayType:
@@ -270,19 +260,19 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 	case *semantic.ViewType:
 		return g.ensureRuntimeDynArrayView()
 	case *semantic.StoreRowsViewType:
-		storePtrType := C.LLVMPointerTypeInContext(g.context, 0)
-		fields := []C.LLVMTypeRef{storePtrType}
-		return C.LLVMStructTypeInContext(g.context, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0), nil
+		storePtrType := llvmPointerTypeInContext(g.context, 0)
+		fields := []llvmIRTypeRef{storePtrType}
+		return llvmStructTypeInContext(g.context, llvmTypeSlicePtr(fields), llvmIRUnsigned(len(fields)), 0), nil
 	case *semantic.StoreRowViewType:
 		usizeType, err := g.lowerType(g.namedType("usize"))
 		if err != nil {
 			return nil, err
 		}
-		storePtrType := C.LLVMPointerTypeInContext(g.context, 0)
-		fields := []C.LLVMTypeRef{storePtrType, usizeType}
-		return C.LLVMStructTypeInContext(g.context, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0), nil
+		storePtrType := llvmPointerTypeInContext(g.context, 0)
+		fields := []llvmIRTypeRef{storePtrType, usizeType}
+		return llvmStructTypeInContext(g.context, llvmTypeSlicePtr(fields), llvmIRUnsigned(len(fields)), 0), nil
 	case *semantic.CStrType:
-		return C.LLVMPointerTypeInContext(g.context, 0), nil
+		return llvmPointerTypeInContext(g.context, 0), nil
 	case *semantic.DictType:
 		base, ok := g.lookupNamedType("DynDict")
 		if !ok {
@@ -308,8 +298,8 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		if err != nil {
 			return nil, err
 		}
-		fields := []C.LLVMTypeRef{dictRefType, keyType, valueRefType}
-		return C.LLVMStructTypeInContext(g.context, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0), nil
+		fields := []llvmIRTypeRef{dictRefType, keyType, valueRefType}
+		return llvmStructTypeInContext(g.context, llvmTypeSlicePtr(fields), llvmIRUnsigned(len(fields)), 0), nil
 	case *semantic.SViewType:
 		st, ok := g.lookupStructType("StringView")
 		if !ok {
@@ -351,18 +341,18 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 	case *semantic.GenericInstanceType:
 		return g.ensureGenericInstanceStruct(tt)
 	case *semantic.FuncType:
-		return C.LLVMPointerTypeInContext(g.context, 0), nil
+		return llvmPointerTypeInContext(g.context, 0), nil
 	default:
 		return nil, fmt.Errorf("unsupported semantic type %T", t)
 	}
 }
 
-func (g *llvmGenerator) lowerBitInt(width int) C.LLVMTypeRef {
+func (g *llvmGenerator) lowerBitInt(width int) llvmIRTypeRef {
 	if width < 1 {
 		width = 1
 	}
 	if width > 64 {
 		width = 64
 	}
-	return C.LLVMIntTypeInContext(g.context, C.unsigned(width))
+	return llvmIntTypeInContext(g.context, llvmIRUnsigned(width))
 }

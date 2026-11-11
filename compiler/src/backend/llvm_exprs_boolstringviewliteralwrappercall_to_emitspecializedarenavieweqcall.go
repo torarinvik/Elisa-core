@@ -2,78 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <string.h>
-#include <llvm-c/Core.h>
-
-static int elisacoreLLVMIsZeroValue(LLVMValueRef value) {
-	return LLVMIsAConstant(value) != NULL && LLVMIsNull(value);
-}
-
-static LLVMMetadataRef elisa_coreAliasMDString(LLVMContextRef ctx, const char* value) {
-	if (value == NULL) {
-		return LLVMMDStringInContext2(ctx, "", 0);
-	}
-	return LLVMMDStringInContext2(ctx, value, strlen(value));
-}
-
-static LLVMMetadataRef elisa_coreAliasMDNode(LLVMContextRef ctx, LLVMMetadataRef* operands, size_t count) {
-	return LLVMMDNodeInContext2(ctx, operands, count);
-}
-
-static unsigned elisa_coreMetadataKindID(LLVMContextRef ctx, const char* kindName) {
-	return LLVMGetMDKindIDInContext(ctx, kindName, strlen(kindName));
-}
-
-static void elisa_coreSetMetadataList(LLVMValueRef inst, LLVMContextRef ctx, const char* kindName, LLVMMetadataRef* scopes, size_t count) {
-	if (inst == NULL || ctx == NULL || kindName == NULL || count == 0) {
-		return;
-	}
-	LLVMMetadataRef list = elisa_coreAliasMDNode(ctx, scopes, count);
-	LLVMValueRef listValue = LLVMMetadataAsValue(ctx, list);
-	LLVMSetMetadata(inst, elisa_coreMetadataKindID(ctx, kindName), listValue);
-}
-
-static LLVMMetadataRef elisa_coreCreateAliasScopeDomain(LLVMContextRef ctx, const char* domainName) {
-	LLVMMetadataRef operands[1];
-	operands[0] = elisa_coreAliasMDString(ctx, domainName);
-	return elisa_coreAliasMDNode(ctx, operands, 1);
-}
-
-static LLVMMetadataRef elisa_coreCreateAliasScope(LLVMContextRef ctx, LLVMMetadataRef domain, const char* scopeName) {
-	LLVMMetadataRef operands[2];
-	operands[0] = elisa_coreAliasMDString(ctx, scopeName);
-	operands[1] = domain;
-	return elisa_coreAliasMDNode(ctx, operands, 2);
-}
-
-static void elisa_coreAttachAliasScopeMetadata(LLVMValueRef inst, LLVMContextRef ctx, const char* domainName, const char* aliasScopeName,
-	const char* noAliasScope1Name, int hasNoAliasScope1, const char* noAliasScope2Name, int hasNoAliasScope2) {
-	if (inst == NULL || ctx == NULL || domainName == NULL || aliasScopeName == NULL) {
-		return;
-	}
-	LLVMMetadataRef domain = elisa_coreCreateAliasScopeDomain(ctx, domainName);
-	LLVMMetadataRef aliasScope = elisa_coreCreateAliasScope(ctx, domain, aliasScopeName);
-	LLVMMetadataRef aliasScopes[1];
-	aliasScopes[0] = aliasScope;
-	elisa_coreSetMetadataList(inst, ctx, "alias.scope", aliasScopes, 1);
-
-	LLVMMetadataRef noAliasScopes[2];
-	size_t noAliasCount = 0;
-	if (hasNoAliasScope1 && noAliasScope1Name != NULL) {
-		noAliasScopes[noAliasCount++] = elisa_coreCreateAliasScope(ctx, domain, noAliasScope1Name);
-	}
-	if (hasNoAliasScope2 && noAliasScope2Name != NULL) {
-		noAliasScopes[noAliasCount++] = elisa_coreCreateAliasScope(ctx, domain, noAliasScope2Name);
-	}
-	if (noAliasCount != 0) {
-		elisa_coreSetMetadataList(inst, ctx, "noalias", noAliasScopes, noAliasCount);
-	}
-}
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -205,7 +133,7 @@ func (s *functionState) memcpyOperandsAreDisjoint(destExpr ast.Expr, srcExpr ast
 	}
 	return s.g.semanticReadView().ExprsAreDisjoint(destCarrier, srcCarrier)
 }
-func (s *functionState) emitSpecializedMemcpyCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitSpecializedMemcpyCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	ident, ok := expr.Func.(*ast.Ident)
 	if !ok {
 		return nil, nil, false, nil
@@ -230,7 +158,7 @@ func (s *functionState) emitSpecializedMemcpyCall(expr *ast.CallExpr) (C.LLVMVal
 	if err != nil {
 		return nil, nil, true, err
 	}
-	args := make([]C.LLVMValueRef, 0, len(expr.Args))
+	args := make([]llvmIRValueRef, 0, len(expr.Args))
 	for i, arg := range expr.Args {
 		var expected semantic.Type
 		if i < len(funcType.Params) {
@@ -248,12 +176,12 @@ func (s *functionState) emitSpecializedMemcpyCall(expr *ast.CallExpr) (C.LLVMVal
 	}
 	call := s.buildCall(llvmFnType, callee, args, callName)
 	if s.memcpyOperandsAreDisjoint(expr.Args[0], expr.Args[1]) {
-		s.addCallSiteEnumAttribute(call, C.uint(1), "noalias")
-		s.addCallSiteEnumAttribute(call, C.uint(2), "noalias")
+		s.addCallSiteEnumAttribute(call, llvmIRUnsigned(1), "noalias")
+		s.addCallSiteEnumAttribute(call, llvmIRUnsigned(2), "noalias")
 	}
 	return call, funcType.Return, true, nil
 }
-func (s *functionState) emitSpecializedArenaViewCopyCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitSpecializedArenaViewCopyCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	ident, ok := expr.Func.(*ast.Ident)
 	if !ok || ident.Name != "arena_da_copy_exact" {
 		return nil, nil, false, nil
@@ -321,8 +249,8 @@ func (s *functionState) emitSpecializedArenaViewCopyCall(expr *ast.CallExpr) (C.
 		if err != nil {
 			return nil, nil, true, err
 		}
-		dstData := C.LLVMBuildExtractValue(s.builder, dstValue, 0, cStringFree("view.copy.dst.data"))
-		srcData := C.LLVMBuildExtractValue(s.builder, srcValue, 0, cStringFree("view.copy.src.data"))
+		dstData := llvmBuildExtractValue(s.builder, dstValue, 0, cStringFree("view.copy.dst.data"))
+		srcData := llvmBuildExtractValue(s.builder, srcValue, 0, cStringFree("view.copy.src.data"))
 		domainName := ""
 		dstScopeName := ""
 		srcScopeName := ""
@@ -332,15 +260,15 @@ func (s *functionState) emitSpecializedArenaViewCopyCall(expr *ast.CallExpr) (C.
 			srcScopeName = domainName + ".src"
 		}
 		for i := uint64(0); i < exactCopyCount; i++ {
-			indexValue := C.LLVMConstInt(usizeType, C.ulonglong(i), 0)
-			indices := []C.LLVMValueRef{indexValue}
-			srcPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, srcData, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("view.copy.src.elem.ptr"))
-			elemValue := C.LLVMBuildLoad2(s.builder, elemLLVMType, srcPtr, cStringFree("view.copy.elem"))
+			indexValue := llvmConstInt(usizeType, llvmIRUnsignedLongLong(i), 0)
+			indices := []llvmIRValueRef{indexValue}
+			srcPtr := llvmBuildGEP2(s.builder, elemLLVMType, srcData, llvmValueSlicePtr(indices), llvmIRUnsigned(len(indices)), cStringFree("view.copy.src.elem.ptr"))
+			elemValue := llvmBuildLoad2(s.builder, elemLLVMType, srcPtr, cStringFree("view.copy.elem"))
 			if disjoint {
 				s.attachAliasScopeMetadataWithNames(elemValue, domainName, srcScopeName, []string{dstScopeName})
 			}
-			dstPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, dstData, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("view.copy.dst.elem.ptr"))
-			store := C.LLVMBuildStore(s.builder, elemValue, dstPtr)
+			dstPtr := llvmBuildGEP2(s.builder, elemLLVMType, dstData, llvmValueSlicePtr(indices), llvmIRUnsigned(len(indices)), cStringFree("view.copy.dst.elem.ptr"))
+			store := llvmBuildStore(s.builder, elemValue, dstPtr)
 			if disjoint {
 				s.attachAliasScopeMetadataWithNames(store, domainName, dstScopeName, []string{srcScopeName})
 			}
@@ -351,10 +279,10 @@ func (s *functionState) emitSpecializedArenaViewCopyCall(expr *ast.CallExpr) (C.
 	if err != nil {
 		return nil, nil, true, err
 	}
-	dstData := C.LLVMBuildExtractValue(s.builder, dstValue, 0, cStringFree("view.copy.dst.data"))
-	dstLen := C.LLVMBuildExtractValue(s.builder, dstValue, 1, cStringFree("view.copy.dst.len"))
-	srcData := C.LLVMBuildExtractValue(s.builder, srcValue, 0, cStringFree("view.copy.src.data"))
-	srcLen := C.LLVMBuildExtractValue(s.builder, srcValue, 1, cStringFree("view.copy.src.len"))
+	dstData := llvmBuildExtractValue(s.builder, dstValue, 0, cStringFree("view.copy.dst.data"))
+	dstLen := llvmBuildExtractValue(s.builder, dstValue, 1, cStringFree("view.copy.dst.len"))
+	srcData := llvmBuildExtractValue(s.builder, srcValue, 0, cStringFree("view.copy.src.data"))
+	srcLen := llvmBuildExtractValue(s.builder, srcValue, 1, cStringFree("view.copy.src.len"))
 	usizeType, err := s.g.lowerBuiltin("usize")
 	if err != nil {
 		return nil, nil, true, err
@@ -369,10 +297,10 @@ func (s *functionState) emitSpecializedArenaViewCopyCall(expr *ast.CallExpr) (C.
 	if err != nil {
 		return nil, nil, true, err
 	}
-	copyElemSizeConst := C.LLVMConstInt(usizeType, C.ulonglong(copyElemSize), 0)
-	dstBytes := C.LLVMBuildMul(s.builder, dstLen, copyElemSizeConst, cStringFree("view.copy.dst.bytes"))
-	srcBytes := C.LLVMBuildMul(s.builder, srcLen, copyElemSizeConst, cStringFree("view.copy.src.bytes"))
-	zeroBytes := C.LLVMConstInt(usizeType, 0, 0)
+	copyElemSizeConst := llvmConstInt(usizeType, llvmIRUnsignedLongLong(copyElemSize), 0)
+	dstBytes := llvmBuildMul(s.builder, dstLen, copyElemSizeConst, cStringFree("view.copy.dst.bytes"))
+	srcBytes := llvmBuildMul(s.builder, srcLen, copyElemSizeConst, cStringFree("view.copy.src.bytes"))
+	zeroBytes := llvmConstInt(usizeType, 0, 0)
 	voidType := s.g.namedType("void")
 	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	memcpyType := s.g.cachedRuntimeHelperType("arena_memcpy", func() *semantic.FuncType {
@@ -386,50 +314,50 @@ func (s *functionState) emitSpecializedArenaViewCopyCall(expr *ast.CallExpr) (C.
 	if err != nil {
 		return nil, nil, true, err
 	}
-	buildMemcpyNoAlias := func(byteCount C.LLVMValueRef) {
-		memcpyCall := s.buildCall(memcpyLLVMType, memcpyCallee, []C.LLVMValueRef{dstData, srcData, byteCount}, "view.copy.memcpy")
-		s.addCallSiteEnumAttribute(memcpyCall, C.uint(1), "noalias")
-		s.addCallSiteEnumAttribute(memcpyCall, C.uint(2), "noalias")
+	buildMemcpyNoAlias := func(byteCount llvmIRValueRef) {
+		memcpyCall := s.buildCall(memcpyLLVMType, memcpyCallee, []llvmIRValueRef{dstData, srcData, byteCount}, "view.copy.memcpy")
+		s.addCallSiteEnumAttribute(memcpyCall, llvmIRUnsigned(1), "noalias")
+		s.addCallSiteEnumAttribute(memcpyCall, llvmIRUnsigned(2), "noalias")
 	}
 
 	if s.g.semanticReadView().ExprsHaveEqualExtentSize(dstExpr, srcExpr) {
-		zeroCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), dstBytes, zeroBytes, cStringFree("view.copy.bytes.zero"))
-		copyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("view.copy.exact.fast"))
-		mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("view.copy.exact.merge"))
-		C.LLVMBuildCondBr(s.builder, zeroCond, mergeBB, copyBB)
+		zeroCond := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), dstBytes, zeroBytes, cStringFree("view.copy.bytes.zero"))
+		copyBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("view.copy.exact.fast"))
+		mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("view.copy.exact.merge"))
+		llvmBuildCondBr(s.builder, zeroCond, mergeBB, copyBB)
 
-		C.LLVMPositionBuilderAtEnd(s.builder, copyBB)
+		llvmPositionBuilderAtEnd(s.builder, copyBB)
 		buildMemcpyNoAlias(dstBytes)
-		C.LLVMBuildBr(s.builder, mergeBB)
+		llvmBuildBr(s.builder, mergeBB)
 
-		C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+		llvmPositionBuilderAtEnd(s.builder, mergeBB)
 		return nil, funcType.Return, true, nil
 	}
 
-	lenEqual := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), dstBytes, srcBytes, cStringFree("view.copy.bytes.eq"))
-	copyCheckBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("view.copy.fast.check"))
-	fallbackBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("view.copy.fallback"))
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("view.copy.merge"))
-	C.LLVMBuildCondBr(s.builder, lenEqual, copyCheckBB, fallbackBB)
+	lenEqual := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), dstBytes, srcBytes, cStringFree("view.copy.bytes.eq"))
+	copyCheckBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("view.copy.fast.check"))
+	fallbackBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("view.copy.fallback"))
+	mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("view.copy.merge"))
+	llvmBuildCondBr(s.builder, lenEqual, copyCheckBB, fallbackBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, copyCheckBB)
-	zeroCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), dstBytes, zeroBytes, cStringFree("view.copy.bytes.zero"))
-	copyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("view.copy.fast"))
-	C.LLVMBuildCondBr(s.builder, zeroCond, mergeBB, copyBB)
+	llvmPositionBuilderAtEnd(s.builder, copyCheckBB)
+	zeroCond := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), dstBytes, zeroBytes, cStringFree("view.copy.bytes.zero"))
+	copyBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("view.copy.fast"))
+	llvmBuildCondBr(s.builder, zeroCond, mergeBB, copyBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, copyBB)
+	llvmPositionBuilderAtEnd(s.builder, copyBB)
 	buildMemcpyNoAlias(dstBytes)
-	C.LLVMBuildBr(s.builder, mergeBB)
+	llvmBuildBr(s.builder, mergeBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, fallbackBB)
-	fallbackCall := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{dstValue, srcValue}, "")
+	llvmPositionBuilderAtEnd(s.builder, fallbackBB)
+	fallbackCall := s.buildCall(llvmFnType, callee, []llvmIRValueRef{dstValue, srcValue}, "")
 	_ = fallbackCall
-	C.LLVMBuildBr(s.builder, mergeBB)
+	llvmBuildBr(s.builder, mergeBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	llvmPositionBuilderAtEnd(s.builder, mergeBB)
 	return nil, funcType.Return, true, nil
 }
-func (s *functionState) emitSpecializedArenaViewEqCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitSpecializedArenaViewEqCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	ident, ok := expr.Func.(*ast.Ident)
 	if !ok || ident.Name != "arena_da_eq_exact" {
 		return nil, nil, false, nil
@@ -483,19 +411,19 @@ func (s *functionState) emitSpecializedArenaViewEqCall(expr *ast.CallExpr) (C.LL
 	if err != nil {
 		return nil, nil, true, err
 	}
-	leftData := C.LLVMBuildExtractValue(s.builder, leftValue, 0, cStringFree("view.eq.left.data"))
-	leftLen := C.LLVMBuildExtractValue(s.builder, leftValue, 1, cStringFree("view.eq.left.len"))
-	rightData := C.LLVMBuildExtractValue(s.builder, rightValue, 0, cStringFree("view.eq.right.data"))
+	leftData := llvmBuildExtractValue(s.builder, leftValue, 0, cStringFree("view.eq.left.data"))
+	leftLen := llvmBuildExtractValue(s.builder, leftValue, 1, cStringFree("view.eq.left.len"))
+	rightData := llvmBuildExtractValue(s.builder, rightValue, 0, cStringFree("view.eq.right.data"))
 	if hasSmallExactEqByteCount {
 		if exactEqByteCount == 0 {
-			return C.LLVMConstInt(C.LLVMInt1TypeInContext(s.g.context), 1, 0), resultType, true, nil
+			return llvmConstInt(llvmInt1TypeInContext(s.g.context), 1, 0), resultType, true, nil
 		}
-		byteType := C.LLVMInt8TypeInContext(s.g.context)
+		byteType := llvmInt8TypeInContext(s.g.context)
 		usizeType, err := s.g.lowerBuiltin("usize")
 		if err != nil {
 			return nil, nil, true, err
 		}
-		cmpResult := C.LLVMConstInt(C.LLVMInt1TypeInContext(s.g.context), 1, 0)
+		cmpResult := llvmConstInt(llvmInt1TypeInContext(s.g.context), 1, 0)
 		domainName := ""
 		leftScopeName := ""
 		rightScopeName := ""
@@ -505,24 +433,24 @@ func (s *functionState) emitSpecializedArenaViewEqCall(expr *ast.CallExpr) (C.LL
 			rightScopeName = domainName + ".right"
 		}
 		for i := uint64(0); i < exactEqByteCount; i++ {
-			indexValue := C.LLVMConstInt(usizeType, C.ulonglong(i), 0)
-			indices := []C.LLVMValueRef{indexValue}
-			leftBytePtr := C.LLVMBuildGEP2(s.builder, byteType, leftData, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("view.eq.left.byte.ptr"))
-			leftByte := C.LLVMBuildLoad2(s.builder, byteType, leftBytePtr, cStringFree("view.eq.left.byte"))
+			indexValue := llvmConstInt(usizeType, llvmIRUnsignedLongLong(i), 0)
+			indices := []llvmIRValueRef{indexValue}
+			leftBytePtr := llvmBuildGEP2(s.builder, byteType, leftData, llvmValueSlicePtr(indices), llvmIRUnsigned(len(indices)), cStringFree("view.eq.left.byte.ptr"))
+			leftByte := llvmBuildLoad2(s.builder, byteType, leftBytePtr, cStringFree("view.eq.left.byte"))
 			if disjoint {
 				s.attachAliasScopeMetadataWithNames(leftByte, domainName, leftScopeName, []string{rightScopeName})
 			}
-			rightBytePtr := C.LLVMBuildGEP2(s.builder, byteType, rightData, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("view.eq.right.byte.ptr"))
-			rightByte := C.LLVMBuildLoad2(s.builder, byteType, rightBytePtr, cStringFree("view.eq.right.byte"))
+			rightBytePtr := llvmBuildGEP2(s.builder, byteType, rightData, llvmValueSlicePtr(indices), llvmIRUnsigned(len(indices)), cStringFree("view.eq.right.byte.ptr"))
+			rightByte := llvmBuildLoad2(s.builder, byteType, rightBytePtr, cStringFree("view.eq.right.byte"))
 			if disjoint {
 				s.attachAliasScopeMetadataWithNames(rightByte, domainName, rightScopeName, []string{leftScopeName})
 			}
-			bytesEqual := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), leftByte, rightByte, cStringFree("view.eq.byte.eq"))
-			cmpResult = C.LLVMBuildAnd(s.builder, cmpResult, bytesEqual, cStringFree("view.eq.byte.and"))
+			bytesEqual := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), leftByte, rightByte, cStringFree("view.eq.byte.eq"))
+			cmpResult = llvmBuildAnd(s.builder, cmpResult, bytesEqual, cStringFree("view.eq.byte.and"))
 		}
 		return cmpResult, resultType, true, nil
 	}
-	_ = C.LLVMBuildExtractValue(s.builder, rightValue, 1, cStringFree("view.eq.right.len"))
+	_ = llvmBuildExtractValue(s.builder, rightValue, 1, cStringFree("view.eq.right.len"))
 	usizeType, err := s.g.lowerBuiltin("usize")
 	if err != nil {
 		return nil, nil, true, err
@@ -535,28 +463,28 @@ func (s *functionState) emitSpecializedArenaViewEqCall(expr *ast.CallExpr) (C.LL
 	if err != nil {
 		return nil, nil, true, err
 	}
-	byteCount := C.LLVMBuildMul(s.builder, leftLen, C.LLVMConstInt(usizeType, C.ulonglong(eqElemSize), 0), cStringFree("view.eq.bytes"))
-	zeroBytes := C.LLVMConstInt(usizeType, 0, 0)
-	zeroCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), byteCount, zeroBytes, cStringFree("view.eq.bytes.zero"))
-	entryBlock := C.LLVMGetInsertBlock(s.builder)
-	memcmpBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("view.eq.memcmp"))
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("view.eq.merge"))
-	C.LLVMBuildCondBr(s.builder, zeroCond, mergeBB, memcmpBB)
+	byteCount := llvmBuildMul(s.builder, leftLen, llvmConstInt(usizeType, llvmIRUnsignedLongLong(eqElemSize), 0), cStringFree("view.eq.bytes"))
+	zeroBytes := llvmConstInt(usizeType, 0, 0)
+	zeroCond := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), byteCount, zeroBytes, cStringFree("view.eq.bytes.zero"))
+	entryBlock := llvmGetInsertBlock(s.builder)
+	memcmpBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("view.eq.memcmp"))
+	mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("view.eq.merge"))
+	llvmBuildCondBr(s.builder, zeroCond, mergeBB, memcmpBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, memcmpBB)
+	llvmPositionBuilderAtEnd(s.builder, memcmpBB)
 	cmp, err := s.emitMemcmpEqualValue(leftData, rightData, byteCount, "view.eq.memcmp", disjoint)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	memcmpEnd := C.LLVMGetInsertBlock(s.builder)
-	C.LLVMBuildBr(s.builder, mergeBB)
+	memcmpEnd := llvmGetInsertBlock(s.builder)
+	llvmBuildBr(s.builder, mergeBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
-	boolType := C.LLVMInt1TypeInContext(s.g.context)
-	phi := C.LLVMBuildPhi(s.builder, boolType, cStringFree("view.eq.result"))
-	trueValue := C.LLVMConstInt(boolType, 1, 0)
-	values := []C.LLVMValueRef{trueValue, cmp}
-	blocks := []C.LLVMBasicBlockRef{entryBlock, memcmpEnd}
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
+	llvmPositionBuilderAtEnd(s.builder, mergeBB)
+	boolType := llvmInt1TypeInContext(s.g.context)
+	phi := llvmBuildPhi(s.builder, boolType, cStringFree("view.eq.result"))
+	trueValue := llvmConstInt(boolType, 1, 0)
+	values := []llvmIRValueRef{trueValue, cmp}
+	blocks := []llvmIRBlockRef{entryBlock, memcmpEnd}
+	llvmAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), llvmIRUnsigned(len(values)))
 	return phi, resultType, true, nil
 }

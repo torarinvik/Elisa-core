@@ -12,3 +12,5 @@ import "unsafe"
 func llvmCString(text string) *llvmIRChar  { return C.CString(text) }
 func llvmGoString(text *llvmIRChar) string { return C.GoString(text) }
 func llvmFree(pointer unsafe.Pointer)      { C.free(pointer) }
+
+func llvmCBytes(bytes []byte) unsafe.Pointer { return C.CBytes(bytes) }

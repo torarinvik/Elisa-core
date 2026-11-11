@@ -2,85 +2,13 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <string.h>
-#include <llvm-c/Core.h>
-
-static int elisacoreLLVMIsZeroValue(LLVMValueRef value) {
-	return LLVMIsAConstant(value) != NULL && LLVMIsNull(value);
-}
-
-static LLVMMetadataRef elisa_coreAliasMDString(LLVMContextRef ctx, const char* value) {
-	if (value == NULL) {
-		return LLVMMDStringInContext2(ctx, "", 0);
-	}
-	return LLVMMDStringInContext2(ctx, value, strlen(value));
-}
-
-static LLVMMetadataRef elisa_coreAliasMDNode(LLVMContextRef ctx, LLVMMetadataRef* operands, size_t count) {
-	return LLVMMDNodeInContext2(ctx, operands, count);
-}
-
-static unsigned elisa_coreMetadataKindID(LLVMContextRef ctx, const char* kindName) {
-	return LLVMGetMDKindIDInContext(ctx, kindName, strlen(kindName));
-}
-
-static void elisa_coreSetMetadataList(LLVMValueRef inst, LLVMContextRef ctx, const char* kindName, LLVMMetadataRef* scopes, size_t count) {
-	if (inst == NULL || ctx == NULL || kindName == NULL || count == 0) {
-		return;
-	}
-	LLVMMetadataRef list = elisa_coreAliasMDNode(ctx, scopes, count);
-	LLVMValueRef listValue = LLVMMetadataAsValue(ctx, list);
-	LLVMSetMetadata(inst, elisa_coreMetadataKindID(ctx, kindName), listValue);
-}
-
-static LLVMMetadataRef elisa_coreCreateAliasScopeDomain(LLVMContextRef ctx, const char* domainName) {
-	LLVMMetadataRef operands[1];
-	operands[0] = elisa_coreAliasMDString(ctx, domainName);
-	return elisa_coreAliasMDNode(ctx, operands, 1);
-}
-
-static LLVMMetadataRef elisa_coreCreateAliasScope(LLVMContextRef ctx, LLVMMetadataRef domain, const char* scopeName) {
-	LLVMMetadataRef operands[2];
-	operands[0] = elisa_coreAliasMDString(ctx, scopeName);
-	operands[1] = domain;
-	return elisa_coreAliasMDNode(ctx, operands, 2);
-}
-
-static void elisa_coreAttachAliasScopeMetadata(LLVMValueRef inst, LLVMContextRef ctx, const char* domainName, const char* aliasScopeName,
-	const char* noAliasScope1Name, int hasNoAliasScope1, const char* noAliasScope2Name, int hasNoAliasScope2) {
-	if (inst == NULL || ctx == NULL || domainName == NULL || aliasScopeName == NULL) {
-		return;
-	}
-	LLVMMetadataRef domain = elisa_coreCreateAliasScopeDomain(ctx, domainName);
-	LLVMMetadataRef aliasScope = elisa_coreCreateAliasScope(ctx, domain, aliasScopeName);
-	LLVMMetadataRef aliasScopes[1];
-	aliasScopes[0] = aliasScope;
-	elisa_coreSetMetadataList(inst, ctx, "alias.scope", aliasScopes, 1);
-
-	LLVMMetadataRef noAliasScopes[2];
-	size_t noAliasCount = 0;
-	if (hasNoAliasScope1 && noAliasScope1Name != NULL) {
-		noAliasScopes[noAliasCount++] = elisa_coreCreateAliasScope(ctx, domain, noAliasScope1Name);
-	}
-	if (hasNoAliasScope2 && noAliasScope2Name != NULL) {
-		noAliasScopes[noAliasCount++] = elisa_coreCreateAliasScope(ctx, domain, noAliasScope2Name);
-	}
-	if (noAliasCount != 0) {
-		elisa_coreSetMetadataList(inst, ctx, "noalias", noAliasScopes, noAliasCount);
-	}
-}
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
 )
 
-func (s *functionState) emitTernaryExpr(expr *ast.TernaryExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitTernaryExpr(expr *ast.TernaryExpr) (llvmIRValueRef, semantic.Type, error) {
 	resultType := s.exprType(expr)
 	parentScope := s.scope
 	condScope, hasConditionBindings, err := s.createConditionBindingScope(expr.Cond)
@@ -90,16 +18,16 @@ func (s *functionState) emitTernaryExpr(expr *ast.TernaryExpr) (C.LLVMValueRef, 
 	if hasConditionBindings {
 		s.scope = condScope
 	}
-	parentBlock := C.LLVMGetInsertBlock(s.builder)
-	thenBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("ternary.then"))
-	elseBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("ternary.else"))
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("ternary.end"))
+	parentBlock := llvmGetInsertBlock(s.builder)
+	thenBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("ternary.then"))
+	elseBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("ternary.else"))
+	mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("ternary.end"))
 	if err := s.emitConditionBranchWithBindings(expr.Cond, thenBB, elseBB, ast.BranchHintNone); err != nil {
 		s.scope = parentScope
 		return nil, nil, err
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, thenBB)
+	llvmPositionBuilderAtEnd(s.builder, thenBB)
 	if hasConditionBindings {
 		s.scope = condScope
 	}
@@ -110,26 +38,26 @@ func (s *functionState) emitTernaryExpr(expr *ast.TernaryExpr) (C.LLVMValueRef, 
 	}
 	// An arm that already terminated (`raise`, or a diverging `else: return -1` branch —
 	// docs/119 §4.1) never reaches the merge, so it contributes no phi incoming.
-	thenEnd := C.LLVMGetInsertBlock(s.builder)
-	thenReaches := C.LLVMGetBasicBlockTerminator(thenEnd) == nil
+	thenEnd := llvmGetInsertBlock(s.builder)
+	thenReaches := llvmGetBasicBlockTerminator(thenEnd) == nil
 	if thenReaches {
-		C.LLVMBuildBr(s.builder, mergeBB)
+		llvmBuildBr(s.builder, mergeBB)
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, elseBB)
+	llvmPositionBuilderAtEnd(s.builder, elseBB)
 	s.scope = parentScope
 	rightValue, _, err := s.emitExpr(expr.Alt, resultType)
 	if err != nil {
 		s.scope = parentScope
 		return nil, nil, err
 	}
-	elseEnd := C.LLVMGetInsertBlock(s.builder)
-	elseReaches := C.LLVMGetBasicBlockTerminator(elseEnd) == nil
+	elseEnd := llvmGetInsertBlock(s.builder)
+	elseReaches := llvmGetBasicBlockTerminator(elseEnd) == nil
 	if elseReaches {
-		C.LLVMBuildBr(s.builder, mergeBB)
+		llvmBuildBr(s.builder, mergeBB)
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	llvmPositionBuilderAtEnd(s.builder, mergeBB)
 	s.scope = parentScope
 	// Both arms void (`f(x) if cond else g(x)`): the arms were emitted for their effects
 	// and there is no value to merge. A phi of void is not a legal instruction, so build
@@ -140,16 +68,16 @@ func (s *functionState) emitTernaryExpr(expr *ast.TernaryExpr) (C.LLVMValueRef, 
 		return nil, resultType, nil
 	}
 	if !thenReaches && !elseReaches {
-		C.LLVMBuildUnreachable(s.builder)
+		llvmBuildUnreachable(s.builder)
 		return nil, resultType, nil
 	}
 	phiType, err := s.g.lowerType(resultType)
 	if err != nil {
 		return nil, nil, err
 	}
-	phi := C.LLVMBuildPhi(s.builder, phiType, cStringFree("termp"))
-	values := []C.LLVMValueRef{}
-	blocks := []C.LLVMBasicBlockRef{}
+	phi := llvmBuildPhi(s.builder, phiType, cStringFree("termp"))
+	values := []llvmIRValueRef{}
+	blocks := []llvmIRBlockRef{}
 	if thenReaches {
 		values = append(values, leftValue)
 		blocks = append(blocks, thenEnd)
@@ -158,11 +86,11 @@ func (s *functionState) emitTernaryExpr(expr *ast.TernaryExpr) (C.LLVMValueRef, 
 		values = append(values, rightValue)
 		blocks = append(blocks, elseEnd)
 	}
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
+	llvmAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), llvmIRUnsigned(len(values)))
 	_ = parentBlock
 	return phi, resultType, nil
 }
-func (s *functionState) emitAddrOfExpr(expr *ast.AddrOfExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitAddrOfExpr(expr *ast.AddrOfExpr) (llvmIRValueRef, semantic.Type, error) {
 	if slot, refType, ok := s.referenceBindingSlot(expr); ok {
 		return slot, &semantic.RefType{Elem: refType, State: semantic.RefStateNonNull}, nil
 	}
@@ -172,7 +100,7 @@ func (s *functionState) emitAddrOfExpr(expr *ast.AddrOfExpr) (C.LLVMValueRef, se
 // emitPlaceAddrOfExpr lowers `&place` as the address of the place itself, reading
 // a reference binding as the place it refers to (as `r.field` does). A cast of
 // `&x` means exactly this; see emitCastExpr.
-func (s *functionState) emitPlaceAddrOfExpr(expr *ast.AddrOfExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitPlaceAddrOfExpr(expr *ast.AddrOfExpr) (llvmIRValueRef, semantic.Type, error) {
 	ptr, operandType, err := s.emitAddress(expr.Operand)
 	if err != nil {
 		return nil, nil, err
@@ -196,7 +124,7 @@ func (s *functionState) emitPlaceAddrOfExpr(expr *ast.AddrOfExpr) (C.LLVMValueRe
 // casts too, and have no recorded type besides -- only the ANALYZER's type is
 // consulted here, since the fallback typing in functionState.exprType would
 // call any `&r` a `T&&`.
-func (s *functionState) referenceBindingSlot(expr *ast.AddrOfExpr) (C.LLVMValueRef, semantic.Type, bool) {
+func (s *functionState) referenceBindingSlot(expr *ast.AddrOfExpr) (llvmIRValueRef, semantic.Type, bool) {
 	if expr == nil {
 		return nil, nil, false
 	}
@@ -235,7 +163,7 @@ func (s *functionState) referenceBindingSlot(expr *ast.AddrOfExpr) (C.LLVMValueR
 	}
 	return binding.ptr, binding.typ, true
 }
-func (s *functionState) emitSpecializeExpr(expr *ast.SpecializeExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitSpecializeExpr(expr *ast.SpecializeExpr) (llvmIRValueRef, semantic.Type, error) {
 	if expr == nil || expr.Operand == nil {
 		return nil, nil, fmt.Errorf("missing specialization operand")
 	}
@@ -298,7 +226,7 @@ func (s *functionState) emitSpecializeExpr(expr *ast.SpecializeExpr) (C.LLVMValu
 	value, err := s.g.ensureFunctionDeclared(lookupName, specialized)
 	return value, specialized, err
 }
-func (s *functionState) emitStructLitExpr(expr *ast.StructLitExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitStructLitExpr(expr *ast.StructLitExpr) (llvmIRValueRef, semantic.Type, error) {
 	if s != nil && s.g != nil && s.g.result != nil && s.g.semanticReadView().HasOwnInitCallsMap() {
 		if call, ok := s.g.semanticReadView().LookupInitCalls(expr); ok && call != nil {
 			return s.emitExpr(call, s.exprType(expr))
@@ -325,7 +253,7 @@ func (s *functionState) emitStructLitExpr(expr *ast.StructLitExpr) (C.LLVMValueR
 	if sizeBytes, sizeErr := s.g.abiSizeOfType(structType); sizeErr == nil && sizeBytes >= largeStructLiteralMemoryThresholdBytes {
 		return s.emitStructLitExprInMemory(expr, structType, llvmType, fields)
 	}
-	value := C.LLVMGetUndef(llvmType)
+	value := llvmGetUndef(llvmType)
 	for i, spread := range expr.Spreads {
 		if i > 0 {
 			return nil, nil, fmt.Errorf("struct literal lowering supports at most one non-pack struct spread")
@@ -355,7 +283,7 @@ func (s *functionState) emitStructLitExpr(expr *ast.StructLitExpr) (C.LLVMValueR
 		if err != nil {
 			return nil, nil, err
 		}
-		value = C.LLVMBuildInsertValue(s.builder, value, fieldValue, C.unsigned(i), cStringFree("ins"))
+		value = llvmBuildInsertValue(s.builder, value, fieldValue, llvmIRUnsigned(i), cStringFree("ins"))
 	}
 	if err := s.emitStructInvariantChecks(value, structType); err != nil {
 		return nil, nil, err
@@ -380,7 +308,7 @@ const largeStructLiteralMemoryThresholdBytes = largeAggregateCopyMemcpyThreshold
 // left untouched are PADDING -- which the value form leaves as `undef` anyway
 // and which nothing reads: struct equality is field-wise, and `memcmp` is used
 // only for byte views.
-func (s *functionState) emitStructLitExprInMemory(expr *ast.StructLitExpr, structType semantic.Type, llvmType C.LLVMTypeRef, fields []structLiteralField) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitStructLitExprInMemory(expr *ast.StructLitExpr, structType semantic.Type, llvmType llvmIRTypeRef, fields []structLiteralField) (llvmIRValueRef, semantic.Type, error) {
 	alloca, err := s.createTempStorage("structlit", structType)
 	if err != nil {
 		return nil, nil, err
@@ -418,7 +346,7 @@ func (s *functionState) emitStructLitExprInMemory(expr *ast.StructLitExpr, struc
 		if err != nil {
 			return nil, nil, err
 		}
-		fieldPtr := C.LLVMBuildStructGEP2(s.builder, llvmType, alloca, C.unsigned(i), cStringFree("structlit.field.ptr"))
+		fieldPtr := llvmBuildStructGEP2(s.builder, llvmType, alloca, llvmIRUnsigned(i), cStringFree("structlit.field.ptr"))
 		if err := s.storeValue(fieldPtr, fieldValue, fields[i].Type, "structlit.field"); err != nil {
 			return nil, nil, err
 		}
@@ -428,7 +356,7 @@ func (s *functionState) emitStructLitExprInMemory(expr *ast.StructLitExpr, struc
 			return nil, nil, err
 		}
 	}
-	return C.LLVMBuildLoad2(s.builder, llvmType, alloca, cStringFree("structlit.val")), structType, nil
+	return llvmBuildLoad2(s.builder, llvmType, alloca, cStringFree("structlit.val")), structType, nil
 }
 
 // backendStructTypeOf unwraps a struct type, or a reference to one, to its *StructType (else nil).
@@ -448,7 +376,7 @@ func backendStructTypeOf(t semantic.Type) *semantic.StructType {
 // materializing it to an addressable temp, binding `self` to it, and checking each invariant. Used
 // right after construction and after a field store. `zeroed` construction bypasses this (it never
 // reaches emitStructLitExpr), which is the intended low-level escape.
-func (s *functionState) emitStructInvariantChecks(value C.LLVMValueRef, structType semantic.Type) error {
+func (s *functionState) emitStructInvariantChecks(value llvmIRValueRef, structType semantic.Type) error {
 	st, ok := structType.(*semantic.StructType)
 	if !ok || st.Decl == nil || len(st.Decl.Invariants) == 0 {
 		return nil
@@ -460,14 +388,14 @@ func (s *functionState) emitStructInvariantChecks(value C.LLVMValueRef, structTy
 	if err != nil {
 		return err
 	}
-	C.LLVMBuildStore(s.builder, value, alloca)
+	llvmBuildStore(s.builder, value, alloca)
 	return s.emitStructInvariantChecksAt(alloca, st)
 }
 
 // emitStructInvariantChecksAt checks each invariant with `self` bound to an existing struct address
 // (used after a field store, where the struct is already addressable). Assumes debug-gating already
 // decided by the caller for the value form; re-checks it here so the address form is safe too.
-func (s *functionState) emitStructInvariantChecksAt(structPtr C.LLVMValueRef, st *semantic.StructType) error {
+func (s *functionState) emitStructInvariantChecksAt(structPtr llvmIRValueRef, st *semantic.StructType) error {
 	if st == nil || st.Decl == nil || len(st.Decl.Invariants) == 0 {
 		return nil
 	}
@@ -487,7 +415,7 @@ func (s *functionState) emitStructInvariantChecksAt(structPtr C.LLVMValueRef, st
 	}
 	return nil
 }
-func (s *functionState) emitRecordUpdateExpr(expr *ast.RecordUpdateExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitRecordUpdateExpr(expr *ast.RecordUpdateExpr) (llvmIRValueRef, semantic.Type, error) {
 	if expr == nil || expr.Base == nil {
 		return nil, nil, fmt.Errorf("invalid record update")
 	}
@@ -509,7 +437,7 @@ func (s *functionState) emitRecordUpdateExpr(expr *ast.RecordUpdateExpr) (C.LLVM
 		if err != nil {
 			return nil, nil, err
 		}
-		value = C.LLVMBuildInsertValue(s.builder, value, fieldValue, C.unsigned(field.Index), cStringFree("record.update"))
+		value = llvmBuildInsertValue(s.builder, value, fieldValue, llvmIRUnsigned(field.Index), cStringFree("record.update"))
 	}
 	target := s.exprType(expr)
 	if target == nil {
@@ -520,7 +448,7 @@ func (s *functionState) emitRecordUpdateExpr(expr *ast.RecordUpdateExpr) (C.LLVM
 func (s *functionState) rewriteDefaultExactMemberType(_ ast.Expr) (semantic.Type, bool) {
 	return nil, false
 }
-func (s *functionState) emitTreeExactMemberUpdateExpr(_ *ast.RecordUpdateExpr, memberType semantic.Type, _ *treeAllocOwnerBinding) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitTreeExactMemberUpdateExpr(_ *ast.RecordUpdateExpr, memberType semantic.Type, _ *treeAllocOwnerBinding) (llvmIRValueRef, semantic.Type, error) {
 	return nil, nil, fmt.Errorf("tree exact member update is no longer supported for %s", memberType.String())
 }
 

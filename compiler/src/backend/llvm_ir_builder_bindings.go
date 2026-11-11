@@ -296,3 +296,23 @@ func llvmBuildVAArg(builder llvmIRBuilderRef, list llvmIRValueRef, typ llvmIRTyp
 func llvmBuildIsNull(builder llvmIRBuilderRef, value llvmIRValueRef, name *llvmIRChar) llvmIRValueRef {
 	return C.LLVMBuildIsNull(builder, value, name)
 }
+
+func llvmBuildURem(builder llvmIRBuilderRef, left, right llvmIRValueRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildURem(builder, left, right, name)
+}
+
+func llvmGetCondition(branch llvmIRValueRef) llvmIRValueRef {
+	return C.LLVMGetCondition(branch)
+}
+
+func llvmIsABranchInst(value llvmIRValueRef) llvmIRValueRef {
+	return C.LLVMIsABranchInst(value)
+}
+
+func llvmIsAConstantInt(value llvmIRValueRef) llvmIRValueRef {
+	return C.LLVMIsAConstantInt(value)
+}
+
+func llvmIsConditional(branch llvmIRValueRef) llvmIRBool {
+	return C.LLVMIsConditional(branch)
+}

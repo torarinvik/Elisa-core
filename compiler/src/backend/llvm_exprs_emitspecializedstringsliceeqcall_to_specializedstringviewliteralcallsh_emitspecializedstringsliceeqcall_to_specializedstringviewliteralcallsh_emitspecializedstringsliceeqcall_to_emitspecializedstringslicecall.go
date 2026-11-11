@@ -2,78 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <string.h>
-#include <llvm-c/Core.h>
-
-static int elisacoreLLVMIsZeroValue(LLVMValueRef value) {
-	return LLVMIsAConstant(value) != NULL && LLVMIsNull(value);
-}
-
-static LLVMMetadataRef elisa_coreAliasMDString(LLVMContextRef ctx, const char* value) {
-	if (value == NULL) {
-		return LLVMMDStringInContext2(ctx, "", 0);
-	}
-	return LLVMMDStringInContext2(ctx, value, strlen(value));
-}
-
-static LLVMMetadataRef elisa_coreAliasMDNode(LLVMContextRef ctx, LLVMMetadataRef* operands, size_t count) {
-	return LLVMMDNodeInContext2(ctx, operands, count);
-}
-
-static unsigned elisa_coreMetadataKindID(LLVMContextRef ctx, const char* kindName) {
-	return LLVMGetMDKindIDInContext(ctx, kindName, strlen(kindName));
-}
-
-static void elisa_coreSetMetadataList(LLVMValueRef inst, LLVMContextRef ctx, const char* kindName, LLVMMetadataRef* scopes, size_t count) {
-	if (inst == NULL || ctx == NULL || kindName == NULL || count == 0) {
-		return;
-	}
-	LLVMMetadataRef list = elisa_coreAliasMDNode(ctx, scopes, count);
-	LLVMValueRef listValue = LLVMMetadataAsValue(ctx, list);
-	LLVMSetMetadata(inst, elisa_coreMetadataKindID(ctx, kindName), listValue);
-}
-
-static LLVMMetadataRef elisa_coreCreateAliasScopeDomain(LLVMContextRef ctx, const char* domainName) {
-	LLVMMetadataRef operands[1];
-	operands[0] = elisa_coreAliasMDString(ctx, domainName);
-	return elisa_coreAliasMDNode(ctx, operands, 1);
-}
-
-static LLVMMetadataRef elisa_coreCreateAliasScope(LLVMContextRef ctx, LLVMMetadataRef domain, const char* scopeName) {
-	LLVMMetadataRef operands[2];
-	operands[0] = elisa_coreAliasMDString(ctx, scopeName);
-	operands[1] = domain;
-	return elisa_coreAliasMDNode(ctx, operands, 2);
-}
-
-static void elisa_coreAttachAliasScopeMetadata(LLVMValueRef inst, LLVMContextRef ctx, const char* domainName, const char* aliasScopeName,
-	const char* noAliasScope1Name, int hasNoAliasScope1, const char* noAliasScope2Name, int hasNoAliasScope2) {
-	if (inst == NULL || ctx == NULL || domainName == NULL || aliasScopeName == NULL) {
-		return;
-	}
-	LLVMMetadataRef domain = elisa_coreCreateAliasScopeDomain(ctx, domainName);
-	LLVMMetadataRef aliasScope = elisa_coreCreateAliasScope(ctx, domain, aliasScopeName);
-	LLVMMetadataRef aliasScopes[1];
-	aliasScopes[0] = aliasScope;
-	elisa_coreSetMetadataList(inst, ctx, "alias.scope", aliasScopes, 1);
-
-	LLVMMetadataRef noAliasScopes[2];
-	size_t noAliasCount = 0;
-	if (hasNoAliasScope1 && noAliasScope1Name != NULL) {
-		noAliasScopes[noAliasCount++] = elisa_coreCreateAliasScope(ctx, domain, noAliasScope1Name);
-	}
-	if (hasNoAliasScope2 && noAliasScope2Name != NULL) {
-		noAliasScopes[noAliasCount++] = elisa_coreCreateAliasScope(ctx, domain, noAliasScope2Name);
-	}
-	if (noAliasCount != 0) {
-		elisa_coreSetMetadataList(inst, ctx, "noalias", noAliasScopes, noAliasCount);
-	}
-}
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -81,7 +9,7 @@ import (
 	"unsafe"
 )
 
-func (s *functionState) emitSpecializedStringSliceEqCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitSpecializedStringSliceEqCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	ident, ok := expr.Func.(*ast.Ident)
 	if !ok || ident.Name != "ctx_string_slice_eq" {
 		return nil, nil, false, nil
@@ -130,53 +58,53 @@ func (s *functionState) emitSpecializedStringSliceEqCall(expr *ast.CallExpr) (C.
 	if err != nil {
 		return nil, nil, true, err
 	}
-	lenEqual := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), leftSliceLen, rightLenI64, cStringFree("strsliceeq.len.eq"))
-	sliceZero := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), leftSliceLen, C.LLVMConstInt(C.LLVMInt64TypeInContext(s.g.context), 0, 0), cStringFree("strsliceeq.len.zero"))
-	dataEqual := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), leftData, rightData, cStringFree("strsliceeq.data.eq"))
+	lenEqual := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), leftSliceLen, rightLenI64, cStringFree("strsliceeq.len.eq"))
+	sliceZero := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), leftSliceLen, llvmConstInt(llvmInt64TypeInContext(s.g.context), 0, 0), cStringFree("strsliceeq.len.zero"))
+	dataEqual := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), leftData, rightData, cStringFree("strsliceeq.data.eq"))
 	usizeType := s.g.namedType("usize")
 	lenValue, err := s.coerceValue(leftSliceLen, s.g.namedType("i64"), usizeType)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	entryBlock := C.LLVMGetInsertBlock(s.builder)
-	zeroBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("strsliceeq.zero"))
-	nonZeroBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("strsliceeq.nonzero"))
-	sameBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("strsliceeq.same"))
-	memcmpBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("strsliceeq.memcmp"))
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("strsliceeq.merge"))
-	C.LLVMBuildCondBr(s.builder, lenEqual, zeroBB, mergeBB)
+	entryBlock := llvmGetInsertBlock(s.builder)
+	zeroBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("strsliceeq.zero"))
+	nonZeroBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("strsliceeq.nonzero"))
+	sameBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("strsliceeq.same"))
+	memcmpBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("strsliceeq.memcmp"))
+	mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("strsliceeq.merge"))
+	llvmBuildCondBr(s.builder, lenEqual, zeroBB, mergeBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, zeroBB)
-	zeroEnd := C.LLVMGetInsertBlock(s.builder)
-	C.LLVMBuildCondBr(s.builder, sliceZero, mergeBB, nonZeroBB)
+	llvmPositionBuilderAtEnd(s.builder, zeroBB)
+	zeroEnd := llvmGetInsertBlock(s.builder)
+	llvmBuildCondBr(s.builder, sliceZero, mergeBB, nonZeroBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, nonZeroBB)
-	C.LLVMBuildCondBr(s.builder, dataEqual, sameBB, memcmpBB)
+	llvmPositionBuilderAtEnd(s.builder, nonZeroBB)
+	llvmBuildCondBr(s.builder, dataEqual, sameBB, memcmpBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, sameBB)
-	sameEnd := C.LLVMGetInsertBlock(s.builder)
-	C.LLVMBuildBr(s.builder, mergeBB)
+	llvmPositionBuilderAtEnd(s.builder, sameBB)
+	sameEnd := llvmGetInsertBlock(s.builder)
+	llvmBuildBr(s.builder, mergeBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, memcmpBB)
+	llvmPositionBuilderAtEnd(s.builder, memcmpBB)
 	disjoint := s.g.semanticReadView().ExprsAreDisjoint(leftExpr, rightExpr)
 	cmp, err := s.emitMemcmpEqualValue(leftData, rightData, lenValue, "strsliceeq.memcmp", disjoint)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	memcmpEnd := C.LLVMGetInsertBlock(s.builder)
-	C.LLVMBuildBr(s.builder, mergeBB)
+	memcmpEnd := llvmGetInsertBlock(s.builder)
+	llvmBuildBr(s.builder, mergeBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
-	boolType := C.LLVMInt1TypeInContext(s.g.context)
-	phi := C.LLVMBuildPhi(s.builder, boolType, cStringFree("strsliceeq.result"))
-	falseValue := C.LLVMConstInt(boolType, 0, 0)
-	trueValue := C.LLVMConstInt(boolType, 1, 0)
-	values := []C.LLVMValueRef{falseValue, trueValue, trueValue, cmp}
-	blocks := []C.LLVMBasicBlockRef{entryBlock, zeroEnd, sameEnd, memcmpEnd}
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
-	return C.LLVMBuildZExt(s.builder, phi, intLLVMType, cStringFree("strsliceeq.int")), intType, true, nil
+	llvmPositionBuilderAtEnd(s.builder, mergeBB)
+	boolType := llvmInt1TypeInContext(s.g.context)
+	phi := llvmBuildPhi(s.builder, boolType, cStringFree("strsliceeq.result"))
+	falseValue := llvmConstInt(boolType, 0, 0)
+	trueValue := llvmConstInt(boolType, 1, 0)
+	values := []llvmIRValueRef{falseValue, trueValue, trueValue, cmp}
+	blocks := []llvmIRBlockRef{entryBlock, zeroEnd, sameEnd, memcmpEnd}
+	llvmAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), llvmIRUnsigned(len(values)))
+	return llvmBuildZExt(s.builder, phi, intLLVMType, cStringFree("strsliceeq.int")), intType, true, nil
 }
-func (s *functionState) emitSpecializedStringSlicesEqCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitSpecializedStringSlicesEqCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	ident, ok := expr.Func.(*ast.Ident)
 	if !ok || ident.Name != "ctx_string_slices_eq" {
 		return nil, nil, false, nil
@@ -227,53 +155,53 @@ func (s *functionState) emitSpecializedStringSlicesEqCall(expr *ast.CallExpr) (C
 	if err != nil {
 		return nil, nil, true, err
 	}
-	lenEqual := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), leftSliceLen, rightSliceLen, cStringFree("strsliceseq.len.eq"))
-	sliceZero := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), leftSliceLen, C.LLVMConstInt(C.LLVMInt64TypeInContext(s.g.context), 0, 0), cStringFree("strsliceseq.len.zero"))
-	dataEqual := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), leftData, rightData, cStringFree("strsliceseq.data.eq"))
+	lenEqual := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), leftSliceLen, rightSliceLen, cStringFree("strsliceseq.len.eq"))
+	sliceZero := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), leftSliceLen, llvmConstInt(llvmInt64TypeInContext(s.g.context), 0, 0), cStringFree("strsliceseq.len.zero"))
+	dataEqual := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), leftData, rightData, cStringFree("strsliceseq.data.eq"))
 	usizeType := s.g.namedType("usize")
 	lenValue, err := s.coerceValue(leftSliceLen, s.g.namedType("i64"), usizeType)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	entryBlock := C.LLVMGetInsertBlock(s.builder)
-	zeroBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("strsliceseq.zero"))
-	nonZeroBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("strsliceseq.nonzero"))
-	sameBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("strsliceseq.same"))
-	memcmpBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("strsliceseq.memcmp"))
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("strsliceseq.merge"))
-	C.LLVMBuildCondBr(s.builder, lenEqual, zeroBB, mergeBB)
+	entryBlock := llvmGetInsertBlock(s.builder)
+	zeroBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("strsliceseq.zero"))
+	nonZeroBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("strsliceseq.nonzero"))
+	sameBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("strsliceseq.same"))
+	memcmpBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("strsliceseq.memcmp"))
+	mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("strsliceseq.merge"))
+	llvmBuildCondBr(s.builder, lenEqual, zeroBB, mergeBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, zeroBB)
-	zeroEnd := C.LLVMGetInsertBlock(s.builder)
-	C.LLVMBuildCondBr(s.builder, sliceZero, mergeBB, nonZeroBB)
+	llvmPositionBuilderAtEnd(s.builder, zeroBB)
+	zeroEnd := llvmGetInsertBlock(s.builder)
+	llvmBuildCondBr(s.builder, sliceZero, mergeBB, nonZeroBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, nonZeroBB)
-	C.LLVMBuildCondBr(s.builder, dataEqual, sameBB, memcmpBB)
+	llvmPositionBuilderAtEnd(s.builder, nonZeroBB)
+	llvmBuildCondBr(s.builder, dataEqual, sameBB, memcmpBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, sameBB)
-	sameEnd := C.LLVMGetInsertBlock(s.builder)
-	C.LLVMBuildBr(s.builder, mergeBB)
+	llvmPositionBuilderAtEnd(s.builder, sameBB)
+	sameEnd := llvmGetInsertBlock(s.builder)
+	llvmBuildBr(s.builder, mergeBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, memcmpBB)
+	llvmPositionBuilderAtEnd(s.builder, memcmpBB)
 	disjoint := s.g.semanticReadView().ExprsAreDisjoint(leftExpr, rightExpr)
 	cmp, err := s.emitMemcmpEqualValue(leftData, rightData, lenValue, "strsliceseq.memcmp", disjoint)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	memcmpEnd := C.LLVMGetInsertBlock(s.builder)
-	C.LLVMBuildBr(s.builder, mergeBB)
+	memcmpEnd := llvmGetInsertBlock(s.builder)
+	llvmBuildBr(s.builder, mergeBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
-	boolType := C.LLVMInt1TypeInContext(s.g.context)
-	phi := C.LLVMBuildPhi(s.builder, boolType, cStringFree("strsliceseq.result"))
-	falseValue := C.LLVMConstInt(boolType, 0, 0)
-	trueValue := C.LLVMConstInt(boolType, 1, 0)
-	values := []C.LLVMValueRef{falseValue, trueValue, trueValue, cmp}
-	blocks := []C.LLVMBasicBlockRef{entryBlock, zeroEnd, sameEnd, memcmpEnd}
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
-	return C.LLVMBuildZExt(s.builder, phi, intLLVMType, cStringFree("strsliceseq.int")), intType, true, nil
+	llvmPositionBuilderAtEnd(s.builder, mergeBB)
+	boolType := llvmInt1TypeInContext(s.g.context)
+	phi := llvmBuildPhi(s.builder, boolType, cStringFree("strsliceseq.result"))
+	falseValue := llvmConstInt(boolType, 0, 0)
+	trueValue := llvmConstInt(boolType, 1, 0)
+	values := []llvmIRValueRef{falseValue, trueValue, trueValue, cmp}
+	blocks := []llvmIRBlockRef{entryBlock, zeroEnd, sameEnd, memcmpEnd}
+	llvmAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), llvmIRUnsigned(len(values)))
+	return llvmBuildZExt(s.builder, phi, intLLVMType, cStringFree("strsliceseq.int")), intType, true, nil
 }
-func (s *functionState) emitSpecializedRuntimeStringCompareCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitSpecializedRuntimeStringCompareCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	ident, ok := expr.Func.(*ast.Ident)
 	if !ok {
 		return nil, nil, false, nil
@@ -304,7 +232,7 @@ func (s *functionState) emitSpecializedRuntimeStringCompareCall(expr *ast.CallEx
 			if err != nil {
 				return nil, nil, true, err
 			}
-			return C.LLVMBuildZExt(s.builder, cmp, intLLVMType, cStringFree("cstrlit.direct.int")), intType, true, nil
+			return llvmBuildZExt(s.builder, cmp, intLLVMType, cStringFree("cstrlit.direct.int")), intType, true, nil
 		}
 		if literalText, ok := s.staticCStringLiteral(leftExpr); ok {
 			cmp, err := s.emitCStrStaticLiteralEqual(rightExpr, rightType, leftExpr, literalText)
@@ -316,7 +244,7 @@ func (s *functionState) emitSpecializedRuntimeStringCompareCall(expr *ast.CallEx
 			if err != nil {
 				return nil, nil, true, err
 			}
-			return C.LLVMBuildZExt(s.builder, cmp, intLLVMType, cStringFree("cstrlit.direct.int")), intType, true, nil
+			return llvmBuildZExt(s.builder, cmp, intLLVMType, cStringFree("cstrlit.direct.int")), intType, true, nil
 		}
 	}
 	cmp, ok, err := s.emitSameExtentRuntimeStringCompareExpr(lexer.TOKEN_EQEQ, leftExpr, leftType, rightExpr, rightType)
@@ -337,12 +265,12 @@ func (s *functionState) emitSpecializedRuntimeStringCompareCall(expr *ast.CallEx
 	if err != nil {
 		return nil, nil, true, err
 	}
-	return C.LLVMBuildZExt(s.builder, cmp, intLLVMType, cStringFree("streq.direct.int")), intType, true, nil
+	return llvmBuildZExt(s.builder, cmp, intLLVMType, cStringFree("streq.direct.int")), intType, true, nil
 }
 func isStringViewCarrierType(t semantic.Type) bool {
 	return classifyRuntimeStringCompareKind(t) == runtimeStringCompareView
 }
-func (s *functionState) emitGlobalCStringLiteral(text string, name string) C.LLVMValueRef {
+func (s *functionState) emitGlobalCStringLiteral(text string, name string) llvmIRValueRef {
 	return s.emitGlobalStringBytes(text, name)
 }
 
@@ -352,21 +280,21 @@ func (s *functionState) emitGlobalCStringLiteral(text string, name string) C.LLV
 // derived from the literal — an sview's len, a folded `.len` — still said 5, and reading the tail
 // read past the end of the global. Otherwise the IR is exactly LLVMBuildGlobalStringPtr's: a
 // private unnamed_addr constant of align 1, whose address is the global itself.
-func (s *functionState) emitGlobalStringBytes(text string, name string) C.LLVMValueRef {
+func (s *functionState) emitGlobalStringBytes(text string, name string) llvmIRValueRef {
 	nameC := cString(name)
-	defer C.free(unsafe.Pointer(nameC))
-	data := C.CBytes(append([]byte(text), 0))
-	defer C.free(data)
-	initializer := C.LLVMConstStringInContext(s.g.context, (*C.char)(data), C.unsigned(len(text)), 0)
-	global := C.LLVMAddGlobal(s.g.module, C.LLVMTypeOf(initializer), nameC)
-	C.LLVMSetLinkage(global, C.LLVMPrivateLinkage)
-	C.LLVMSetGlobalConstant(global, 1)
-	C.LLVMSetUnnamedAddress(global, C.LLVMGlobalUnnamedAddr)
-	C.LLVMSetInitializer(global, initializer)
-	C.LLVMSetAlignment(global, 1)
+	defer llvmFree(unsafe.Pointer(nameC))
+	data := llvmCBytes(append([]byte(text), 0))
+	defer llvmFree(data)
+	initializer := llvmConstStringInContext(s.g.context, (*llvmIRChar)(data), llvmIRUnsigned(len(text)), 0)
+	global := llvmAddGlobal(s.g.module, llvmTypeOf(initializer), nameC)
+	llvmSetLinkage(global, llvmPrivateLinkage)
+	llvmSetGlobalConstant(global, 1)
+	llvmSetUnnamedAddress(global, llvmGlobalUnnamedAddr)
+	llvmSetInitializer(global, initializer)
+	llvmSetAlignment(global, 1)
 	return global
 }
-func (s *functionState) emitInternSmallStringCall(data C.LLVMValueRef, lenValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitInternSmallStringCall(data llvmIRValueRef, lenValue llvmIRValueRef, name string) (llvmIRValueRef, error) {
 	u8Type := s.g.namedType("u8")
 	usizeType := s.g.namedType("usize")
 	srcType := &semantic.RefType{Elem: u8Type, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
@@ -380,9 +308,9 @@ func (s *functionState) emitInternSmallStringCall(data C.LLVMValueRef, lenValue 
 	if err != nil {
 		return nil, err
 	}
-	return s.buildCall(llvmFnType, callee, []C.LLVMValueRef{data, lenValue}, name), nil
+	return s.buildCall(llvmFnType, callee, []llvmIRValueRef{data, lenValue}, name), nil
 }
-func (s *functionState) emitDirectStringViewCopyLarge(viewData C.LLVMValueRef, viewLen C.LLVMValueRef) (C.LLVMValueRef, error) {
+func (s *functionState) emitDirectStringViewCopyLarge(viewData llvmIRValueRef, viewLen llvmIRValueRef) (llvmIRValueRef, error) {
 	i64Type := s.g.namedType("i64")
 	usizeType := s.g.namedType("usize")
 	voidType := s.g.namedType("void")
@@ -397,9 +325,9 @@ func (s *functionState) emitDirectStringViewCopyLarge(viewData C.LLVMValueRef, v
 	if err != nil {
 		return nil, err
 	}
-	oneValue := C.LLVMConstInt(C.LLVMInt64TypeInContext(s.g.context), 1, 0)
-	allocSize := C.LLVMBuildAdd(s.builder, viewLen, oneValue, cStringFree("svcopy.alloc.size"))
-	allocPtr := s.buildCall(allocLLVMType, allocCallee, []C.LLVMValueRef{allocSize}, "svcopy.alloc")
+	oneValue := llvmConstInt(llvmInt64TypeInContext(s.g.context), 1, 0)
+	allocSize := llvmBuildAdd(s.builder, viewLen, oneValue, cStringFree("svcopy.alloc.size"))
+	allocPtr := s.buildCall(allocLLVMType, allocCallee, []llvmIRValueRef{allocSize}, "svcopy.alloc")
 
 	lenUsize, err := s.coerceValue(viewLen, i64Type, usizeType)
 	if err != nil {
@@ -414,19 +342,19 @@ func (s *functionState) emitDirectStringViewCopyLarge(viewData C.LLVMValueRef, v
 	if err != nil {
 		return nil, err
 	}
-	_ = s.buildCall(memcpyLLVMType, memcpyCallee, []C.LLVMValueRef{allocPtr, viewData, lenUsize}, "svcopy.memcpy")
+	_ = s.buildCall(memcpyLLVMType, memcpyCallee, []llvmIRValueRef{allocPtr, viewData, lenUsize}, "svcopy.memcpy")
 
 	i8LLVMType, err := s.g.lowerBuiltin("u8")
 	if err != nil {
 		return nil, err
 	}
-	bytePtr := C.LLVMBuildGEP2(s.builder, i8LLVMType, allocPtr, llvmValueSlicePtr([]C.LLVMValueRef{lenUsize}), 1, cStringFree("svcopy.term.ptr"))
-	zeroByte := C.LLVMConstInt(i8LLVMType, 0, 0)
-	C.LLVMBuildStore(s.builder, zeroByte, bytePtr)
+	bytePtr := llvmBuildGEP2(s.builder, i8LLVMType, allocPtr, llvmValueSlicePtr([]llvmIRValueRef{lenUsize}), 1, cStringFree("svcopy.term.ptr"))
+	zeroByte := llvmConstInt(i8LLVMType, 0, 0)
+	llvmBuildStore(s.builder, zeroByte, bytePtr)
 
 	return allocPtr, nil
 }
-func (s *functionState) emitSpecializedStringSliceCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitSpecializedStringSliceCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	ident, ok := expr.Func.(*ast.Ident)
 	if !ok || ident.Name != "ctx_string_slice" {
 		return nil, nil, false, nil
@@ -468,17 +396,17 @@ func (s *functionState) emitSpecializedStringSliceCall(expr *ast.CallExpr) (C.LL
 	if err != nil {
 		return nil, nil, true, err
 	}
-	beginValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(begin), 0)
+	beginValue := llvmConstInt(usizeLLVMType, llvmIRUnsignedLongLong(begin), 0)
 	sliceData := inputValue
 	if begin != 0 {
 		i8LLVMType, err := s.g.lowerBuiltin("u8")
 		if err != nil {
 			return nil, nil, true, err
 		}
-		indices := []C.LLVMValueRef{beginValue}
-		sliceData = C.LLVMBuildGEP2(s.builder, i8LLVMType, inputValue, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("strslice.data"))
+		indices := []llvmIRValueRef{beginValue}
+		sliceData = llvmBuildGEP2(s.builder, i8LLVMType, inputValue, llvmValueSlicePtr(indices), llvmIRUnsigned(len(indices)), cStringFree("strslice.data"))
 	}
-	lenValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(exactLen), 0)
+	lenValue := llvmConstInt(usizeLLVMType, llvmIRUnsignedLongLong(exactLen), 0)
 	if exactLen == 0 {
 		emptyPtr := s.emitGlobalCStringLiteral("", "strslice.empty")
 		value, err := s.emitInternSmallStringCall(emptyPtr, lenValue, "strslice.zero.small")
@@ -488,7 +416,7 @@ func (s *functionState) emitSpecializedStringSliceCall(expr *ast.CallExpr) (C.LL
 		value, err := s.emitInternSmallStringCall(sliceData, lenValue, "strslice.small")
 		return value, resultType, true, err
 	}
-	largeLen := C.LLVMConstInt(C.LLVMInt64TypeInContext(s.g.context), C.ulonglong(exactLen), 0)
+	largeLen := llvmConstInt(llvmInt64TypeInContext(s.g.context), llvmIRUnsignedLongLong(exactLen), 0)
 	value, err := s.emitDirectStringViewCopyLarge(sliceData, largeLen)
 	return value, resultType, true, err
 }

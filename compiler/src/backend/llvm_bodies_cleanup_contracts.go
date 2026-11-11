@@ -2,14 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-
-void elisa_coreSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigned trueWeight, unsigned falseWeight);
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -43,7 +35,7 @@ func (s *functionState) emitScopedCleanup(binding scopedCleanupBinding) error {
 		if err != nil {
 			return err
 		}
-		s.buildCall(waitLLVMType, wait, []C.LLVMValueRef{binding.ptr}, "")
+		s.buildCall(waitLLVMType, wait, []llvmIRValueRef{binding.ptr}, "")
 		return nil
 	}
 	ops := semantic.CreateTypeBoundOps(binding.typ)
@@ -291,7 +283,7 @@ func (s *functionState) emitPreconditionChecks(decl *ast.FuncDecl) error {
 // emitPostconditionChecks emits a function's `ensure` value-contracts just before a return, in
 // debug builds only. `result` is bound to the returned value so the conditions can reference it,
 // and `old(...)` reads the entry-time snapshot captured by emitOldCaptures.
-func (s *functionState) emitPostconditionChecks(value C.LLVMValueRef, actual semantic.Type) error {
+func (s *functionState) emitPostconditionChecks(value llvmIRValueRef, actual semantic.Type) error {
 	if s.decl == nil || len(s.decl.EnsureValues) == 0 {
 		return nil
 	}
@@ -306,7 +298,7 @@ func (s *functionState) emitPostconditionChecks(value C.LLVMValueRef, actual sem
 			if err != nil {
 				return err
 			}
-			C.LLVMBuildStore(s.builder, value, alloca)
+			llvmBuildStore(s.builder, value, alloca)
 			s.defineBinding("result", valueBinding{ptr: alloca, typ: s.fnType.Return, mutable: false})
 		}
 	}
@@ -371,41 +363,41 @@ func (s *functionState) emitContractCheck(cond ast.Expr, label string) error {
 	if err != nil {
 		return err
 	}
-	okBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("contract.ok"))
-	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("contract.fail"))
-	C.LLVMBuildCondBr(s.builder, condVal, okBB, failBB)
-	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+	okBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("contract.ok"))
+	failBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("contract.fail"))
+	llvmBuildCondBr(s.builder, condVal, okBB, failBB)
+	llvmPositionBuilderAtEnd(s.builder, failBB)
 	if err := s.emitPanicWithBacktrace(cond.Pos(), &ast.StringLit{Position: cond.Pos(), Value: label}); err != nil {
 		return err
 	}
-	C.LLVMPositionBuilderAtEnd(s.builder, okBB)
+	llvmPositionBuilderAtEnd(s.builder, okBB)
 	return nil
 }
 
 // blockReachableFromEntry walks the CFG forward from fn's entry block. A conditional branch on a
 // constant follows only the edge it takes, so the exit of a `while true` that leaves only by
 // `return` is unreachable.
-func blockReachableFromEntry(fn C.LLVMValueRef, target C.LLVMBasicBlockRef) bool {
-	entry := C.LLVMGetEntryBasicBlock(fn)
-	seen := map[C.LLVMBasicBlockRef]bool{entry: true}
-	work := []C.LLVMBasicBlockRef{entry}
+func blockReachableFromEntry(fn llvmIRValueRef, target llvmIRBlockRef) bool {
+	entry := llvmGetEntryBasicBlock(fn)
+	seen := map[llvmIRBlockRef]bool{entry: true}
+	work := []llvmIRBlockRef{entry}
 	for len(work) != 0 {
 		block := work[len(work)-1]
 		work = work[:len(work)-1]
 		if block == target {
 			return true
 		}
-		term := C.LLVMGetBasicBlockTerminator(block)
+		term := llvmGetBasicBlockTerminator(block)
 		if term == nil {
 			continue
 		}
-		successors := int(C.LLVMGetNumSuccessors(term))
+		successors := int(llvmGetNumSuccessors(term))
 		only := -1
-		if C.LLVMIsABranchInst(term) != nil && C.LLVMIsConditional(term) != 0 {
-			if cond := C.LLVMGetCondition(term); cond != nil && C.LLVMIsAConstantInt(cond) != nil {
+		if llvmIsABranchInst(term) != nil && llvmIsConditional(term) != 0 {
+			if cond := llvmGetCondition(term); cond != nil && llvmIsAConstantInt(cond) != nil {
 				// Successor 0 is the true destination, successor 1 the false one.
 				only = 1
-				if C.LLVMConstIntGetZExtValue(cond) != 0 {
+				if llvmConstIntGetZExtValue(cond) != 0 {
 					only = 0
 				}
 			}
@@ -414,7 +406,7 @@ func blockReachableFromEntry(fn C.LLVMValueRef, target C.LLVMBasicBlockRef) bool
 			if only >= 0 && i != only {
 				continue
 			}
-			next := C.LLVMGetSuccessor(term, C.unsigned(i))
+			next := llvmGetSuccessor(term, llvmIRUnsigned(i))
 			if next != nil && !seen[next] {
 				seen[next] = true
 				work = append(work, next)
