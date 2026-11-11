@@ -223,7 +223,11 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 		a.currentReturn = fnType.Return
 		a.returnFreshShapeStatus = freshReturnTracker(fnType.Return)
 	}
-	allParamDecls := a.expandedFuncDeclParams(fn)
+	allParamDecls := fn.Params
+	ordinaryParams := ordinaryExplicitParams(allParamDecls)
+	if !ordinaryParams {
+		allParamDecls = a.expandedFuncDeclParams(fn)
+	}
 	// MONOMORPHIZATION: bind the signature to the concrete arguments before the parameter
 	// symbols are defined from it. Binding only the type-parameter SCOPE is not enough —
 	// parameter symbols take their types from fnType, so without this substitution the body
@@ -281,8 +285,14 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 					if bindings := a.implicitBindingsForCurrentFunction(fnType); len(bindings) != 0 {
 						a.currentImplicitScopes = pushExprBindingScope(savedBodyImplicitScopes, bindings)
 					}
-					a.seedParamRefinementFacts(a.readOnlyExpandedFuncDeclParams(fn))
-					a.seedParamWhereRefinementFacts(a.readOnlyExpandedFuncDeclParams(fn))
+					if ordinaryParams {
+						a.seedParamRefinementFacts(allParamDecls)
+						a.seedParamWhereRefinementFacts(allParamDecls)
+					} else {
+						// Keep expansion diagnostics in their original order for malformed declarations.
+						a.seedParamRefinementFacts(a.readOnlyExpandedFuncDeclParams(fn))
+						a.seedParamWhereRefinementFacts(a.readOnlyExpandedFuncDeclParams(fn))
+					}
 					a.seedRequiresAsAssertFacts(fn)
 					savedChangesPaths, savedHasChanges := a.currentChangesPaths, a.currentHasChanges
 					savedPreservesPaths, savedHasPreserves := a.currentPreservesPaths, a.currentHasPreserves
