@@ -379,3 +379,18 @@ func TestInvariantRecheckElidedInRelease(t *testing.T) {
 		t.Fatalf("release build should elide the standing-invariant re-checks (no trap), got: %v", err)
 	}
 }
+
+func TestRangeLoopInvariantChecksAtIterationStart(t *testing.T) {
+	t.Parallel()
+	out, err := buildRunRefinement(t, `
+def main() -> int can[Abort.Panic]:
+    next: mutable i64 = 0
+    for index in 0..<3 |next|:
+        invariant next <= index
+        next <- index + 1
+    return 0 if next == 3 else 1
+`, backend.OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("loop-head invariant should hold at each iteration: %v (out=%q)", err, out)
+	}
+}

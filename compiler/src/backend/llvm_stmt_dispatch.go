@@ -473,26 +473,7 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 	case *ast.StaticErrorStmt:
 		return fmt.Errorf("static error should not reach LLVM lowering")
 	case *ast.ContractStmt:
-		// In-body `invariant` -> a debug-gated runtime check at this point. (Lifted requires/ensure
-		// never reach here; a stray non-invariant was already reported by the analyzer.)
-		if n.Kind != ast.ContractInvariant || n.Cond == nil {
-			return nil
-		}
-		if s.g != nil && s.g.result != nil && s.g.semanticReadView().ValueGhostContracts(n.Cond) {
-			// A ghost-reading invariant is verification-only (the ghost it reads is erased and has no
-			// runtime storage); the obligation was discharged statically. Emit nothing.
-			return nil
-		}
-		if s.g.optLevel != OptimizationLevel0 && !s.g.forceContracts {
-			return nil
-		}
-		if err := s.emitContractCheck(n.Cond, "invariant failed"); err != nil {
-			return err
-		}
-		// Standing invariant: re-asserted after each later mutation of a variable it reads, until its
-		// block exits (docs/90 brick 90-14).
-		s.registerActiveInvariant(n.Cond)
-		return nil
+		return s.emitInBodyInvariant(n, true)
 	case *ast.AssertByStmt:
 		// The `by:` proof block is verification-only (already consumed by the analyzer) and is ERASED:
 		// nothing from it is lowered. COND itself was statically proven; emit it as a debug-gated

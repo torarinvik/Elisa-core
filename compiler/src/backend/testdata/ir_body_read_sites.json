@@ -52,7 +52,7 @@
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
     "llvm_bodies_invertbranchhint_to_emitexpectpatternstmt.go": {
-      "sha256": "e976e2b4c99ebc858a93d1d0f44592f454925ca89bf1cee26d5263f4057ced29",
+      "sha256": "88234b90a77e3b8ab7bf8b8efd7dd8b95830c60360085f1abaf76e4772827acb",
       "selectors": 4,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
@@ -137,12 +137,12 @@
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
     "llvm_stmt_dispatch.go": {
-      "sha256": "e9ea78e043f5ab654fd57ade95d36add623b536c13a0e178df531da63c70ea51",
+      "sha256": "74481a6f7dbf1d9b4af64b94c9207869f9afdc6eef0505298016682cf19fca52",
       "selectors": 4,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
     "llvm_stmt_scope_codegen.go": {
-      "sha256": "bd242daba05f75387cfb33a43240504d034f2e92a01bd0b9614807e56aece0f2",
+      "sha256": "9958a4852e82104b4e1ff20ec9bcf4455a223c94e7a067dd06541b44aae1308b",
       "selectors": 1,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     }

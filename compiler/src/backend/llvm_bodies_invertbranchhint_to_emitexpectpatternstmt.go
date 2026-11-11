@@ -240,7 +240,7 @@ func (s *functionState) emitWhile(stmt *ast.WhileStmt) error {
 		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
 		s.scope = condScope
 		s.pushLoopTargets(exitBB, condBB)
-		if err := s.emitBlock(stmt.Body, true); err != nil {
+		if err := s.emitLoopBody(stmt.Body); err != nil {
 			s.popLoopTargets()
 			s.scope = parentScope
 			return err
@@ -276,7 +276,7 @@ func (s *functionState) emitWhile(stmt *ast.WhileStmt) error {
 
 	C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
 	s.pushLoopTargets(exitBB, condBB)
-	if err := s.emitBlock(stmt.Body, true); err != nil {
+	if err := s.emitLoopBody(stmt.Body); err != nil {
 		s.popLoopTargets()
 		return err
 	}
@@ -374,7 +374,7 @@ func (s *functionState) emitForStmt(stmt *ast.ForStmt) error {
 	s.pushLoopTargets(exitBB, stepBB)
 	savedComprehensionAliasContext := s.comprehensionAliasContext
 	s.comprehensionAliasContext = s.comprehensionAliasContextForLoop(stmt)
-	bodyErr := s.emitBlock(stmt.Body, true)
+	bodyErr := s.emitLoopBody(stmt.Body)
 	s.comprehensionAliasContext = savedComprehensionAliasContext
 	if bodyErr != nil {
 		s.popLoopTargets()

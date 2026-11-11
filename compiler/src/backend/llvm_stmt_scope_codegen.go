@@ -16,6 +16,14 @@ func (s *functionState) emitDeferredBody(binding *deferredBodyBinding) error {
 	return s.emitBlockInCurrentScope(binding.stmt.Body)
 }
 func (s *functionState) emitBlock(stmts []ast.Stmt, scoped bool) error {
+	return s.emitBlockWithLoopHead(stmts, scoped, false)
+}
+
+func (s *functionState) emitLoopBody(stmts []ast.Stmt) error {
+	return s.emitBlockWithLoopHead(stmts, true, true)
+}
+
+func (s *functionState) emitBlockWithLoopHead(stmts []ast.Stmt, scoped, loopHead bool) error {
 	// Invariants declared inside this block stop being re-checked once it exits (their variables may
 	// leave scope). Truncate back to the count we entered with (docs/90 brick 90-14).
 	savedInvariants := len(s.activeInvariants)
@@ -29,13 +37,8 @@ func (s *functionState) emitBlock(stmts []ast.Stmt, scoped bool) error {
 			s.popScope()
 			s.packedStores = savedPackedStores
 		}()
-		for _, stmt := range stmts {
-			if s.currentBlockTerminated() {
-				break
-			}
-			if err := s.emitStmt(stmt); err != nil {
-				return err
-			}
+		if err := s.emitBlockStatements(stmts, loopHead); err != nil {
+			return err
 		}
 		if s.currentBlockTerminated() {
 			s.discardScopeCleanups(scope)
@@ -43,9 +46,27 @@ func (s *functionState) emitBlock(stmts []ast.Stmt, scoped bool) error {
 		}
 		return s.emitScopeCleanups(scope)
 	}
+	return s.emitBlockStatements(stmts, loopHead)
+}
+
+func (s *functionState) emitBlockStatements(stmts []ast.Stmt, loopHead bool) error {
 	for _, stmt := range stmts {
 		if s.currentBlockTerminated() {
 			break
+		}
+		if loopHead {
+			if contract, ok := stmt.(*ast.ContractStmt); ok {
+				switch contract.Kind {
+				case ast.ContractDecreases:
+					continue
+				case ast.ContractInvariant:
+					if err := s.emitInBodyInvariant(contract, false); err != nil {
+						return err
+					}
+					continue
+				}
+			}
+			loopHead = false
 		}
 		if err := s.emitStmt(stmt); err != nil {
 			return err

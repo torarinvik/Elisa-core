@@ -19,6 +19,27 @@ import "elisacore/src/ast"
 // to the block it was declared in (truncated on block exit), so a re-check never re-evaluates a
 // condition whose variables have left scope.
 
+// Leading loop invariants are evaluated at the loop head each iteration. Other
+// in-body invariants also stand across later mutations in their block.
+func (s *functionState) emitInBodyInvariant(stmt *ast.ContractStmt, standing bool) error {
+	if stmt.Kind != ast.ContractInvariant || stmt.Cond == nil {
+		return nil
+	}
+	if s.g.optLevel != OptimizationLevel0 && !s.g.forceContracts {
+		return nil
+	}
+	if s.g.result != nil && s.g.semanticReadView().ValueGhostContracts(stmt.Cond) {
+		return nil
+	}
+	if err := s.emitContractCheck(stmt.Cond, "invariant failed"); err != nil {
+		return err
+	}
+	if standing {
+		s.registerActiveInvariant(stmt.Cond)
+	}
+	return nil
+}
+
 // activeInvariant is a standing in-body invariant: its condition plus the set of identifier names it
 // reads, so a later assignment to one of those names triggers a re-check.
 type activeInvariant struct {
