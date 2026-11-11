@@ -193,3 +193,60 @@ entry:
 		})
 	}
 }
+
+func TestBoundedQuotientSumRequiresUpperBoundAndZeroSeed(t *testing.T) {
+	if !boundedDivisionUnrollSupported() {
+		t.Skip("requires LLVM 23")
+	}
+	const source = `
+target triple = "arm64-apple-macosx"
+define i64 @sum_quotients(i64 %input) {
+entry:
+  %invalid = icmp ugt i64 %input, 1000000000
+  br i1 %invalid, label %exit, label %pre
+pre:
+  %zero = icmp eq i64 %input, 0
+  br i1 %zero, label %exit, label %body
+body:
+  %sum = phi i64 [ 0, %pre ], [ %next_sum, %body ]
+  %word = phi i64 [ %input, %pre ], [ %next_word, %body ]
+  %next_word = udiv i64 %word, 5
+  %next_sum = add i64 %sum, %next_word
+  %done = icmp ult i64 %word, 5
+  br i1 %done, label %exit, label %body
+exit:
+  %result = phi i64 [ -1, %entry ], [ 0, %pre ], [ %next_sum, %body ]
+  ret i64 %result
+}
+`
+	for _, test := range []struct {
+		name string
+		ir   string
+		fold bool
+	}{
+		{"bounded", source, true},
+		{"wide input", strings.Replace(source, "1000000000", "4294967295", 1), false},
+		{"nonzero seed", strings.Replace(source, "%sum = phi i64 [ 0", "%sum = phi i64 [ 1", 1), false},
+		{"different exit condition", strings.Replace(source, "icmp ult i64 %word, 5", "icmp ult i64 %word, 6", 1), false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			g, err := parseLLVMIRForSplitHalfTest(test.ir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer g.dispose()
+			if err := g.ensureTargetMachine(); err != nil {
+				t.Fatal(err)
+			}
+			if unrollBoundedDivisionLoops(g) == 2 {
+				t.Fatal("LLVM cleanup failed")
+			}
+			if err := g.verify(); err != nil {
+				t.Fatal(err)
+			}
+			if ir := g.printModule(); strings.Contains(ir, "quotient.sum.parallel") != test.fold {
+				t.Fatalf("unexpected quotient sum version:\n%s", ir)
+			}
+		})
+	}
+}
