@@ -5,6 +5,7 @@
 #include <llvm/Config/llvm-config.h>
 #include <llvm-c/Core.h>
 #if LLVM_VERSION_MAJOR >= 23
+#include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/Analysis/LoopInfo.h>
 #include <llvm/IR/Dominators.h>
@@ -17,6 +18,16 @@
 using namespace llvm;
 
 namespace {
+const ConstantInt *remainderModulus(const BinaryOperator &Op) {
+  switch (Op.getOpcode()) {
+  case Instruction::SRem:
+  case Instruction::URem:
+    return dyn_cast<ConstantInt>(Op.getOperand(1));
+  default:
+    return nullptr;
+  }
+}
+
 class BoundedRemainderProof {
   DominatorTree &DT;
   LoopInfo &LI;
@@ -24,6 +35,7 @@ class BoundedRemainderProof {
   uint64_t SignedMax;
   unsigned Work = 0;
   SmallPtrSet<Value *, 16> Active;
+  DenseMap<std::pair<Value *, Instruction *>, uint64_t> Known;
 
   std::optional<uint64_t> guardedLoad(Value *V, Instruction *At) {
     auto *Load = dyn_cast<LoadInst>(V);
@@ -70,8 +82,7 @@ class BoundedRemainderProof {
         continue;
       }
       auto *R = dyn_cast<BinaryOperator>(Phi.getIncomingValue(I));
-      auto *K = R && R->getOpcode() == Instruction::SRem
-                    ? dyn_cast<ConstantInt>(R->getOperand(1)) : nullptr;
+      auto *K = R ? remainderModulus(*R) : nullptr;
       if (!K || !K->equalsInt(Modulus))
         return false;
       HasBackedge = true;
@@ -80,7 +91,11 @@ class BoundedRemainderProof {
   }
 
   std::optional<uint64_t> bound(Value *V, Instruction *At) {
-    if (++Work > 512 || Active.size() >= 48)
+    // A load's bound is valid only at uses dominated by its range check.
+    auto Key = std::make_pair(V, At);
+    if (auto It = Known.find(Key); It != Known.end())
+      return It->second;
+    if (++Work > 512 || Active.size() >= 96)
       return std::nullopt;
     if (auto *K = dyn_cast<ConstantInt>(V)) {
       if (!K->isNegative())
@@ -96,6 +111,8 @@ class BoundedRemainderProof {
       return std::nullopt;
     auto Result = boundAcyclic(V, At);
     Active.erase(V);
+    if (Result)
+      Known.try_emplace(Key, *Result);
     return Result;
   }
 
@@ -117,10 +134,9 @@ class BoundedRemainderProof {
         auto B = bound(Op->getOperand(1), Op);
         if (A && B && *A <= SignedMax && *B <= SignedMax - *A)
           return *A + *B;
-      } else if (Op->getOpcode() == Instruction::SRem) {
-        auto *K = dyn_cast<ConstantInt>(Op->getOperand(1));
-        if (K && K->getValue().isStrictlyPositive() && bound(Op->getOperand(0), Op))
-          return K->getZExtValue() - 1;
+      } else if (auto *K = remainderModulus(*Op);
+                 K && K->getValue().isStrictlyPositive() && bound(Op->getOperand(0), Op)) {
+        return K->getZExtValue() - 1;
       }
     }
     return guardedLoad(V, At);
@@ -175,14 +191,14 @@ unsigned foldBoundedRemainders(Module &M) {
     SmallVector<BinaryOperator *, 8> Candidates;
     for (Instruction &I : instructions(F)) {
       auto *Op = dyn_cast<BinaryOperator>(&I);
-      if (!Op || Op->getOpcode() != Instruction::SRem || Op->hasMetadataOtherThanDebugLoc() ||
+      if (!Op || Op->hasMetadataOtherThanDebugLoc() ||
           !Op->getType()->isIntegerTy() || Op->getType()->getIntegerBitWidth() > 64)
         continue;
-      auto *K = dyn_cast<ConstantInt>(Op->getOperand(1));
+      auto *K = remainderModulus(*Op);
       if (K && K->getValue().isStrictlyPositive() && !K->getValue().isPowerOf2())
         Candidates.push_back(Op);
     }
-    if (Candidates.empty() || Candidates.size() > 32)
+    if (Candidates.empty() || Candidates.size() > 64)
       continue;
     DominatorTree DT(F);
     LoopInfo LI(DT);
