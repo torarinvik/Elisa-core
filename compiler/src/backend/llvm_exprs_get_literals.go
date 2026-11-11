@@ -2,12 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -23,7 +17,7 @@ import (
 //     whose absence path runs the recovery (or, with no else, returns None).
 //   - `get opt` / `get opt else ...`: unwrap an optional / nullable reference,
 //     with the recovery (or None-propagation) on the absent path.
-func (s *functionState) emitGetExpr(expr *ast.GetExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitGetExpr(expr *ast.GetExpr) (llvmIRValueRef, semantic.Type, error) {
 	resultType := s.exprType(expr)
 	if idx, ok := expr.Value.(*ast.IndexExpr); ok && idx.Fallback != nil {
 		return s.emitExpr(expr.Value, resultType)
@@ -46,7 +40,7 @@ func (s *functionState) emitGetExpr(expr *ast.GetExpr) (C.LLVMValueRef, semantic
 	return s.emitGetUnwrapExpr(expr.Value, recovery, resultType)
 }
 
-func (s *functionState) emitGetDictIndexExpr(idx *ast.IndexExpr, recovery *ast.RecoveryClause, resultType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitGetDictIndexExpr(idx *ast.IndexExpr, recovery *ast.RecoveryClause, resultType semantic.Type) (llvmIRValueRef, semantic.Type, error) {
 	valueType := s.exprType(idx.AsBuiltinDictGet)
 	if valueType == nil {
 		dictType, _, ok := builtinDictReceiverType(s.exprType(idx.Object))
@@ -73,9 +67,9 @@ func (s *functionState) emitGetDictIndexExpr(idx *ast.IndexExpr, recovery *ast.R
 	if err != nil {
 		return nil, nil, err
 	}
-	nullValue := C.LLVMConstNull(llvmRefType)
-	okCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), value, nullValue, cStringFree("get.dict.nonnull"))
-	return s.emitGetBranch(okCond, func() (C.LLVMValueRef, error) {
+	nullValue := llvmConstNull(llvmRefType)
+	okCond := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntNE), value, nullValue, cStringFree("get.dict.nonnull"))
+	return s.emitGetBranch(okCond, func() (llvmIRValueRef, error) {
 		loaded, err := s.loadValue(value, refType.Elem, "get.dict.value")
 		if err != nil {
 			return nil, err
@@ -91,7 +85,7 @@ func (s *functionState) emitGetDictIndexExpr(idx *ast.IndexExpr, recovery *ast.R
 // within the source (0 <= start <= end <= len) it produces the bounded view;
 // otherwise it runs the recovery clause. The bounds are usize (unsigned), so the
 // non-negativity of start is free.
-func (s *functionState) emitGetCheckedSliceExpr(slice *ast.SliceExpr, recovery *ast.RecoveryClause, resultType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitGetCheckedSliceExpr(slice *ast.SliceExpr, recovery *ast.RecoveryClause, resultType semantic.Type) (llvmIRValueRef, semantic.Type, error) {
 	usizeType := s.g.namedType("usize")
 	startValue, _, err := s.emitExpr(slice.Start, usizeType)
 	if err != nil {
@@ -105,10 +99,10 @@ func (s *functionState) emitGetCheckedSliceExpr(slice *ast.SliceExpr, recovery *
 	if err != nil {
 		return nil, nil, err
 	}
-	startLEEnd := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULE), startValue, endValue, cStringFree("get.slice.start_le_end"))
-	endLELen := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULE), endValue, lenValue, cStringFree("get.slice.end_le_len"))
-	okCond := C.LLVMBuildAnd(s.builder, startLEEnd, endLELen, cStringFree("get.slice.in_range"))
-	return s.emitGetBranch(okCond, func() (C.LLVMValueRef, error) {
+	startLEEnd := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntULE), startValue, endValue, cStringFree("get.slice.start_le_end"))
+	endLELen := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntULE), endValue, lenValue, cStringFree("get.slice.end_le_len"))
+	okCond := llvmBuildAnd(s.builder, startLEEnd, endLELen, cStringFree("get.slice.in_range"))
+	return s.emitGetBranch(okCond, func() (llvmIRValueRef, error) {
 		view, _, err := s.emitSliceExpr(slice)
 		return view, err
 	}, recovery, resultType)
@@ -117,7 +111,7 @@ func (s *functionState) emitGetCheckedSliceExpr(slice *ast.SliceExpr, recovery *
 // emitSliceSourceLength computes the element count of a slice's source for the
 // bounds check: a constant for fixed-size arrays, the runtime count field for
 // dynamic containers (darray / view / darray-view).
-func (s *functionState) emitSliceSourceLength(slice *ast.SliceExpr) (C.LLVMValueRef, error) {
+func (s *functionState) emitSliceSourceLength(slice *ast.SliceExpr) (llvmIRValueRef, error) {
 	usizeType := s.g.namedType("usize")
 	usizeLLVM, err := s.g.lowerType(usizeType)
 	if err != nil {
@@ -129,7 +123,7 @@ func (s *functionState) emitSliceSourceLength(slice *ast.SliceExpr) (C.LLVMValue
 		base = ref.Elem
 	}
 	if arr, ok := base.(*semantic.ArrayType); ok && arr != nil && arr.HasConstSize {
-		return C.LLVMConstInt(usizeLLVM, C.ulonglong(arr.ConstSize), 0), nil
+		return llvmConstInt(usizeLLVM, llvmIRUnsignedLongLong(arr.ConstSize), 0), nil
 	}
 	switch base.(type) {
 	case *semantic.DArrayType, *semantic.ViewType:
@@ -145,7 +139,7 @@ func (s *functionState) emitSliceSourceLength(slice *ast.SliceExpr) (C.LLVMValue
 
 // emitGetCheckedIndexExpr emits a bounds-checked container access: in-range
 // produces the element, out-of-range runs the recovery clause.
-func (s *functionState) emitGetCheckedIndexExpr(idx *ast.IndexExpr, recovery *ast.RecoveryClause, resultType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitGetCheckedIndexExpr(idx *ast.IndexExpr, recovery *ast.RecoveryClause, resultType semantic.Type) (llvmIRValueRef, semantic.Type, error) {
 	usizeType := s.g.namedType("usize")
 	indexValue, _, err := s.emitExpr(idx.Index, usizeType)
 	if err != nil {
@@ -155,8 +149,8 @@ func (s *functionState) emitGetCheckedIndexExpr(idx *ast.IndexExpr, recovery *as
 	if err != nil {
 		return nil, nil, err
 	}
-	okCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), indexValue, countValue, cStringFree("get.index.in.range"))
-	return s.emitGetBranch(okCond, func() (C.LLVMValueRef, error) {
+	okCond := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntULT), indexValue, countValue, cStringFree("get.index.in.range"))
+	return s.emitGetBranch(okCond, func() (llvmIRValueRef, error) {
 		value, actualType, err := loadValue()
 		if err != nil {
 			return nil, err
@@ -170,21 +164,21 @@ func (s *functionState) emitGetCheckedIndexExpr(idx *ast.IndexExpr, recovery *as
 
 // emitGetUnwrapExpr unwraps an optional / nullable reference, running the
 // recovery clause on the absent path.
-func (s *functionState) emitGetUnwrapExpr(valueExpr ast.Expr, recovery *ast.RecoveryClause, resultType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitGetUnwrapExpr(valueExpr ast.Expr, recovery *ast.RecoveryClause, resultType semantic.Type) (llvmIRValueRef, semantic.Type, error) {
 	valueType := s.exprType(valueExpr)
 	value, _, err := s.emitExpr(valueExpr, valueType)
 	if err != nil {
 		return nil, nil, err
 	}
-	var okCond, okValue C.LLVMValueRef
+	var okCond, okValue llvmIRValueRef
 	switch t := valueType.(type) {
 	case *semantic.RefType:
 		llvmRefType, err := s.g.lowerType(valueType)
 		if err != nil {
 			return nil, nil, err
 		}
-		nullValue := C.LLVMConstNull(llvmRefType)
-		okCond = C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), value, nullValue, cStringFree("get.nonnull"))
+		nullValue := llvmConstNull(llvmRefType)
+		okCond = llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntNE), value, nullValue, cStringFree("get.nonnull"))
 		okValue = value
 	case *semantic.OptionalType:
 		okCond, err = s.extractOptionalPresent(value, t)
@@ -200,53 +194,53 @@ func (s *functionState) emitGetUnwrapExpr(valueExpr ast.Expr, recovery *ast.Reco
 	default:
 		return nil, nil, fmt.Errorf("get requires an optional value or nullable ref")
 	}
-	return s.emitGetBranch(okCond, func() (C.LLVMValueRef, error) { return okValue, nil }, recovery, resultType)
+	return s.emitGetBranch(okCond, func() (llvmIRValueRef, error) { return okValue, nil }, recovery, resultType)
 }
 
 // emitGetBranch is the shared branch/merge skeleton for `get`: when okCond holds
 // it takes okValue (computed lazily so the in-range index load only happens on
 // the taken path); otherwise it runs the recovery clause, which may fall through
 // (value/void) or terminate (return/raise).
-func (s *functionState) emitGetBranch(okCond C.LLVMValueRef, okValue func() (C.LLVMValueRef, error), recovery *ast.RecoveryClause, resultType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
-	okBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("get.ok"))
-	fallbackBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("get.fallback"))
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("get.merge"))
-	C.LLVMBuildCondBr(s.builder, okCond, okBB, fallbackBB)
+func (s *functionState) emitGetBranch(okCond llvmIRValueRef, okValue func() (llvmIRValueRef, error), recovery *ast.RecoveryClause, resultType semantic.Type) (llvmIRValueRef, semantic.Type, error) {
+	okBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("get.ok"))
+	fallbackBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("get.fallback"))
+	mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("get.merge"))
+	llvmBuildCondBr(s.builder, okCond, okBB, fallbackBB)
 
-	incomingValues := make([]C.LLVMValueRef, 0, 2)
-	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, 2)
+	incomingValues := make([]llvmIRValueRef, 0, 2)
+	incomingBlocks := make([]llvmIRBlockRef, 0, 2)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, okBB)
+	llvmPositionBuilderAtEnd(s.builder, okBB)
 	okVal, err := okValue()
 	if err != nil {
 		return nil, nil, err
 	}
 	if !s.currentBlockTerminated() {
-		okEnd := C.LLVMGetInsertBlock(s.builder)
-		C.LLVMBuildBr(s.builder, mergeBB)
+		okEnd := llvmGetInsertBlock(s.builder)
+		llvmBuildBr(s.builder, mergeBB)
 		if !isVoidType(resultType) {
 			incomingValues = append(incomingValues, okVal)
 		}
 		incomingBlocks = append(incomingBlocks, okEnd)
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, fallbackBB)
+	llvmPositionBuilderAtEnd(s.builder, fallbackBB)
 	fallbackValue, reachable, err := s.emitRecoveryClause(recovery, resultType, nil, nil)
 	if err != nil {
 		return nil, nil, err
 	}
 	if reachable && !s.currentBlockTerminated() {
-		fallbackEnd := C.LLVMGetInsertBlock(s.builder)
-		C.LLVMBuildBr(s.builder, mergeBB)
+		fallbackEnd := llvmGetInsertBlock(s.builder)
+		llvmBuildBr(s.builder, mergeBB)
 		if !isVoidType(resultType) {
 			incomingValues = append(incomingValues, fallbackValue)
 		}
 		incomingBlocks = append(incomingBlocks, fallbackEnd)
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	llvmPositionBuilderAtEnd(s.builder, mergeBB)
 	if len(incomingBlocks) == 0 {
-		C.LLVMBuildUnreachable(s.builder)
+		llvmBuildUnreachable(s.builder)
 		return nil, resultType, nil
 	}
 	if isVoidType(resultType) {
@@ -259,12 +253,12 @@ func (s *functionState) emitGetBranch(okCond C.LLVMValueRef, okValue func() (C.L
 	if err != nil {
 		return nil, nil, err
 	}
-	phi := C.LLVMBuildPhi(s.builder, phiType, cStringFree("getphi"))
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
+	phi := llvmBuildPhi(s.builder, phiType, cStringFree("getphi"))
+	llvmAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), llvmIRUnsigned(len(incomingValues)))
 	return phi, resultType, nil
 }
 
-func (s *functionState) emitIntLiteral(expr *ast.IntLit) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitIntLiteral(expr *ast.IntLit) (llvmIRValueRef, semantic.Type, error) {
 	t := s.exprType(expr)
 	if t == nil {
 		t = s.g.namedType("int")
@@ -277,9 +271,9 @@ func (s *functionState) emitIntLiteral(expr *ast.IntLit) (C.LLVMValueRef, semant
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to parse integer literal %q: %w", expr.Value, err)
 	}
-	return C.LLVMConstInt(llvmType, C.ulonglong(parsed), 0), t, nil
+	return llvmConstInt(llvmType, llvmIRUnsignedLongLong(parsed), 0), t, nil
 }
-func (s *functionState) emitFloatLiteral(expr *ast.FloatLit) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitFloatLiteral(expr *ast.FloatLit) (llvmIRValueRef, semantic.Type, error) {
 	t := s.exprType(expr)
 	if t == nil {
 		t = s.g.namedType("f64")
@@ -292,9 +286,9 @@ func (s *functionState) emitFloatLiteral(expr *ast.FloatLit) (C.LLVMValueRef, se
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to parse float literal %q: %w", expr.Value, err)
 	}
-	return C.LLVMConstReal(llvmType, C.double(parsed)), t, nil
+	return llvmConstReal(llvmType, llvmIRDouble(parsed)), t, nil
 }
-func (s *functionState) emitStringLiteral(expr *ast.StringLit, expected semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitStringLiteral(expr *ast.StringLit, expected semantic.Type) (llvmIRValueRef, semantic.Type, error) {
 	value := s.emitGlobalStringBytes(expr.Value, "str")
 	resultType := s.exprType(expr)
 	if resultType == nil {
@@ -323,14 +317,14 @@ func (s *functionState) emitStringLiteral(expr *ast.StringLit, expected semantic
 		if err != nil {
 			return nil, nil, err
 		}
-		viewValue := C.LLVMGetUndef(viewLLVMType)
-		viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, value, 0, cStringFree("str.view.data"))
-		viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, C.LLVMConstInt(i64Type, C.ulonglong(len(expr.Value)), 0), 1, cStringFree("str.view.len"))
+		viewValue := llvmGetUndef(viewLLVMType)
+		viewValue = llvmBuildInsertValue(s.builder, viewValue, value, 0, cStringFree("str.view.data"))
+		viewValue = llvmBuildInsertValue(s.builder, viewValue, llvmConstInt(i64Type, llvmIRUnsignedLongLong(len(expr.Value)), 0), 1, cStringFree("str.view.len"))
 		return viewValue, resultType, nil
 	}
 	return value, resultType, nil
 }
-func (s *functionState) emitCharLiteral(expr *ast.CharLit) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitCharLiteral(expr *ast.CharLit) (llvmIRValueRef, semantic.Type, error) {
 	t := s.exprType(expr)
 	if t == nil {
 		t = s.g.namedType("char")
@@ -343,5 +337,5 @@ func (s *functionState) emitCharLiteral(expr *ast.CharLit) (C.LLVMValueRef, sema
 	if !ok {
 		return nil, nil, fmt.Errorf("failed to parse char literal %q", expr.Value)
 	}
-	return C.LLVMConstInt(llvmType, C.ulonglong(parsed), 0), t, nil
+	return llvmConstInt(llvmType, llvmIRUnsignedLongLong(parsed), 0), t, nil
 }

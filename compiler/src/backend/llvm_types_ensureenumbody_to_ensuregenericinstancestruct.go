@@ -2,12 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/semantic"
 	"fmt"
@@ -76,11 +70,11 @@ func enumTagValueCapacity(enum *semantic.EnumType) uint64 {
 	}
 }
 
-func (g *llvmGenerator) lowerEnumTagType(enum *semantic.EnumType) (C.LLVMTypeRef, error) {
+func (g *llvmGenerator) lowerEnumTagType(enum *semantic.EnumType) (llvmIRTypeRef, error) {
 	return g.lowerBuiltin(enumTagBuiltinName(enum))
 }
 
-func (g *llvmGenerator) ensureEnumBody(name string, enum *semantic.EnumType) (C.LLVMTypeRef, error) {
+func (g *llvmGenerator) ensureEnumBody(name string, enum *semantic.EnumType) (llvmIRTypeRef, error) {
 	leaves := enumLayoutLeaves(enum)
 	if enumLeavesAreTagOnly(leaves) {
 		return g.lowerEnumTagType(enum)
@@ -110,13 +104,13 @@ func (g *llvmGenerator) ensureEnumBody(name string, enum *semantic.EnumType) (C.
 			maxSlots = slots
 		}
 	}
-	payloadType := C.LLVMArrayType2(wordType, C.uint64_t(maxSlots))
-	fields := []C.LLVMTypeRef{tagType, payloadType}
-	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
+	payloadType := llvmArrayType2(wordType, llvmIRUint64(maxSlots))
+	fields := []llvmIRTypeRef{tagType, payloadType}
+	llvmStructSetBody(ty, llvmTypeSlicePtr(fields), llvmIRUnsigned(len(fields)), 0)
 	g.structBodies[name] = true
 	return ty, nil
 }
-func (g *llvmGenerator) ensurePackedEnumRowType(name string, enum *semantic.EnumType) (C.LLVMTypeRef, error) {
+func (g *llvmGenerator) ensurePackedEnumRowType(name string, enum *semantic.EnumType) (llvmIRTypeRef, error) {
 	ty, err := g.ensureNamedStructType(name)
 	if err != nil {
 		return nil, err
@@ -128,7 +122,7 @@ func (g *llvmGenerator) ensurePackedEnumRowType(name string, enum *semantic.Enum
 	if err != nil {
 		return nil, err
 	}
-	fields := []C.LLVMTypeRef{tagType}
+	fields := []llvmIRTypeRef{tagType}
 	if enum.Decl != nil {
 		for _, fieldDecl := range enum.Decl.Common {
 			field, ok := enum.Common[fieldDecl.Name]
@@ -163,10 +157,10 @@ func (g *llvmGenerator) ensurePackedEnumRowType(name string, enum *semantic.Enum
 		if err != nil {
 			return nil, err
 		}
-		payloadType := C.LLVMArrayType2(wordType, C.uint64_t(maxSlots))
+		payloadType := llvmArrayType2(wordType, llvmIRUint64(maxSlots))
 		fields = append(fields, payloadType)
 	}
-	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
+	llvmStructSetBody(ty, llvmTypeSlicePtr(fields), llvmIRUnsigned(len(fields)), 0)
 	g.structBodies[name] = true
 	return ty, nil
 }
@@ -314,7 +308,7 @@ func (g *llvmGenerator) payloadSlotBytes(enum *semantic.EnumType) uint64 {
 
 // payloadSlotType is the LLVM element type of the inline payload-slot array (see payloadSlotBytes).
 // Its ABI size MUST equal payloadSlotBytes(enum); the two move together.
-func (g *llvmGenerator) payloadSlotType(enum *semantic.EnumType) (C.LLVMTypeRef, error) {
+func (g *llvmGenerator) payloadSlotType(enum *semantic.EnumType) (llvmIRTypeRef, error) {
 	if g.aosNarrowSlots(enum) {
 		switch g.aosSlotBytes(enum) {
 		case 1:
@@ -346,9 +340,9 @@ func (g *llvmGenerator) enumVariantPayloadSlots(enum *semantic.EnumType, variant
 	slotBytes := g.payloadSlotBytes(enum)
 	return (sizeBytes + slotBytes - 1) / slotBytes, nil
 }
-func (g *llvmGenerator) lowerEnumVariantPayloadType(variant *semantic.EnumVariant) (C.LLVMTypeRef, error) {
+func (g *llvmGenerator) lowerEnumVariantPayloadType(variant *semantic.EnumVariant) (llvmIRTypeRef, error) {
 	if variant == nil || len(variant.Payload) == 0 {
-		return C.LLVMVoidTypeInContext(g.context), nil
+		return llvmVoidTypeInContext(g.context), nil
 	}
 	if len(variant.Payload) == 1 {
 		return g.lowerEnumPayloadFieldType(variant.Payload[0])
@@ -356,7 +350,7 @@ func (g *llvmGenerator) lowerEnumVariantPayloadType(variant *semantic.EnumVarian
 	if cached := g.packedVariantPayloadTypes[variant]; cached != nil {
 		return cached, nil
 	}
-	fields := make([]C.LLVMTypeRef, 0, len(variant.Payload))
+	fields := make([]llvmIRTypeRef, 0, len(variant.Payload))
 	for _, payload := range variant.Payload {
 		fieldType, err := g.lowerEnumPayloadFieldType(payload)
 		if err != nil {
@@ -364,7 +358,7 @@ func (g *llvmGenerator) lowerEnumVariantPayloadType(variant *semantic.EnumVarian
 		}
 		fields = append(fields, fieldType)
 	}
-	payloadType := C.LLVMStructTypeInContext(g.context, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
+	payloadType := llvmStructTypeInContext(g.context, llvmTypeSlicePtr(fields), llvmIRUnsigned(len(fields)), 0)
 	g.packedVariantPayloadTypes[variant] = payloadType
 	return payloadType, nil
 }

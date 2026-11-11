@@ -2,14 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-
-void elisa_coreSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigned trueWeight, unsigned falseWeight);
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -18,7 +10,7 @@ import (
 	"fmt"
 )
 
-func (s *functionState) emitIterLoopPatternBindings(pattern ast.MoveBindPattern, mode ast.IterBindMode, itemType semantic.Type, itemValue C.LLVMValueRef, itemPtr C.LLVMValueRef) error {
+func (s *functionState) emitIterLoopPatternBindings(pattern ast.MoveBindPattern, mode ast.IterBindMode, itemType semantic.Type, itemValue llvmIRValueRef, itemPtr llvmIRValueRef) error {
 	switch p := pattern.(type) {
 	case *ast.MoveBindNamePattern:
 		if mode == ast.IterBindValue {
@@ -37,7 +29,7 @@ func (s *functionState) emitIterLoopPatternBindings(pattern ast.MoveBindPattern,
 					return err
 				}
 				s.defineBinding(tempName, valueBinding{ptr: tempAlloca, typ: itemType, mutable: false})
-				C.LLVMBuildStore(s.builder, itemValue, tempAlloca)
+				llvmBuildStore(s.builder, itemValue, tempAlloca)
 				tempIdent := &ast.Ident{Position: p.Position, Name: tempName}
 				for _, arg := range p.Args {
 					if arg.Name == "_" {
@@ -70,7 +62,7 @@ func (s *functionState) emitIterLoopPatternBindings(pattern ast.MoveBindPattern,
 					if !ok {
 						return fmt.Errorf("unknown field %q in iterable destructuring", fieldName)
 					}
-					fieldValue := C.LLVMBuildExtractValue(s.builder, itemValue, C.unsigned(field.Index), cStringFree(arg.Name+".iter.field"))
+					fieldValue := llvmBuildExtractValue(s.builder, itemValue, llvmIRUnsigned(field.Index), cStringFree(arg.Name+".iter.field"))
 					if err := s.emitMoveBindLocal(arg.Name, field.Type, fieldValue); err != nil {
 						return err
 					}
@@ -90,7 +82,7 @@ func (s *functionState) emitIterLoopPatternBindings(pattern ast.MoveBindPattern,
 				if !ok {
 					return fmt.Errorf("unknown field %q in iterable destructuring", fieldName)
 				}
-				fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, itemPtr, C.unsigned(field.Index), cStringFree(arg.Name+".iter.field.ptr"))
+				fieldPtr := llvmBuildStructGEP2(s.builder, containerLLVMType, itemPtr, llvmIRUnsigned(field.Index), cStringFree(arg.Name+".iter.field.ptr"))
 				refType := &semantic.RefType{Elem: field.Type, Mutable: mode == ast.IterBindMutableRef, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny}
 				if err := s.emitIterLoopRefLocal(arg.Name, refType, fieldPtr); err != nil {
 					return err
@@ -107,7 +99,7 @@ func (s *functionState) emitIterLoopPatternBindings(pattern ast.MoveBindPattern,
 				if p.Args[i].Name == "_" {
 					continue
 				}
-				fieldValue := C.LLVMBuildExtractValue(s.builder, itemValue, C.unsigned(fields[i].Index), cStringFree(p.Args[i].Name+".iter.field"))
+				fieldValue := llvmBuildExtractValue(s.builder, itemValue, llvmIRUnsigned(fields[i].Index), cStringFree(p.Args[i].Name+".iter.field"))
 				if err := s.emitMoveBindLocal(p.Args[i].Name, fields[i].Type, fieldValue); err != nil {
 					return err
 				}
@@ -122,7 +114,7 @@ func (s *functionState) emitIterLoopPatternBindings(pattern ast.MoveBindPattern,
 			if p.Args[i].Name == "_" {
 				continue
 			}
-			fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, itemPtr, C.unsigned(fields[i].Index), cStringFree(p.Args[i].Name+".iter.field.ptr"))
+			fieldPtr := llvmBuildStructGEP2(s.builder, containerLLVMType, itemPtr, llvmIRUnsigned(fields[i].Index), cStringFree(p.Args[i].Name+".iter.field.ptr"))
 			refType := &semantic.RefType{Elem: fields[i].Type, Mutable: mode == ast.IterBindMutableRef, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny}
 			if err := s.emitIterLoopRefLocal(p.Args[i].Name, refType, fieldPtr); err != nil {
 				return err
@@ -143,7 +135,7 @@ func (s *functionState) emitIterLoopPatternBindings(pattern ast.MoveBindPattern,
 				if p.Args[i].Name == "_" {
 					continue
 				}
-				fieldValue := C.LLVMBuildExtractValue(s.builder, itemValue, C.unsigned(fields[i].Index), cStringFree(p.Args[i].Name+".iter.tuple.field"))
+				fieldValue := llvmBuildExtractValue(s.builder, itemValue, llvmIRUnsigned(fields[i].Index), cStringFree(p.Args[i].Name+".iter.tuple.field"))
 				if err := s.emitMoveBindLocal(p.Args[i].Name, fields[i].Type, fieldValue); err != nil {
 					return err
 				}
@@ -158,7 +150,7 @@ func (s *functionState) emitIterLoopPatternBindings(pattern ast.MoveBindPattern,
 			if p.Args[i].Name == "_" {
 				continue
 			}
-			fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, itemPtr, C.unsigned(fields[i].Index), cStringFree(p.Args[i].Name+".iter.tuple.field.ptr"))
+			fieldPtr := llvmBuildStructGEP2(s.builder, containerLLVMType, itemPtr, llvmIRUnsigned(fields[i].Index), cStringFree(p.Args[i].Name+".iter.tuple.field.ptr"))
 			refType := &semantic.RefType{Elem: fields[i].Type, Mutable: mode == ast.IterBindMutableRef, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny}
 			if err := s.emitIterLoopRefLocal(p.Args[i].Name, refType, fieldPtr); err != nil {
 				return err
@@ -171,7 +163,7 @@ func (s *functionState) emitIterLoopPatternBindings(pattern ast.MoveBindPattern,
 		return fmt.Errorf("unsupported iterable loop pattern %T", pattern)
 	}
 }
-func (s *functionState) buildEnumerateItemValue(tupleType semantic.Type, indexValue C.LLVMValueRef, itemValue C.LLVMValueRef, itemActualType semantic.Type, name string) (C.LLVMValueRef, error) {
+func (s *functionState) buildEnumerateItemValue(tupleType semantic.Type, indexValue llvmIRValueRef, itemValue llvmIRValueRef, itemActualType semantic.Type, name string) (llvmIRValueRef, error) {
 	tuple, ok := semantic.StripAggregateStateType(tupleType).(*semantic.TupleType)
 	if !ok || tuple == nil || len(tuple.Fields) != 2 {
 		return nil, fmt.Errorf("enumerate loop item requires a 2-field tuple type")
@@ -191,9 +183,9 @@ func (s *functionState) buildEnumerateItemValue(tupleType semantic.Type, indexVa
 	if err != nil {
 		return nil, err
 	}
-	value := C.LLVMGetUndef(tupleLLVMType)
-	value = C.LLVMBuildInsertValue(s.builder, value, indexCoerced, 0, cStringFree(name+".enumerate.item.index.insert"))
-	value = C.LLVMBuildInsertValue(s.builder, value, itemCoerced, 1, cStringFree(name+".enumerate.item.value.insert"))
+	value := llvmGetUndef(tupleLLVMType)
+	value = llvmBuildInsertValue(s.builder, value, indexCoerced, 0, cStringFree(name+".enumerate.item.index.insert"))
+	value = llvmBuildInsertValue(s.builder, value, itemCoerced, 1, cStringFree(name+".enumerate.item.value.insert"))
 	return value, nil
 }
 
@@ -208,7 +200,7 @@ type iterViewTransform struct {
 	itemType semantic.Type
 }
 
-func (s *functionState) peelIterViewTransforms(sourceName string, sourceAlloca C.LLVMValueRef, sourceType semantic.Type, bindMode ast.IterBindMode) (C.LLVMValueRef, semantic.Type, []iterViewTransform, error) {
+func (s *functionState) peelIterViewTransforms(sourceName string, sourceAlloca llvmIRValueRef, sourceType semantic.Type, bindMode ast.IterBindMode) (llvmIRValueRef, semantic.Type, []iterViewTransform, error) {
 	iterSourceAlloca := sourceAlloca
 	iterSourceType := sourceType
 	transforms := []iterViewTransform{}
@@ -233,8 +225,8 @@ func (s *functionState) peelIterViewTransforms(sourceName string, sourceAlloca C
 			if err != nil {
 				return nil, nil, nil, err
 			}
-			innerSourceValue := C.LLVMBuildExtractValue(s.builder, carrierValue, 0, cStringFree(sourceName+".enumerate.source.extract"))
-			C.LLVMBuildStore(s.builder, innerSourceValue, innerSourceAlloca)
+			innerSourceValue := llvmBuildExtractValue(s.builder, carrierValue, 0, cStringFree(sourceName+".enumerate.source.extract"))
+			llvmBuildStore(s.builder, innerSourceValue, innerSourceAlloca)
 			transforms = append(transforms, iterViewTransform{kind: iterViewTransformEnumerate, itemType: enumerateItemType})
 			iterSourceAlloca = innerSourceAlloca
 			iterSourceType = innerSourceType
@@ -262,7 +254,7 @@ func iterLoopBaseSourceExpr(expr ast.Expr) ast.Expr {
 	}
 }
 
-func (s *functionState) applyIterViewTransforms(sourceName string, indexValue C.LLVMValueRef, stepBB C.LLVMBasicBlockRef, itemValue C.LLVMValueRef, itemType semantic.Type, transforms []iterViewTransform) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) applyIterViewTransforms(sourceName string, indexValue llvmIRValueRef, stepBB llvmIRBlockRef, itemValue llvmIRValueRef, itemType semantic.Type, transforms []iterViewTransform) (llvmIRValueRef, semantic.Type, error) {
 	currentValue := itemValue
 	currentType := itemType
 	for i := len(transforms) - 1; i >= 0; i-- {
@@ -280,37 +272,37 @@ func (s *functionState) applyIterViewTransforms(sourceName string, indexValue C.
 	return currentValue, currentType, nil
 }
 
-func (s *functionState) emitEqualityCompare(left C.LLVMValueRef, leftType semantic.Type, right C.LLVMValueRef, rightType semantic.Type, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitEqualityCompare(left llvmIRValueRef, leftType semantic.Type, right llvmIRValueRef, rightType semantic.Type, name string) (llvmIRValueRef, error) {
 	rightValue, err := s.coerceValue(right, rightType, leftType)
 	if err != nil {
 		return nil, err
 	}
 	if isFloatType(leftType) {
-		return C.LLVMBuildFCmp(s.builder, C.LLVMRealPredicate(C.LLVMRealOEQ), left, rightValue, cStringFree(name)), nil
+		return llvmBuildFCmp(s.builder, llvmIRRealPredicate(llvmRealOEQ), left, rightValue, cStringFree(name)), nil
 	}
-	return C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), left, rightValue, cStringFree(name)), nil
+	return llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), left, rightValue, cStringFree(name)), nil
 }
 
-func (s *functionState) emitIterFilterBranch(pattern ast.MoveBindPattern, sourceType semantic.Type, rowValue C.LLVMValueRef, filter ast.Expr, passBB C.LLVMBasicBlockRef, failBB C.LLVMBasicBlockRef, name string) error {
+func (s *functionState) emitIterFilterBranch(pattern ast.MoveBindPattern, sourceType semantic.Type, rowValue llvmIRValueRef, filter ast.Expr, passBB llvmIRBlockRef, failBB llvmIRBlockRef, name string) error {
 	if filter == nil {
-		C.LLVMBuildBr(s.builder, passBB)
+		llvmBuildBr(s.builder, passBB)
 		return nil
 	}
 	if binary, ok := filter.(*ast.BinaryExpr); ok && binary != nil {
 		switch binary.Op {
 		case lexer.TOKEN_AND:
-			rightBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".and.rhs"))
+			rightBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".and.rhs"))
 			if err := s.emitIterFilterBranch(pattern, sourceType, rowValue, binary.Left, rightBB, failBB, name+".and.left"); err != nil {
 				return err
 			}
-			C.LLVMPositionBuilderAtEnd(s.builder, rightBB)
+			llvmPositionBuilderAtEnd(s.builder, rightBB)
 			return s.emitIterFilterBranch(pattern, sourceType, rowValue, binary.Right, passBB, failBB, name+".and.right")
 		case lexer.TOKEN_OR:
-			rightBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".or.rhs"))
+			rightBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".or.rhs"))
 			if err := s.emitIterFilterBranch(pattern, sourceType, rowValue, binary.Left, passBB, rightBB, name+".or.left"); err != nil {
 				return err
 			}
-			C.LLVMPositionBuilderAtEnd(s.builder, rightBB)
+			llvmPositionBuilderAtEnd(s.builder, rightBB)
 			return s.emitIterFilterBranch(pattern, sourceType, rowValue, binary.Right, passBB, failBB, name+".or.right")
 		}
 	}
@@ -322,7 +314,7 @@ func (s *functionState) emitIterFilterBranch(pattern ast.MoveBindPattern, source
 	if err != nil {
 		return err
 	}
-	C.LLVMBuildCondBr(s.builder, filterBool, passBB, failBB)
+	llvmBuildCondBr(s.builder, filterBool, passBB, failBB)
 	return nil
 }
 
@@ -346,7 +338,7 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 	if err != nil {
 		return err
 	}
-	C.LLVMBuildStore(s.builder, sourceValue, sourceAlloca)
+	llvmBuildStore(s.builder, sourceValue, sourceAlloca)
 
 	iterSourceAlloca, iterSourceType, transforms, err := s.peelIterViewTransforms(sourceName, sourceAlloca, sourceType, stmt.Mode)
 	if err != nil {
@@ -366,36 +358,36 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 	if err != nil {
 		return err
 	}
-	zeroValue := C.LLVMConstInt(usizeLLVMType, 0, 0)
-	C.LLVMBuildStore(s.builder, zeroValue, indexAlloca)
+	zeroValue := llvmConstInt(usizeLLVMType, 0, 0)
+	llvmBuildStore(s.builder, zeroValue, indexAlloca)
 
-	condBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.cond"))
-	bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.body"))
-	stepBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.step"))
-	exitBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.end"))
-	C.LLVMBuildBr(s.builder, condBB)
+	condBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.cond"))
+	bodyBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.body"))
+	stepBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.step"))
+	exitBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.end"))
+	llvmBuildBr(s.builder, condBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, condBB)
+	llvmPositionBuilderAtEnd(s.builder, condBB)
 	indexValue, err := s.loadValue(indexAlloca, usizeType, sourceName+".index")
 	if err != nil {
 		return err
 	}
-	condValue := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), indexValue, countValue, cStringFree("iter.cmp"))
-	C.LLVMBuildCondBr(s.builder, condValue, bodyBB, exitBB)
+	condValue := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntULT), indexValue, countValue, cStringFree("iter.cmp"))
+	llvmBuildCondBr(s.builder, condValue, bodyBB, exitBB)
 
 	itemType, ok := iterLoopItemTypeBackend(iterSourceType)
 	if !ok && stmt.Mode != ast.IterBindValue {
 		return fmt.Errorf("iterable loop ref binding requires an addressable array-like source, got %s", iterSourceType.String())
 	}
-	C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
+	llvmPositionBuilderAtEnd(s.builder, bodyBB)
 	s.pushScope()
 	iterScope := s.scope
 	drainCleanupFloor := -1
 	var drainBinder scopedCleanupBinding
 	iterIndexValue := indexValue
 	if stmt.Reverse {
-		lastIndex := C.LLVMBuildSub(s.builder, countValue, C.LLVMConstInt(usizeLLVMType, 1, 0), cStringFree("iter.rev.last"))
-		iterIndexValue = C.LLVMBuildSub(s.builder, lastIndex, indexValue, cStringFree("iter.rev.index"))
+		lastIndex := llvmBuildSub(s.builder, countValue, llvmConstInt(usizeLLVMType, 1, 0), cStringFree("iter.rev.last"))
+		iterIndexValue = llvmBuildSub(s.builder, lastIndex, indexValue, cStringFree("iter.rev.index"))
 	}
 	if colExpr, ok := iterSourceExpr.(*ast.EnumColumnExpr); ok {
 		if _, err := s.emitEnumColumnScanCategoryFilter(colExpr, iterIndexValue, stepBB, sourceName); err != nil {
@@ -404,17 +396,17 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 		}
 	}
 	if iterLoopIsDictSource(iterSourceType) {
-		occupiedBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.dict.occupied"))
+		occupiedBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.dict.occupied"))
 		occupiedValue, err := s.emitIterLoopDictOccupied(iterSourceAlloca, iterSourceType, iterIndexValue, sourceName)
 		if err != nil {
 			s.popScope()
 			return err
 		}
-		C.LLVMBuildCondBr(s.builder, occupiedValue, occupiedBB, stepBB)
-		C.LLVMPositionBuilderAtEnd(s.builder, occupiedBB)
+		llvmBuildCondBr(s.builder, occupiedValue, occupiedBB, stepBB)
+		llvmPositionBuilderAtEnd(s.builder, occupiedBB)
 	}
-	var boundItemValue C.LLVMValueRef
-	var boundItemPtr C.LLVMValueRef
+	var boundItemValue llvmIRValueRef
+	var boundItemPtr llvmIRValueRef
 	if stmt.Mode == ast.IterBindValue {
 		itemValue, resolvedItemType, err := s.emitIterLoopElementValue(iterSourceExpr, iterSourceAlloca, iterSourceType, iterIndexValue, sourceName)
 		if err != nil {
@@ -474,17 +466,17 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 	// skip edge through a block that drops it before stepping.
 	filterSkipBB := stepBB
 	if drainCleanupFloor >= 0 && (stmt.PatternFilter != nil || stmt.WhereFilter != nil || stmt.Filter != nil) {
-		filterSkipBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.drain.filtered"))
-		resumeBB := C.LLVMGetInsertBlock(s.builder)
-		C.LLVMPositionBuilderAtEnd(s.builder, filterSkipBB)
+		filterSkipBB = llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.drain.filtered"))
+		resumeBB := llvmGetInsertBlock(s.builder)
+		llvmPositionBuilderAtEnd(s.builder, filterSkipBB)
 		if err := s.emitConditionalDrop(drainBinder); err != nil {
 			s.popScope()
 			return err
 		}
 		if !s.currentBlockTerminated() {
-			C.LLVMBuildBr(s.builder, stepBB)
+			llvmBuildBr(s.builder, stepBB)
 		}
-		C.LLVMPositionBuilderAtEnd(s.builder, resumeBB)
+		llvmPositionBuilderAtEnd(s.builder, resumeBB)
 	}
 	if stmt.PatternFilter != nil {
 		filterValue := boundItemValue
@@ -504,28 +496,28 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 				return err
 			}
 		}
-		filterBodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.pattern.filter.body"))
+		filterBodyBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.pattern.filter.body"))
 		if _, _, err := s.emitMatchPatternTest(stmt.PatternFilter, filterValue, nil, filterType, nil, nil, nil, filterBodyBB, filterSkipBB); err != nil {
 			s.popScope()
 			return err
 		}
-		C.LLVMPositionBuilderAtEnd(s.builder, filterBodyBB)
+		llvmPositionBuilderAtEnd(s.builder, filterBodyBB)
 	}
 	if stmt.WhereFilter != nil {
-		filterBodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.where.filter.body"))
+		filterBodyBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.where.filter.body"))
 		if err := s.emitIterFilterBranch(stmt.Pattern, iterSourceType, boundItemValue, stmt.WhereFilter, filterBodyBB, filterSkipBB, "iter.where.filter"); err != nil {
 			s.popScope()
 			return err
 		}
-		C.LLVMPositionBuilderAtEnd(s.builder, filterBodyBB)
+		llvmPositionBuilderAtEnd(s.builder, filterBodyBB)
 	}
 	if stmt.Filter != nil {
-		filterBodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.filter.body"))
+		filterBodyBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.filter.body"))
 		if err := s.emitIterFilterBranch(stmt.Pattern, iterSourceType, boundItemValue, stmt.Filter, filterBodyBB, filterSkipBB, "iter.filter"); err != nil {
 			s.popScope()
 			return err
 		}
-		C.LLVMPositionBuilderAtEnd(s.builder, filterBodyBB)
+		llvmPositionBuilderAtEnd(s.builder, filterBodyBB)
 	}
 	s.pushLoopTargets(exitBB, stepBB)
 	if drainCleanupFloor >= 0 {
@@ -549,14 +541,14 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 	}
 	s.popScope()
 	if !s.currentBlockTerminated() {
-		C.LLVMBuildBr(s.builder, stepBB)
+		llvmBuildBr(s.builder, stepBB)
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, stepBB)
+	llvmPositionBuilderAtEnd(s.builder, stepBB)
 	if !s.currentBlockTerminated() {
-		nextValue := C.LLVMBuildAdd(s.builder, indexValue, C.LLVMConstInt(usizeLLVMType, 1, 0), cStringFree("iter.next"))
-		C.LLVMBuildStore(s.builder, nextValue, indexAlloca)
-		backedge := C.LLVMBuildBr(s.builder, condBB)
+		nextValue := llvmBuildAdd(s.builder, indexValue, llvmConstInt(usizeLLVMType, 1, 0), cStringFree("iter.next"))
+		llvmBuildStore(s.builder, nextValue, indexAlloca)
+		backedge := llvmBuildBr(s.builder, condBB)
 		// A plain forward `for x in xs:` whose body is the clean element-wise store shape is
 		// expected to vectorize (docs/70). Filtered / reversed / view-transformed / dict / column
 		// -scan loops have body-side branching that legitimately explains scalar execution, so
@@ -570,6 +562,6 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 		}
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, exitBB)
+	llvmPositionBuilderAtEnd(s.builder, exitBB)
 	return nil
 }

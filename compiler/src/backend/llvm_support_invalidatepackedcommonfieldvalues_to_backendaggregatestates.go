@@ -2,12 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -52,7 +46,7 @@ func (s *functionState) invalidatePackedCommonFieldValuesExpr(expr ast.Expr) {
 		s.invalidatePackedCommonFieldValues(path)
 	}
 }
-func (s *functionState) updatePackedVariantViewDecodedPtr(name string, ptr C.LLVMValueRef) {
+func (s *functionState) updatePackedVariantViewDecodedPtr(name string, ptr llvmIRValueRef) {
 	if name == "" || ptr == nil {
 		return
 	}
@@ -63,7 +57,7 @@ func (s *functionState) updatePackedVariantViewDecodedPtr(name string, ptr C.LLV
 				continue
 			}
 			binding.ptr = ptr
-			binding.ptrBlock = C.LLVMGetInsertBlock(s.builder)
+			binding.ptrBlock = llvmGetInsertBlock(s.builder)
 			scope.packedViewBinding = binding
 			return
 		}
@@ -76,7 +70,7 @@ func (s *functionState) updatePackedVariantViewDecodedPtr(name string, ptr C.LLV
 		return
 	}
 }
-func (s *functionState) lookupPackedEnumStorage(name string, enumType *semantic.EnumType) (C.LLVMValueRef, bool) {
+func (s *functionState) lookupPackedEnumStorage(name string, enumType *semantic.EnumType) (llvmIRValueRef, bool) {
 	if name == "" || enumType == nil || !enumType.Packed {
 		return nil, false
 	}
@@ -85,7 +79,7 @@ func (s *functionState) lookupPackedEnumStorage(name string, enumType *semantic.
 		if !ok {
 			continue
 		}
-		if binding.typ == enumType && binding.ptr != nil && (binding.block == nil || binding.block == C.LLVMGetInsertBlock(s.builder)) {
+		if binding.typ == enumType && binding.ptr != nil && (binding.block == nil || binding.block == llvmGetInsertBlock(s.builder)) {
 			return binding.ptr, true
 		}
 	}
@@ -176,10 +170,10 @@ func (s *functionState) invalidatePackedEnumStoreOriginExpr(expr ast.Expr) {
 		s.invalidatePackedEnumStoreOrigin(path)
 	}
 }
-func (s *functionState) emitConstValue(value semantic.ConstValue) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitConstValue(value semantic.ConstValue) (llvmIRValueRef, semantic.Type, error) {
 	return s.emitConstValueWithType(value, nil)
 }
-func (s *functionState) emitConstValueWithType(value semantic.ConstValue, actual semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitConstValueWithType(value semantic.ConstValue, actual semantic.Type) (llvmIRValueRef, semantic.Type, error) {
 	switch value.Kind {
 	case semantic.ConstInt:
 		resultType := actual
@@ -190,7 +184,7 @@ func (s *functionState) emitConstValueWithType(value semantic.ConstValue, actual
 		if err != nil {
 			return nil, nil, err
 		}
-		return C.LLVMConstInt(llvmType, C.ulonglong(value.Int), boolToLLVMBool(value.Int < 0)), resultType, nil
+		return llvmConstInt(llvmType, llvmIRUnsignedLongLong(value.Int), boolToLLVMBool(value.Int < 0)), resultType, nil
 	case semantic.ConstFloat:
 		resultType := actual
 		if resultType == nil || semantic.IsInvalidType(resultType) {
@@ -200,17 +194,17 @@ func (s *functionState) emitConstValueWithType(value semantic.ConstValue, actual
 		if err != nil {
 			return nil, nil, err
 		}
-		return C.LLVMConstReal(llvmType, C.double(value.Float)), resultType, nil
+		return llvmConstReal(llvmType, llvmIRDouble(value.Float)), resultType, nil
 	case semantic.ConstBool:
 		llvmType, err := s.g.lowerBuiltin("bool")
 		if err != nil {
 			return nil, nil, err
 		}
-		var raw C.ulonglong
+		var raw llvmIRUnsignedLongLong
 		if value.Bool {
 			raw = 1
 		}
-		return C.LLVMConstInt(llvmType, raw, 0), s.g.namedType("bool"), nil
+		return llvmConstInt(llvmType, raw, 0), s.g.namedType("bool"), nil
 	case semantic.ConstString:
 		// Preserve a declared view's aggregate ABI when materializing a named
 		// constant. A raw pointer is only the representation of a C string.
@@ -222,14 +216,14 @@ func (s *functionState) emitConstValueWithType(value semantic.ConstValue, actual
 		return nil, nil, fmt.Errorf("unsupported const kind %d", value.Kind)
 	}
 }
-func (s *functionState) zeroValue(t semantic.Type) (C.LLVMValueRef, error) {
+func (s *functionState) zeroValue(t semantic.Type) (llvmIRValueRef, error) {
 	llvmType, err := s.g.lowerType(t)
 	if err != nil {
 		return nil, err
 	}
-	return C.LLVMConstNull(llvmType), nil
+	return llvmConstNull(llvmType), nil
 }
-func (s *functionState) ensureTrapFunction() (C.LLVMValueRef, error) {
+func (s *functionState) ensureTrapFunction() (llvmIRValueRef, error) {
 	if value, ok := s.g.functions["llvm.trap"]; ok {
 		return value, nil
 	}
@@ -244,12 +238,12 @@ func (s *functionState) emitTrapUnreachable(name string) error {
 	}
 	// The intrinsic is already declared in this module. Reuse its LLVM type
 	// instead of retaining a fresh semantic signature for every trap site.
-	trapType := C.LLVMGlobalGetValueType(trapFn)
+	trapType := llvmGlobalGetValueType(trapFn)
 	s.buildCall(trapType, trapFn, nil, "")
-	C.LLVMBuildUnreachable(s.builder)
+	llvmBuildUnreachable(s.builder)
 	return nil
 }
-func (s *functionState) ensureAbortFunction() (C.LLVMValueRef, *semantic.FuncType, error) {
+func (s *functionState) ensureAbortFunction() (llvmIRValueRef, *semantic.FuncType, error) {
 	voidType := s.g.namedType("void")
 	fnType := &semantic.FuncType{Name: "abort", Return: voidType}
 	value, err := s.g.ensureFunctionDeclared("abort", fnType)
@@ -258,7 +252,7 @@ func (s *functionState) ensureAbortFunction() (C.LLVMValueRef, *semantic.FuncTyp
 	}
 	return value, fnType, nil
 }
-func (s *functionState) ensurePrintfFunction() (C.LLVMValueRef, *semantic.FuncType, error) {
+func (s *functionState) ensurePrintfFunction() (llvmIRValueRef, *semantic.FuncType, error) {
 	voidType := s.g.namedType("void")
 	intType := s.g.namedType("int")
 	u8RefType := &semantic.RefType{Elem: s.g.namedType("u8"), State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
@@ -284,7 +278,7 @@ func (s *functionState) ensurePrintfFunction() (C.LLVMValueRef, *semantic.FuncTy
 	}
 	return nil, nil, firstErr
 }
-func (s *functionState) ensureBacktraceFunction() (C.LLVMValueRef, *semantic.FuncType, error) {
+func (s *functionState) ensureBacktraceFunction() (llvmIRValueRef, *semantic.FuncType, error) {
 	intType := s.g.namedType("int")
 	voidRefType := &semantic.RefType{Elem: s.g.namedType("void"), State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	fnType := &semantic.FuncType{Name: "backtrace", Params: []semantic.Type{voidRefType, intType}, Return: intType}
@@ -294,7 +288,7 @@ func (s *functionState) ensureBacktraceFunction() (C.LLVMValueRef, *semantic.Fun
 	}
 	return value, fnType, nil
 }
-func (s *functionState) ensureBacktraceSymbolsFDFunction() (C.LLVMValueRef, *semantic.FuncType, error) {
+func (s *functionState) ensureBacktraceSymbolsFDFunction() (llvmIRValueRef, *semantic.FuncType, error) {
 	voidType := s.g.namedType("void")
 	intType := s.g.namedType("int")
 	voidRefType := &semantic.RefType{Elem: s.g.namedType("void"), State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
@@ -340,17 +334,17 @@ func (s *functionState) emitPanicWithBacktrace(pos lexer.Pos, message ast.Expr) 
 	if err != nil {
 		return err
 	}
-	lineValue := C.LLVMConstInt(intLLVMType, C.ulonglong(pos.Line), 0)
-	colValue := C.LLVMConstInt(intLLVMType, C.ulonglong(pos.Col), 0)
+	lineValue := llvmConstInt(intLLVMType, llvmIRUnsignedLongLong(pos.Line), 0)
+	colValue := llvmConstInt(intLLVMType, llvmIRUnsignedLongLong(pos.Col), 0)
 	reportFn, reportType, err := s.ensurePanicReportFunction()
 	if err != nil {
 		return err
 	}
-	s.buildCall(reportType, reportFn, []C.LLVMValueRef{filePtr, lineValue, colValue, messagePtr}, "")
-	C.LLVMBuildUnreachable(s.builder)
+	s.buildCall(reportType, reportFn, []llvmIRValueRef{filePtr, lineValue, colValue, messagePtr}, "")
+	llvmBuildUnreachable(s.builder)
 	return nil
 }
-func (s *functionState) coercePanicMessageToCString(value C.LLVMValueRef, valueType semantic.Type, fallback C.LLVMValueRef) (C.LLVMValueRef, bool, error) {
+func (s *functionState) coercePanicMessageToCString(value llvmIRValueRef, valueType semantic.Type, fallback llvmIRValueRef) (llvmIRValueRef, bool, error) {
 	refType, ok := valueType.(*semantic.RefType)
 	if !ok || !semantic.SameType(refType.Elem, s.g.namedType("u8")) {
 		return fallback, false, nil
@@ -360,8 +354,8 @@ func (s *functionState) coercePanicMessageToCString(value C.LLVMValueRef, valueT
 		return nil, false, err
 	}
 	if refType.State == semantic.RefStateNullable {
-		isNull := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), value, C.LLVMConstNull(llvmType), cStringFree("panic.message.is_null"))
-		value = C.LLVMBuildSelect(s.builder, isNull, fallback, value, cStringFree("panic.message.ptr"))
+		isNull := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), value, llvmConstNull(llvmType), cStringFree("panic.message.is_null"))
+		value = llvmBuildSelect(s.builder, isNull, fallback, value, cStringFree("panic.message.ptr"))
 	}
 	return value, true, nil
 }

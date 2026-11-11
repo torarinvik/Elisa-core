@@ -2,12 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -52,9 +46,9 @@ func optionalMatchExhaustive(arms []ast.MatchArm, payloadCovered bool) bool {
 // A payload pattern is total when lowering emitted a direct branch to the
 // arm. This distinguishes a plain binder from a predicate or narrowed enum
 // category, even though they can share the same syntax node.
-func optionalPayloadTestAlwaysMatches(testBB, bodyBB C.LLVMBasicBlockRef) bool {
-	term := C.LLVMGetBasicBlockTerminator(testBB)
-	return term != nil && C.LLVMGetNumSuccessors(term) == 1 && C.LLVMGetSuccessor(term, 0) == bodyBB
+func optionalPayloadTestAlwaysMatches(testBB, bodyBB llvmIRBlockRef) bool {
+	term := llvmGetBasicBlockTerminator(testBB)
+	return term != nil && llvmGetNumSuccessors(term) == 1 && llvmGetSuccessor(term, 0) == bodyBB
 }
 
 func (s *functionState) emitOptionalMatch(stmt *ast.MatchStmt, optionalType *semantic.OptionalType) error {
@@ -73,28 +67,28 @@ func (s *functionState) emitOptionalMatch(stmt *ast.MatchStmt, optionalType *sem
 	if err != nil {
 		return err
 	}
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.optional.end"))
-	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.optional.fail"))
+	mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.optional.end"))
+	failBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.optional.fail"))
 	allTerminated := true
 	payloadCovered := false
 	for i, arm := range stmt.Arms {
-		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.optional.arm"))
-		var nextBB C.LLVMBasicBlockRef
+		bodyBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.optional.arm"))
+		var nextBB llvmIRBlockRef
 		if i == len(stmt.Arms)-1 {
 			nextBB = failBB
 		} else {
-			nextBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.optional.next"))
+			nextBB = llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.optional.next"))
 		}
 		if _, wildcard := arm.Pattern.(*ast.MatchWildcardPattern); wildcard {
 			// `_` matches absence too; only its guard may send control onward.
-			C.LLVMBuildBr(s.builder, bodyBB)
+			llvmBuildBr(s.builder, bodyBB)
 		} else if backendMatchPatternIsNull(arm.Pattern) {
-			absentValue := C.LLVMBuildNot(s.builder, presentValue, cStringFree("match.optional.absent"))
-			C.LLVMBuildCondBr(s.builder, absentValue, bodyBB, nextBB)
+			absentValue := llvmBuildNot(s.builder, presentValue, cStringFree("match.optional.absent"))
+			llvmBuildCondBr(s.builder, absentValue, bodyBB, nextBB)
 		} else {
-			payloadTestBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.optional.payload"))
-			C.LLVMBuildCondBr(s.builder, presentValue, payloadTestBB, nextBB)
-			C.LLVMPositionBuilderAtEnd(s.builder, payloadTestBB)
+			payloadTestBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.optional.payload"))
+			llvmBuildCondBr(s.builder, presentValue, payloadTestBB, nextBB)
+			llvmPositionBuilderAtEnd(s.builder, payloadTestBB)
 			if _, _, err := s.emitMatchPatternTest(arm.Pattern, payloadValue, nil, optionalType.Value, nil, nil, nil, bodyBB, nextBB); err != nil {
 				return err
 			}
@@ -103,7 +97,7 @@ func (s *functionState) emitOptionalMatch(stmt *ast.MatchStmt, optionalType *sem
 			}
 		}
 
-		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
+		llvmPositionBuilderAtEnd(s.builder, bodyBB)
 		s.pushScope()
 		if err := s.emitMatchArmGuard(arm.Guard, nextBB); err != nil {
 			s.popScope()
@@ -116,29 +110,29 @@ func (s *functionState) emitOptionalMatch(stmt *ast.MatchStmt, optionalType *sem
 		s.popScope()
 		if !s.currentBlockTerminated() {
 			allTerminated = false
-			C.LLVMBuildBr(s.builder, mergeBB)
+			llvmBuildBr(s.builder, mergeBB)
 		}
 		if nextBB != mergeBB {
-			C.LLVMPositionBuilderAtEnd(s.builder, nextBB)
+			llvmPositionBuilderAtEnd(s.builder, nextBB)
 		}
 	}
 
 	exhaustive := optionalMatchExhaustive(stmt.Arms, payloadCovered)
-	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+	llvmPositionBuilderAtEnd(s.builder, failBB)
 	if exhaustive {
-		C.LLVMBuildUnreachable(s.builder)
+		llvmBuildUnreachable(s.builder)
 	} else {
-		C.LLVMBuildBr(s.builder, mergeBB)
+		llvmBuildBr(s.builder, mergeBB)
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	llvmPositionBuilderAtEnd(s.builder, mergeBB)
 	if allTerminated && exhaustive {
-		C.LLVMBuildUnreachable(s.builder)
+		llvmBuildUnreachable(s.builder)
 	}
 	return nil
 }
 
-func (s *functionState) emitOptionalMatchExpr(expr *ast.MatchExpr, resultType semantic.Type, optionalType *semantic.OptionalType) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitOptionalMatchExpr(expr *ast.MatchExpr, resultType semantic.Type, optionalType *semantic.OptionalType) (llvmIRValueRef, semantic.Type, error) {
 	if expr.Store != nil {
 		return nil, nil, fmt.Errorf("optional match does not take an in-store clause")
 	}
@@ -154,29 +148,29 @@ func (s *functionState) emitOptionalMatchExpr(expr *ast.MatchExpr, resultType se
 	if err != nil {
 		return nil, nil, err
 	}
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.optional.expr.end"))
-	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.optional.expr.fail"))
-	incomingValues := make([]C.LLVMValueRef, 0, len(expr.Arms)+1)
-	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, len(expr.Arms)+1)
+	mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.optional.expr.end"))
+	failBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.optional.expr.fail"))
+	incomingValues := make([]llvmIRValueRef, 0, len(expr.Arms)+1)
+	incomingBlocks := make([]llvmIRBlockRef, 0, len(expr.Arms)+1)
 	payloadCovered := false
 	for i, arm := range expr.Arms {
-		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.optional.expr.arm"))
-		var nextBB C.LLVMBasicBlockRef
+		bodyBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.optional.expr.arm"))
+		var nextBB llvmIRBlockRef
 		if i == len(expr.Arms)-1 {
 			nextBB = failBB
 		} else {
-			nextBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.optional.expr.next"))
+			nextBB = llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.optional.expr.next"))
 		}
 		if _, wildcard := arm.Pattern.(*ast.MatchWildcardPattern); wildcard {
 			// `_` matches absence too; only its guard may send control onward.
-			C.LLVMBuildBr(s.builder, bodyBB)
+			llvmBuildBr(s.builder, bodyBB)
 		} else if backendMatchPatternIsNull(arm.Pattern) {
-			absentValue := C.LLVMBuildNot(s.builder, presentValue, cStringFree("match.optional.expr.absent"))
-			C.LLVMBuildCondBr(s.builder, absentValue, bodyBB, nextBB)
+			absentValue := llvmBuildNot(s.builder, presentValue, cStringFree("match.optional.expr.absent"))
+			llvmBuildCondBr(s.builder, absentValue, bodyBB, nextBB)
 		} else {
-			payloadTestBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.optional.expr.payload"))
-			C.LLVMBuildCondBr(s.builder, presentValue, payloadTestBB, nextBB)
-			C.LLVMPositionBuilderAtEnd(s.builder, payloadTestBB)
+			payloadTestBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.optional.expr.payload"))
+			llvmBuildCondBr(s.builder, presentValue, payloadTestBB, nextBB)
+			llvmPositionBuilderAtEnd(s.builder, payloadTestBB)
 			if _, _, err := s.emitMatchPatternTest(arm.Pattern, payloadValue, nil, optionalType.Value, nil, nil, nil, bodyBB, nextBB); err != nil {
 				return nil, nil, err
 			}
@@ -185,7 +179,7 @@ func (s *functionState) emitOptionalMatchExpr(expr *ast.MatchExpr, resultType se
 			}
 		}
 
-		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
+		llvmPositionBuilderAtEnd(s.builder, bodyBB)
 		s.pushScope()
 		if err := s.emitMatchArmGuard(arm.Guard, nextBB); err != nil {
 			s.popScope()
@@ -197,36 +191,36 @@ func (s *functionState) emitOptionalMatchExpr(expr *ast.MatchExpr, resultType se
 			return nil, nil, err
 		}
 		if reachable && !s.currentBlockTerminated() {
-			armEnd := C.LLVMGetInsertBlock(s.builder)
+			armEnd := llvmGetInsertBlock(s.builder)
 			incomingValues = append(incomingValues, armValue)
 			incomingBlocks = append(incomingBlocks, armEnd)
-			C.LLVMBuildBr(s.builder, mergeBB)
+			llvmBuildBr(s.builder, mergeBB)
 		}
 		s.popScope()
 		if nextBB != mergeBB {
-			C.LLVMPositionBuilderAtEnd(s.builder, nextBB)
+			llvmPositionBuilderAtEnd(s.builder, nextBB)
 		}
 	}
 
 	exhaustive := optionalMatchExhaustive(expr.Arms, payloadCovered)
-	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+	llvmPositionBuilderAtEnd(s.builder, failBB)
 	if exhaustive || semantic.IsNeverType(resultType) {
-		C.LLVMBuildUnreachable(s.builder)
+		llvmBuildUnreachable(s.builder)
 	} else {
 		llvmType, err := s.g.lowerType(resultType)
 		if err != nil {
 			return nil, nil, err
 		}
-		undefValue := C.LLVMGetUndef(llvmType)
-		failEnd := C.LLVMGetInsertBlock(s.builder)
+		undefValue := llvmGetUndef(llvmType)
+		failEnd := llvmGetInsertBlock(s.builder)
 		incomingValues = append(incomingValues, undefValue)
 		incomingBlocks = append(incomingBlocks, failEnd)
-		C.LLVMBuildBr(s.builder, mergeBB)
+		llvmBuildBr(s.builder, mergeBB)
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	llvmPositionBuilderAtEnd(s.builder, mergeBB)
 	if len(incomingValues) == 0 {
-		C.LLVMBuildUnreachable(s.builder)
+		llvmBuildUnreachable(s.builder)
 		return nil, resultType, nil
 	}
 	if len(incomingValues) == 1 || semantic.IsNeverType(resultType) {
@@ -236,7 +230,7 @@ func (s *functionState) emitOptionalMatchExpr(expr *ast.MatchExpr, resultType se
 	if err != nil {
 		return nil, nil, err
 	}
-	phi := C.LLVMBuildPhi(s.builder, llvmType, cStringFree("match.optional.expr.result"))
-	C.LLVMAddIncoming(phi, &incomingValues[0], &incomingBlocks[0], C.unsigned(len(incomingValues)))
+	phi := llvmBuildPhi(s.builder, llvmType, cStringFree("match.optional.expr.result"))
+	llvmAddIncoming(phi, &incomingValues[0], &incomingBlocks[0], llvmIRUnsigned(len(incomingValues)))
 	return phi, resultType, nil
 }

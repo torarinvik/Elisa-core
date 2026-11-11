@@ -2,12 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -15,7 +9,7 @@ import (
 	"fmt"
 )
 
-func (s *functionState) emitStringCompareOperandValue(e ast.Expr, valueType semantic.Type) (C.LLVMValueRef, error) {
+func (s *functionState) emitStringCompareOperandValue(e ast.Expr, valueType semantic.Type) (llvmIRValueRef, error) {
 	if ref, ok := s.exprType(e).(*semantic.RefType); ok {
 		if _, ok := ref.Elem.(*semantic.SViewType); ok {
 			ptr, _, err := s.emitExpr(e, s.exprType(e))
@@ -29,7 +23,7 @@ func (s *functionState) emitStringCompareOperandValue(e ast.Expr, valueType sema
 	return value, err
 }
 
-func (s *functionState) emitRuntimeStringCompareExpr(expr *ast.BinaryExpr, helperName string, firstType semantic.Type, secondType semantic.Type, swap bool) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitRuntimeStringCompareExpr(expr *ast.BinaryExpr, helperName string, firstType semantic.Type, secondType semantic.Type, swap bool) (llvmIRValueRef, semantic.Type, error) {
 	firstExpr := expr.Left
 	secondExpr := expr.Right
 	if swap {
@@ -42,7 +36,7 @@ func (s *functionState) emitRuntimeStringCompareExpr(expr *ast.BinaryExpr, helpe
 				return nil, nil, err
 			}
 			if expr.Op == lexer.TOKEN_BANGEQ {
-				cmp = C.LLVMBuildNot(s.builder, cmp, cStringFree("cstrlit.eq.not"))
+				cmp = llvmBuildNot(s.builder, cmp, cStringFree("cstrlit.eq.not"))
 			}
 			return cmp, s.g.namedType("bool"), nil
 		}
@@ -52,7 +46,7 @@ func (s *functionState) emitRuntimeStringCompareExpr(expr *ast.BinaryExpr, helpe
 				return nil, nil, err
 			}
 			if expr.Op == lexer.TOKEN_BANGEQ {
-				cmp = C.LLVMBuildNot(s.builder, cmp, cStringFree("cstrlit.eq.not"))
+				cmp = llvmBuildNot(s.builder, cmp, cStringFree("cstrlit.eq.not"))
 			}
 			return cmp, s.g.namedType("bool"), nil
 		}
@@ -64,7 +58,7 @@ func (s *functionState) emitRuntimeStringCompareExpr(expr *ast.BinaryExpr, helpe
 				return nil, nil, err
 			}
 			if expr.Op == lexer.TOKEN_BANGEQ {
-				cmp = C.LLVMBuildNot(s.builder, cmp, cStringFree("strcmp.lit.not"))
+				cmp = llvmBuildNot(s.builder, cmp, cStringFree("strcmp.lit.not"))
 			}
 			return cmp, s.g.namedType("bool"), nil
 		}
@@ -103,21 +97,21 @@ func (s *functionState) emitRuntimeStringCompareExpr(expr *ast.BinaryExpr, helpe
 	if err != nil {
 		return nil, nil, err
 	}
-	args := []C.LLVMValueRef{firstValue, secondValue}
+	args := []llvmIRValueRef{firstValue, secondValue}
 	call := s.buildCall(llvmFnType, callee, args, "streqtmp")
 	helperLLVMType, err := s.g.lowerType(helperReturn)
 	if err != nil {
 		return nil, nil, err
 	}
-	zero := C.LLVMConstInt(helperLLVMType, 0, 0)
-	pred := C.LLVMIntPredicate(C.LLVMIntNE)
+	zero := llvmConstInt(helperLLVMType, 0, 0)
+	pred := llvmIRIntPredicate(llvmIntNE)
 	if expr.Op == lexer.TOKEN_BANGEQ {
-		pred = C.LLVMIntPredicate(C.LLVMIntEQ)
+		pred = llvmIRIntPredicate(llvmIntEQ)
 	}
-	cmp := C.LLVMBuildICmp(s.builder, pred, call, zero, cStringFree("strcmp"))
+	cmp := llvmBuildICmp(s.builder, pred, call, zero, cStringFree("strcmp"))
 	return cmp, s.g.namedType("bool"), nil
 }
-func (s *functionState) emitSameExtentRuntimeStringCompareExpr(op lexer.TokenKind, firstExpr ast.Expr, firstType semantic.Type, secondExpr ast.Expr, secondType semantic.Type) (C.LLVMValueRef, bool, error) {
+func (s *functionState) emitSameExtentRuntimeStringCompareExpr(op lexer.TokenKind, firstExpr ast.Expr, firstType semantic.Type, secondExpr ast.Expr, secondType semantic.Type) (llvmIRValueRef, bool, error) {
 	if s == nil || s.g == nil || s.g.result == nil || !s.g.semanticReadView().ExprsHaveSameExtent(firstExpr, secondExpr) {
 		return nil, false, nil
 	}
@@ -152,11 +146,11 @@ func (s *functionState) emitSameExtentRuntimeStringCompareExpr(op lexer.TokenKin
 		return nil, true, err
 	}
 	if op == lexer.TOKEN_BANGEQ {
-		cmp = C.LLVMBuildNot(s.builder, cmp, cStringFree("streq.memcmp.not"))
+		cmp = llvmBuildNot(s.builder, cmp, cStringFree("streq.memcmp.not"))
 	}
 	return cmp, true, nil
 }
-func (s *functionState) emitDisjointRuntimeStringCompareExpr(op lexer.TokenKind, firstExpr ast.Expr, firstType semantic.Type, secondExpr ast.Expr, secondType semantic.Type) (C.LLVMValueRef, bool, error) {
+func (s *functionState) emitDisjointRuntimeStringCompareExpr(op lexer.TokenKind, firstExpr ast.Expr, firstType semantic.Type, secondExpr ast.Expr, secondType semantic.Type) (llvmIRValueRef, bool, error) {
 	if s == nil || s.g == nil || s.g.result == nil || !s.g.semanticReadView().ExprsAreDisjoint(firstExpr, secondExpr) {
 		return nil, false, nil
 	}
@@ -183,37 +177,37 @@ func (s *functionState) emitDisjointRuntimeStringCompareExpr(op lexer.TokenKind,
 	if err != nil {
 		return nil, true, err
 	}
-	lenEqual := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), firstCoercedLen, secondCoercedLen, cStringFree("streq.disjoint.len.eq"))
-	entryBlock := C.LLVMGetInsertBlock(s.builder)
-	memcmpBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("streq.disjoint.memcmp"))
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("streq.disjoint.merge"))
-	C.LLVMBuildCondBr(s.builder, lenEqual, memcmpBB, mergeBB)
+	lenEqual := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), firstCoercedLen, secondCoercedLen, cStringFree("streq.disjoint.len.eq"))
+	entryBlock := llvmGetInsertBlock(s.builder)
+	memcmpBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("streq.disjoint.memcmp"))
+	mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("streq.disjoint.merge"))
+	llvmBuildCondBr(s.builder, lenEqual, memcmpBB, mergeBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, memcmpBB)
+	llvmPositionBuilderAtEnd(s.builder, memcmpBB)
 	cmp, err := s.emitMemcmpEqualValue(firstData, secondData, firstCoercedLen, "streq.disjoint.memcmp", true)
 	if err != nil {
 		return nil, true, err
 	}
 	if op == lexer.TOKEN_BANGEQ {
-		cmp = C.LLVMBuildNot(s.builder, cmp, cStringFree("streq.disjoint.memcmp.not"))
+		cmp = llvmBuildNot(s.builder, cmp, cStringFree("streq.disjoint.memcmp.not"))
 	}
-	memcmpEnd := C.LLVMGetInsertBlock(s.builder)
-	C.LLVMBuildBr(s.builder, mergeBB)
+	memcmpEnd := llvmGetInsertBlock(s.builder)
+	llvmBuildBr(s.builder, mergeBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
-	boolType := C.LLVMInt1TypeInContext(s.g.context)
-	phi := C.LLVMBuildPhi(s.builder, boolType, cStringFree("streq.disjoint.result"))
-	fallbackRaw := C.ulonglong(0)
+	llvmPositionBuilderAtEnd(s.builder, mergeBB)
+	boolType := llvmInt1TypeInContext(s.g.context)
+	phi := llvmBuildPhi(s.builder, boolType, cStringFree("streq.disjoint.result"))
+	fallbackRaw := llvmIRUnsignedLongLong(0)
 	if op == lexer.TOKEN_BANGEQ {
 		fallbackRaw = 1
 	}
-	fallback := C.LLVMConstInt(boolType, fallbackRaw, 0)
-	values := []C.LLVMValueRef{fallback, cmp}
-	blocks := []C.LLVMBasicBlockRef{entryBlock, memcmpEnd}
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
+	fallback := llvmConstInt(boolType, fallbackRaw, 0)
+	values := []llvmIRValueRef{fallback, cmp}
+	blocks := []llvmIRBlockRef{entryBlock, memcmpEnd}
+	llvmAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), llvmIRUnsigned(len(values)))
 	return phi, true, nil
 }
-func (s *functionState) emitRuntimeStringCompareOperand(expr ast.Expr, exprType semantic.Type) (C.LLVMValueRef, C.LLVMValueRef, semantic.Type, runtimeStringCompareKind, error) {
+func (s *functionState) emitRuntimeStringCompareOperand(expr ast.Expr, exprType semantic.Type) (llvmIRValueRef, llvmIRValueRef, semantic.Type, runtimeStringCompareKind, error) {
 	kind := classifyRuntimeStringCompareKind(exprType)
 	if kind == runtimeStringCompareNone {
 		return nil, nil, nil, kind, nil
@@ -225,8 +219,8 @@ func (s *functionState) emitRuntimeStringCompareOperand(expr ast.Expr, exprType 
 	switch kind {
 	case runtimeStringCompareView:
 		lenType := s.g.namedType("i64")
-		data := C.LLVMBuildExtractValue(s.builder, value, 0, cStringFree("streq.view.data"))
-		length := C.LLVMBuildExtractValue(s.builder, value, 1, cStringFree("streq.view.len"))
+		data := llvmBuildExtractValue(s.builder, value, 0, cStringFree("streq.view.data"))
+		length := llvmBuildExtractValue(s.builder, value, 1, cStringFree("streq.view.len"))
 		return data, length, lenType, kind, nil
 	case runtimeStringCompareCStr:
 		lenType := s.g.namedType("i64")
@@ -241,7 +235,7 @@ func (s *functionState) emitRuntimeStringCompareOperand(expr ast.Expr, exprType 
 		return nil, nil, nil, kind, nil
 	}
 }
-func (s *functionState) emitRuntimeStringLengthValue(stringValue C.LLVMValueRef, stringType semantic.Type, resultType semantic.Type, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitRuntimeStringLengthValue(stringValue llvmIRValueRef, stringType semantic.Type, resultType semantic.Type, name string) (llvmIRValueRef, error) {
 	helperType := &semantic.FuncType{
 		Name:   "ctx_strlen",
 		Params: []semantic.Type{stringType},
@@ -255,9 +249,9 @@ func (s *functionState) emitRuntimeStringLengthValue(stringValue C.LLVMValueRef,
 	if err != nil {
 		return nil, err
 	}
-	return s.buildCall(llvmFnType, callee, []C.LLVMValueRef{stringValue}, name), nil
+	return s.buildCall(llvmFnType, callee, []llvmIRValueRef{stringValue}, name), nil
 }
-func (s *functionState) emitSpecializedRuntimeCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitSpecializedRuntimeCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if value, actualType, handled, err := s.emitSpecializedStringViewLiteralCall(expr); handled {
 		return value, actualType, true, err
 	}
@@ -300,7 +294,7 @@ func (s *functionState) emitSpecializedRuntimeCall(expr *ast.CallExpr) (C.LLVMVa
 	if err != nil {
 		return nil, nil, true, err
 	}
-	return C.LLVMBuildZExt(s.builder, cmp, intLLVMType, cStringFree("svlit.eq.int")), intType, true, nil
+	return llvmBuildZExt(s.builder, cmp, intLLVMType, cStringFree("svlit.eq.int")), intType, true, nil
 }
 func (s *functionState) staticIntLiteral(expr ast.Expr) (int64, bool) {
 	switch n := expr.(type) {
@@ -320,29 +314,29 @@ func (s *functionState) staticIntLiteral(expr ast.Expr) (int64, bool) {
 		return 0, false
 	}
 }
-func (s *functionState) emitMinInt64Value(left C.LLVMValueRef, right C.LLVMValueRef, namePrefix string) C.LLVMValueRef {
-	chooseLeft := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntSLE), left, right, cStringFree(namePrefix+".chooseleft"))
-	leftBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(namePrefix+".left"))
-	rightBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(namePrefix+".right"))
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(namePrefix+".merge"))
-	C.LLVMBuildCondBr(s.builder, chooseLeft, leftBB, rightBB)
+func (s *functionState) emitMinInt64Value(left llvmIRValueRef, right llvmIRValueRef, namePrefix string) llvmIRValueRef {
+	chooseLeft := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntSLE), left, right, cStringFree(namePrefix+".chooseleft"))
+	leftBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(namePrefix+".left"))
+	rightBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(namePrefix+".right"))
+	mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(namePrefix+".merge"))
+	llvmBuildCondBr(s.builder, chooseLeft, leftBB, rightBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, leftBB)
-	leftEnd := C.LLVMGetInsertBlock(s.builder)
-	C.LLVMBuildBr(s.builder, mergeBB)
+	llvmPositionBuilderAtEnd(s.builder, leftBB)
+	leftEnd := llvmGetInsertBlock(s.builder)
+	llvmBuildBr(s.builder, mergeBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, rightBB)
-	rightEnd := C.LLVMGetInsertBlock(s.builder)
-	C.LLVMBuildBr(s.builder, mergeBB)
+	llvmPositionBuilderAtEnd(s.builder, rightBB)
+	rightEnd := llvmGetInsertBlock(s.builder)
+	llvmBuildBr(s.builder, mergeBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
-	phi := C.LLVMBuildPhi(s.builder, C.LLVMInt64TypeInContext(s.g.context), cStringFree(namePrefix))
-	values := []C.LLVMValueRef{left, right}
-	blocks := []C.LLVMBasicBlockRef{leftEnd, rightEnd}
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
+	llvmPositionBuilderAtEnd(s.builder, mergeBB)
+	phi := llvmBuildPhi(s.builder, llvmInt64TypeInContext(s.g.context), cStringFree(namePrefix))
+	values := []llvmIRValueRef{left, right}
+	blocks := []llvmIRBlockRef{leftEnd, rightEnd}
+	llvmAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), llvmIRUnsigned(len(values)))
 	return phi
 }
-func (s *functionState) emitConstantClampedStringSliceOperand(expr ast.Expr, exprType semantic.Type, start int64, end int64, namePrefix string) (C.LLVMValueRef, C.LLVMValueRef, error) {
+func (s *functionState) emitConstantClampedStringSliceOperand(expr ast.Expr, exprType semantic.Type, start int64, end int64, namePrefix string) (llvmIRValueRef, llvmIRValueRef, error) {
 	if classifyRuntimeStringCompareKind(exprType) != runtimeStringCompareCStr {
 		return nil, nil, fmt.Errorf("constant string slice specialization requires cstr operand")
 	}
@@ -355,19 +349,19 @@ func (s *functionState) emitConstantClampedStringSliceOperand(expr ast.Expr, exp
 	if err != nil {
 		return nil, nil, err
 	}
-	i64LLVMType := C.LLVMInt64TypeInContext(s.g.context)
-	zeroI64 := C.LLVMConstInt(i64LLVMType, 0, 0)
+	i64LLVMType := llvmInt64TypeInContext(s.g.context)
+	zeroI64 := llvmConstInt(i64LLVMType, 0, 0)
 	clampedStart := zeroI64
 	if start > 0 {
-		startValue := C.LLVMConstInt(i64LLVMType, C.ulonglong(start), 0)
+		startValue := llvmConstInt(i64LLVMType, llvmIRUnsignedLongLong(start), 0)
 		clampedStart = s.emitMinInt64Value(startValue, stringLen, namePrefix+".start")
 	}
 	clampedEnd := stringLen
 	if end >= 0 {
-		endValue := C.LLVMConstInt(i64LLVMType, C.ulonglong(end), 0)
+		endValue := llvmConstInt(i64LLVMType, llvmIRUnsignedLongLong(end), 0)
 		clampedEnd = s.emitMinInt64Value(endValue, stringLen, namePrefix+".end")
 	}
-	sliceLen := C.LLVMBuildSub(s.builder, clampedEnd, clampedStart, cStringFree(namePrefix+".slice.len"))
+	sliceLen := llvmBuildSub(s.builder, clampedEnd, clampedStart, cStringFree(namePrefix+".slice.len"))
 	sliceData := stringValue
 	if start > 0 {
 		usizeType := s.g.namedType("usize")
@@ -379,8 +373,8 @@ func (s *functionState) emitConstantClampedStringSliceOperand(expr ast.Expr, exp
 		if err != nil {
 			return nil, nil, err
 		}
-		indices := []C.LLVMValueRef{clampedStartUsize}
-		sliceData = C.LLVMBuildGEP2(s.builder, i8LLVMType, stringValue, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree(namePrefix+".data"))
+		indices := []llvmIRValueRef{clampedStartUsize}
+		sliceData = llvmBuildGEP2(s.builder, i8LLVMType, stringValue, llvmValueSlicePtr(indices), llvmIRUnsigned(len(indices)), cStringFree(namePrefix+".data"))
 	}
 	return sliceData, sliceLen, nil
 }

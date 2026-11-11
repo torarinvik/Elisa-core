@@ -2,19 +2,13 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
 	"elisacore/src/semantic"
 )
 
-func (s *functionState) emitPointerCompareExpr(expr *ast.BinaryExpr, leftType semantic.Type, rightType semantic.Type, resultType semantic.Type) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitPointerCompareExpr(expr *ast.BinaryExpr, leftType semantic.Type, rightType semantic.Type, resultType semantic.Type) (llvmIRValueRef, semantic.Type, bool, error) {
 	if expr.Op != lexer.TOKEN_EQEQ && expr.Op != lexer.TOKEN_BANGEQ {
 		return nil, nil, false, nil
 	}
@@ -32,14 +26,14 @@ func (s *functionState) emitPointerCompareExpr(expr *ast.BinaryExpr, leftType se
 	if err != nil {
 		return nil, nil, true, err
 	}
-	pred := C.LLVMIntPredicate(C.LLVMIntEQ)
+	pred := llvmIRIntPredicate(llvmIntEQ)
 	if expr.Op == lexer.TOKEN_BANGEQ {
-		pred = C.LLVMIntPredicate(C.LLVMIntNE)
+		pred = llvmIRIntPredicate(llvmIntNE)
 	}
-	cmp := C.LLVMBuildICmp(s.builder, pred, left, right, cStringFree("ptrcmptmp"))
+	cmp := llvmBuildICmp(s.builder, pred, left, right, cStringFree("ptrcmptmp"))
 	return cmp, resultType, true, nil
 }
-func (s *functionState) emitOptionalCompareExpr(expr *ast.BinaryExpr, leftType semantic.Type, rightType semantic.Type, resultType semantic.Type) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitOptionalCompareExpr(expr *ast.BinaryExpr, leftType semantic.Type, rightType semantic.Type, resultType semantic.Type) (llvmIRValueRef, semantic.Type, bool, error) {
 	if expr.Op != lexer.TOKEN_EQEQ && expr.Op != lexer.TOKEN_BANGEQ {
 		return nil, nil, false, nil
 	}
@@ -104,7 +98,7 @@ func (s *functionState) emitOptionalCompareExpr(expr *ast.BinaryExpr, leftType s
 		return nil, nil, true, err
 	}
 	if expr.Op == lexer.TOKEN_EQEQ {
-		return C.LLVMBuildNot(s.builder, presentValue, cStringFree("optionalisnull")), resultType, true, nil
+		return llvmBuildNot(s.builder, presentValue, cStringFree("optionalisnull")), resultType, true, nil
 	}
 	return presentValue, resultType, true, nil
 }
@@ -127,7 +121,7 @@ func (s *functionState) optionalCompareStoredType(expr ast.Expr) (*semantic.Opti
 	}
 	return nil, false
 }
-func (s *functionState) emitOptionalCompareOperandValue(expr ast.Expr, optionalType *semantic.OptionalType) (C.LLVMValueRef, error) {
+func (s *functionState) emitOptionalCompareOperandValue(expr ast.Expr, optionalType *semantic.OptionalType) (llvmIRValueRef, error) {
 	switch n := expr.(type) {
 	case *ast.ParenExpr:
 		return s.emitOptionalCompareOperandValue(n.Inner, optionalType)
@@ -148,7 +142,7 @@ func (s *functionState) emitOptionalCompareOperandValue(expr ast.Expr, optionalT
 	optionalValue, _, err := s.emitExpr(expr, optionalType)
 	return optionalValue, err
 }
-func (s *functionState) emitPointerArithmeticExpr(expr *ast.BinaryExpr, leftType semantic.Type, rightType semantic.Type, resultType semantic.Type) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitPointerArithmeticExpr(expr *ast.BinaryExpr, leftType semantic.Type, rightType semantic.Type, resultType semantic.Type) (llvmIRValueRef, semantic.Type, bool, error) {
 	if _, ok := resultType.(*semantic.RefType); !ok {
 		return nil, nil, false, nil
 	}
@@ -181,14 +175,14 @@ func (s *functionState) emitPointerArithmeticExpr(expr *ast.BinaryExpr, leftType
 		return nil, nil, true, err
 	}
 	if expr.Op == lexer.TOKEN_MINUS {
-		indexValue = C.LLVMBuildNeg(s.builder, indexValue, cStringFree("ptridx.neg"))
+		indexValue = llvmBuildNeg(s.builder, indexValue, cStringFree("ptridx.neg"))
 	}
 	elemLLVMType, err := s.g.lowerType(baseType.Elem)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	indices := []C.LLVMValueRef{indexValue}
-	ptr := C.LLVMBuildGEP2(s.builder, elemLLVMType, baseValue, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("ptrarith"))
+	indices := []llvmIRValueRef{indexValue}
+	ptr := llvmBuildGEP2(s.builder, elemLLVMType, baseValue, llvmValueSlicePtr(indices), llvmIRUnsigned(len(indices)), cStringFree("ptrarith"))
 	return ptr, resultType, true, nil
 }
 

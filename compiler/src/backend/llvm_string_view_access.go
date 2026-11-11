@@ -2,12 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -18,7 +12,7 @@ import (
 // bounded StringView `{data, len}` value: data = the darray's items pointer,
 // len = count. Read-only; no allocation. Replaces the unsafe
 // `out[0].ref[static u8&]` idiom with a length-carrying view.
-func (s *functionState) emitBuiltinDArraySviewCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitBuiltinDArraySviewCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if expr == nil {
 		return nil, nil, false, nil
 	}
@@ -43,8 +37,8 @@ func (s *functionState) emitBuiltinDArraySviewCall(expr *ast.CallExpr) (C.LLVMVa
 	if err != nil {
 		return nil, nil, true, err
 	}
-	voidPtrType := C.LLVMPointerTypeInContext(s.g.context, 0)
-	dataValue := C.LLVMBuildLoad2(s.builder, voidPtrType, itemsPtr, cStringFree("darray.sview.data"))
+	voidPtrType := llvmPointerTypeInContext(s.g.context, 0)
+	dataValue := llvmBuildLoad2(s.builder, voidPtrType, itemsPtr, cStringFree("darray.sview.data"))
 	countPtr, usizeType, err := s.emitBuiltinDArrayCountPtr(darrayPtr, darrayType)
 	if err != nil {
 		return nil, nil, true, err
@@ -53,32 +47,32 @@ func (s *functionState) emitBuiltinDArraySviewCall(expr *ast.CallExpr) (C.LLVMVa
 	if err != nil {
 		return nil, nil, true, err
 	}
-	countValue := C.LLVMBuildLoad2(s.builder, usizeLLVMType, countPtr, cStringFree("darray.sview.count"))
+	countValue := llvmBuildLoad2(s.builder, usizeLLVMType, countPtr, cStringFree("darray.sview.count"))
 	// An empty darray may have a nil items pointer, but StringView.data is a
 	// non-null reference even when len is zero. Give empty views a process-lived
 	// NUL byte rather than allowing a null pointer into the StringView carrier.
-	empty := C.LLVMBuildICmp(
+	empty := llvmBuildICmp(
 		s.builder,
-		C.LLVMIntPredicate(C.LLVMIntEQ),
+		llvmIRIntPredicate(llvmIntEQ),
 		countValue,
-		C.LLVMConstInt(usizeLLVMType, 0, 0),
+		llvmConstInt(usizeLLVMType, 0, 0),
 		cStringFree("darray.sview.empty"),
 	)
-	emptyBacking := C.LLVMBuildGlobalStringPtr(s.builder, cStringFree(""), cStringFree("darray.sview.empty.backing"))
-	dataValue = C.LLVMBuildSelect(s.builder, empty, emptyBacking, dataValue, cStringFree("darray.sview.data.valid"))
+	emptyBacking := llvmBuildGlobalStringPtr(s.builder, cStringFree(""), cStringFree("darray.sview.empty.backing"))
+	dataValue = llvmBuildSelect(s.builder, empty, emptyBacking, dataValue, cStringFree("darray.sview.data.valid"))
 	sviewLLVMType, err := s.g.lowerType(resultType)
 	if err != nil {
 		return nil, nil, true, err
 	}
 	// StringView is { ptr data, i64 len }; coerce count to the len field type.
-	lenFieldType := C.LLVMStructGetTypeAtIndex(sviewLLVMType, 1)
+	lenFieldType := llvmStructGetTypeAtIndex(sviewLLVMType, 1)
 	lenValue := countValue
 	if lenFieldType != usizeLLVMType {
-		lenValue = C.LLVMBuildIntCast2(s.builder, countValue, lenFieldType, 0, cStringFree("darray.sview.len"))
+		lenValue = llvmBuildIntCast2(s.builder, countValue, lenFieldType, 0, cStringFree("darray.sview.len"))
 	}
-	view := C.LLVMGetUndef(sviewLLVMType)
-	view = C.LLVMBuildInsertValue(s.builder, view, dataValue, 0, cStringFree("darray.sview.insert.data"))
-	view = C.LLVMBuildInsertValue(s.builder, view, lenValue, 1, cStringFree("darray.sview.insert.len"))
+	view := llvmGetUndef(sviewLLVMType)
+	view = llvmBuildInsertValue(s.builder, view, dataValue, 0, cStringFree("darray.sview.insert.data"))
+	view = llvmBuildInsertValue(s.builder, view, lenValue, 1, cStringFree("darray.sview.insert.len"))
 	return view, resultType, true, nil
 }
 
@@ -88,7 +82,7 @@ func (s *functionState) emitBuiltinDArraySviewCall(expr *ast.CallExpr) (C.LLVMVa
 // at items[count] WITHOUT changing count (std::string::c_str() semantics), then
 // returns the items pointer. The capacity bump sources the darray's region arena
 // (regionArenaOwner, ambient fallback) — exactly like a push.
-func (s *functionState) emitBuiltinDArrayCstrCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitBuiltinDArrayCstrCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if expr == nil {
 		return nil, nil, false, nil
 	}
@@ -128,8 +122,8 @@ func (s *functionState) emitBuiltinDArrayCstrCall(expr *ast.CallExpr) (C.LLVMVal
 	if err != nil {
 		return nil, nil, true, err
 	}
-	currentCount := C.LLVMBuildLoad2(s.builder, usizeLLVMType, countPtr, cStringFree("darray.cstr.count"))
-	neededValue, err := s.emitCheckedUSizeAdd(currentCount, C.LLVMConstInt(usizeLLVMType, 1, 0), "darray.cstr.needed")
+	currentCount := llvmBuildLoad2(s.builder, usizeLLVMType, countPtr, cStringFree("darray.cstr.count"))
+	neededValue, err := s.emitCheckedUSizeAdd(currentCount, llvmConstInt(usizeLLVMType, 1, 0), "darray.cstr.needed")
 	if err != nil {
 		return nil, nil, true, err
 	}
@@ -140,14 +134,14 @@ func (s *functionState) emitBuiltinDArrayCstrCall(expr *ast.CallExpr) (C.LLVMVal
 	if err != nil {
 		return nil, nil, true, err
 	}
-	voidPtrType := C.LLVMPointerTypeInContext(s.g.context, 0)
-	itemsValue := C.LLVMBuildLoad2(s.builder, voidPtrType, itemsPtr, cStringFree("darray.cstr.items"))
+	voidPtrType := llvmPointerTypeInContext(s.g.context, 0)
+	itemsValue := llvmBuildLoad2(s.builder, voidPtrType, itemsPtr, cStringFree("darray.cstr.items"))
 	elemLLVMType, err := s.g.lowerType(darrayType.Elem)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	slotPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, itemsValue, llvmValueSlicePtr([]C.LLVMValueRef{currentCount}), 1, cStringFree("darray.cstr.nul.slot"))
-	C.LLVMBuildStore(s.builder, C.LLVMConstInt(elemLLVMType, 0, 0), slotPtr)
+	slotPtr := llvmBuildGEP2(s.builder, elemLLVMType, itemsValue, llvmValueSlicePtr([]llvmIRValueRef{currentCount}), 1, cStringFree("darray.cstr.nul.slot"))
+	llvmBuildStore(s.builder, llvmConstInt(elemLLVMType, 0, 0), slotPtr)
 	// A cstr lowers to an opaque pointer; the items pointer (start of bytes) is
 	// the C-string, now NUL-terminated at [count].
 	return itemsValue, resultType, true, nil
@@ -157,33 +151,33 @@ func (s *functionState) emitBuiltinDArrayCstrCall(expr *ast.CallExpr) (C.LLVMVal
 // the byte load behind the bounds branch so an empty view or an index at the
 // end never touches the backing pointer. LLVM can remove the check in loops
 // whose index is already bounded by the view length.
-func (s *functionState) emitInlineStringViewIndex(view, index C.LLVMValueRef, resultType semantic.Type) (C.LLVMValueRef, error) {
+func (s *functionState) emitInlineStringViewIndex(view, index llvmIRValueRef, resultType semantic.Type) (llvmIRValueRef, error) {
 	resultLLVM, err := s.g.lowerType(resultType)
 	if err != nil {
 		return nil, err
 	}
 	ctx := s.g.context
-	length := C.LLVMBuildExtractValue(s.builder, view, 1, cStringFree("sview.index.len"))
-	validLength := C.LLVMBuildICmp(s.builder, C.LLVMIntSGE, length, C.LLVMConstNull(C.LLVMTypeOf(length)), cStringFree("sview.index.valid.len"))
+	length := llvmBuildExtractValue(s.builder, view, 1, cStringFree("sview.index.len"))
+	validLength := llvmBuildICmp(s.builder, llvmIntSGE, length, llvmConstNull(llvmTypeOf(length)), cStringFree("sview.index.valid.len"))
 	// With a nonnegative length, an unsigned comparison also rejects negative indexes.
-	validIndex := C.LLVMBuildICmp(s.builder, C.LLVMIntULT, index, length, cStringFree("sview.index.in.range"))
-	valid := C.LLVMBuildAnd(s.builder, validLength, validIndex, cStringFree("sview.index.valid"))
-	origin := C.LLVMGetInsertBlock(s.builder)
-	read := C.LLVMAppendBasicBlockInContext(ctx, s.fnValue, cStringFree("sview.index.read"))
-	join := C.LLVMAppendBasicBlockInContext(ctx, s.fnValue, cStringFree("sview.index.join"))
-	C.LLVMBuildCondBr(s.builder, valid, read, join)
-	C.LLVMPositionBuilderAtEnd(s.builder, read)
-	data := C.LLVMBuildExtractValue(s.builder, view, 0, cStringFree("sview.index.data"))
-	byteType := C.LLVMInt8TypeInContext(ctx)
-	indices := []C.LLVMValueRef{index}
-	address := C.LLVMBuildGEP2(s.builder, byteType, data, llvmValueSlicePtr(indices), 1, cStringFree("sview.index.ptr"))
-	byteValue := C.LLVMBuildLoad2(s.builder, byteType, address, cStringFree("sview.index.byte"))
-	value := C.LLVMBuildZExt(s.builder, byteValue, resultLLVM, cStringFree("sview.index.wide"))
-	C.LLVMBuildBr(s.builder, join)
-	C.LLVMPositionBuilderAtEnd(s.builder, join)
-	result := C.LLVMBuildPhi(s.builder, resultLLVM, cStringFree("sview.index"))
-	values := []C.LLVMValueRef{C.LLVMConstNull(resultLLVM), value}
-	blocks := []C.LLVMBasicBlockRef{origin, read}
-	C.LLVMAddIncoming(result, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), 2)
+	validIndex := llvmBuildICmp(s.builder, llvmIntULT, index, length, cStringFree("sview.index.in.range"))
+	valid := llvmBuildAnd(s.builder, validLength, validIndex, cStringFree("sview.index.valid"))
+	origin := llvmGetInsertBlock(s.builder)
+	read := llvmAppendBasicBlockInContext(ctx, s.fnValue, cStringFree("sview.index.read"))
+	join := llvmAppendBasicBlockInContext(ctx, s.fnValue, cStringFree("sview.index.join"))
+	llvmBuildCondBr(s.builder, valid, read, join)
+	llvmPositionBuilderAtEnd(s.builder, read)
+	data := llvmBuildExtractValue(s.builder, view, 0, cStringFree("sview.index.data"))
+	byteType := llvmInt8TypeInContext(ctx)
+	indices := []llvmIRValueRef{index}
+	address := llvmBuildGEP2(s.builder, byteType, data, llvmValueSlicePtr(indices), 1, cStringFree("sview.index.ptr"))
+	byteValue := llvmBuildLoad2(s.builder, byteType, address, cStringFree("sview.index.byte"))
+	value := llvmBuildZExt(s.builder, byteValue, resultLLVM, cStringFree("sview.index.wide"))
+	llvmBuildBr(s.builder, join)
+	llvmPositionBuilderAtEnd(s.builder, join)
+	result := llvmBuildPhi(s.builder, resultLLVM, cStringFree("sview.index"))
+	values := []llvmIRValueRef{llvmConstNull(resultLLVM), value}
+	blocks := []llvmIRBlockRef{origin, read}
+	llvmAddIncoming(result, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), 2)
 	return result, nil
 }

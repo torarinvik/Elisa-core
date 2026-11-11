@@ -2,12 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -36,7 +30,7 @@ func appendIsTargetExprsBackend(out []ast.Expr, expr ast.Expr) []ast.Expr {
 func flattenIsTargetExprsBackend(expr ast.Expr) []ast.Expr {
 	return appendIsTargetExprsBackend(nil, expr)
 }
-func (s *functionState) emitComparableIsTargetTest(leftExpr ast.Expr, targetExpr ast.Expr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitComparableIsTargetTest(leftExpr ast.Expr, targetExpr ast.Expr) (llvmIRValueRef, semantic.Type, error) {
 	leftType := s.exprType(leftExpr)
 	rightType := s.exprType(targetExpr)
 	resultType := s.g.namedType("bool")
@@ -63,11 +57,11 @@ func (s *functionState) emitComparableIsTargetTest(leftExpr ast.Expr, targetExpr
 		return s.emitEnumCompareExpr(lexer.TOKEN_EQEQ, enumType, left, right, resultType)
 	}
 	if isFloatType(operandType) {
-		return C.LLVMBuildFCmp(s.builder, C.LLVMRealOEQ, left, right, cStringFree("isvalue.eq")), resultType, nil
+		return llvmBuildFCmp(s.builder, llvmRealOEQ, left, right, cStringFree("isvalue.eq")), resultType, nil
 	}
-	return C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), left, right, cStringFree("isvalue.eq")), resultType, nil
+	return llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), left, right, cStringFree("isvalue.eq")), resultType, nil
 }
-func (s *functionState) emitEnumIsTest(leftExpr ast.Expr, enumType *semantic.EnumType, variant *semantic.EnumVariant, pattern *ast.MatchVariantPattern) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitEnumIsTest(leftExpr ast.Expr, enumType *semantic.EnumType, variant *semantic.EnumVariant, pattern *ast.MatchVariantPattern) (llvmIRValueRef, semantic.Type, error) {
 	storeBinding, err := s.resolvePackedMatchStoreBinding(enumType, leftExpr, nil)
 	if err != nil {
 		return nil, nil, err
@@ -77,28 +71,28 @@ func (s *functionState) emitEnumIsTest(leftExpr ast.Expr, enumType *semantic.Enu
 		return nil, nil, err
 	}
 	if pattern != nil && len(pattern.Args) != 0 {
-		successBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("is.variant.ok"))
-		failureBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("is.variant.fail"))
-		contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("is.variant.cont"))
+		successBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("is.variant.ok"))
+		failureBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("is.variant.fail"))
+		contBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("is.variant.cont"))
 		if _, _, err := s.emitMatchPatternTest(pattern, enumValue, nil, enumType, storeBinding, leftExpr, nil, successBB, failureBB); err != nil {
 			return nil, nil, err
 		}
 
-		C.LLVMPositionBuilderAtEnd(s.builder, successBB)
-		successValue := C.LLVMConstInt(C.LLVMInt1TypeInContext(s.g.context), 1, 0)
-		C.LLVMBuildBr(s.builder, contBB)
-		successEnd := C.LLVMGetInsertBlock(s.builder)
+		llvmPositionBuilderAtEnd(s.builder, successBB)
+		successValue := llvmConstInt(llvmInt1TypeInContext(s.g.context), 1, 0)
+		llvmBuildBr(s.builder, contBB)
+		successEnd := llvmGetInsertBlock(s.builder)
 
-		C.LLVMPositionBuilderAtEnd(s.builder, failureBB)
-		failureValue := C.LLVMConstInt(C.LLVMInt1TypeInContext(s.g.context), 0, 0)
-		C.LLVMBuildBr(s.builder, contBB)
-		failureEnd := C.LLVMGetInsertBlock(s.builder)
+		llvmPositionBuilderAtEnd(s.builder, failureBB)
+		failureValue := llvmConstInt(llvmInt1TypeInContext(s.g.context), 0, 0)
+		llvmBuildBr(s.builder, contBB)
+		failureEnd := llvmGetInsertBlock(s.builder)
 
-		C.LLVMPositionBuilderAtEnd(s.builder, contBB)
-		phi := C.LLVMBuildPhi(s.builder, C.LLVMInt1TypeInContext(s.g.context), cStringFree("is.variant.result"))
-		values := []C.LLVMValueRef{successValue, failureValue}
-		blocks := []C.LLVMBasicBlockRef{successEnd, failureEnd}
-		C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
+		llvmPositionBuilderAtEnd(s.builder, contBB)
+		phi := llvmBuildPhi(s.builder, llvmInt1TypeInContext(s.g.context), cStringFree("is.variant.result"))
+		values := []llvmIRValueRef{successValue, failureValue}
+		blocks := []llvmIRBlockRef{successEnd, failureEnd}
+		llvmAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), llvmIRUnsigned(len(values)))
 		return phi, s.g.namedType("bool"), nil
 	}
 	tagValue, err := s.extractEnumTagValue(enumValue, nil, enumType, storeBinding)
@@ -109,7 +103,7 @@ func (s *functionState) emitEnumIsTest(leftExpr ast.Expr, enumType *semantic.Enu
 	if err != nil {
 		return nil, nil, err
 	}
-	cmp := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), tagValue, tagConst, cStringFree("istag"))
+	cmp := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), tagValue, tagConst, cStringFree("istag"))
 	return cmp, s.g.namedType("bool"), nil
 }
 
@@ -117,7 +111,7 @@ func (s *functionState) emitEnumIsTest(leftExpr ast.Expr, enumType *semantic.Enu
 // docs/81 range primitive against the category's dense leaf-tag range. A widening test (the
 // scrutinee's static type already descends from the category) is constant true; an empty category
 // is constant false. The scrutinee is still evaluated for effects in the constant cases.
-func (s *functionState) emitEnumCategoryIsTest(leftExpr ast.Expr, scrutinee *semantic.EnumType, category *semantic.EnumType) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitEnumCategoryIsTest(leftExpr ast.Expr, scrutinee *semantic.EnumType, category *semantic.EnumType) (llvmIRValueRef, semantic.Type, error) {
 	boolType := s.g.namedType("bool")
 	storeBinding, err := s.resolvePackedMatchStoreBinding(scrutinee, leftExpr, nil)
 	if err != nil {
@@ -128,10 +122,10 @@ func (s *functionState) emitEnumCategoryIsTest(leftExpr ast.Expr, scrutinee *sem
 		return nil, nil, err
 	}
 	if semantic.EnumDescendsFrom(scrutinee, category) {
-		return C.LLVMConstInt(C.LLVMInt1TypeInContext(s.g.context), 1, 0), boolType, nil
+		return llvmConstInt(llvmInt1TypeInContext(s.g.context), 1, 0), boolType, nil
 	}
 	if category.LeafTagCount == 0 {
-		return C.LLVMConstInt(C.LLVMInt1TypeInContext(s.g.context), 0, 0), boolType, nil
+		return llvmConstInt(llvmInt1TypeInContext(s.g.context), 0, 0), boolType, nil
 	}
 	tagValue, err := s.extractEnumTagValue(enumValue, nil, scrutinee, storeBinding)
 	if err != nil {
@@ -142,27 +136,27 @@ func (s *functionState) emitEnumCategoryIsTest(leftExpr ast.Expr, scrutinee *sem
 
 // emitTagRangeTest emits the docs/81 category-membership primitive: matches ⇔ tag - lo <u count.
 // count==1 folds to plain equality (a leaf is a range of size 1), lo==0 skips the subtract.
-func (s *functionState) emitTagRangeTest(tagValue C.LLVMValueRef, enumType *semantic.EnumType, lo uint32, count uint32) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitTagRangeTest(tagValue llvmIRValueRef, enumType *semantic.EnumType, lo uint32, count uint32) (llvmIRValueRef, semantic.Type, error) {
 	boolType := s.g.namedType("bool")
 	if lo == 0 && uint64(count) == enumTagValueCapacity(enumType) {
-		return C.LLVMConstInt(C.LLVMInt1TypeInContext(s.g.context), 1, 0), boolType, nil
+		return llvmConstInt(llvmInt1TypeInContext(s.g.context), 1, 0), boolType, nil
 	}
 	loConst, err := s.enumTagConstant(enumType, lo)
 	if err != nil {
 		return nil, nil, err
 	}
 	if count == 1 {
-		return C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), tagValue, loConst, cStringFree("istag")), boolType, nil
+		return llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), tagValue, loConst, cStringFree("istag")), boolType, nil
 	}
 	relative := tagValue
 	if lo != 0 {
-		relative = C.LLVMBuildSub(s.builder, tagValue, loConst, cStringFree("istag.rel"))
+		relative = llvmBuildSub(s.builder, tagValue, loConst, cStringFree("istag.rel"))
 	}
 	countConst, err := s.enumTagConstant(enumType, count)
 	if err != nil {
 		return nil, nil, err
 	}
-	return C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), relative, countConst, cStringFree("istag.range")), boolType, nil
+	return llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntULT), relative, countConst, cStringFree("istag.range")), boolType, nil
 }
 
 // enumCategoryArm resolves a bind-arm name to a sub-category of a hierarchy scrutinee (docs/77 §2),
@@ -265,34 +259,34 @@ func (s *functionState) structIsTargetPattern(expr ast.Expr) (*ast.MatchStructPa
 	}
 	return nil, false
 }
-func (s *functionState) emitStructIsTest(leftExpr ast.Expr, pattern *ast.MatchStructPattern) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitStructIsTest(leftExpr ast.Expr, pattern *ast.MatchStructPattern) (llvmIRValueRef, semantic.Type, error) {
 	leftType := s.exprType(leftExpr)
 	value, _, err := s.emitExpr(leftExpr, leftType)
 	if err != nil {
 		return nil, nil, err
 	}
-	successBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("is.struct.ok"))
-	failureBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("is.struct.fail"))
-	contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("is.struct.cont"))
+	successBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("is.struct.ok"))
+	failureBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("is.struct.fail"))
+	contBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("is.struct.cont"))
 	if _, _, err := s.emitMatchPatternTest(pattern, value, nil, leftType, nil, leftExpr, nil, successBB, failureBB); err != nil {
 		return nil, nil, err
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, successBB)
-	successValue := C.LLVMConstInt(C.LLVMInt1TypeInContext(s.g.context), 1, 0)
-	C.LLVMBuildBr(s.builder, contBB)
-	successEnd := C.LLVMGetInsertBlock(s.builder)
+	llvmPositionBuilderAtEnd(s.builder, successBB)
+	successValue := llvmConstInt(llvmInt1TypeInContext(s.g.context), 1, 0)
+	llvmBuildBr(s.builder, contBB)
+	successEnd := llvmGetInsertBlock(s.builder)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, failureBB)
-	failureValue := C.LLVMConstInt(C.LLVMInt1TypeInContext(s.g.context), 0, 0)
-	C.LLVMBuildBr(s.builder, contBB)
-	failureEnd := C.LLVMGetInsertBlock(s.builder)
+	llvmPositionBuilderAtEnd(s.builder, failureBB)
+	failureValue := llvmConstInt(llvmInt1TypeInContext(s.g.context), 0, 0)
+	llvmBuildBr(s.builder, contBB)
+	failureEnd := llvmGetInsertBlock(s.builder)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, contBB)
-	phi := C.LLVMBuildPhi(s.builder, C.LLVMInt1TypeInContext(s.g.context), cStringFree("is.struct.result"))
-	values := []C.LLVMValueRef{successValue, failureValue}
-	blocks := []C.LLVMBasicBlockRef{successEnd, failureEnd}
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
+	llvmPositionBuilderAtEnd(s.builder, contBB)
+	phi := llvmBuildPhi(s.builder, llvmInt1TypeInContext(s.g.context), cStringFree("is.struct.result"))
+	values := []llvmIRValueRef{successValue, failureValue}
+	blocks := []llvmIRBlockRef{successEnd, failureEnd}
+	llvmAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), llvmIRUnsigned(len(values)))
 	return phi, s.g.namedType("bool"), nil
 }
 func (s *functionState) enumIsTargetPattern(expr ast.Expr) (*semantic.EnumType, *semantic.EnumVariant, *ast.MatchVariantPattern, bool) {

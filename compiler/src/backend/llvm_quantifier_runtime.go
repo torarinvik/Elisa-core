@@ -1,10 +1,5 @@
 package backend
 
-/*
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"fmt"
 
@@ -20,7 +15,7 @@ import (
 //	result = forall; for i in lo..<hi: if P != forall: result = !forall; break
 //
 // Any other quantifier is unbounded and has no runtime meaning.
-func (s *functionState) emitQuantifierExpr(n *ast.QuantifierExpr) (C.LLVMValueRef, error) {
+func (s *functionState) emitQuantifierExpr(n *ast.QuantifierExpr) (llvmIRValueRef, error) {
 	lo, hi, binder, body, ok := rangeQuantifierParts(n)
 	if !ok {
 		return nil, fmt.Errorf("unsupported expression %T (an unbounded quantifier has no runtime check)", n)
@@ -47,40 +42,40 @@ func (s *functionState) emitQuantifierExpr(n *ast.QuantifierExpr) (C.LLVMValueRe
 	if hiVal, err = s.coerceValue(hiVal, hiType, binderType); err != nil {
 		return nil, err
 	}
-	boolType := C.LLVMInt1TypeInContext(s.g.context)
+	boolType := llvmInt1TypeInContext(s.g.context)
 	forall := !n.Exists
-	initial := C.LLVMConstInt(boolType, 0, 0)
+	initial := llvmConstInt(boolType, 0, 0)
 	if forall {
-		initial = C.LLVMConstInt(boolType, 1, 0)
+		initial = llvmConstInt(boolType, 1, 0)
 	}
 	resultPtr, err := s.createEntryAllocaRaw("quant.result", s.exprType(n))
 	if err != nil {
 		return nil, err
 	}
-	C.LLVMBuildStore(s.builder, initial, resultPtr)
+	llvmBuildStore(s.builder, initial, resultPtr)
 	indexPtr, err := s.createEntryAllocaRaw("quant.index", binderType)
 	if err != nil {
 		return nil, err
 	}
-	C.LLVMBuildStore(s.builder, loVal, indexPtr)
+	llvmBuildStore(s.builder, loVal, indexPtr)
 
-	headBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("quant.head"))
-	bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("quant.body"))
-	stepBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("quant.step"))
-	foundBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("quant.found"))
-	doneBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("quant.done"))
-	C.LLVMBuildBr(s.builder, headBB)
+	headBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("quant.head"))
+	bodyBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("quant.body"))
+	stepBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("quant.step"))
+	foundBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("quant.found"))
+	doneBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("quant.done"))
+	llvmBuildBr(s.builder, headBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, headBB)
-	index := C.LLVMBuildLoad2(s.builder, llvmBinder, indexPtr, cStringFree("quant.i"))
-	pred := C.LLVMIntPredicate(C.LLVMIntULT)
+	llvmPositionBuilderAtEnd(s.builder, headBB)
+	index := llvmBuildLoad2(s.builder, llvmBinder, indexPtr, cStringFree("quant.i"))
+	pred := llvmIRIntPredicate(llvmIntULT)
 	if isSignedIntegerType(binderType) {
-		pred = C.LLVMIntPredicate(C.LLVMIntSLT)
+		pred = llvmIRIntPredicate(llvmIntSLT)
 	}
-	inRange := C.LLVMBuildICmp(s.builder, pred, index, hiVal, cStringFree("quant.inrange"))
-	C.LLVMBuildCondBr(s.builder, inRange, bodyBB, doneBB)
+	inRange := llvmBuildICmp(s.builder, pred, index, hiVal, cStringFree("quant.inrange"))
+	llvmBuildCondBr(s.builder, inRange, bodyBB, doneBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
+	llvmPositionBuilderAtEnd(s.builder, bodyBB)
 	s.pushScope()
 	s.defineBinding(binder.Name, valueBinding{ptr: indexPtr, typ: binderType})
 	bodyVal, _, err := s.emitExpr(body, nil)
@@ -90,22 +85,22 @@ func (s *functionState) emitQuantifierExpr(n *ast.QuantifierExpr) (C.LLVMValueRe
 	}
 	// forall: a false body decides (result false); exists: a true body decides (result true).
 	if forall {
-		C.LLVMBuildCondBr(s.builder, bodyVal, stepBB, foundBB)
+		llvmBuildCondBr(s.builder, bodyVal, stepBB, foundBB)
 	} else {
-		C.LLVMBuildCondBr(s.builder, bodyVal, foundBB, stepBB)
+		llvmBuildCondBr(s.builder, bodyVal, foundBB, stepBB)
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, stepBB)
-	next := C.LLVMBuildAdd(s.builder, C.LLVMBuildLoad2(s.builder, llvmBinder, indexPtr, cStringFree("quant.cur")), C.LLVMConstInt(llvmBinder, 1, 0), cStringFree("quant.next"))
-	C.LLVMBuildStore(s.builder, next, indexPtr)
-	C.LLVMBuildBr(s.builder, headBB)
+	llvmPositionBuilderAtEnd(s.builder, stepBB)
+	next := llvmBuildAdd(s.builder, llvmBuildLoad2(s.builder, llvmBinder, indexPtr, cStringFree("quant.cur")), llvmConstInt(llvmBinder, 1, 0), cStringFree("quant.next"))
+	llvmBuildStore(s.builder, next, indexPtr)
+	llvmBuildBr(s.builder, headBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, foundBB)
-	C.LLVMBuildStore(s.builder, C.LLVMConstNot(initial), resultPtr)
-	C.LLVMBuildBr(s.builder, doneBB)
+	llvmPositionBuilderAtEnd(s.builder, foundBB)
+	llvmBuildStore(s.builder, llvmConstNot(initial), resultPtr)
+	llvmBuildBr(s.builder, doneBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, doneBB)
-	return C.LLVMBuildLoad2(s.builder, boolType, resultPtr, cStringFree("quant.value")), nil
+	llvmPositionBuilderAtEnd(s.builder, doneBB)
+	return llvmBuildLoad2(s.builder, boolType, resultPtr, cStringFree("quant.value")), nil
 }
 
 // rangeQuantifierParts recognizes the parser's range-binder desugaring (see emitQuantifierExpr).

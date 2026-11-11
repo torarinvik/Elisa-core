@@ -2,29 +2,21 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-
-void elisa_coreSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigned trueWeight, unsigned falseWeight);
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
 )
 
-func (s *functionState) emitStructMatchFieldValue(actualValue C.LLVMValueRef, actualType semantic.Type, field structLiteralField, name string) (C.LLVMValueRef, error) {
-	return C.LLVMBuildExtractValue(s.builder, actualValue, C.unsigned(field.Index), cStringFree(name)), nil
+func (s *functionState) emitStructMatchFieldValue(actualValue llvmIRValueRef, actualType semantic.Type, field structLiteralField, name string) (llvmIRValueRef, error) {
+	return llvmBuildExtractValue(s.builder, actualValue, llvmIRUnsigned(field.Index), cStringFree(name)), nil
 }
 
 // emitRangeMatchPatternTest emits the docs/122 §5.2 range arm (`LO..<HI` / `LO..=HI`):
 // scrutinee >= LO chained through an intermediate block into scrutinee </<= HI, with
 // signedness taken from the common comparison type — the two-comparison analogue of
 // emitLiteralMatchPatternTest's single equality.
-func (s *functionState) emitRangeMatchPatternTest(p *ast.MatchRangePattern, actualValue C.LLVMValueRef, actualType semantic.Type, successBB C.LLVMBasicBlockRef, failureBB C.LLVMBasicBlockRef) error {
+func (s *functionState) emitRangeMatchPatternTest(p *ast.MatchRangePattern, actualValue llvmIRValueRef, actualType semantic.Type, successBB llvmIRBlockRef, failureBB llvmIRBlockRef) error {
 	if p.Lo == nil || p.Hi == nil {
 		return fmt.Errorf("range pattern is missing a bound")
 	}
@@ -48,36 +40,36 @@ func (s *functionState) emitRangeMatchPatternTest(p *ast.MatchRangePattern, actu
 		}
 	}
 	signed := isSignedIntegerType(comparisonType)
-	gePred := C.LLVMIntPredicate(C.LLVMIntUGE)
-	hiPred := C.LLVMIntPredicate(C.LLVMIntULT)
+	gePred := llvmIRIntPredicate(llvmIntUGE)
+	hiPred := llvmIRIntPredicate(llvmIntULT)
 	if p.Inclusive {
-		hiPred = C.LLVMIntPredicate(C.LLVMIntULE)
+		hiPred = llvmIRIntPredicate(llvmIntULE)
 	}
 	if signed {
-		gePred = C.LLVMIntPredicate(C.LLVMIntSGE)
-		hiPred = C.LLVMIntPredicate(C.LLVMIntSLT)
+		gePred = llvmIRIntPredicate(llvmIntSGE)
+		hiPred = llvmIRIntPredicate(llvmIntSLT)
 		if p.Inclusive {
-			hiPred = C.LLVMIntPredicate(C.LLVMIntSLE)
+			hiPred = llvmIRIntPredicate(llvmIntSLE)
 		}
 	}
 	loValue, _, err := s.emitExpr(p.Lo, comparisonType)
 	if err != nil {
 		return err
 	}
-	hiBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.range.hi"))
-	loCmp := C.LLVMBuildICmp(s.builder, gePred, coercedActual, loValue, cStringFree("match.range.lo"))
-	C.LLVMBuildCondBr(s.builder, loCmp, hiBB, failureBB)
-	C.LLVMPositionBuilderAtEnd(s.builder, hiBB)
+	hiBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.range.hi"))
+	loCmp := llvmBuildICmp(s.builder, gePred, coercedActual, loValue, cStringFree("match.range.lo"))
+	llvmBuildCondBr(s.builder, loCmp, hiBB, failureBB)
+	llvmPositionBuilderAtEnd(s.builder, hiBB)
 	hiValue, _, err := s.emitExpr(p.Hi, comparisonType)
 	if err != nil {
 		return err
 	}
-	hiCmp := C.LLVMBuildICmp(s.builder, hiPred, coercedActual, hiValue, cStringFree("match.range.hi.cmp"))
-	C.LLVMBuildCondBr(s.builder, hiCmp, successBB, failureBB)
+	hiCmp := llvmBuildICmp(s.builder, hiPred, coercedActual, hiValue, cStringFree("match.range.hi.cmp"))
+	llvmBuildCondBr(s.builder, hiCmp, successBB, failureBB)
 	return nil
 }
 
-func (s *functionState) emitLiteralMatchPatternTest(literalExpr ast.Expr, actualValue C.LLVMValueRef, actualType semantic.Type, successBB C.LLVMBasicBlockRef, failureBB C.LLVMBasicBlockRef) error {
+func (s *functionState) emitLiteralMatchPatternTest(literalExpr ast.Expr, actualValue llvmIRValueRef, actualType semantic.Type, successBB llvmIRBlockRef, failureBB llvmIRBlockRef) error {
 	if literalExpr == nil {
 		return fmt.Errorf("missing literal pattern expression")
 	}
@@ -115,7 +107,7 @@ func (s *functionState) emitLiteralMatchPatternTest(literalExpr ast.Expr, actual
 				if err != nil {
 					return err
 				}
-				C.LLVMBuildCondBr(s.builder, cmp, successBB, failureBB)
+				llvmBuildCondBr(s.builder, cmp, successBB, failureBB)
 				return nil
 			}
 		}
@@ -125,7 +117,7 @@ func (s *functionState) emitLiteralMatchPatternTest(literalExpr ast.Expr, actual
 		if err != nil {
 			return err
 		}
-		C.LLVMBuildCondBr(s.builder, cmp, successBB, failureBB)
+		llvmBuildCondBr(s.builder, cmp, successBB, failureBB)
 		return nil
 	}
 	comparisonType := actualType
@@ -145,15 +137,15 @@ func (s *functionState) emitLiteralMatchPatternTest(literalExpr ast.Expr, actual
 		return err
 	}
 	if isFloatType(comparisonType) {
-		cmp := C.LLVMBuildFCmp(s.builder, C.LLVMRealOEQ, coercedActual, literalValue, cStringFree("match.literal.eq"))
-		C.LLVMBuildCondBr(s.builder, cmp, successBB, failureBB)
+		cmp := llvmBuildFCmp(s.builder, llvmRealOEQ, coercedActual, literalValue, cStringFree("match.literal.eq"))
+		llvmBuildCondBr(s.builder, cmp, successBB, failureBB)
 		return nil
 	}
-	cmp := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), coercedActual, literalValue, cStringFree("match.literal.eq"))
-	C.LLVMBuildCondBr(s.builder, cmp, successBB, failureBB)
+	cmp := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), coercedActual, literalValue, cStringFree("match.literal.eq"))
+	llvmBuildCondBr(s.builder, cmp, successBB, failureBB)
 	return nil
 }
-func (s *functionState) emitRuntimeStringCompareLiteralValue(actualValue C.LLVMValueRef, literalExpr ast.Expr, literalType semantic.Type, helperName string, firstType semantic.Type, secondType semantic.Type, swap bool) (C.LLVMValueRef, error) {
+func (s *functionState) emitRuntimeStringCompareLiteralValue(actualValue llvmIRValueRef, literalExpr ast.Expr, literalType semantic.Type, helperName string, firstType semantic.Type, secondType semantic.Type, swap bool) (llvmIRValueRef, error) {
 	firstValue := actualValue
 	secondValue, _, err := s.emitExpr(literalExpr, literalType)
 	if err != nil {
@@ -172,22 +164,22 @@ func (s *functionState) emitRuntimeStringCompareLiteralValue(actualValue C.LLVMV
 	if err != nil {
 		return nil, err
 	}
-	call := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{firstValue, secondValue}, "match.literal.str")
+	call := s.buildCall(llvmFnType, callee, []llvmIRValueRef{firstValue, secondValue}, "match.literal.str")
 	helperLLVMType, err := s.g.lowerType(helperReturn)
 	if err != nil {
 		return nil, err
 	}
-	zero := C.LLVMConstInt(helperLLVMType, 0, 0)
-	return C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), call, zero, cStringFree("match.literal.str.eq")), nil
+	zero := llvmConstInt(helperLLVMType, 0, 0)
+	return llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntNE), call, zero, cStringFree("match.literal.str.eq")), nil
 }
-func (s *functionState) emitMatchedVariantPayloadPatternTest(pattern *ast.MatchVariantPattern, actualValue C.LLVMValueRef, decodedActualValue C.LLVMValueRef, enumType *semantic.EnumType, variant *semantic.EnumVariant, store *packedStoreBinding, originExpr ast.Expr, successBB C.LLVMBasicBlockRef, failureBB C.LLVMBasicBlockRef) (C.LLVMValueRef, packedPayloadValueCache, error) {
+func (s *functionState) emitMatchedVariantPayloadPatternTest(pattern *ast.MatchVariantPattern, actualValue llvmIRValueRef, decodedActualValue llvmIRValueRef, enumType *semantic.EnumType, variant *semantic.EnumVariant, store *packedStoreBinding, originExpr ast.Expr, successBB llvmIRBlockRef, failureBB llvmIRBlockRef) (llvmIRValueRef, packedPayloadValueCache, error) {
 	matchedDecodedValue := decodedActualValue
 	if pattern == nil || variant == nil {
-		C.LLVMBuildBr(s.builder, successBB)
+		llvmBuildBr(s.builder, successBB)
 		return matchedDecodedValue, packedPayloadValueCache{}, nil
 	}
 	if len(pattern.Args) == 0 {
-		C.LLVMBuildBr(s.builder, successBB)
+		llvmBuildBr(s.builder, successBB)
 		return matchedDecodedValue, packedPayloadValueCache{}, nil
 	}
 	namedCount := 0
@@ -222,7 +214,7 @@ func (s *functionState) emitMatchedVariantPayloadPatternTest(pattern *ast.MatchV
 		}
 	}
 	if lastNestedPattern < 0 {
-		C.LLVMBuildBr(s.builder, successBB)
+		llvmBuildBr(s.builder, successBB)
 		return matchedDecodedValue, packedPayloadValueCache{}, nil
 	}
 	payloadValues, err := s.extractEnumVariantPayloadValues(actualValue, matchedDecodedValue, enumType, variant, store, originExpr)
@@ -243,13 +235,13 @@ func (s *functionState) emitMatchedVariantPayloadPatternTest(pattern *ast.MatchV
 		}
 		nextSuccess := successBB
 		if i != lastNestedPattern {
-			nextSuccess = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.pattern.next"))
+			nextSuccess = llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.pattern.next"))
 		}
 		if _, _, err := s.emitMatchPatternTest(arg.Pattern, payloadValues[i], nil, variant.Payload[i], s.nestedPayloadPatternStore(variant.Payload[i], enumType, store), nil, nil, nextSuccess, failureBB); err != nil {
 			return nil, packedPayloadValueCache{}, err
 		}
 		if i != lastNestedPattern {
-			C.LLVMPositionBuilderAtEnd(s.builder, nextSuccess)
+			llvmPositionBuilderAtEnd(s.builder, nextSuccess)
 		}
 	}
 	return matchedDecodedValue, cachedPayloads, nil

@@ -2,14 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-
-void elisa_coreSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigned trueWeight, unsigned falseWeight);
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -56,7 +48,7 @@ func (s *functionState) defaultParallelForPool(stmt *ast.ParallelForStmt) (activ
 	if err != nil {
 		return activePoolBinding{}, err
 	}
-	C.LLVMBuildStore(s.builder, poolValue, poolAlloca)
+	llvmBuildStore(s.builder, poolValue, poolAlloca)
 
 	coresCallee, coresType, err := s.ensureRuntimeFunction("perf_cores", nil)
 	if err != nil {
@@ -74,8 +66,8 @@ func (s *functionState) defaultParallelForPool(stmt *ast.ParallelForStmt) (activ
 	// perf_cores() returns i64; usize is the same width on supported targets, so a bitcast/trunc is
 	// unnecessary -- the value is already a non-negative core count in an i64.
 	workers := coresI64
-	if C.LLVMGetIntTypeWidth(C.LLVMTypeOf(coresI64)) != C.LLVMGetIntTypeWidth(usizeLLVM) {
-		workers = C.LLVMBuildTrunc(s.builder, coresI64, usizeLLVM, cStringFree("parallel.default.cores.usize"))
+	if llvmGetIntTypeWidth(llvmTypeOf(coresI64)) != llvmGetIntTypeWidth(usizeLLVM) {
+		workers = llvmBuildTrunc(s.builder, coresI64, usizeLLVM, cStringFree("parallel.default.cores.usize"))
 	}
 	return activePoolBinding{name: "__parallel_default_pool", ptr: poolAlloca, typ: poolType, workers: workers}, nil
 }
@@ -106,7 +98,7 @@ func (s *functionState) emitParallelForStmtWithPool(stmt *ast.ParallelForStmt, i
 	if err != nil {
 		return err
 	}
-	C.LLVMBuildStore(s.builder, sourceValue, sourceAlloca)
+	llvmBuildStore(s.builder, sourceValue, sourceAlloca)
 	s.defineBinding(sourceName, valueBinding{ptr: sourceAlloca, typ: info.SourceType})
 
 	sourceIdent := &ast.Ident{Position: stmt.Position, Name: sourceName}
@@ -138,7 +130,7 @@ func (s *functionState) emitParallelForStmtWithPool(stmt *ast.ParallelForStmt, i
 		return err
 	}
 	groupValue := s.buildCall(taskGroupNewLLVMType, taskGroupNew, nil, "task.group.new")
-	C.LLVMBuildStore(s.builder, groupValue, groupAlloca)
+	llvmBuildStore(s.builder, groupValue, groupAlloca)
 	s.defineBinding(groupName, valueBinding{ptr: groupAlloca, typ: groupType})
 
 	workerFn, workerFnType, chunkType, err := s.emitParallelForWorkerFunction(stmt, info, prefix, partitionLocal)
@@ -149,7 +141,7 @@ func (s *functionState) emitParallelForStmtWithPool(stmt *ast.ParallelForStmt, i
 	if partitionLocal && !partitionLocalSubmit {
 		s.g.partUnsafeHelpers = true
 	}
-	var poolSubmit C.LLVMValueRef
+	var poolSubmit llvmIRValueRef
 	var poolSubmitType *semantic.FuncType
 	if partitionLocalSubmit {
 		s.g.partSyntheticDepth++
@@ -186,61 +178,61 @@ func (s *functionState) emitParallelForStmtWithPool(stmt *ast.ParallelForStmt, i
 	if err != nil {
 		return err
 	}
-	zero := C.LLVMConstInt(usizeLLVMType, 0, 0)
-	one := C.LLVMConstInt(usizeLLVMType, 1, 0)
+	zero := llvmConstInt(usizeLLVMType, 0, 0)
+	one := llvmConstInt(usizeLLVMType, 1, 0)
 
 	startAlloca, err := s.createEntryAlloca(prefix+"_start", usizeType)
 	if err != nil {
 		return err
 	}
-	C.LLVMBuildStore(s.builder, zero, startAlloca)
+	llvmBuildStore(s.builder, zero, startAlloca)
 
-	hasWorkers := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), pool.workers, zero, cStringFree("parallel.workers.nonzero"))
-	hasItems := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), totalValue, zero, cStringFree("parallel.total.nonzero"))
-	shouldRun := C.LLVMBuildAnd(s.builder, hasWorkers, hasItems, cStringFree("parallel.should.run"))
+	hasWorkers := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntNE), pool.workers, zero, cStringFree("parallel.workers.nonzero"))
+	hasItems := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntNE), totalValue, zero, cStringFree("parallel.total.nonzero"))
+	shouldRun := llvmBuildAnd(s.builder, hasWorkers, hasItems, cStringFree("parallel.should.run"))
 
-	runBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("parallel.run"))
-	loopCondBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("parallel.cond"))
-	loopBodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("parallel.body"))
-	waitBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("parallel.wait"))
-	exitBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("parallel.end"))
+	runBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("parallel.run"))
+	loopCondBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("parallel.cond"))
+	loopBodyBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("parallel.body"))
+	waitBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("parallel.wait"))
+	exitBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("parallel.end"))
 
-	C.LLVMBuildCondBr(s.builder, shouldRun, runBB, exitBB)
+	llvmBuildCondBr(s.builder, shouldRun, runBB, exitBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, runBB)
-	adjustedTotal := C.LLVMBuildAdd(s.builder, totalValue, C.LLVMBuildSub(s.builder, pool.workers, one, cStringFree("parallel.workers.minus.one")), cStringFree("parallel.total.adjusted"))
-	chunkSize := C.LLVMBuildUDiv(s.builder, adjustedTotal, pool.workers, cStringFree("parallel.chunk.size"))
-	C.LLVMBuildBr(s.builder, loopCondBB)
+	llvmPositionBuilderAtEnd(s.builder, runBB)
+	adjustedTotal := llvmBuildAdd(s.builder, totalValue, llvmBuildSub(s.builder, pool.workers, one, cStringFree("parallel.workers.minus.one")), cStringFree("parallel.total.adjusted"))
+	chunkSize := llvmBuildUDiv(s.builder, adjustedTotal, pool.workers, cStringFree("parallel.chunk.size"))
+	llvmBuildBr(s.builder, loopCondBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, loopCondBB)
+	llvmPositionBuilderAtEnd(s.builder, loopCondBB)
 	startValue, err := s.loadValue(startAlloca, usizeType, prefix+".start")
 	if err != nil {
 		return err
 	}
-	hasMore := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), startValue, totalValue, cStringFree("parallel.has.more"))
-	C.LLVMBuildCondBr(s.builder, hasMore, loopBodyBB, waitBB)
+	hasMore := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntULT), startValue, totalValue, cStringFree("parallel.has.more"))
+	llvmBuildCondBr(s.builder, hasMore, loopBodyBB, waitBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, loopBodyBB)
-	endCandidate := C.LLVMBuildAdd(s.builder, startValue, chunkSize, cStringFree("parallel.end.candidate"))
+	llvmPositionBuilderAtEnd(s.builder, loopBodyBB)
+	endCandidate := llvmBuildAdd(s.builder, startValue, chunkSize, cStringFree("parallel.end.candidate"))
 	endValue := s.emitUnsignedMin(endCandidate, totalValue, usizeLLVMType, "parallel.end")
 	chunkValue, err := s.buildParallelForChunkValue(info, chunkType, sourceValue, startValue, endValue)
 	if err != nil {
 		return err
 	}
-	taskValue := s.buildCall(poolSubmitLLVMType, poolSubmit, []C.LLVMValueRef{pool.ptr, workerFn, chunkValue}, "parallel.submit")
-	s.buildCall(taskGroupAddLLVMType, taskGroupAdd, []C.LLVMValueRef{groupAlloca, taskValue}, "")
-	C.LLVMBuildStore(s.builder, endValue, startAlloca)
-	C.LLVMBuildBr(s.builder, loopCondBB)
+	taskValue := s.buildCall(poolSubmitLLVMType, poolSubmit, []llvmIRValueRef{pool.ptr, workerFn, chunkValue}, "parallel.submit")
+	s.buildCall(taskGroupAddLLVMType, taskGroupAdd, []llvmIRValueRef{groupAlloca, taskValue}, "")
+	llvmBuildStore(s.builder, endValue, startAlloca)
+	llvmBuildBr(s.builder, loopCondBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, waitBB)
-	s.buildCall(taskGroupWaitLLVMType, taskGroupWait, []C.LLVMValueRef{groupAlloca}, "")
-	C.LLVMBuildBr(s.builder, exitBB)
+	llvmPositionBuilderAtEnd(s.builder, waitBB)
+	s.buildCall(taskGroupWaitLLVMType, taskGroupWait, []llvmIRValueRef{groupAlloca}, "")
+	llvmBuildBr(s.builder, exitBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, exitBB)
+	llvmPositionBuilderAtEnd(s.builder, exitBB)
 	_ = workerFnType
 	return nil
 }
-func (s *functionState) emitParallelForWorkerFunction(stmt *ast.ParallelForStmt, info *semantic.ParallelForInfo, prefix string, partitionLocal bool) (C.LLVMValueRef, *semantic.FuncType, *semantic.StructType, error) {
+func (s *functionState) emitParallelForWorkerFunction(stmt *ast.ParallelForStmt, info *semantic.ParallelForInfo, prefix string, partitionLocal bool) (llvmIRValueRef, *semantic.FuncType, *semantic.StructType, error) {
 	chunkType, err := s.buildParallelForChunkType(info, prefix)
 	if err != nil {
 		return nil, nil, nil, err
@@ -257,7 +249,7 @@ func (s *functionState) emitParallelForWorkerFunction(stmt *ast.ParallelForStmt,
 	s.g.functions[workerName] = workerFn
 	s.g.setDefinedFunctionLinkage(workerName, workerFn, workerType)
 	if partitionLocal {
-		C.LLVMSetLinkage(workerFn, C.LLVMPrivateLinkage)
+		llvmSetLinkage(workerFn, llvmPrivateLinkage)
 		if s.g.partLocalHelpers == nil {
 			s.g.partLocalHelpers = make(map[string]bool)
 		}
@@ -438,12 +430,12 @@ func (s *functionState) buildParallelForChunkType(info *semantic.ParallelForInfo
 		Decl:   decl,
 	}, nil
 }
-func (s *functionState) buildParallelForChunkValue(info *semantic.ParallelForInfo, chunkType *semantic.StructType, sourceValue, startValue, endValue C.LLVMValueRef) (C.LLVMValueRef, error) {
+func (s *functionState) buildParallelForChunkValue(info *semantic.ParallelForInfo, chunkType *semantic.StructType, sourceValue, startValue, endValue llvmIRValueRef) (llvmIRValueRef, error) {
 	chunkLLVMType, err := s.g.lowerType(chunkType)
 	if err != nil {
 		return nil, err
 	}
-	chunkValue := C.LLVMGetUndef(chunkLLVMType)
+	chunkValue := llvmGetUndef(chunkLLVMType)
 	captureBase := 3
 	if info.BandMode {
 		// Build this worker's band inline: { base: source.base + start*sizeof(T), count: end-start }.
@@ -461,21 +453,21 @@ func (s *functionState) buildParallelForChunkValue(info *semantic.ParallelForInf
 		if err != nil {
 			return nil, err
 		}
-		srcBase := C.LLVMBuildExtractValue(s.builder, sourceValue, 0, cStringFree("band.src.base"))
-		elemSizeConst := C.LLVMConstInt(usizeLLVM, C.ulonglong(elemSize), 0)
-		offset := C.LLVMBuildMul(s.builder, startValue, elemSizeConst, cStringFree("band.offset"))
-		bandBase := C.LLVMBuildAdd(s.builder, srcBase, offset, cStringFree("band.base"))
-		bandCount := C.LLVMBuildSub(s.builder, endValue, startValue, cStringFree("band.count"))
-		bandValue := C.LLVMGetUndef(sliceLLVM)
-		bandValue = C.LLVMBuildInsertValue(s.builder, bandValue, bandBase, 0, cStringFree("band.base.ins"))
-		bandValue = C.LLVMBuildInsertValue(s.builder, bandValue, bandCount, 1, cStringFree("band.count.ins"))
-		chunkValue = C.LLVMBuildInsertValue(s.builder, chunkValue, bandValue, 0, cStringFree("parallel.chunk.band"))
-		chunkValue = C.LLVMBuildInsertValue(s.builder, chunkValue, startValue, 1, cStringFree("parallel.chunk.start"))
+		srcBase := llvmBuildExtractValue(s.builder, sourceValue, 0, cStringFree("band.src.base"))
+		elemSizeConst := llvmConstInt(usizeLLVM, llvmIRUnsignedLongLong(elemSize), 0)
+		offset := llvmBuildMul(s.builder, startValue, elemSizeConst, cStringFree("band.offset"))
+		bandBase := llvmBuildAdd(s.builder, srcBase, offset, cStringFree("band.base"))
+		bandCount := llvmBuildSub(s.builder, endValue, startValue, cStringFree("band.count"))
+		bandValue := llvmGetUndef(sliceLLVM)
+		bandValue = llvmBuildInsertValue(s.builder, bandValue, bandBase, 0, cStringFree("band.base.ins"))
+		bandValue = llvmBuildInsertValue(s.builder, bandValue, bandCount, 1, cStringFree("band.count.ins"))
+		chunkValue = llvmBuildInsertValue(s.builder, chunkValue, bandValue, 0, cStringFree("parallel.chunk.band"))
+		chunkValue = llvmBuildInsertValue(s.builder, chunkValue, startValue, 1, cStringFree("parallel.chunk.start"))
 		captureBase = 2
 	} else {
-		chunkValue = C.LLVMBuildInsertValue(s.builder, chunkValue, sourceValue, 0, cStringFree("parallel.chunk.source"))
-		chunkValue = C.LLVMBuildInsertValue(s.builder, chunkValue, startValue, 1, cStringFree("parallel.chunk.start"))
-		chunkValue = C.LLVMBuildInsertValue(s.builder, chunkValue, endValue, 2, cStringFree("parallel.chunk.end"))
+		chunkValue = llvmBuildInsertValue(s.builder, chunkValue, sourceValue, 0, cStringFree("parallel.chunk.source"))
+		chunkValue = llvmBuildInsertValue(s.builder, chunkValue, startValue, 1, cStringFree("parallel.chunk.start"))
+		chunkValue = llvmBuildInsertValue(s.builder, chunkValue, endValue, 2, cStringFree("parallel.chunk.end"))
 	}
 	for i, name := range info.Captures {
 		binding, ok := s.lookupBinding(name)
@@ -486,11 +478,11 @@ func (s *functionState) buildParallelForChunkValue(info *semantic.ParallelForInf
 		if err != nil {
 			return nil, err
 		}
-		chunkValue = C.LLVMBuildInsertValue(s.builder, chunkValue, value, C.unsigned(captureBase+i), cStringFree("parallel.chunk.capture"))
+		chunkValue = llvmBuildInsertValue(s.builder, chunkValue, value, llvmIRUnsigned(captureBase+i), cStringFree("parallel.chunk.capture"))
 	}
 	return chunkValue, nil
 }
-func (s *functionState) ensureRuntimeFunction(name string, bindings map[string]semantic.Type) (C.LLVMValueRef, *semantic.FuncType, error) {
+func (s *functionState) ensureRuntimeFunction(name string, bindings map[string]semantic.Type) (llvmIRValueRef, *semantic.FuncType, error) {
 	sym, ok := s.g.lookupGlobal(name)
 	if !ok {
 		return nil, nil, fmt.Errorf("missing runtime function %q", name)

@@ -4,6 +4,7 @@ package backend
 
 /*
 #include <llvm-c/Core.h>
+void elisa_coreSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigned trueWeight, unsigned falseWeight);
 
 // These calls synchronously consume pointer arrays and copy their LLVM handles
 // into C++-owned operands. They retain neither the caller's array nor its name
@@ -153,6 +154,9 @@ const (
 	llvmIntUGT = C.LLVMIntUGT
 	llvmIntUGE = C.LLVMIntUGE
 	llvmIntSLE = C.LLVMIntSLE
+	llvmIntSGE = C.LLVMIntSGE
+	llvmIntSGT = C.LLVMIntSGT
+	llvmIntSLT = C.LLVMIntSLT
 )
 
 func llvmBuildICmp(builder llvmIRBuilderRef, predicate llvmIRIntPredicate, left, right llvmIRValueRef, name *llvmIRChar) llvmIRValueRef {
@@ -189,4 +193,50 @@ func llvmBuildIntCast2(builder llvmIRBuilderRef, value llvmIRValueRef, typ llvmI
 
 func llvmGetBasicBlockTerminator(block llvmIRBlockRef) llvmIRValueRef {
 	return C.LLVMGetBasicBlockTerminator(block)
+}
+
+func llvmBuildXor(builder llvmIRBuilderRef, left, right llvmIRValueRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildXor(builder, left, right, name)
+}
+
+func llvmBuildLShr(builder llvmIRBuilderRef, left, right llvmIRValueRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildLShr(builder, left, right, name)
+}
+
+func llvmBuildTrunc(builder llvmIRBuilderRef, value llvmIRValueRef, typ llvmIRTypeRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildTrunc(builder, value, typ, name)
+}
+
+func llvmBuildBitCast(builder llvmIRBuilderRef, value llvmIRValueRef, typ llvmIRTypeRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildBitCast(builder, value, typ, name)
+}
+
+type llvmIRRealPredicate = C.LLVMRealPredicate
+
+const llvmRealOEQ = C.LLVMRealOEQ
+
+func llvmBuildFCmp(builder llvmIRBuilderRef, predicate llvmIRRealPredicate, left, right llvmIRValueRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildFCmp(builder, predicate, left, right, name)
+}
+
+func llvmBuildNeg(builder llvmIRBuilderRef, value llvmIRValueRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildNeg(builder, value, name)
+}
+
+func llvmBuildGlobalStringPtr(builder llvmIRBuilderRef, value, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildGlobalStringPtr(builder, value, name)
+}
+
+func llvmConstNot(value llvmIRValueRef) llvmIRValueRef { return C.LLVMConstNot(value) }
+
+func llvmSetAlignment(value llvmIRValueRef, bytes llvmIRUnsigned) { C.LLVMSetAlignment(value, bytes) }
+
+func llvmGetNumSuccessors(term llvmIRValueRef) llvmIRUnsigned { return C.LLVMGetNumSuccessors(term) }
+
+func llvmGetSuccessor(term llvmIRValueRef, index llvmIRUnsigned) llvmIRBlockRef {
+	return C.LLVMGetSuccessor(term, index)
+}
+
+func llvmSetBranchWeights(branch llvmIRValueRef, context llvmIRContextRef, trueWeight, falseWeight llvmIRUnsigned) {
+	C.elisa_coreSetBranchWeights(branch, context, trueWeight, falseWeight)
 }

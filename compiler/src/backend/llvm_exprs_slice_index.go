@@ -2,19 +2,13 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
 )
 
-func (s *functionState) emitSliceExpr(expr *ast.SliceExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitSliceExpr(expr *ast.SliceExpr) (llvmIRValueRef, semantic.Type, error) {
 	if value, resultType, handled, err := s.emitPackedStoreSliceExpr(expr); handled {
 		return value, resultType, err
 	}
@@ -32,7 +26,7 @@ func (s *functionState) emitSliceExpr(expr *ast.SliceExpr) (C.LLVMValueRef, sema
 		return nil, nil, fmt.Errorf("slice is not implemented for %s", s.exprType(expr.Object).String())
 	}
 	var (
-		objectValue C.LLVMValueRef
+		objectValue llvmIRValueRef
 		err         error
 	)
 	if info.useAddress {
@@ -68,7 +62,7 @@ func (s *functionState) emitSliceExpr(expr *ast.SliceExpr) (C.LLVMValueRef, sema
 	if err != nil {
 		return nil, nil, err
 	}
-	args := []C.LLVMValueRef{objectValue, startValue, endValue}
+	args := []llvmIRValueRef{objectValue, startValue, endValue}
 	callName := "slicetmp"
 	if isVoidType(info.resultType) {
 		callName = ""
@@ -77,7 +71,7 @@ func (s *functionState) emitSliceExpr(expr *ast.SliceExpr) (C.LLVMValueRef, sema
 	return call, info.resultType, nil
 }
 
-func (s *functionState) emitRawU8RefSliceExpr(expr *ast.SliceExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitRawU8RefSliceExpr(expr *ast.SliceExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	objectType := s.exprType(expr.Object)
 	refType, ok := objectType.(*semantic.RefType)
 	if !ok || refType.State != semantic.RefStateNonNull {
@@ -112,24 +106,24 @@ func (s *functionState) emitRawU8RefSliceExpr(expr *ast.SliceExpr) (C.LLVMValueR
 	if err != nil {
 		return nil, nil, true, err
 	}
-	dataPtr := C.LLVMBuildGEP2(s.builder, u8LLVMType, sourceValue, llvmValueSlicePtr([]C.LLVMValueRef{startValue}), 1, cStringFree("rawstrslice.data"))
-	sliceLen := C.LLVMBuildSub(s.builder, endValue, startValue, cStringFree("rawstrslice.len"))
+	dataPtr := llvmBuildGEP2(s.builder, u8LLVMType, sourceValue, llvmValueSlicePtr([]llvmIRValueRef{startValue}), 1, cStringFree("rawstrslice.data"))
+	sliceLen := llvmBuildSub(s.builder, endValue, startValue, cStringFree("rawstrslice.len"))
 	viewLLVMType, err := s.g.lowerType(resultType)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	lenFieldType := C.LLVMStructGetTypeAtIndex(viewLLVMType, 1)
+	lenFieldType := llvmStructGetTypeAtIndex(viewLLVMType, 1)
 	lenValue := sliceLen
 	if lenFieldType != usizeLLVMType {
-		lenValue = C.LLVMBuildIntCast2(s.builder, sliceLen, lenFieldType, 0, cStringFree("rawstrslice.len.cast"))
+		lenValue = llvmBuildIntCast2(s.builder, sliceLen, lenFieldType, 0, cStringFree("rawstrslice.len.cast"))
 	}
-	viewValue := C.LLVMGetUndef(viewLLVMType)
-	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, dataPtr, 0, cStringFree("rawstrslice.view.data"))
-	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, lenValue, 1, cStringFree("rawstrslice.view.len"))
+	viewValue := llvmGetUndef(viewLLVMType)
+	viewValue = llvmBuildInsertValue(s.builder, viewValue, dataPtr, 0, cStringFree("rawstrslice.view.data"))
+	viewValue = llvmBuildInsertValue(s.builder, viewValue, lenValue, 1, cStringFree("rawstrslice.view.len"))
 	return viewValue, resultType, true, nil
 }
 
-func (s *functionState) emitDArraySliceExpr(expr *ast.SliceExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitDArraySliceExpr(expr *ast.SliceExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	objectType := s.exprType(expr.Object)
 	darrayType, objectIsRef := darraySliceBaseType(objectType)
 	if darrayType == nil {
@@ -148,7 +142,7 @@ func (s *functionState) emitDArraySliceExpr(expr *ast.SliceExpr) (C.LLVMValueRef
 	if err != nil {
 		return nil, nil, true, err
 	}
-	var arrayValue C.LLVMValueRef
+	var arrayValue llvmIRValueRef
 	if objectIsRef {
 		objectPtr, _, err := s.emitExpr(expr.Object, objectType)
 		if err != nil {
@@ -158,7 +152,7 @@ func (s *functionState) emitDArraySliceExpr(expr *ast.SliceExpr) (C.LLVMValueRef
 		if err != nil {
 			return nil, nil, true, err
 		}
-		arrayValue = C.LLVMBuildLoad2(s.builder, arrayLLVMType, objectPtr, cStringFree("darrayslice.array"))
+		arrayValue = llvmBuildLoad2(s.builder, arrayLLVMType, objectPtr, cStringFree("darrayslice.array"))
 	} else {
 		arrayValue, _, err = s.emitExpr(expr.Object, objectType)
 		if err != nil {
@@ -189,7 +183,7 @@ func darraySliceBaseType(objectType semantic.Type) (*semantic.DArrayType, bool) 
 	}
 	return darrayType, true
 }
-func (s *functionState) emitFixedArraySliceExpr(expr *ast.SliceExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitFixedArraySliceExpr(expr *ast.SliceExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	arrayType, arrayPtr, handled, err := s.fixedArraySliceBase(expr.Object)
 	if err != nil || !handled {
 		return nil, nil, handled, err
@@ -208,36 +202,36 @@ func (s *functionState) emitFixedArraySliceExpr(expr *ast.SliceExpr) (C.LLVMValu
 	if err != nil {
 		return nil, nil, true, err
 	}
-	arrayLen := C.LLVMConstInt(usizeLLVMType, C.ulonglong(arrayType.ConstSize), 0)
+	arrayLen := llvmConstInt(usizeLLVMType, llvmIRUnsignedLongLong(arrayType.ConstSize), 0)
 	startClamped := s.emitUnsignedMin(startValue, arrayLen, usizeLLVMType, "arrayslice.start.clamped")
 	endClamped := s.emitUnsignedMin(endValue, arrayLen, usizeLLVMType, "arrayslice.end.clamped")
 	boundedStart := s.emitUnsignedMin(startClamped, endClamped, usizeLLVMType, "arrayslice.start.bounded")
-	sliceLen := C.LLVMBuildSub(s.builder, endClamped, boundedStart, cStringFree("arrayslice.len"))
+	sliceLen := llvmBuildSub(s.builder, endClamped, boundedStart, cStringFree("arrayslice.len"))
 
 	llvmArrayType, err := s.g.lowerType(arrayType)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	zeroIndex := C.LLVMConstInt(usizeLLVMType, 0, 0)
-	indices := []C.LLVMValueRef{zeroIndex, boundedStart}
-	dataPtr := C.LLVMBuildGEP2(s.builder, llvmArrayType, arrayPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("arrayslice.data"))
+	zeroIndex := llvmConstInt(usizeLLVMType, 0, 0)
+	indices := []llvmIRValueRef{zeroIndex, boundedStart}
+	dataPtr := llvmBuildGEP2(s.builder, llvmArrayType, arrayPtr, llvmValueSlicePtr(indices), llvmIRUnsigned(len(indices)), cStringFree("arrayslice.data"))
 
 	viewLLVMType, err := s.g.lowerType(resultType)
 	if err != nil {
 		return nil, nil, true, err
 	}
 	if _, ok := resultType.(*semantic.SViewType); ok {
-		viewValue := C.LLVMGetUndef(viewLLVMType)
-		viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, dataPtr, 0, cStringFree("strslice.view.data"))
-		viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, sliceLen, 1, cStringFree("strslice.view.len"))
+		viewValue := llvmGetUndef(viewLLVMType)
+		viewValue = llvmBuildInsertValue(s.builder, viewValue, dataPtr, 0, cStringFree("strslice.view.data"))
+		viewValue = llvmBuildInsertValue(s.builder, viewValue, sliceLen, 1, cStringFree("strslice.view.len"))
 		return viewValue, resultType, true, nil
 	}
-	viewValue := C.LLVMGetUndef(viewLLVMType)
-	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, dataPtr, 0, cStringFree("arrayslice.view.data"))
-	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, sliceLen, 1, cStringFree("arrayslice.view.len"))
+	viewValue := llvmGetUndef(viewLLVMType)
+	viewValue = llvmBuildInsertValue(s.builder, viewValue, dataPtr, 0, cStringFree("arrayslice.view.data"))
+	viewValue = llvmBuildInsertValue(s.builder, viewValue, sliceLen, 1, cStringFree("arrayslice.view.len"))
 	return viewValue, resultType, true, nil
 }
-func (s *functionState) fixedArraySliceBase(object ast.Expr) (*semantic.ArrayType, C.LLVMValueRef, bool, error) {
+func (s *functionState) fixedArraySliceBase(object ast.Expr) (*semantic.ArrayType, llvmIRValueRef, bool, error) {
 	objectType := s.exprType(object)
 	if arrayType, ok := objectType.(*semantic.ArrayType); ok {
 		arrayPtr, _, err := s.emitAddressOrTemp(object)
@@ -260,15 +254,15 @@ func (s *functionState) fixedArraySliceBase(object ast.Expr) (*semantic.ArrayTyp
 	}
 	return arrayType, arrayPtr, true, nil
 }
-func (s *functionState) emitUnsignedMin(left C.LLVMValueRef, right C.LLVMValueRef, llvmType C.LLVMTypeRef, name string) C.LLVMValueRef {
-	cmp := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULE), left, right, cStringFree(name+".cmp"))
-	mask := C.LLVMBuildZExt(s.builder, cmp, llvmType, cStringFree(name+".mask"))
-	negMask := C.LLVMBuildSub(s.builder, C.LLVMConstNull(llvmType), mask, cStringFree(name+".negmask"))
-	diff := C.LLVMBuildXor(s.builder, left, right, cStringFree(name+".diff"))
-	maskedDiff := C.LLVMBuildAnd(s.builder, diff, negMask, cStringFree(name+".masked"))
-	return C.LLVMBuildXor(s.builder, right, maskedDiff, cStringFree(name))
+func (s *functionState) emitUnsignedMin(left llvmIRValueRef, right llvmIRValueRef, llvmType llvmIRTypeRef, name string) llvmIRValueRef {
+	cmp := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntULE), left, right, cStringFree(name+".cmp"))
+	mask := llvmBuildZExt(s.builder, cmp, llvmType, cStringFree(name+".mask"))
+	negMask := llvmBuildSub(s.builder, llvmConstNull(llvmType), mask, cStringFree(name+".negmask"))
+	diff := llvmBuildXor(s.builder, left, right, cStringFree(name+".diff"))
+	maskedDiff := llvmBuildAnd(s.builder, diff, negMask, cStringFree(name+".masked"))
+	return llvmBuildXor(s.builder, right, maskedDiff, cStringFree(name))
 }
-func (s *functionState) emitRuntimeStringLenExpr(object ast.Expr, fieldType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitRuntimeStringLenExpr(object ast.Expr, fieldType semantic.Type) (llvmIRValueRef, semantic.Type, error) {
 	stringType, ok := cstrFieldOperandType(s.exprType(object))
 	if !ok {
 		return nil, nil, fmt.Errorf("string len requires cstr operand")
@@ -290,11 +284,11 @@ func (s *functionState) emitRuntimeStringLenExpr(object ast.Expr, fieldType sema
 	if err != nil {
 		return nil, nil, err
 	}
-	args := []C.LLVMValueRef{stringValue}
+	args := []llvmIRValueRef{stringValue}
 	call := s.buildCall(llvmFnType, callee, args, "strlen")
 	return call, fieldType, nil
 }
-func (s *functionState) emitIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitIndexExpr(expr *ast.IndexExpr) (llvmIRValueRef, semantic.Type, error) {
 	if expr != nil && expr.AsSpecialize != nil {
 		// `fn[T]` over a generic function: the analyzer reinterpreted this as a single-type-arg
 		// value specialization. Emit the materialized generic-function value, not an index.
@@ -360,7 +354,7 @@ func (s *functionState) emitIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, sema
 	return value, elemType, err
 }
 
-func (s *functionState) emitConstDictIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitConstDictIndexExpr(expr *ast.IndexExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if expr == nil {
 		return nil, nil, false, nil
 	}
@@ -418,7 +412,7 @@ func backendConstDictKeyFingerprint(keyType semantic.Type, value semantic.ConstV
 	return "", false
 }
 
-func (s *functionState) emitTupleIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitTupleIndexExpr(expr *ast.IndexExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	tupleType, ok := semantic.StripAggregateStateType(s.exprType(expr.Object)).(*semantic.TupleType)
 	if !ok || tupleType == nil {
 		return nil, nil, false, nil
@@ -435,11 +429,11 @@ func (s *functionState) emitTupleIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef,
 		return nil, nil, true, err
 	}
 	fieldType := tupleType.Fields[indexValue.Int].Type
-	value := C.LLVMBuildExtractValue(s.builder, tupleValue, C.unsigned(indexValue.Int), cStringFree("tuple.idx"))
+	value := llvmBuildExtractValue(s.builder, tupleValue, llvmIRUnsigned(indexValue.Int), cStringFree("tuple.idx"))
 	return value, fieldType, true, nil
 }
 
-func (s *functionState) emitIndexFallbackExpr(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitIndexFallbackExpr(expr *ast.IndexExpr) (llvmIRValueRef, semantic.Type, error) {
 	if expr == nil || expr.Fallback == nil {
 		return nil, nil, fmt.Errorf("missing safe index fallback expression")
 	}
@@ -457,13 +451,13 @@ func (s *functionState) emitIndexFallbackExpr(expr *ast.IndexExpr) (C.LLVMValueR
 		return nil, nil, err
 	}
 
-	condValue := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), indexValue, countValue, cStringFree("safe.index.in.range"))
-	inRangeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("safe.index.in_range"))
-	fallbackBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("safe.index.fallback"))
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("safe.index.end"))
-	C.LLVMBuildCondBr(s.builder, condValue, inRangeBB, fallbackBB)
+	condValue := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntULT), indexValue, countValue, cStringFree("safe.index.in.range"))
+	inRangeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("safe.index.in_range"))
+	fallbackBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("safe.index.fallback"))
+	mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("safe.index.end"))
+	llvmBuildCondBr(s.builder, condValue, inRangeBB, fallbackBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, inRangeBB)
+	llvmPositionBuilderAtEnd(s.builder, inRangeBB)
 	inRangeValue, actualType, err := loadValue()
 	if err != nil {
 		return nil, nil, err
@@ -474,29 +468,29 @@ func (s *functionState) emitIndexFallbackExpr(expr *ast.IndexExpr) (C.LLVMValueR
 			return nil, nil, err
 		}
 	}
-	inRangeEnd := C.LLVMGetInsertBlock(s.builder)
-	if C.LLVMGetBasicBlockTerminator(inRangeEnd) == nil {
-		C.LLVMBuildBr(s.builder, mergeBB)
+	inRangeEnd := llvmGetInsertBlock(s.builder)
+	if llvmGetBasicBlockTerminator(inRangeEnd) == nil {
+		llvmBuildBr(s.builder, mergeBB)
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, fallbackBB)
+	llvmPositionBuilderAtEnd(s.builder, fallbackBB)
 	fallbackValue, _, err := s.emitExpr(expr.Fallback, resultType)
 	if err != nil {
 		return nil, nil, err
 	}
-	fallbackEnd := C.LLVMGetInsertBlock(s.builder)
-	if C.LLVMGetBasicBlockTerminator(fallbackEnd) == nil {
-		C.LLVMBuildBr(s.builder, mergeBB)
+	fallbackEnd := llvmGetInsertBlock(s.builder)
+	if llvmGetBasicBlockTerminator(fallbackEnd) == nil {
+		llvmBuildBr(s.builder, mergeBB)
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	llvmPositionBuilderAtEnd(s.builder, mergeBB)
 	phiType, err := s.g.lowerType(resultType)
 	if err != nil {
 		return nil, nil, err
 	}
-	phi := C.LLVMBuildPhi(s.builder, phiType, cStringFree("safe.index.result"))
-	values := []C.LLVMValueRef{inRangeValue, fallbackValue}
-	blocks := []C.LLVMBasicBlockRef{inRangeEnd, fallbackEnd}
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
+	phi := llvmBuildPhi(s.builder, phiType, cStringFree("safe.index.result"))
+	values := []llvmIRValueRef{inRangeValue, fallbackValue}
+	blocks := []llvmIRBlockRef{inRangeEnd, fallbackEnd}
+	llvmAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), llvmIRUnsigned(len(values)))
 	return phi, resultType, nil
 }

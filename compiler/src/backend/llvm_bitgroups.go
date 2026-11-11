@@ -2,19 +2,13 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
 )
 
-func (s *functionState) emitBitGroupMemberExpr(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitBitGroupMemberExpr(expr *ast.FieldExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	groupType, ok := s.exprType(expr.Object).(*semantic.BitGroupType)
 	if !ok || groupType == nil {
 		return nil, nil, false, nil
@@ -45,7 +39,7 @@ func (s *functionState) emitBitGroupMemberAssign(target *ast.FieldExpr, valueExp
 		return true, err
 	}
 	backingType := s.g.lowerBitInt(groupType.BackingWidth)
-	current := C.LLVMBuildLoad2(s.builder, backingType, groupPtr, cStringFree(target.Field+".packed.cur"))
+	current := llvmBuildLoad2(s.builder, backingType, groupPtr, cStringFree(target.Field+".packed.cur"))
 	value, _, err := s.emitExpr(valueExpr, member.Type)
 	if err != nil {
 		return true, err
@@ -54,46 +48,46 @@ func (s *functionState) emitBitGroupMemberAssign(target *ast.FieldExpr, valueExp
 	if err != nil {
 		return true, err
 	}
-	C.LLVMBuildStore(s.builder, updated, groupPtr)
+	llvmBuildStore(s.builder, updated, groupPtr)
 	return true, nil
 }
 
-func (s *functionState) extractBitGroupMember(backing C.LLVMValueRef, group *semantic.BitGroupType, member semantic.BitGroupMember, name string) (C.LLVMValueRef, error) {
+func (s *functionState) extractBitGroupMember(backing llvmIRValueRef, group *semantic.BitGroupType, member semantic.BitGroupMember, name string) (llvmIRValueRef, error) {
 	backingType := s.g.lowerBitInt(group.BackingWidth)
 	shifted := backing
 	if member.Offset != 0 {
-		shift := C.LLVMConstInt(backingType, C.ulonglong(member.Offset), 0)
-		shifted = C.LLVMBuildLShr(s.builder, backing, shift, cStringFree(name+".packed.shift"))
+		shift := llvmConstInt(backingType, llvmIRUnsignedLongLong(member.Offset), 0)
+		shifted = llvmBuildLShr(s.builder, backing, shift, cStringFree(name+".packed.shift"))
 	}
-	mask := C.LLVMConstInt(backingType, C.ulonglong(semantic.BitWidthMaxUnsigned(member.Width)), 0)
-	masked := C.LLVMBuildAnd(s.builder, shifted, mask, cStringFree(name+".packed.mask"))
+	mask := llvmConstInt(backingType, llvmIRUnsignedLongLong(semantic.BitWidthMaxUnsigned(member.Width)), 0)
+	masked := llvmBuildAnd(s.builder, shifted, mask, cStringFree(name+".packed.mask"))
 	if group.Kind == semantic.BitGroupBitset {
-		zero := C.LLVMConstInt(backingType, 0, 0)
-		return C.LLVMBuildICmp(s.builder, C.LLVMIntNE, masked, zero, cStringFree(name+".packed.test")), nil
+		zero := llvmConstInt(backingType, 0, 0)
+		return llvmBuildICmp(s.builder, llvmIntNE, masked, zero, cStringFree(name+".packed.test")), nil
 	}
 	memberLLVMType, err := s.g.lowerType(member.Type)
 	if err != nil {
 		return nil, err
 	}
-	return C.LLVMBuildTrunc(s.builder, masked, memberLLVMType, cStringFree(name+".packed.value")), nil
+	return llvmBuildTrunc(s.builder, masked, memberLLVMType, cStringFree(name+".packed.value")), nil
 }
 
-func (s *functionState) insertBitGroupMember(current C.LLVMValueRef, value C.LLVMValueRef, group *semantic.BitGroupType, member semantic.BitGroupMember, name string) (C.LLVMValueRef, error) {
+func (s *functionState) insertBitGroupMember(current llvmIRValueRef, value llvmIRValueRef, group *semantic.BitGroupType, member semantic.BitGroupMember, name string) (llvmIRValueRef, error) {
 	backingType := s.g.lowerBitInt(group.BackingWidth)
-	var widened C.LLVMValueRef
+	var widened llvmIRValueRef
 	if group.Kind == semantic.BitGroupBitset {
-		widened = C.LLVMBuildZExt(s.builder, value, backingType, cStringFree(name+".packed.bool"))
+		widened = llvmBuildZExt(s.builder, value, backingType, cStringFree(name+".packed.bool"))
 	} else {
-		widened = C.LLVMBuildZExt(s.builder, value, backingType, cStringFree(name+".packed.extend"))
+		widened = llvmBuildZExt(s.builder, value, backingType, cStringFree(name+".packed.extend"))
 	}
 	if member.Offset != 0 {
-		shift := C.LLVMConstInt(backingType, C.ulonglong(member.Offset), 0)
-		widened = C.LLVMBuildShl(s.builder, widened, shift, cStringFree(name+".packed.place"))
+		shift := llvmConstInt(backingType, llvmIRUnsignedLongLong(member.Offset), 0)
+		widened = llvmBuildShl(s.builder, widened, shift, cStringFree(name+".packed.place"))
 	}
 	memberMask := semantic.BitWidthMaxUnsigned(member.Width)
 	maskBits := memberMask << member.Offset
-	mask := C.LLVMConstInt(backingType, C.ulonglong(maskBits), 0)
-	clearMask := C.LLVMConstNot(mask)
-	cleared := C.LLVMBuildAnd(s.builder, current, clearMask, cStringFree(name+".packed.clear"))
-	return C.LLVMBuildOr(s.builder, cleared, C.LLVMBuildAnd(s.builder, widened, mask, cStringFree(name+".packed.limit")), cStringFree(name+".packed.store")), nil
+	mask := llvmConstInt(backingType, llvmIRUnsignedLongLong(maskBits), 0)
+	clearMask := llvmConstNot(mask)
+	cleared := llvmBuildAnd(s.builder, current, clearMask, cStringFree(name+".packed.clear"))
+	return llvmBuildOr(s.builder, cleared, llvmBuildAnd(s.builder, widened, mask, cStringFree(name+".packed.limit")), cStringFree(name+".packed.store")), nil
 }

@@ -2,19 +2,13 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
 )
 
-func (s *functionState) emitPackedDirectFieldReadAtOrigin(ops *packedStoreOps, handleValue C.LLVMValueRef, enumType *semantic.EnumType, fieldType semantic.Type, fieldOffsetBytes uint64, origin packedReadOriginKey, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitPackedDirectFieldReadAtOrigin(ops *packedStoreOps, handleValue llvmIRValueRef, enumType *semantic.EnumType, fieldType semantic.Type, fieldOffsetBytes uint64, origin packedReadOriginKey, name string) (llvmIRValueRef, error) {
 	if ops == nil || enumType == nil || !enumType.Packed {
 		return nil, fmt.Errorf("packed direct field read requires packed enum metadata")
 	}
@@ -29,7 +23,7 @@ func (s *functionState) emitPackedDirectFieldReadAtOrigin(ops *packedStoreOps, h
 	cacheDirectField := false
 	if ops.canCacheDirectReadValues(enumType) {
 		if s.packedDirectFieldReads == nil {
-			s.packedDirectFieldReads = map[packedDirectFieldReadCacheKey]C.LLVMValueRef{}
+			s.packedDirectFieldReads = map[packedDirectFieldReadCacheKey]llvmIRValueRef{}
 		}
 		originKey, cacheHandle := ops.directReadCacheIdentity(enumType, origin, handleValue)
 		cacheKey = packedDirectFieldReadCacheKey{
@@ -55,7 +49,7 @@ func (s *functionState) emitPackedDirectFieldReadAtOrigin(ops *packedStoreOps, h
 		if err != nil {
 			return nil, err
 		}
-		wordValue, err := ops.loadPayloadWordAtOrigin(handleValue, enumType, C.LLVMConstInt(usizeType, C.ulonglong(wordOffset), 0), origin, name+".word")
+		wordValue, err := ops.loadPayloadWordAtOrigin(handleValue, enumType, llvmConstInt(usizeType, llvmIRUnsignedLongLong(wordOffset), 0), origin, name+".word")
 		if err != nil {
 			return nil, err
 		}
@@ -64,8 +58,8 @@ func (s *functionState) emitPackedDirectFieldReadAtOrigin(ops *packedStoreOps, h
 			if err != nil {
 				return nil, err
 			}
-			shiftBits := C.LLVMConstInt(uintptrLLVMType, C.ulonglong(byteOffsetInWord*8), 0)
-			wordValue = C.LLVMBuildLShr(s.builder, wordValue, shiftBits, cStringFree(name+".shift"))
+			shiftBits := llvmConstInt(uintptrLLVMType, llvmIRUnsignedLongLong(byteOffsetInWord*8), 0)
+			wordValue = llvmBuildLShr(s.builder, wordValue, shiftBits, cStringFree(name+".shift"))
 		}
 		// The word holds the field's BIT PATTERN, so a FLOAT field must be reinterpreted,
 		// not numerically converted. coerceValue emits `uitofp`, which turned the stored
@@ -73,15 +67,15 @@ func (s *functionState) emitPackedDirectFieldReadAtOrigin(ops *packedStoreOps, h
 		// under the AoS profile read back garbage while the constructor's own row GEP was
 		// correct. The multi-word path below already reinterprets, via a memcpy through
 		// allocas; this fast path did not.
-		var coerced C.LLVMValueRef
+		var coerced llvmIRValueRef
 		if semantic.IsFloatType(fieldType) {
 			fieldLLVMType, err := s.g.lowerType(fieldType)
 			if err != nil {
 				return nil, err
 			}
-			bitsType := C.LLVMIntTypeInContext(s.g.context, C.unsigned(fieldSizeBytes*8))
-			truncated := C.LLVMBuildTrunc(s.builder, wordValue, bitsType, cStringFree(name+".bits"))
-			coerced = C.LLVMBuildBitCast(s.builder, truncated, fieldLLVMType, cStringFree(name+".float"))
+			bitsType := llvmIntTypeInContext(s.g.context, llvmIRUnsigned(fieldSizeBytes*8))
+			truncated := llvmBuildTrunc(s.builder, wordValue, bitsType, cStringFree(name+".bits"))
+			coerced = llvmBuildBitCast(s.builder, truncated, fieldLLVMType, cStringFree(name+".float"))
 		} else {
 			converted, err := s.coerceValue(wordValue, s.g.namedType("uintptr"), fieldType)
 			if err != nil {
@@ -103,7 +97,7 @@ func (s *functionState) emitPackedDirectFieldReadAtOrigin(ops *packedStoreOps, h
 	if err != nil {
 		return nil, err
 	}
-	C.LLVMBuildStore(s.builder, C.LLVMConstNull(fieldLLVMType), fieldPtr)
+	llvmBuildStore(s.builder, llvmConstNull(fieldLLVMType), fieldPtr)
 	lastByte := byteOffsetInWord + fieldSizeBytes
 	wordCount := lastByte / wordBytes
 	if lastByte%wordBytes != 0 {
@@ -114,7 +108,7 @@ func (s *functionState) emitPackedDirectFieldReadAtOrigin(ops *packedStoreOps, h
 		return nil, err
 	}
 	for i := uint64(0); i < wordCount; i++ {
-		wordValue, err := ops.loadPayloadWordAtOrigin(handleValue, enumType, C.LLVMConstInt(usizeType, C.ulonglong(wordOffset+i), 0), origin, name+".word")
+		wordValue, err := ops.loadPayloadWordAtOrigin(handleValue, enumType, llvmConstInt(usizeType, llvmIRUnsignedLongLong(wordOffset+i), 0), origin, name+".word")
 		if err != nil {
 			return nil, err
 		}
@@ -122,7 +116,7 @@ func (s *functionState) emitPackedDirectFieldReadAtOrigin(ops *packedStoreOps, h
 		if err != nil {
 			return nil, err
 		}
-		C.LLVMBuildStore(s.builder, wordValue, wordPtr)
+		llvmBuildStore(s.builder, wordValue, wordPtr)
 		wordStart := i * wordBytes
 		copyStart := wordStart
 		if copyStart < byteOffsetInWord {
@@ -159,7 +153,7 @@ func (s *functionState) emitPackedDirectFieldReadAtOrigin(ops *packedStoreOps, h
 	}
 	return value, nil
 }
-func (s *functionState) emitPackSideTableFieldValue(bufferPtr C.LLVMValueRef, byteOffset uint64, fieldValue C.LLVMValueRef, fieldType semantic.Type, name string) error {
+func (s *functionState) emitPackSideTableFieldValue(bufferPtr llvmIRValueRef, byteOffset uint64, fieldValue llvmIRValueRef, fieldType semantic.Type, name string) error {
 	fieldSizeBytes, err := s.g.abiSizeOfType(fieldType)
 	if err != nil {
 		return err
@@ -198,7 +192,7 @@ func (s *functionState) packedEnumDirectFieldByteOffset(enumType *semantic.EnumT
 	}
 	return offsetBytes, true, nil
 }
-func (s *functionState) readPackedEnumWordWithStore(handleValue C.LLVMValueRef, enumType *semantic.EnumType, store *packedStoreBinding, wordOffset C.LLVMValueRef) (C.LLVMValueRef, error) {
+func (s *functionState) readPackedEnumWordWithStore(handleValue llvmIRValueRef, enumType *semantic.EnumType, store *packedStoreBinding, wordOffset llvmIRValueRef) (llvmIRValueRef, error) {
 	ops, ok := s.packedStoreOpsFromBinding(store)
 	if !ok {
 		return nil, fmt.Errorf("packed enum %s common-field read requires store context", enumType.Name)

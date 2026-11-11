@@ -2,14 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-
-void elisa_coreSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigned trueWeight, unsigned falseWeight);
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -46,7 +38,7 @@ func (s *functionState) emitLockStmt(stmt *ast.LockStmt) error {
 	s.pushScope()
 	defer s.popScope()
 	s.defineBinding(stmt.GuardName, valueBinding{ptr: guardAlloca, typ: guardType})
-	C.LLVMBuildStore(s.builder, guardValue, guardAlloca)
+	llvmBuildStore(s.builder, guardValue, guardAlloca)
 	guard := scopedCleanupBinding{kind: scopedCleanupLockGuard, name: stmt.GuardName, ptr: guardAlloca, typ: guardType}
 	s.registerScopedCleanup(guard)
 	return s.emitBlockInCurrentScope(stmt.Body)
@@ -59,17 +51,17 @@ func (s *functionState) emitConditionalMutexUnlock(guard scopedCleanupBinding) e
 	if err != nil {
 		return err
 	}
-	handleValue := C.LLVMBuildExtractValue(s.builder, guardValue, 0, cStringFree("lock.guard.handle"))
+	handleValue := llvmBuildExtractValue(s.builder, guardValue, 0, cStringFree("lock.guard.handle"))
 	nullHandleType, err := s.g.lowerType(&semantic.RefType{Elem: s.g.namedType("void"), State: semantic.RefStateNullable, Storage: semantic.RefStorageAny, ExplicitStorage: true})
 	if err != nil {
 		return err
 	}
-	isNull := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), handleValue, C.LLVMConstNull(nullHandleType), cStringFree("lock.guard.null"))
-	unlockBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("lock.unlock"))
-	contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("lock.after"))
-	C.LLVMBuildCondBr(s.builder, isNull, contBB, unlockBB)
+	isNull := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), handleValue, llvmConstNull(nullHandleType), cStringFree("lock.guard.null"))
+	unlockBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("lock.unlock"))
+	contBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("lock.after"))
+	llvmBuildCondBr(s.builder, isNull, contBB, unlockBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, unlockBB)
+	llvmPositionBuilderAtEnd(s.builder, unlockBB)
 	unlockCall := &ast.CallExpr{
 		Func: &ast.Ident{Name: "mutex_unlock"},
 		Args: []ast.Expr{&ast.MoveExpr{Operand: &ast.Ident{Name: guard.name}}},
@@ -78,10 +70,10 @@ func (s *functionState) emitConditionalMutexUnlock(guard scopedCleanupBinding) e
 		return err
 	}
 	if !s.currentBlockTerminated() {
-		C.LLVMBuildBr(s.builder, contBB)
+		llvmBuildBr(s.builder, contBB)
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, contBB)
+	llvmPositionBuilderAtEnd(s.builder, contBB)
 	return nil
 }
 func (s *functionState) emitConditionalPoolShutdown(pool scopedCleanupBinding) error {
@@ -92,17 +84,17 @@ func (s *functionState) emitConditionalPoolShutdown(pool scopedCleanupBinding) e
 	if err != nil {
 		return err
 	}
-	handleValue := C.LLVMBuildExtractValue(s.builder, poolValue, 0, cStringFree("pool.handle"))
+	handleValue := llvmBuildExtractValue(s.builder, poolValue, 0, cStringFree("pool.handle"))
 	nullHandleType, err := s.g.lowerType(&semantic.RefType{Elem: s.g.namedType("void"), State: semantic.RefStateNullable, Storage: semantic.RefStorageAny, ExplicitStorage: true})
 	if err != nil {
 		return err
 	}
-	isNull := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), handleValue, C.LLVMConstNull(nullHandleType), cStringFree("pool.handle.null"))
-	shutdownBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("pool.shutdown"))
-	contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("pool.after"))
-	C.LLVMBuildCondBr(s.builder, isNull, contBB, shutdownBB)
+	isNull := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), handleValue, llvmConstNull(nullHandleType), cStringFree("pool.handle.null"))
+	shutdownBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("pool.shutdown"))
+	contBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("pool.after"))
+	llvmBuildCondBr(s.builder, isNull, contBB, shutdownBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, shutdownBB)
+	llvmPositionBuilderAtEnd(s.builder, shutdownBB)
 	if err := s.emitPoolShutdown(pool.ptr, pool.typ); err != nil {
 		return err
 	}
@@ -110,15 +102,15 @@ func (s *functionState) emitConditionalPoolShutdown(pool scopedCleanupBinding) e
 	if err != nil {
 		return err
 	}
-	C.LLVMBuildStore(s.builder, zero, pool.ptr)
+	llvmBuildStore(s.builder, zero, pool.ptr)
 	if !s.currentBlockTerminated() {
-		C.LLVMBuildBr(s.builder, contBB)
+		llvmBuildBr(s.builder, contBB)
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, contBB)
+	llvmPositionBuilderAtEnd(s.builder, contBB)
 	return nil
 }
-func (s *functionState) emitPoolShutdown(poolPtr C.LLVMValueRef, poolType semantic.Type) error {
+func (s *functionState) emitPoolShutdown(poolPtr llvmIRValueRef, poolType semantic.Type) error {
 	poolRefType := &semantic.RefType{Elem: poolType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	helperType := &semantic.FuncType{Name: "pool_shutdown", Params: []semantic.Type{poolRefType}, Return: s.g.namedType("void")}
 	callee, err := s.g.ensureFunctionDeclared("pool_shutdown", helperType)
@@ -129,7 +121,7 @@ func (s *functionState) emitPoolShutdown(poolPtr C.LLVMValueRef, poolType semant
 	if err != nil {
 		return err
 	}
-	s.buildCall(llvmFnType, callee, []C.LLVMValueRef{poolPtr}, "")
+	s.buildCall(llvmFnType, callee, []llvmIRValueRef{poolPtr}, "")
 	return nil
 }
 
@@ -149,9 +141,9 @@ func regionStrategyTag(allocator string) int {
 		return 0 // ARENA_STRATEGY_CHAINED ("" or "chained")
 	}
 }
-func (s *functionState) emitRegionInit(arenaPtr C.LLVMValueRef, arenaType semantic.Type, capacityExpr ast.Expr, allocator string) error {
+func (s *functionState) emitRegionInit(arenaPtr llvmIRValueRef, arenaType semantic.Type, capacityExpr ast.Expr, allocator string) error {
 	capacityType := s.g.namedType("usize")
-	var capacityValue C.LLVMValueRef
+	var capacityValue llvmIRValueRef
 	if capacityExpr != nil {
 		value, _, err := s.emitExpr(capacityExpr, capacityType)
 		if err != nil {
@@ -163,7 +155,7 @@ func (s *functionState) emitRegionInit(arenaPtr C.LLVMValueRef, arenaType semant
 		if err != nil {
 			return err
 		}
-		capacityValue = C.LLVMConstInt(usizeLLVMType, 8*1024, 0)
+		capacityValue = llvmConstInt(usizeLLVMType, 8*1024, 0)
 	}
 	return s.emitRegionInitValue(arenaPtr, arenaType, capacityValue, regionStrategyTag(allocator))
 }
@@ -171,7 +163,7 @@ func (s *functionState) emitRegionInit(arenaPtr C.LLVMValueRef, arenaType semant
 // emitRegionInitValue eagerly initializes a region's first block from a precomputed slot capacity
 // and strategy tag (used for inferred reserve_commit stacks, where the capacity is a derived value
 // rather than a surface expression).
-func (s *functionState) emitRegionInitValue(arenaPtr C.LLVMValueRef, arenaType semantic.Type, capacityValue C.LLVMValueRef, strategyTag int) error {
+func (s *functionState) emitRegionInitValue(arenaPtr llvmIRValueRef, arenaType semantic.Type, capacityValue llvmIRValueRef, strategyTag int) error {
 	capacityType := s.g.namedType("usize")
 	regionType := s.g.namedType("Region")
 	if regionType == nil {
@@ -190,7 +182,7 @@ func (s *functionState) emitRegionInitValue(arenaPtr C.LLVMValueRef, arenaType s
 	if lerr != nil {
 		return lerr
 	}
-	strategyConst := C.LLVMConstInt(intLLVMType, C.ulonglong(strategyTag), 0)
+	strategyConst := llvmConstInt(intLLVMType, llvmIRUnsignedLongLong(strategyTag), 0)
 	helperType := &semantic.FuncType{Name: "new_region_backend", Params: []semantic.Type{capacityType, intType}, Return: regionRefType}
 	callee, cerr := s.g.ensureFunctionDeclared("new_region_backend", helperType)
 	if cerr != nil {
@@ -200,15 +192,15 @@ func (s *functionState) emitRegionInitValue(arenaPtr C.LLVMValueRef, arenaType s
 	if ferr != nil {
 		return ferr
 	}
-	regionValue := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{capacityValue, strategyConst}, "region.init")
+	regionValue := s.buildCall(llvmFnType, callee, []llvmIRValueRef{capacityValue, strategyConst}, "region.init")
 	if strategyTag != 0 {
-		strategyPtr := C.LLVMBuildStructGEP2(s.builder, arenaLLVMType, arenaPtr, 3, cStringFree("region.strategy"))
-		C.LLVMBuildStore(s.builder, strategyConst, strategyPtr)
+		strategyPtr := llvmBuildStructGEP2(s.builder, arenaLLVMType, arenaPtr, 3, cStringFree("region.strategy"))
+		llvmBuildStore(s.builder, strategyConst, strategyPtr)
 	}
-	beginPtr := C.LLVMBuildStructGEP2(s.builder, arenaLLVMType, arenaPtr, 0, cStringFree("region.begin"))
-	endPtr := C.LLVMBuildStructGEP2(s.builder, arenaLLVMType, arenaPtr, 1, cStringFree("region.end"))
-	C.LLVMBuildStore(s.builder, regionValue, beginPtr)
-	C.LLVMBuildStore(s.builder, regionValue, endPtr)
+	beginPtr := llvmBuildStructGEP2(s.builder, arenaLLVMType, arenaPtr, 0, cStringFree("region.begin"))
+	endPtr := llvmBuildStructGEP2(s.builder, arenaLLVMType, arenaPtr, 1, cStringFree("region.end"))
+	llvmBuildStore(s.builder, regionValue, beginPtr)
+	llvmBuildStore(s.builder, regionValue, endPtr)
 	if err := s.emitRegionProfileCreate(arenaPtr, regionValue, capacityValue); err != nil {
 		return err
 	}
@@ -219,7 +211,7 @@ func (s *functionState) emitRegionInitValue(arenaPtr C.LLVMValueRef, arenaType s
 // obtains during initialization. Lazy arenas already report this from arena_alloc;
 // explicit regions bypass that path, so omitting this call loses their lifecycle
 // entirely from the profiler stream.
-func (s *functionState) emitRegionProfileCreate(arenaPtr C.LLVMValueRef, regionValue C.LLVMValueRef, capacityValue C.LLVMValueRef) error {
+func (s *functionState) emitRegionProfileCreate(arenaPtr llvmIRValueRef, regionValue llvmIRValueRef, capacityValue llvmIRValueRef) error {
 	u32Type := s.g.namedType("u32")
 	uintptrType := s.g.namedType("uintptr")
 	usizeType := s.g.namedType("usize")
@@ -255,25 +247,25 @@ func (s *functionState) emitRegionProfileCreate(arenaPtr C.LLVMValueRef, regionV
 	if err != nil {
 		return err
 	}
-	capacityBytes := C.LLVMBuildMul(
+	capacityBytes := llvmBuildMul(
 		s.builder,
 		capacityValue,
-		C.LLVMConstInt(usizeLLVMType, C.ulonglong(s.g.wordBits/8), 0),
+		llvmConstInt(usizeLLVMType, llvmIRUnsignedLongLong(s.g.wordBits/8), 0),
 		cStringFree("profile.region.bytes"),
 	)
-	args := []C.LLVMValueRef{
-		C.LLVMConstInt(u32LLVMType, C.ulonglong(profileAllocationRegionCreate), 0),
-		C.LLVMBuildPtrToInt(s.builder, regionValue, uintptrLLVMType, cStringFree("profile.region.address")),
+	args := []llvmIRValueRef{
+		llvmConstInt(u32LLVMType, llvmIRUnsignedLongLong(profileAllocationRegionCreate), 0),
+		llvmBuildPtrToInt(s.builder, regionValue, uintptrLLVMType, cStringFree("profile.region.address")),
 		capacityBytes,
-		C.LLVMConstInt(uintptrLLVMType, 0, 0),
-		C.LLVMConstInt(usizeLLVMType, 0, 0),
-		C.LLVMBuildPtrToInt(s.builder, arenaPtr, uintptrLLVMType, cStringFree("profile.arena.address")),
-		C.LLVMConstInt(usizeLLVMType, 0, 0),
+		llvmConstInt(uintptrLLVMType, 0, 0),
+		llvmConstInt(usizeLLVMType, 0, 0),
+		llvmBuildPtrToInt(s.builder, arenaPtr, uintptrLLVMType, cStringFree("profile.arena.address")),
+		llvmConstInt(usizeLLVMType, 0, 0),
 	}
 	s.buildCall(llvmFnType, callee, args, "")
 	return nil
 }
-func (s *functionState) emitArenaFree(arenaPtr C.LLVMValueRef, arenaType semantic.Type) error {
+func (s *functionState) emitArenaFree(arenaPtr llvmIRValueRef, arenaType semantic.Type) error {
 	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	helperType := &semantic.FuncType{Name: "arena_free", Params: []semantic.Type{arenaRefType}, Return: s.g.namedType("void")}
 	callee, err := s.g.ensureFunctionDeclared("arena_free", helperType)
@@ -284,10 +276,10 @@ func (s *functionState) emitArenaFree(arenaPtr C.LLVMValueRef, arenaType semanti
 	if err != nil {
 		return err
 	}
-	s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaPtr}, "")
+	s.buildCall(llvmFnType, callee, []llvmIRValueRef{arenaPtr}, "")
 	return nil
 }
-func (s *functionState) emitArenaSnapshot(arenaPtr C.LLVMValueRef, arenaType semantic.Type) (C.LLVMValueRef, error) {
+func (s *functionState) emitArenaSnapshot(arenaPtr llvmIRValueRef, arenaType semantic.Type) (llvmIRValueRef, error) {
 	markType := s.g.namedType("ArenaMark")
 	if markType == nil {
 		return nil, fmt.Errorf("missing builtin ArenaMark type for region checkpoints")
@@ -302,9 +294,9 @@ func (s *functionState) emitArenaSnapshot(arenaPtr C.LLVMValueRef, arenaType sem
 	if err != nil {
 		return nil, err
 	}
-	return s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaPtr}, "region.mark"), nil
+	return s.buildCall(llvmFnType, callee, []llvmIRValueRef{arenaPtr}, "region.mark"), nil
 }
-func (s *functionState) emitArenaRewind(arenaPtr C.LLVMValueRef, arenaType semantic.Type, markValue C.LLVMValueRef, markType semantic.Type) error {
+func (s *functionState) emitArenaRewind(arenaPtr llvmIRValueRef, arenaType semantic.Type, markValue llvmIRValueRef, markType semantic.Type) error {
 	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	helperType := &semantic.FuncType{Name: "arena_rewind", Params: []semantic.Type{arenaRefType, markType}, Return: s.g.namedType("void")}
 	callee, err := s.g.ensureFunctionDeclared("arena_rewind", helperType)
@@ -315,10 +307,10 @@ func (s *functionState) emitArenaRewind(arenaPtr C.LLVMValueRef, arenaType seman
 	if err != nil {
 		return err
 	}
-	s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaPtr, markValue}, "")
+	s.buildCall(llvmFnType, callee, []llvmIRValueRef{arenaPtr, markValue}, "")
 	return nil
 }
-func (s *functionState) emitArenaReset(arenaPtr C.LLVMValueRef, arenaType semantic.Type) error {
+func (s *functionState) emitArenaReset(arenaPtr llvmIRValueRef, arenaType semantic.Type) error {
 	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	helperType := &semantic.FuncType{Name: "arena_reset", Params: []semantic.Type{arenaRefType}, Return: s.g.namedType("void")}
 	callee, err := s.g.ensureFunctionDeclared("arena_reset", helperType)
@@ -329,10 +321,10 @@ func (s *functionState) emitArenaReset(arenaPtr C.LLVMValueRef, arenaType semant
 	if err != nil {
 		return err
 	}
-	s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaPtr}, "")
+	s.buildCall(llvmFnType, callee, []llvmIRValueRef{arenaPtr}, "")
 	return nil
 }
-func (s *functionState) emitArenaAdopt(parentPtr C.LLVMValueRef, childPtr C.LLVMValueRef, arenaType semantic.Type) error {
+func (s *functionState) emitArenaAdopt(parentPtr llvmIRValueRef, childPtr llvmIRValueRef, arenaType semantic.Type) error {
 	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	helperType := &semantic.FuncType{Name: "arena_adopt", Params: []semantic.Type{arenaRefType, arenaRefType}, Return: s.g.namedType("void")}
 	callee, err := s.g.ensureFunctionDeclared("arena_adopt", helperType)
@@ -343,10 +335,10 @@ func (s *functionState) emitArenaAdopt(parentPtr C.LLVMValueRef, childPtr C.LLVM
 	if err != nil {
 		return err
 	}
-	s.buildCall(llvmFnType, callee, []C.LLVMValueRef{parentPtr, childPtr}, "")
+	s.buildCall(llvmFnType, callee, []llvmIRValueRef{parentPtr, childPtr}, "")
 	return nil
 }
-func (s *functionState) attachBranchHintMetadata(branch C.LLVMValueRef, hint ast.BranchHint) {
+func (s *functionState) attachBranchHintMetadata(branch llvmIRValueRef, hint ast.BranchHint) {
 	if s == nil || s.g == nil || branch == nil || hint == ast.BranchHintNone {
 		return
 	}
@@ -355,10 +347,10 @@ func (s *functionState) attachBranchHintMetadata(branch C.LLVMValueRef, hint ast
 	if hint == ast.BranchHintUnlikely {
 		trueWeight, falseWeight = falseWeight, trueWeight
 	}
-	C.elisa_coreSetBranchWeights(branch, s.g.context, C.uint(trueWeight), C.uint(falseWeight))
+	llvmSetBranchWeights(branch, s.g.context, llvmIRUnsigned(trueWeight), llvmIRUnsigned(falseWeight))
 }
-func (s *functionState) buildCondBrWithHint(condValue C.LLVMValueRef, trueBB C.LLVMBasicBlockRef, falseBB C.LLVMBasicBlockRef, hint ast.BranchHint) {
-	branch := C.LLVMBuildCondBr(s.builder, condValue, trueBB, falseBB)
+func (s *functionState) buildCondBrWithHint(condValue llvmIRValueRef, trueBB llvmIRBlockRef, falseBB llvmIRBlockRef, hint ast.BranchHint) {
+	branch := llvmBuildCondBr(s.builder, condValue, trueBB, falseBB)
 	s.attachBranchHintMetadata(branch, hint)
 }
 func backendConditionOptionalBindType(valueType semantic.Type) (semantic.Type, bool) {

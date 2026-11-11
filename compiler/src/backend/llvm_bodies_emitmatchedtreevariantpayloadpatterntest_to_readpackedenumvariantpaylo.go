@@ -2,14 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-
-void elisa_coreSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigned trueWeight, unsigned falseWeight);
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -54,7 +46,7 @@ func packedEnumMatchCanUseTagSwitch(enumType *semantic.EnumType, arms []ast.Matc
 	}
 	return len(seen) >= 3
 }
-func (s *functionState) emitStringMatchPatternTest(pattern ast.MatchPattern, actualValue C.LLVMValueRef, actualExpr ast.Expr, actualType semantic.Type, successBB C.LLVMBasicBlockRef, failureBB C.LLVMBasicBlockRef) error {
+func (s *functionState) emitStringMatchPatternTest(pattern ast.MatchPattern, actualValue llvmIRValueRef, actualExpr ast.Expr, actualType semantic.Type, successBB llvmIRBlockRef, failureBB llvmIRBlockRef) error {
 	_, _, err := s.emitMatchPatternTest(pattern, actualValue, nil, actualType, nil, actualExpr, nil, successBB, failureBB)
 	return err
 }
@@ -187,16 +179,16 @@ func (s *functionState) resolveTupleMatchPatternElems(pattern *ast.MatchTuplePat
 	}
 	return fields, nil
 }
-func (s *functionState) extractEnumTagValue(enumValue C.LLVMValueRef, decodedEnumValue C.LLVMValueRef, enumType *semantic.EnumType, store *packedStoreBinding) (C.LLVMValueRef, error) {
+func (s *functionState) extractEnumTagValue(enumValue llvmIRValueRef, decodedEnumValue llvmIRValueRef, enumType *semantic.EnumType, store *packedStoreBinding) (llvmIRValueRef, error) {
 	if enumType != nil && enumType.Packed {
 		return s.loadEnumTag(decodedEnumValue, enumValue, enumType, store)
 	}
 	if enumIsTagOnly(enumType) {
 		return enumValue, nil
 	}
-	return C.LLVMBuildExtractValue(s.builder, enumValue, 0, cStringFree("match.tag.value")), nil
+	return llvmBuildExtractValue(s.builder, enumValue, 0, cStringFree("match.tag.value")), nil
 }
-func (s *functionState) extractEnumVariantPayloadValues(enumValue C.LLVMValueRef, decodedEnumValue C.LLVMValueRef, enumType *semantic.EnumType, variant *semantic.EnumVariant, store *packedStoreBinding, originExpr ast.Expr) ([]C.LLVMValueRef, error) {
+func (s *functionState) extractEnumVariantPayloadValues(enumValue llvmIRValueRef, decodedEnumValue llvmIRValueRef, enumType *semantic.EnumType, variant *semantic.EnumVariant, store *packedStoreBinding, originExpr ast.Expr) ([]llvmIRValueRef, error) {
 	if variant == nil || len(variant.Payload) == 0 {
 		return nil, nil
 	}
@@ -227,7 +219,7 @@ func (s *functionState) extractEnumVariantPayloadValues(enumValue C.LLVMValueRef
 // prepareNonPackedEnumMatchTemp materializes a non-packed enum scrutinee once.
 // Callers invoke it before emitting dispatch so its copy dominates every arm;
 // nested/fallback extraction still remains safe when no pre-seeding occurred.
-func (s *functionState) prepareNonPackedEnumMatchTemp(enumValue C.LLVMValueRef, enumType *semantic.EnumType) (C.LLVMValueRef, error) {
+func (s *functionState) prepareNonPackedEnumMatchTemp(enumValue llvmIRValueRef, enumType *semantic.EnumType) (llvmIRValueRef, error) {
 	if enumValue == nil || enumType == nil || enumType.Packed || enumIsTagOnly(enumType) {
 		return nil, nil
 	}
@@ -239,7 +231,7 @@ func (s *functionState) prepareNonPackedEnumMatchTemp(enumValue C.LLVMValueRef, 
 		return nil, err
 	}
 	if s.nonPackedEnumMatchTemps == nil {
-		s.nonPackedEnumMatchTemps = make(map[C.LLVMValueRef]C.LLVMValueRef)
+		s.nonPackedEnumMatchTemps = make(map[llvmIRValueRef]llvmIRValueRef)
 	}
 	s.nonPackedEnumMatchTemps[enumValue] = ptr
 	return ptr, nil
@@ -351,13 +343,13 @@ func constEnumMatchIsExhaustive(constEnumType *semantic.ConstEnumType, arms []as
 	}
 	return len(covered) == len(constEnumType.Members)
 }
-func (s *functionState) loadEnumTag(decodedEnumPtr C.LLVMValueRef, enumPtr C.LLVMValueRef, enumType *semantic.EnumType, store *packedStoreBinding) (C.LLVMValueRef, error) {
+func (s *functionState) loadEnumTag(decodedEnumPtr llvmIRValueRef, enumPtr llvmIRValueRef, enumType *semantic.EnumType, store *packedStoreBinding) (llvmIRValueRef, error) {
 	if enumType != nil && !enumType.Packed && enumIsTagOnly(enumType) {
 		tagType, err := s.g.lowerEnumTagType(enumType)
 		if err != nil {
 			return nil, err
 		}
-		return C.LLVMBuildLoad2(s.builder, tagType, enumPtr, cStringFree("match.tag.value")), nil
+		return llvmBuildLoad2(s.builder, tagType, enumPtr, cStringFree("match.tag.value")), nil
 	}
 	if enumType != nil && enumType.Packed {
 		if decodedEnumPtr != nil {
@@ -377,14 +369,14 @@ func (s *functionState) loadEnumTag(decodedEnumPtr C.LLVMValueRef, enumPtr C.LLV
 	if err != nil {
 		return nil, err
 	}
-	tagPtr := C.LLVMBuildStructGEP2(s.builder, enumLLVMType, enumPtr, 0, cStringFree("match.tag.ptr"))
+	tagPtr := llvmBuildStructGEP2(s.builder, enumLLVMType, enumPtr, 0, cStringFree("match.tag.ptr"))
 	tagType, err := s.g.lowerEnumTagType(enumType)
 	if err != nil {
 		return nil, err
 	}
-	return C.LLVMBuildLoad2(s.builder, tagType, tagPtr, cStringFree("match.tag.value")), nil
+	return llvmBuildLoad2(s.builder, tagType, tagPtr, cStringFree("match.tag.value")), nil
 }
-func (s *functionState) readInlineWordHandlePayload(handleValue C.LLVMValueRef, enumType *semantic.EnumType, variant *semantic.EnumVariant) ([]C.LLVMValueRef, bool, error) {
+func (s *functionState) readInlineWordHandlePayload(handleValue llvmIRValueRef, enumType *semantic.EnumType, variant *semantic.EnumVariant) ([]llvmIRValueRef, bool, error) {
 	if !s.canInlinePackedEnumVariant(enumType, variant) || len(variant.Payload) != 1 {
 		return nil, false, nil
 	}
@@ -396,12 +388,12 @@ func (s *functionState) readInlineWordHandlePayload(handleValue C.LLVMValueRef, 
 	if err != nil {
 		return nil, false, err
 	}
-	shifted := C.LLVMBuildLShr(s.builder, handleValue, C.LLVMConstInt(uintptrLLVMType, 1, 0), cStringFree("packed.inline.payload.bits"))
-	masked := C.LLVMBuildAnd(s.builder, shifted, C.LLVMConstInt(uintptrLLVMType, C.ulonglong(0x0000ffffffffffff), 0), cStringFree("packed.inline.payload.mask"))
-	value := C.LLVMBuildTrunc(s.builder, masked, payloadLLVMType, cStringFree("packed.inline.payload.value"))
-	return []C.LLVMValueRef{value}, true, nil
+	shifted := llvmBuildLShr(s.builder, handleValue, llvmConstInt(uintptrLLVMType, 1, 0), cStringFree("packed.inline.payload.bits"))
+	masked := llvmBuildAnd(s.builder, shifted, llvmConstInt(uintptrLLVMType, llvmIRUnsignedLongLong(0x0000ffffffffffff), 0), cStringFree("packed.inline.payload.mask"))
+	value := llvmBuildTrunc(s.builder, masked, payloadLLVMType, cStringFree("packed.inline.payload.value"))
+	return []llvmIRValueRef{value}, true, nil
 }
-func (s *functionState) loadEnumVariantPayload(decodedEnumPtr C.LLVMValueRef, enumPtr C.LLVMValueRef, enumType *semantic.EnumType, variant *semantic.EnumVariant, store *packedStoreBinding, origin packedReadOriginKey) ([]C.LLVMValueRef, error) {
+func (s *functionState) loadEnumVariantPayload(decodedEnumPtr llvmIRValueRef, enumPtr llvmIRValueRef, enumType *semantic.EnumType, variant *semantic.EnumVariant, store *packedStoreBinding, origin packedReadOriginKey) ([]llvmIRValueRef, error) {
 	if variant == nil || len(variant.Payload) == 0 {
 		return nil, nil
 	}
@@ -440,7 +432,7 @@ func (s *functionState) loadEnumVariantPayload(decodedEnumPtr C.LLVMValueRef, en
 	}
 	// docs/76 free-null niche: record slots for optional enum children hold the bare handle;
 	// rebuild the generic carrier as each field value crosses the record boundary.
-	unpackNiche := func(value C.LLVMValueRef, fieldType semantic.Type) (C.LLVMValueRef, error) {
+	unpackNiche := func(value llvmIRValueRef, fieldType semantic.Type) (llvmIRValueRef, error) {
 		nicheEnum, ok := s.g.optionalEnumNicheField(fieldType)
 		if !ok {
 			return value, nil
@@ -448,24 +440,24 @@ func (s *functionState) loadEnumVariantPayload(decodedEnumPtr C.LLVMValueRef, en
 		return s.unpackOptionalEnumNicheValue(value, fieldType.(*semantic.OptionalType), nicheEnum, "match.payload")
 	}
 	if len(variant.Payload) == 1 {
-		value := C.LLVMBuildLoad2(s.builder, payloadType, payloadPtr, cStringFree("match.payload"))
+		value := llvmBuildLoad2(s.builder, payloadType, payloadPtr, cStringFree("match.payload"))
 		// The AoS record payload is tiled at handle width (u32) and sits at a 4-byte
 		// offset after the tag, so `payloadPtr` is only 4-aligned even when the loaded
 		// struct (e.g. a DynArray side-table with an 8-byte data pointer) has a natural
 		// 8-byte alignment. Declaring the load's true (under-)alignment prevents -O2 from
 		// assuming 8-alignment and miscompiling the load (comprehension-filter Call SEGV).
-		C.LLVMSetAlignment(value, 4)
+		llvmSetAlignment(value, 4)
 		value, err := unpackNiche(value, variant.Payload[0])
 		if err != nil {
 			return nil, err
 		}
-		return []C.LLVMValueRef{value}, nil
+		return []llvmIRValueRef{value}, nil
 	}
-	aggregate := C.LLVMBuildLoad2(s.builder, payloadType, payloadPtr, cStringFree("match.payload"))
-	C.LLVMSetAlignment(aggregate, 4)
-	values := make([]C.LLVMValueRef, 0, len(variant.Payload))
+	aggregate := llvmBuildLoad2(s.builder, payloadType, payloadPtr, cStringFree("match.payload"))
+	llvmSetAlignment(aggregate, 4)
+	values := make([]llvmIRValueRef, 0, len(variant.Payload))
 	for i, fieldType := range variant.Payload {
-		value := C.LLVMBuildExtractValue(s.builder, aggregate, C.unsigned(i), cStringFree("match.payload.field"))
+		value := llvmBuildExtractValue(s.builder, aggregate, llvmIRUnsigned(i), cStringFree("match.payload.field"))
 		value, err := unpackNiche(value, fieldType)
 		if err != nil {
 			return nil, err
@@ -474,7 +466,7 @@ func (s *functionState) loadEnumVariantPayload(decodedEnumPtr C.LLVMValueRef, en
 	}
 	return values, nil
 }
-func (s *functionState) readPackedEnumVariantPayloadWithStore(handleValue C.LLVMValueRef, enumType *semantic.EnumType, variant *semantic.EnumVariant, store *packedStoreBinding, origin packedReadOriginKey) ([]C.LLVMValueRef, bool, error) {
+func (s *functionState) readPackedEnumVariantPayloadWithStore(handleValue llvmIRValueRef, enumType *semantic.EnumType, variant *semantic.EnumVariant, store *packedStoreBinding, origin packedReadOriginKey) ([]llvmIRValueRef, bool, error) {
 	if enumType == nil || !enumType.Packed || variant == nil || len(variant.Payload) == 0 {
 		return nil, false, nil
 	}
@@ -491,7 +483,7 @@ func (s *functionState) readPackedEnumVariantPayloadWithStore(handleValue C.LLVM
 	cachePayloadValues := false
 	if ops.canCacheDirectReadValues(enumType) {
 		if s.packedVariantPayloadReads == nil {
-			s.packedVariantPayloadReads = map[packedVariantPayloadReadCacheKey][]C.LLVMValueRef{}
+			s.packedVariantPayloadReads = map[packedVariantPayloadReadCacheKey][]llvmIRValueRef{}
 		}
 		originKey, cacheHandle := ops.directReadCacheIdentity(enumType, origin, handleValue)
 		payloadCacheKey = packedVariantPayloadReadCacheKey{
@@ -508,7 +500,7 @@ func (s *functionState) readPackedEnumVariantPayloadWithStore(handleValue C.LLVM
 		cachePayloadValues = true
 	}
 	tailIndex, hasTail := variant.TailPayloadIndex()
-	var tailValue C.LLVMValueRef
+	var tailValue llvmIRValueRef
 	if hasTail {
 		var err error
 		tailValue, ok, err = ops.loadTailView(handleValue, enumType, variant, tailIndex, "packed.payload.tail")
@@ -521,7 +513,7 @@ func (s *functionState) readPackedEnumVariantPayloadWithStore(handleValue C.LLVM
 	} else if !ops.canDirectWordRead() {
 		return nil, false, nil
 	}
-	values := make([]C.LLVMValueRef, 0, len(variant.Payload))
+	values := make([]llvmIRValueRef, 0, len(variant.Payload))
 	for payloadIndex, payloadType := range variant.Payload {
 		if hasTail && payloadIndex == tailIndex {
 			values = append(values, tailValue)

@@ -75,3 +75,34 @@ func llvmConstPointerNull(typ llvmIRTypeRef) llvmIRValueRef {
 func llvmGetTypeByName2(context llvmIRContextRef, name *llvmIRChar) llvmIRTypeRef {
 	return C.LLVMGetTypeByName2(context, name)
 }
+
+type llvmIRDouble = C.double
+type llvmIRUint64 = C.uint64_t
+
+func llvmInt1TypeInContext(context llvmIRContextRef) llvmIRTypeRef {
+	return C.LLVMInt1TypeInContext(context)
+}
+
+func llvmIntTypeInContext(context llvmIRContextRef, width llvmIRUnsigned) llvmIRTypeRef {
+	return C.LLVMIntTypeInContext(context, width)
+}
+
+func llvmVoidTypeInContext(context llvmIRContextRef) llvmIRTypeRef {
+	return C.LLVMVoidTypeInContext(context)
+}
+
+func llvmArrayType2(element llvmIRTypeRef, count llvmIRUint64) llvmIRTypeRef {
+	return C.LLVMArrayType2(element, count)
+}
+
+func llvmStructTypeInContext(context llvmIRContextRef, elements *llvmIRTypeRef, count llvmIRUnsigned, packed llvmIRBool) llvmIRTypeRef {
+	return C.LLVMStructTypeInContext(context, elements, count, packed)
+}
+
+func llvmGlobalGetValueType(value llvmIRValueRef) llvmIRTypeRef {
+	return C.LLVMGlobalGetValueType(value)
+}
+
+func llvmConstReal(typ llvmIRTypeRef, value llvmIRDouble) llvmIRValueRef {
+	return C.LLVMConstReal(typ, value)
+}
