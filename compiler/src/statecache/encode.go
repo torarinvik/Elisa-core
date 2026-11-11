@@ -93,7 +93,18 @@ func (r *Registry) EncodeFramedWithCapacity(root any, capacity int) ([]byte, err
 }
 
 func (r *Registry) encode(root any, framed bool, capacity int) ([]byte, error) {
-	e := &encoder{registry: r, objects: map[identity]uint64{}, pointerObjects: pointerObjectIndex{byAddress: map[uintptr]pointerObject{}}, scanning: true, strings: map[string]uint64{}, framed: framed}
+	var pointerCapacity int
+	if framed && capacity >= 32<<20 {
+		// Reused checkpoints usually retain most of their graph. Reserve
+		// a conservative fraction of the previous wire size to avoid
+		// repeated growth of the address index while discovering objects.
+		pointerCapacity = min(capacity/128, 2_000_000)
+	}
+	e := &encoder{
+		registry: r, objects: map[identity]uint64{}, scanning: true,
+		pointerObjects: pointerObjectIndex{byAddress: make(map[uintptr]pointerObject, pointerCapacity)},
+		strings:        map[string]uint64{}, framed: framed,
+	}
 	v := reflect.ValueOf(root)
 	if !v.IsValid() || r.ids[v.Type()] == 0 {
 		return nil, fmt.Errorf("unregistered state root")
