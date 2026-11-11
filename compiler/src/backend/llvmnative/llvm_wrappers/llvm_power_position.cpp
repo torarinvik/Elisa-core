@@ -88,6 +88,61 @@ static bool foldPowerPositionLoop(BasicBlock &Body) {
   return true;
 }
 
+// The header tests the current power before doubling. The half-limit ensures
+// every executed doubling fits, including for the largest unsigned input.
+static bool foldHighestPowerOfTwoLoop(BasicBlock &Body) {
+  auto *Back = dyn_cast<CondBrInst>(Body.getTerminator());
+  auto *Done = Back ? dyn_cast<ICmpInst>(Back->getCondition()) : nullptr;
+  if (Body.size() != 4 || Body.hasAddressTaken() || !Done ||
+      Done->getPredicate() != ICmpInst::ICMP_UGT || Back->getSuccessor(1) != &Body ||
+      Back->getMetadata(LLVMContext::MD_loop))
+    return false;
+  BasicBlock *Exit = Back->getSuccessor(0);
+  auto *Power = dyn_cast<PHINode>(Done->getOperand(0));
+  auto *Limit = dyn_cast<BinaryOperator>(Done->getOperand(1));
+  if (Exit == &Body || !Power || Power->getParent() != &Body ||
+      !Power->getType()->isIntegerTy(64) || Power->getNumIncomingValues() != 2 ||
+      !Limit || Limit->getOpcode() != Instruction::LShr || Limit->isExact() ||
+      !powerPositionConstant(Limit->getOperand(1), 1))
+    return false;
+  auto *Doubled = dyn_cast_or_null<BinaryOperator>(Power->getIncomingValueForBlock(&Body));
+  if (!Doubled || Doubled->getParent() != &Body || Doubled->getOpcode() != Instruction::Shl ||
+      Doubled->getOperand(0) != Power || !powerPositionConstant(Doubled->getOperand(1), 1))
+    return false;
+  BasicBlock *Entry = Power->getIncomingBlock(Power->getIncomingBlock(0) == &Body ? 1 : 0);
+  auto *Enter = dyn_cast<UncondBrInst>(Entry->getTerminator());
+  if (Entry == Exit || !Enter || Enter->getSuccessor() != &Body ||
+      !powerPositionConstant(Power->getIncomingValueForBlock(Entry), 1))
+    return false;
+  for (Instruction &I : Body) {
+    for (Use &U : I.uses()) {
+      auto *UseInst = dyn_cast<Instruction>(U.getUser());
+      if (!UseInst) return false;
+      if (UseInst->getParent() == &Body) continue;
+      auto *Phi = dyn_cast<PHINode>(UseInst);
+      if (&I != Power || !Phi || Phi->getParent() != Exit || Phi->getIncomingBlock(U) != &Body)
+        return false;
+    }
+  }
+
+  IRBuilder<> B(Enter);
+  Value *Input = B.CreateFreeze(Limit->getOperand(0));
+  // The loop returns one for zero as well as one. Setting the low bit
+  // preserves every other highest set bit and makes ctlz defined.
+  Value *Nonzero = B.CreateOr(Input, B.getInt64(1));
+  Value *Zeros = B.CreateIntrinsic(Intrinsic::ctlz, {Input->getType()}, {Nonzero, B.getTrue()});
+  Value *Highest = B.CreateLShr(B.getInt64(uint64_t{1} << 63), Zeros, "highest.power.of.two");
+  for (PHINode &Phi : Exit->phis()) {
+    int Index = Phi.getBasicBlockIndex(&Body);
+    if (Phi.getIncomingValue(Index) == Power) Phi.setIncomingValue(Index, Highest);
+    Phi.setIncomingBlock(Index, Entry);
+  }
+  Enter->setSuccessor(0, Exit);
+  Body.dropAllReferences();
+  Body.eraseFromParent();
+  return true;
+}
+
 static bool foldPowerPositionChain(BasicBlock &Entry) {
   auto *Enter = dyn_cast<CondBrInst>(Entry.getTerminator());
   auto *Small = Enter ? dyn_cast<ICmpInst>(Enter->getCondition()) : nullptr;
@@ -164,7 +219,8 @@ static unsigned elisacoreFoldPowerPosition(Module &M) {
   for (Function &F : M) {
     if (BDU_SkipFunction(F, M) || F.size() > 128) continue;
     for (BasicBlock &B : F) {
-      if (!foldPowerPositionLoop(B) && !foldPowerPositionChain(B)) continue;
+      if (!foldHighestPowerOfTwoLoop(B) && !foldPowerPositionLoop(B) &&
+          !foldPowerPositionChain(B)) continue;
       ++Changed;
       break;
     }
