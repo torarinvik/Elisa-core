@@ -2,19 +2,13 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
 )
 
-func (s *functionState) emitBuiltinDictReceiverValue(receiver ast.Expr, receiverType semantic.Type) (C.LLVMValueRef, *semantic.DictType, error) {
+func (s *functionState) emitBuiltinDictReceiverValue(receiver ast.Expr, receiverType semantic.Type) (llvmIRValueRef, *semantic.DictType, error) {
 	dictType, receiverRefType, ok := builtinDictReceiverType(receiverType)
 	if !ok || dictType == nil {
 		return nil, nil, fmt.Errorf("dict receiver is not a dict")
@@ -26,7 +20,7 @@ func (s *functionState) emitBuiltinDictReceiverValue(receiver ast.Expr, receiver
 	ptr, _, err := s.emitAddress(receiver)
 	return ptr, dictType, err
 }
-func (s *functionState) emitBuiltinDictEntryValue(entryExpr ast.Expr, entryType *semantic.DictEntryType, receiverRefType *semantic.RefType) (C.LLVMValueRef, error) {
+func (s *functionState) emitBuiltinDictEntryValue(entryExpr ast.Expr, entryType *semantic.DictEntryType, receiverRefType *semantic.RefType) (llvmIRValueRef, error) {
 	if receiverRefType != nil {
 		entryPtr, _, err := s.emitExpr(entryExpr, receiverRefType)
 		if err != nil {
@@ -36,12 +30,12 @@ func (s *functionState) emitBuiltinDictEntryValue(entryExpr ast.Expr, entryType 
 		if err != nil {
 			return nil, err
 		}
-		return C.LLVMBuildLoad2(s.builder, entryLLVMType, entryPtr, cStringFree("dict.entry.load")), nil
+		return llvmBuildLoad2(s.builder, entryLLVMType, entryPtr, cStringFree("dict.entry.load")), nil
 	}
 	entryValue, _, err := s.emitExpr(entryExpr, entryType)
 	return entryValue, err
 }
-func (s *functionState) emitBuiltinDictEntryCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitBuiltinDictEntryCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
 	if !ok || fieldExpr == nil || fieldExpr.Field != "entry" || fieldExpr.Object == nil {
 		return nil, nil, false, nil
@@ -73,18 +67,18 @@ func (s *functionState) emitBuiltinDictEntryCall(expr *ast.CallExpr) (C.LLVMValu
 	if err != nil {
 		return nil, nil, true, err
 	}
-	valuePtr := s.buildCall(getLLVMType, getCallee, []C.LLVMValueRef{dictValue, keyValue}, "dict.entry.get")
+	valuePtr := s.buildCall(getLLVMType, getCallee, []llvmIRValueRef{dictValue, keyValue}, "dict.entry.get")
 	entryLLVMType, err := s.g.lowerType(resultType)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	entryValue := C.LLVMGetUndef(entryLLVMType)
-	entryValue = C.LLVMBuildInsertValue(s.builder, entryValue, dictValue, 0, cStringFree("dict.entry.dict"))
-	entryValue = C.LLVMBuildInsertValue(s.builder, entryValue, keyValue, 1, cStringFree("dict.entry.key"))
-	entryValue = C.LLVMBuildInsertValue(s.builder, entryValue, valuePtr, 2, cStringFree("dict.entry.value"))
+	entryValue := llvmGetUndef(entryLLVMType)
+	entryValue = llvmBuildInsertValue(s.builder, entryValue, dictValue, 0, cStringFree("dict.entry.dict"))
+	entryValue = llvmBuildInsertValue(s.builder, entryValue, keyValue, 1, cStringFree("dict.entry.key"))
+	entryValue = llvmBuildInsertValue(s.builder, entryValue, valuePtr, 2, cStringFree("dict.entry.value"))
 	return entryValue, resultType, true, nil
 }
-func (s *functionState) emitBuiltinDictEntryInsertCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitBuiltinDictEntryInsertCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
 	if !ok || fieldExpr == nil || fieldExpr.Field != "insert" || fieldExpr.Object == nil {
 		return nil, nil, false, nil
@@ -117,7 +111,7 @@ func (s *functionState) emitBuiltinDictEntryInsertCall(expr *ast.CallExpr) (C.LL
 		}
 		owner.arenaRef = arenaRef
 	}
-	var entryPtr C.LLVMValueRef
+	var entryPtr llvmIRValueRef
 	var err error
 	if receiverRefType != nil {
 		entryPtr, _, err = s.emitExpr(fieldExpr.Object, receiverRefType)
@@ -146,35 +140,35 @@ func (s *functionState) emitBuiltinDictEntryInsertCall(expr *ast.CallExpr) (C.LL
 	if err != nil {
 		return nil, nil, true, err
 	}
-	var dictValue, keyValue, cachedValue C.LLVMValueRef
-	var valuePtrPtr C.LLVMValueRef
+	var dictValue, keyValue, cachedValue llvmIRValueRef
+	var valuePtrPtr llvmIRValueRef
 	if entryPtr != nil {
-		dictPtr := C.LLVMBuildStructGEP2(s.builder, entryLLVMType, entryPtr, 0, cStringFree("dict.entry.insert.dict.ptr"))
-		keyPtr := C.LLVMBuildStructGEP2(s.builder, entryLLVMType, entryPtr, 1, cStringFree("dict.entry.insert.key.ptr"))
-		valuePtrPtr = C.LLVMBuildStructGEP2(s.builder, entryLLVMType, entryPtr, 2, cStringFree("dict.entry.insert.value.ptr"))
-		dictValue = C.LLVMBuildLoad2(s.builder, dictRefLLVMType, dictPtr, cStringFree("dict.entry.insert.dict"))
-		keyValue = C.LLVMBuildLoad2(s.builder, keyLLVMType, keyPtr, cStringFree("dict.entry.insert.key"))
-		cachedValue = C.LLVMBuildLoad2(s.builder, valueRefLLVMType, valuePtrPtr, cStringFree("dict.entry.insert.cached"))
+		dictPtr := llvmBuildStructGEP2(s.builder, entryLLVMType, entryPtr, 0, cStringFree("dict.entry.insert.dict.ptr"))
+		keyPtr := llvmBuildStructGEP2(s.builder, entryLLVMType, entryPtr, 1, cStringFree("dict.entry.insert.key.ptr"))
+		valuePtrPtr = llvmBuildStructGEP2(s.builder, entryLLVMType, entryPtr, 2, cStringFree("dict.entry.insert.value.ptr"))
+		dictValue = llvmBuildLoad2(s.builder, dictRefLLVMType, dictPtr, cStringFree("dict.entry.insert.dict"))
+		keyValue = llvmBuildLoad2(s.builder, keyLLVMType, keyPtr, cStringFree("dict.entry.insert.key"))
+		cachedValue = llvmBuildLoad2(s.builder, valueRefLLVMType, valuePtrPtr, cStringFree("dict.entry.insert.cached"))
 	} else {
 		entryValue, err := s.emitBuiltinDictEntryValue(fieldExpr.Object, entryType, receiverRefType)
 		if err != nil {
 			return nil, nil, true, err
 		}
-		dictValue = C.LLVMBuildExtractValue(s.builder, entryValue, 0, cStringFree("dict.entry.insert.dict"))
-		keyValue = C.LLVMBuildExtractValue(s.builder, entryValue, 1, cStringFree("dict.entry.insert.key"))
-		cachedValue = C.LLVMBuildExtractValue(s.builder, entryValue, 2, cStringFree("dict.entry.insert.cached"))
+		dictValue = llvmBuildExtractValue(s.builder, entryValue, 0, cStringFree("dict.entry.insert.dict"))
+		keyValue = llvmBuildExtractValue(s.builder, entryValue, 1, cStringFree("dict.entry.insert.key"))
+		cachedValue = llvmBuildExtractValue(s.builder, entryValue, 2, cStringFree("dict.entry.insert.cached"))
 	}
-	nullValue := C.LLVMConstNull(valueRefLLVMType)
-	hasCached := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), cachedValue, nullValue, cStringFree("dict.entry.insert.has"))
-	currentBB := C.LLVMGetInsertBlock(s.builder)
-	nonNullBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("dict.entry.insert.nonnull"))
-	insertBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("dict.entry.insert.insert"))
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("dict.entry.insert.merge"))
-	C.LLVMBuildCondBr(s.builder, hasCached, nonNullBB, insertBB)
-	C.LLVMPositionBuilderAtEnd(s.builder, nonNullBB)
-	C.LLVMBuildBr(s.builder, mergeBB)
-	nonNullEnd := C.LLVMGetInsertBlock(s.builder)
-	C.LLVMPositionBuilderAtEnd(s.builder, insertBB)
+	nullValue := llvmConstNull(valueRefLLVMType)
+	hasCached := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntNE), cachedValue, nullValue, cStringFree("dict.entry.insert.has"))
+	currentBB := llvmGetInsertBlock(s.builder)
+	nonNullBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("dict.entry.insert.nonnull"))
+	insertBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("dict.entry.insert.insert"))
+	mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("dict.entry.insert.merge"))
+	llvmBuildCondBr(s.builder, hasCached, nonNullBB, insertBB)
+	llvmPositionBuilderAtEnd(s.builder, nonNullBB)
+	llvmBuildBr(s.builder, mergeBB)
+	nonNullEnd := llvmGetInsertBlock(s.builder)
+	llvmPositionBuilderAtEnd(s.builder, insertBB)
 	insertedArg, _, err := s.emitExpr(expr.Args[0], entryType.Dict.Value)
 	if err != nil {
 		return nil, nil, true, err
@@ -187,20 +181,20 @@ func (s *functionState) emitBuiltinDictEntryInsertCall(expr *ast.CallExpr) (C.LL
 	if err != nil {
 		return nil, nil, true, err
 	}
-	insertedValue := s.buildCall(putLLVMType, putCallee, []C.LLVMValueRef{owner.arenaRef, dictValue, keyValue, insertedArg}, "dict.entry.insert.result")
+	insertedValue := s.buildCall(putLLVMType, putCallee, []llvmIRValueRef{owner.arenaRef, dictValue, keyValue, insertedArg}, "dict.entry.insert.result")
 	if valuePtrPtr != nil {
-		C.LLVMBuildStore(s.builder, insertedValue, valuePtrPtr)
+		llvmBuildStore(s.builder, insertedValue, valuePtrPtr)
 	}
-	C.LLVMBuildBr(s.builder, mergeBB)
-	insertEnd := C.LLVMGetInsertBlock(s.builder)
-	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
-	phi := C.LLVMBuildPhi(s.builder, valueRefLLVMType, cStringFree("dict.entry.insert.phi"))
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr([]C.LLVMValueRef{cachedValue, insertedValue}), llvmBlockSlicePtr([]C.LLVMBasicBlockRef{nonNullEnd, insertEnd}), 2)
+	llvmBuildBr(s.builder, mergeBB)
+	insertEnd := llvmGetInsertBlock(s.builder)
+	llvmPositionBuilderAtEnd(s.builder, mergeBB)
+	phi := llvmBuildPhi(s.builder, valueRefLLVMType, cStringFree("dict.entry.insert.phi"))
+	llvmAddIncoming(phi, llvmValueSlicePtr([]llvmIRValueRef{cachedValue, insertedValue}), llvmBlockSlicePtr([]llvmIRBlockRef{nonNullEnd, insertEnd}), 2)
 	_ = currentBB
 	return phi, valueRefType, true, nil
 }
 
-func (s *functionState) emitBuiltinDictRegionMutationCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitBuiltinDictRegionMutationCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
 	if !ok || fieldExpr == nil || fieldExpr.Object == nil {
 		return nil, nil, false, nil
@@ -257,7 +251,7 @@ func (s *functionState) emitBuiltinDictRegionMutationCall(expr *ast.CallExpr) (C
 		if err != nil {
 			return nil, nil, true, err
 		}
-		value := s.buildCall(llvmType, callee, []C.LLVMValueRef{owner.arenaRef, dictValue, minCapacity}, "")
+		value := s.buildCall(llvmType, callee, []llvmIRValueRef{owner.arenaRef, dictValue, minCapacity}, "")
 		return value, s.g.namedType("void"), true, nil
 	}
 	keyValue, _, err := s.emitExpr(expr.Args[0], dictType.Key)
@@ -282,11 +276,11 @@ func (s *functionState) emitBuiltinDictRegionMutationCall(expr *ast.CallExpr) (C
 	if err != nil {
 		return nil, nil, true, err
 	}
-	value := s.buildCall(llvmType, callee, []C.LLVMValueRef{owner.arenaRef, dictValue, keyValue, insertedArg}, resultName)
+	value := s.buildCall(llvmType, callee, []llvmIRValueRef{owner.arenaRef, dictValue, keyValue, insertedArg}, resultName)
 	return value, builtinDictEntryValueRefType(dictType, true), true, nil
 }
 
-func (s *functionState) emitBuiltinSetReceiverValue(receiver ast.Expr, receiverType semantic.Type) (C.LLVMValueRef, *semantic.SetType, error) {
+func (s *functionState) emitBuiltinSetReceiverValue(receiver ast.Expr, receiverType semantic.Type) (llvmIRValueRef, *semantic.SetType, error) {
 	setType, receiverRefType, ok := builtinSetReceiverType(receiverType)
 	if !ok || setType == nil {
 		return nil, nil, fmt.Errorf("set receiver is not a set")
@@ -299,7 +293,7 @@ func (s *functionState) emitBuiltinSetReceiverValue(receiver ast.Expr, receiverT
 	return ptr, setType, err
 }
 
-func (s *functionState) emitBuiltinSetRegionMutationCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitBuiltinSetRegionMutationCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
 	if !ok || fieldExpr == nil || fieldExpr.Object == nil {
 		return nil, nil, false, nil
@@ -352,7 +346,7 @@ func (s *functionState) emitBuiltinSetRegionMutationCall(expr *ast.CallExpr) (C.
 		if err != nil {
 			return nil, nil, true, err
 		}
-		value := s.buildCall(llvmType, callee, []C.LLVMValueRef{owner.arenaRef, setValue, minCapacity}, "")
+		value := s.buildCall(llvmType, callee, []llvmIRValueRef{owner.arenaRef, setValue, minCapacity}, "")
 		return value, s.g.namedType("void"), true, nil
 	}
 	elemValue, _, err := s.emitExpr(expr.Args[0], setType.Elem)
@@ -367,6 +361,6 @@ func (s *functionState) emitBuiltinSetRegionMutationCall(expr *ast.CallExpr) (C.
 	if err != nil {
 		return nil, nil, true, err
 	}
-	value := s.buildCall(llvmType, callee, []C.LLVMValueRef{owner.arenaRef, setValue, elemValue}, "set.add.result")
+	value := s.buildCall(llvmType, callee, []llvmIRValueRef{owner.arenaRef, setValue, elemValue}, "set.add.result")
 	return value, s.g.namedType("bool"), true, nil
 }

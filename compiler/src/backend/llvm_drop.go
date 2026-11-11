@@ -2,11 +2,6 @@
 
 package backend
 
-/*
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -47,7 +42,7 @@ func (s *functionState) isOwnDropReceiver(paramType semantic.Type) bool {
 // registerDropCleanup arms the destructor for a freshly declared drop-typed local.
 // Returns false when the type has no `__drop__`, in which case nothing is emitted and
 // the caller's code path is byte-for-byte what it was before this feature.
-func (s *functionState) registerDropCleanup(name string, alloca C.LLVMValueRef, declType semantic.Type) (bool, error) {
+func (s *functionState) registerDropCleanup(name string, alloca llvmIRValueRef, declType semantic.Type) (bool, error) {
 	hook := semantic.DropHookSymbol(declType)
 	if hook == "" {
 		return false, nil
@@ -68,7 +63,7 @@ func (s *functionState) registerDropCleanup(name string, alloca C.LLVMValueRef, 
 		return false, err
 	}
 	// The value is live from here: arm the flag at the declaration point itself.
-	C.LLVMBuildStore(s.builder, C.LLVMConstInt(llvmBool, 1, 0), flag)
+	llvmBuildStore(s.builder, llvmConstInt(llvmBool, 1, 0), flag)
 	s.registerScopedCleanup(scopedCleanupBinding{
 		kind:     scopedCleanupDrop,
 		name:     name,
@@ -92,7 +87,7 @@ func (s *functionState) clearDropLiveFlag(binding scopedCleanupBinding) error {
 	if err != nil {
 		return err
 	}
-	C.LLVMBuildStore(s.builder, C.LLVMConstInt(llvmBool, 0, 0), binding.flagPtr)
+	llvmBuildStore(s.builder, llvmConstInt(llvmBool, 0, 0), binding.flagPtr)
 	return nil
 }
 
@@ -111,13 +106,13 @@ func (s *functionState) emitConditionalDrop(binding scopedCleanupBinding) error 
 	if err != nil {
 		return err
 	}
-	live := C.LLVMBuildLoad2(s.builder, llvmBool, binding.flagPtr, cStringFree("drop.live"))
-	isLive := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), live, C.LLVMConstInt(llvmBool, 0, 0), cStringFree("drop.islive"))
-	dropBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("drop.run"))
-	contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("drop.after"))
-	C.LLVMBuildCondBr(s.builder, isLive, dropBB, contBB)
+	live := llvmBuildLoad2(s.builder, llvmBool, binding.flagPtr, cStringFree("drop.live"))
+	isLive := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntNE), live, llvmConstInt(llvmBool, 0, 0), cStringFree("drop.islive"))
+	dropBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("drop.run"))
+	contBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("drop.after"))
+	llvmBuildCondBr(s.builder, isLive, dropBB, contBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, dropBB)
+	llvmPositionBuilderAtEnd(s.builder, dropBB)
 	// Synthesize the call through the ordinary expression emitter so the destructor gets
 	// the same ABI, byval and sret handling as any hand-written call. The `move` also
 	// routes through emitMovedValue, which zeroes the slot and clears this very flag —
@@ -130,9 +125,9 @@ func (s *functionState) emitConditionalDrop(binding scopedCleanupBinding) error 
 		return err
 	}
 	if !s.currentBlockTerminated() {
-		C.LLVMBuildBr(s.builder, contBB)
+		llvmBuildBr(s.builder, contBB)
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, contBB)
+	llvmPositionBuilderAtEnd(s.builder, contBB)
 	return nil
 }

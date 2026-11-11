@@ -127,3 +127,19 @@ func llvmBuildCall2(builder llvmIRBuilderRef, typ llvmIRTypeRef, callee llvmIRVa
 func llvmSetInstructionCallConv(call llvmIRValueRef, convention llvmIRUnsigned) {
 	C.LLVMSetInstructionCallConv(call, convention)
 }
+
+type llvmIRIntPredicate = C.LLVMIntPredicate
+
+const (
+	llvmIntEQ  = C.LLVMIntEQ
+	llvmIntNE  = C.LLVMIntNE
+	llvmIntULT = C.LLVMIntULT
+)
+
+func llvmBuildICmp(builder llvmIRBuilderRef, predicate llvmIRIntPredicate, left, right llvmIRValueRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildICmp(builder, predicate, left, right, name)
+}
+
+func llvmBuildSelect(builder llvmIRBuilderRef, condition, yes, no llvmIRValueRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildSelect(builder, condition, yes, no, name)
+}

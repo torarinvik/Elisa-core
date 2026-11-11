@@ -2,12 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -42,7 +36,7 @@ func backendConstAggregateIsMaterialized(t semantic.Type) bool {
 	}
 }
 
-func (s *functionState) emitAddress(expr ast.Expr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitAddress(expr ast.Expr) (llvmIRValueRef, semantic.Type, error) {
 	switch n := expr.(type) {
 	case *ast.Ident:
 		if binding, ok := s.lookupBinding(n.Name); ok {
@@ -83,7 +77,7 @@ func (s *functionState) emitAddress(expr ast.Expr) (C.LLVMValueRef, semantic.Typ
 		return nil, nil, fmt.Errorf("expression %T is not addressable", expr)
 	}
 }
-func (s *functionState) emitValueAddress(expr ast.Expr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitValueAddress(expr ast.Expr) (llvmIRValueRef, semantic.Type, error) {
 	switch n := expr.(type) {
 	case *ast.Ident:
 		return s.emitIdentValueAddress(n)
@@ -95,7 +89,7 @@ func (s *functionState) emitValueAddress(expr ast.Expr) (C.LLVMValueRef, semanti
 		return s.emitAddress(expr)
 	}
 }
-func (s *functionState) emitIdentValueAddress(expr *ast.Ident) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitIdentValueAddress(expr *ast.Ident) (llvmIRValueRef, semantic.Type, error) {
 	valueType := s.exprType(expr)
 	if semantic.IsNullType(valueType) {
 		return nil, nil, fmt.Errorf("identifier %s is known null and has no readable address", expr.Name)
@@ -123,7 +117,7 @@ func (s *functionState) emitIdentValueAddress(expr *ast.Ident) (C.LLVMValueRef, 
 	}
 	return nil, nil, fmt.Errorf("identifier %s is not addressable", expr.Name)
 }
-func (s *functionState) refinedOptionalPayloadAddress(ptr C.LLVMValueRef, storedType semantic.Type, valueType semantic.Type, name string) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) refinedOptionalPayloadAddress(ptr llvmIRValueRef, storedType semantic.Type, valueType semantic.Type, name string) (llvmIRValueRef, semantic.Type, error) {
 	optionalType, ok := storedType.(*semantic.OptionalType)
 	if !ok || valueType == nil || semantic.SameType(storedType, valueType) {
 		return ptr, storedType, nil
@@ -138,10 +132,10 @@ func (s *functionState) refinedOptionalPayloadAddress(ptr C.LLVMValueRef, stored
 	if err != nil {
 		return nil, nil, err
 	}
-	payloadPtr := C.LLVMBuildStructGEP2(s.builder, llvmOptionalType, ptr, 1, cStringFree(name+".payload"))
+	payloadPtr := llvmBuildStructGEP2(s.builder, llvmOptionalType, ptr, 1, cStringFree(name+".payload"))
 	return payloadPtr, valueType, nil
 }
-func (s *functionState) emitFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitFieldAddress(expr *ast.FieldExpr) (llvmIRValueRef, semantic.Type, error) {
 	if ptr, fieldType, handled, err := s.emitStoreRowFieldAddress(expr); handled {
 		return ptr, fieldType, err
 	}
@@ -156,7 +150,7 @@ func (s *functionState) emitFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, s
 	if err != nil {
 		return nil, nil, err
 	}
-	var containerLLVMType C.LLVMTypeRef
+	var containerLLVMType llvmIRTypeRef
 	if enumType, ok := containerType.(*semantic.EnumType); ok && enumType.Packed {
 		containerLLVMType, err = s.loweredEnumStorageType(enumType)
 	} else {
@@ -168,12 +162,12 @@ func (s *functionState) emitFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, s
 	if enumType, ok := containerType.(*semantic.EnumType); ok && enumType.Packed {
 		if key, ok := s.packedEnumStoragePath(expr.Object); ok {
 			if cachedPtr, ok := s.lookupPackedEnumStorage(key, enumType); ok {
-				fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, cachedPtr, C.unsigned(index), cStringFree(expr.Field))
+				fieldPtr := llvmBuildStructGEP2(s.builder, containerLLVMType, cachedPtr, llvmIRUnsigned(index), cStringFree(expr.Field))
 				return fieldPtr, fieldType, nil
 			}
 		}
 	}
-	var objPtr C.LLVMValueRef
+	var objPtr llvmIRValueRef
 	if pointerLike {
 		objPtr, _, err = s.emitExpr(expr.Object, nil)
 	} else {
@@ -201,11 +195,11 @@ func (s *functionState) emitFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, s
 	if err := s.emitDebugPointerDerefGuard(objPtr); err != nil {
 		return nil, nil, err
 	}
-	fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, objPtr, C.unsigned(index), cStringFree(expr.Field))
+	fieldPtr := llvmBuildStructGEP2(s.builder, containerLLVMType, objPtr, llvmIRUnsigned(index), cStringFree(expr.Field))
 	s.propagateAliasSafeFieldPtr(objPtr, fieldPtr, containerType, fieldType, pointerLike)
 	return fieldPtr, fieldType, nil
 }
-func (s *functionState) emitReadableFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitReadableFieldAddress(expr *ast.FieldExpr) (llvmIRValueRef, semantic.Type, error) {
 	if ptr, fieldType, handled, err := s.emitStoreRowFieldAddress(expr); handled {
 		return ptr, fieldType, err
 	}
@@ -223,7 +217,7 @@ func (s *functionState) emitReadableFieldAddress(expr *ast.FieldExpr) (C.LLVMVal
 	if err != nil {
 		return nil, nil, err
 	}
-	var containerLLVMType C.LLVMTypeRef
+	var containerLLVMType llvmIRTypeRef
 	if enumType, ok := containerType.(*semantic.EnumType); ok && enumType.Packed {
 		containerLLVMType, err = s.loweredEnumStorageType(enumType)
 	} else {
@@ -235,12 +229,12 @@ func (s *functionState) emitReadableFieldAddress(expr *ast.FieldExpr) (C.LLVMVal
 	if enumType, ok := containerType.(*semantic.EnumType); ok && enumType.Packed {
 		if key, ok := s.packedEnumStoragePath(expr.Object); ok {
 			if cachedPtr, ok := s.lookupPackedEnumStorage(key, enumType); ok {
-				fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, cachedPtr, C.unsigned(index), cStringFree(expr.Field))
+				fieldPtr := llvmBuildStructGEP2(s.builder, containerLLVMType, cachedPtr, llvmIRUnsigned(index), cStringFree(expr.Field))
 				return s.refinedOptionalPayloadAddress(fieldPtr, fieldType, s.exprType(expr), expr.Field)
 			}
 		}
 	}
-	var objPtr C.LLVMValueRef
+	var objPtr llvmIRValueRef
 	if pointerLike {
 		objPtr, _, err = s.emitExpr(expr.Object, nil)
 	} else {
@@ -267,7 +261,7 @@ func (s *functionState) emitReadableFieldAddress(expr *ast.FieldExpr) (C.LLVMVal
 	if err := s.emitDebugPointerDerefGuard(objPtr); err != nil {
 		return nil, nil, err
 	}
-	fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, objPtr, C.unsigned(index), cStringFree(expr.Field))
+	fieldPtr := llvmBuildStructGEP2(s.builder, containerLLVMType, objPtr, llvmIRUnsigned(index), cStringFree(expr.Field))
 	s.propagateAliasSafeFieldPtr(objPtr, fieldPtr, containerType, fieldType, pointerLike)
 	return s.refinedOptionalPayloadAddress(fieldPtr, fieldType, s.exprType(expr), expr.Field)
 }
@@ -310,7 +304,7 @@ func backendImplicitCallLikeRefUpcastType(expected *semantic.RefType, actual sem
 	coerced.ExplicitStorage = expected.ExplicitStorage
 	return &coerced, true
 }
-func (s *functionState) emitSafeChainReceiverValue(receiver ast.Expr) (C.LLVMValueRef, C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitSafeChainReceiverValue(receiver ast.Expr) (llvmIRValueRef, llvmIRValueRef, semantic.Type, error) {
 	if receiver == nil {
 		return nil, nil, nil, fmt.Errorf("optional chaining requires a receiver")
 	}
@@ -338,11 +332,11 @@ func (s *functionState) emitSafeChainReceiverValue(receiver ast.Expr) (C.LLVMVal
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	nullValue := C.LLVMConstNull(C.LLVMTypeOf(refValue))
-	presentValue := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), refValue, nullValue, cStringFree("safe.receiver.present"))
+	nullValue := llvmConstNull(llvmTypeOf(refValue))
+	presentValue := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntNE), refValue, nullValue, cStringFree("safe.receiver.present"))
 	return presentValue, refValue, baseReceiverType, nil
 }
-func (s *functionState) emitFieldAddressFromObjectValue(objValue C.LLVMValueRef, objType semantic.Type, fieldName string, name string) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitFieldAddressFromObjectValue(objValue llvmIRValueRef, objType semantic.Type, fieldName string, name string) (llvmIRValueRef, semantic.Type, error) {
 	if objType == nil {
 		return nil, nil, fmt.Errorf("missing semantic type for field %q", fieldName)
 	}
@@ -350,7 +344,7 @@ func (s *functionState) emitFieldAddressFromObjectValue(objValue C.LLVMValueRef,
 	if err != nil {
 		return nil, nil, err
 	}
-	var containerLLVMType C.LLVMTypeRef
+	var containerLLVMType llvmIRTypeRef
 	if enumType, ok := containerType.(*semantic.EnumType); ok && enumType.Packed {
 		containerLLVMType, err = s.loweredEnumStorageType(enumType)
 	} else {
@@ -376,10 +370,10 @@ func (s *functionState) emitFieldAddressFromObjectValue(objValue C.LLVMValueRef,
 			return nil, nil, err
 		}
 	}
-	fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, objPtr, C.unsigned(index), cStringFree(name+"."+fieldName))
+	fieldPtr := llvmBuildStructGEP2(s.builder, containerLLVMType, objPtr, llvmIRUnsigned(index), cStringFree(name+"."+fieldName))
 	return fieldPtr, fieldType, nil
 }
-func (s *functionState) emitFieldValueFromObjectValue(objValue C.LLVMValueRef, objType semantic.Type, fieldName string, name string) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitFieldValueFromObjectValue(objValue llvmIRValueRef, objType semantic.Type, fieldName string, name string) (llvmIRValueRef, semantic.Type, error) {
 	if fieldType, ok := cstrSyntheticFieldType(objType, fieldName); ok {
 		value, err := s.emitRuntimeStringLengthValue(objValue, objType, fieldType, name+"."+fieldName)
 		return value, fieldType, err
@@ -394,7 +388,7 @@ func (s *functionState) emitFieldValueFromObjectValue(objValue C.LLVMValueRef, o
 	}
 	return value, fieldType, nil
 }
-func (s *functionState) emitPreparedUFCSReceiverValue(receiverValue C.LLVMValueRef, actualType semantic.Type, expectedType semantic.Type, name string) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitPreparedUFCSReceiverValue(receiverValue llvmIRValueRef, actualType semantic.Type, expectedType semantic.Type, name string) (llvmIRValueRef, semantic.Type, error) {
 	if actualType == nil || expectedType == nil {
 		return receiverValue, actualType, nil
 	}
@@ -425,7 +419,7 @@ func (s *functionState) emitPreparedUFCSReceiverValue(receiverValue C.LLVMValueR
 	}
 	return ptr, expectedType, nil
 }
-func (s *functionState) emitStoreRowFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitStoreRowFieldAddress(expr *ast.FieldExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if expr == nil || expr.Object == nil {
 		return nil, nil, false, nil
 	}
@@ -437,8 +431,8 @@ func (s *functionState) emitStoreRowFieldAddress(expr *ast.FieldExpr) (C.LLVMVal
 	if err != nil || !handled {
 		return nil, nil, handled, err
 	}
-	storePtr := C.LLVMBuildExtractValue(s.builder, rowValue, 0, cStringFree(expr.Field+".row.store"))
-	indexValue := C.LLVMBuildExtractValue(s.builder, rowValue, 1, cStringFree(expr.Field+".row.index"))
+	storePtr := llvmBuildExtractValue(s.builder, rowValue, 0, cStringFree(expr.Field+".row.store"))
+	indexValue := llvmBuildExtractValue(s.builder, rowValue, 1, cStringFree(expr.Field+".row.index"))
 	columnPtr, darrayType, err := s.emitBuiltinStoreFieldDArrayPtr(storePtr, rowType.Store, expr.Field)
 	if err != nil {
 		return nil, nil, true, err
@@ -453,7 +447,7 @@ func (s *functionState) emitStoreRowFieldAddress(expr *ast.FieldExpr) (C.LLVMVal
 	}
 	return elemPtr, elemType, true, nil
 }
-func (s *functionState) emitStoreRowCarrierValue(expr ast.Expr, objType semantic.Type, fieldName string) (*semantic.StoreRowViewType, C.LLVMValueRef, bool, error) {
+func (s *functionState) emitStoreRowCarrierValue(expr ast.Expr, objType semantic.Type, fieldName string) (*semantic.StoreRowViewType, llvmIRValueRef, bool, error) {
 	switch tt := objType.(type) {
 	case *semantic.StoreRowViewType:
 		rowValue, _, err := s.emitExpr(expr, tt)
@@ -477,13 +471,13 @@ func (s *functionState) emitStoreRowCarrierValue(expr ast.Expr, objType semantic
 		if err != nil {
 			return nil, nil, true, err
 		}
-		rowValue := C.LLVMBuildLoad2(s.builder, rowLLVMType, rowPtr, cStringFree(fieldName+".row.load"))
+		rowValue := llvmBuildLoad2(s.builder, rowLLVMType, rowPtr, cStringFree(fieldName+".row.load"))
 		return rowType, rowValue, true, nil
 	default:
 		return nil, nil, false, nil
 	}
 }
-func (s *functionState) emitTreeFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitTreeFieldAddress(expr *ast.FieldExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if expr == nil {
 		return nil, nil, false, nil
 	}
@@ -494,7 +488,7 @@ func (s *functionState) emitTreeFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRe
 	}
 	return nil, nil, false, nil
 }
-func (s *functionState) packedEnumStoragePtrFromExprValue(value C.LLVMValueRef, exprType semantic.Type, enumType *semantic.EnumType, store *packedStoreBinding) (C.LLVMValueRef, error) {
+func (s *functionState) packedEnumStoragePtrFromExprValue(value llvmIRValueRef, exprType semantic.Type, enumType *semantic.EnumType, store *packedStoreBinding) (llvmIRValueRef, error) {
 	if enumType == nil || !enumType.Packed {
 		return value, nil
 	}
@@ -509,7 +503,7 @@ func (s *functionState) packedEnumStoragePtrFromExprValue(value C.LLVMValueRef, 
 	}
 	return s.decodePackedEnumHandleWithStore(value, enumType, store)
 }
-func (s *functionState) emitAddressOrTemp(expr ast.Expr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitAddressOrTemp(expr ast.Expr) (llvmIRValueRef, semantic.Type, error) {
 	if ptr, typ, err := s.emitAddress(expr); err == nil {
 		return ptr, typ, nil
 	}
@@ -523,7 +517,7 @@ func (s *functionState) emitAddressOrTemp(expr ast.Expr) (C.LLVMValueRef, semant
 	}
 	return ptr, typ, nil
 }
-func (s *functionState) emitNodeTableIndexAddress(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitNodeTableIndexAddress(expr *ast.IndexExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if expr == nil {
 		return nil, nil, false, nil
 	}
@@ -549,7 +543,7 @@ func (s *functionState) emitNodeTableIndexAddress(expr *ast.IndexExpr) (C.LLVMVa
 	if keyEnum != nil && keyEnum != enumType {
 		return nil, nil, true, fmt.Errorf("node key enum %s does not match node table %s", keyEnum.Name, enumType.Name)
 	}
-	var tablePtr C.LLVMValueRef
+	var tablePtr llvmIRValueRef
 	if pointerLike {
 		tablePtr, _, err = s.emitExpr(expr.Object, objType)
 	} else {
@@ -562,7 +556,7 @@ func (s *functionState) emitNodeTableIndexAddress(expr *ast.IndexExpr) (C.LLVMVa
 	if err != nil {
 		return nil, nil, true, err
 	}
-	valuesPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, tablePtr, 0, cStringFree("node.table.values.ptr"))
+	valuesPtr := llvmBuildStructGEP2(s.builder, containerLLVMType, tablePtr, 0, cStringFree("node.table.values.ptr"))
 	viewType := &semantic.ViewType{Elem: elemType, SurfaceName: "view"}
 	viewLLVMType, err := s.g.lowerType(viewType)
 	if err != nil {

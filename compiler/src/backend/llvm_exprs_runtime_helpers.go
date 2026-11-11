@@ -2,12 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -36,7 +30,7 @@ func (s *functionState) nodeTableFillTypeArgs(expr *ast.CallExpr) (*semantic.Enu
 	}
 	return enumType, elemType, nil
 }
-func (s *functionState) emitNodeKeyIndexValue(expr ast.Expr) (C.LLVMValueRef, *semantic.EnumType, bool, error) {
+func (s *functionState) emitNodeKeyIndexValue(expr ast.Expr) (llvmIRValueRef, *semantic.EnumType, bool, error) {
 	if expr == nil {
 		return nil, nil, false, nil
 	}
@@ -56,9 +50,9 @@ func (s *functionState) emitNodeKeyIndexValue(expr ast.Expr) (C.LLVMValueRef, *s
 		}
 		value = loaded
 	}
-	return C.LLVMBuildExtractValue(s.builder, value, 0, cStringFree("nodekey.index")), enumType, true, nil
+	return llvmBuildExtractValue(s.builder, value, 0, cStringFree("nodekey.index")), enumType, true, nil
 }
-func (s *functionState) emitDenseKeyHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitDenseKeyHelperCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if callIdentName(expr) != "dense_key" {
 		return nil, nil, false, nil
 	}
@@ -80,7 +74,7 @@ func (s *functionState) emitDenseKeyHelperCall(expr *ast.CallExpr) (C.LLVMValueR
 	if storeType == nil || storeType.Enum == nil {
 		return nil, nil, true, fmt.Errorf("dense_key requires frozen packed-store metadata")
 	}
-	var handleValue C.LLVMValueRef
+	var handleValue llvmIRValueRef
 	actualNodeType := s.exprType(expr.Args[0])
 	sourceEnum, ok := denseKeySourceEnumType(actualNodeType)
 	if !ok || sourceEnum == nil {
@@ -91,7 +85,7 @@ func (s *functionState) emitDenseKeyHelperCall(expr *ast.CallExpr) (C.LLVMValueR
 		if err != nil {
 			return nil, nil, true, err
 		}
-		handleValue = C.LLVMBuildExtractValue(s.builder, viewValue, 0, cStringFree("nodekey.view.handle"))
+		handleValue = llvmBuildExtractValue(s.builder, viewValue, 0, cStringFree("nodekey.view.handle"))
 	} else {
 		var actualType semantic.Type
 		handleValue, actualType, err = s.emitExpr(expr.Args[0], actualNodeType)
@@ -105,7 +99,7 @@ func (s *functionState) emitDenseKeyHelperCall(expr *ast.CallExpr) (C.LLVMValueR
 			}
 		}
 	}
-	var indexValue C.LLVMValueRef
+	var indexValue llvmIRValueRef
 	switch s.g.packedModeForEnum(sourceEnum) {
 	case packedEnumABIIndexSOA, packedEnumABIVariantSparse, packedEnumABIAoS:
 		indexValue, err = s.coerceValue(handleValue, sourceEnum, s.g.namedType("u32"))
@@ -115,11 +109,11 @@ func (s *functionState) emitDenseKeyHelperCall(expr *ast.CallExpr) (C.LLVMValueR
 	default:
 		return nil, nil, true, fmt.Errorf("unsupported packed enum ABI mode %d", s.g.packedModeForEnum(sourceEnum))
 	}
-	resultValue := C.LLVMGetUndef(resultLLVMType)
-	resultValue = C.LLVMBuildInsertValue(s.builder, resultValue, indexValue, 0, cStringFree("nodekey.index.insert"))
+	resultValue := llvmGetUndef(resultLLVMType)
+	resultValue = llvmBuildInsertValue(s.builder, resultValue, indexValue, 0, cStringFree("nodekey.index.insert"))
 	return resultValue, resultType, true, nil
 }
-func (s *functionState) emitNodeTableFillHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitNodeTableFillHelperCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if callSpecializedIdentName(expr) != "node_table_fill" {
 		return nil, nil, false, nil
 	}
@@ -154,14 +148,14 @@ func (s *functionState) emitNodeTableFillHelperCall(expr *ast.CallExpr) (C.LLVMV
 	if err != nil {
 		return nil, nil, true, err
 	}
-	zeroCount := C.LLVMConstInt(usizeLLVMType, 0, 0)
-	entryBlock := C.LLVMGetInsertBlock(s.builder)
-	allocBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("node.table.alloc"))
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("node.table.merge"))
-	isZero := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), countValue, zeroCount, cStringFree("node.table.count.zero"))
-	C.LLVMBuildCondBr(s.builder, isZero, mergeBB, allocBB)
+	zeroCount := llvmConstInt(usizeLLVMType, 0, 0)
+	entryBlock := llvmGetInsertBlock(s.builder)
+	allocBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("node.table.alloc"))
+	mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("node.table.merge"))
+	isZero := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), countValue, zeroCount, cStringFree("node.table.count.zero"))
+	llvmBuildCondBr(s.builder, isZero, mergeBB, allocBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, allocBB)
+	llvmPositionBuilderAtEnd(s.builder, allocBB)
 	arenaPtr, _, err := s.emitAddressOrTemp(expr.Args[0])
 	if err != nil {
 		return nil, nil, true, err
@@ -189,15 +183,15 @@ func (s *functionState) emitNodeTableFillHelperCall(expr *ast.CallExpr) (C.LLVMV
 	if err != nil {
 		return nil, nil, true, err
 	}
-	allocPtr := s.buildCall(allocLLVMType, allocCallee, []C.LLVMValueRef{arenaPtr, byteCount}, "node.table.alloc.ptr")
+	allocPtr := s.buildCall(allocLLVMType, allocCallee, []llvmIRValueRef{arenaPtr, byteCount}, "node.table.alloc.ptr")
 	viewType := &semantic.ViewType{Elem: elemType, SurfaceName: "view"}
 	viewLLVMType, err := s.g.lowerType(viewType)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	viewValue := C.LLVMGetUndef(viewLLVMType)
-	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, allocPtr, 0, cStringFree("node.table.view.data"))
-	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, countValue, 1, cStringFree("node.table.view.len"))
+	viewValue := llvmGetUndef(viewLLVMType)
+	viewValue = llvmBuildInsertValue(s.builder, viewValue, allocPtr, 0, cStringFree("node.table.view.data"))
+	viewValue = llvmBuildInsertValue(s.builder, viewValue, countValue, 1, cStringFree("node.table.view.len"))
 	initValue, actualInitType, err := s.emitExpr(expr.Args[2], elemType)
 	if err != nil {
 		return nil, nil, true, err
@@ -217,27 +211,27 @@ func (s *functionState) emitNodeTableFillHelperCall(expr *ast.CallExpr) (C.LLVMV
 	if err != nil {
 		return nil, nil, true, err
 	}
-	_ = s.buildCall(fillLLVMType, fillCallee, []C.LLVMValueRef{viewValue, initValue}, "")
-	materialized := C.LLVMGetUndef(resultLLVMType)
-	materialized = C.LLVMBuildInsertValue(s.builder, materialized, viewValue, 0, cStringFree("node.table.values.insert"))
-	allocEnd := C.LLVMGetInsertBlock(s.builder)
-	C.LLVMBuildBr(s.builder, mergeBB)
+	_ = s.buildCall(fillLLVMType, fillCallee, []llvmIRValueRef{viewValue, initValue}, "")
+	materialized := llvmGetUndef(resultLLVMType)
+	materialized = llvmBuildInsertValue(s.builder, materialized, viewValue, 0, cStringFree("node.table.values.insert"))
+	allocEnd := llvmGetInsertBlock(s.builder)
+	llvmBuildBr(s.builder, mergeBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
-	zeroResult := C.LLVMConstNull(resultLLVMType)
-	phi := C.LLVMBuildPhi(s.builder, resultLLVMType, cStringFree("node.table.result"))
-	values := []C.LLVMValueRef{zeroResult, materialized}
-	blocks := []C.LLVMBasicBlockRef{entryBlock, allocEnd}
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
+	llvmPositionBuilderAtEnd(s.builder, mergeBB)
+	zeroResult := llvmConstNull(resultLLVMType)
+	phi := llvmBuildPhi(s.builder, resultLLVMType, cStringFree("node.table.result"))
+	values := []llvmIRValueRef{zeroResult, materialized}
+	blocks := []llvmIRBlockRef{entryBlock, allocEnd}
+	llvmAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), llvmIRUnsigned(len(values)))
 	return phi, resultType, true, nil
 }
-func (s *functionState) emitResolvedCall(callee C.LLVMValueRef, funcType *semantic.FuncType, direct bool, args []C.LLVMValueRef, regionArenaArgs []C.LLVMValueRef) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitResolvedCall(callee llvmIRValueRef, funcType *semantic.FuncType, direct bool, args []llvmIRValueRef, regionArenaArgs []llvmIRValueRef) (llvmIRValueRef, semantic.Type, error) {
 	// ABI lowering may rewrite args. Preserve the source argument values only
 	// for native extern calls whose postconditions will actually be checked.
 	if !s.externEnsureChecksEnabled(funcType) {
 		return s.emitResolvedCallInner(callee, funcType, direct, args, regionArenaArgs)
 	}
-	elisaArgs := append([]C.LLVMValueRef(nil), args...)
+	elisaArgs := append([]llvmIRValueRef(nil), args...)
 	value, valueType, err := s.emitResolvedCallInner(callee, funcType, direct, args, regionArenaArgs)
 	if err != nil {
 		return nil, nil, err
@@ -248,7 +242,7 @@ func (s *functionState) emitResolvedCall(callee C.LLVMValueRef, funcType *semant
 	return value, valueType, nil
 }
 
-func (s *functionState) emitResolvedCallInner(callee C.LLVMValueRef, funcType *semantic.FuncType, direct bool, args []C.LLVMValueRef, regionArenaArgs []C.LLVMValueRef) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitResolvedCallInner(callee llvmIRValueRef, funcType *semantic.FuncType, direct bool, args []llvmIRValueRef, regionArenaArgs []llvmIRValueRef) (llvmIRValueRef, semantic.Type, error) {
 	if funcType == nil {
 		return nil, nil, fmt.Errorf("call target does not have a function type")
 	}
@@ -283,7 +277,7 @@ func (s *functionState) emitResolvedCallInner(callee C.LLVMValueRef, funcType *s
 	// applyByvalCallAttrs tags the byval pointer arguments on a built call. On
 	// arm64 the memory-class arg convention is a plain indirect pointer, so the
 	// attribute is suppressed there (the pointer-to-copy is still passed).
-	applyByvalCallAttrs := func(call C.LLVMValueRef) {
+	applyByvalCallAttrs := func(call llvmIRValueRef) {
 		if !s.g.aggregateArgUsesByval(funcTypeIsCABI(funcType)) {
 			return
 		}
@@ -297,10 +291,10 @@ func (s *functionState) emitResolvedCallInner(callee C.LLVMValueRef, funcType *s
 		if err != nil {
 			return nil, nil, err
 		}
-		callArgs := make([]C.LLVMValueRef, 0, len(args)+1)
+		callArgs := make([]llvmIRValueRef, 0, len(args)+1)
 		callArgs = append(callArgs, resultSlot)
 		callArgs = append(callArgs, args...)
-		var call C.LLVMValueRef
+		var call llvmIRValueRef
 		if direct {
 			call = s.buildTypedCall(llvmFnType, callee, callArgs, "calltmp", funcType)
 		} else {
@@ -324,10 +318,10 @@ func (s *functionState) emitResolvedCallInner(callee C.LLVMValueRef, funcType *s
 		if err != nil {
 			return nil, nil, err
 		}
-		callArgs := make([]C.LLVMValueRef, 0, len(args)+1)
+		callArgs := make([]llvmIRValueRef, 0, len(args)+1)
 		callArgs = append(callArgs, resultSlot)
 		callArgs = append(callArgs, args...)
-		var call C.LLVMValueRef
+		var call llvmIRValueRef
 		if direct {
 			call = s.buildTypedCall(llvmFnType, callee, callArgs, "", funcType)
 		} else {
@@ -349,7 +343,7 @@ func (s *functionState) emitResolvedCallInner(callee C.LLVMValueRef, funcType *s
 	if !isVoidType(funcType.Return) {
 		callName = "calltmp"
 	}
-	var call C.LLVMValueRef
+	var call llvmIRValueRef
 	if direct {
 		call = s.buildTypedCall(llvmFnType, callee, args, callName, funcType)
 	} else {
@@ -377,7 +371,7 @@ func (s *functionState) emitResolvedCallInner(callee C.LLVMValueRef, funcType *s
 	}
 	return call, funcType.Return, nil
 }
-func (s *functionState) emitSafeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitSafeFieldExpr(expr *ast.FieldExpr) (llvmIRValueRef, semantic.Type, error) {
 	if expr == nil || expr.Object == nil {
 		return nil, nil, fmt.Errorf("optional field access requires a receiver")
 	}
@@ -390,19 +384,19 @@ func (s *functionState) emitSafeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 	if err != nil {
 		return nil, nil, err
 	}
-	presentBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("safe.field.present"))
-	noneBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("safe.field.none"))
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("safe.field.merge"))
-	C.LLVMBuildCondBr(s.builder, presentValue, presentBB, noneBB)
+	presentBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("safe.field.present"))
+	noneBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("safe.field.none"))
+	mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("safe.field.merge"))
+	llvmBuildCondBr(s.builder, presentValue, presentBB, noneBB)
 
 	var (
-		someValue  C.LLVMValueRef
-		noneValue  C.LLVMValueRef
-		presentEnd C.LLVMBasicBlockRef
-		noneEnd    C.LLVMBasicBlockRef
+		someValue  llvmIRValueRef
+		noneValue  llvmIRValueRef
+		presentEnd llvmIRBlockRef
+		noneEnd    llvmIRBlockRef
 	)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, presentBB)
+	llvmPositionBuilderAtEnd(s.builder, presentBB)
 	payloadValue, payloadType, err := s.emitFieldValueFromObjectValue(receiverValue, receiverType, expr.Field, "safe.field")
 	if err != nil {
 		return nil, nil, err
@@ -415,25 +409,25 @@ func (s *functionState) emitSafeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 	if err != nil {
 		return nil, nil, err
 	}
-	presentEnd = C.LLVMGetInsertBlock(s.builder)
-	C.LLVMBuildBr(s.builder, mergeBB)
+	presentEnd = llvmGetInsertBlock(s.builder)
+	llvmBuildBr(s.builder, mergeBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, noneBB)
+	llvmPositionBuilderAtEnd(s.builder, noneBB)
 	noneValue, err = s.buildOptionalNone(optionalType)
 	if err != nil {
 		return nil, nil, err
 	}
-	noneEnd = C.LLVMGetInsertBlock(s.builder)
-	C.LLVMBuildBr(s.builder, mergeBB)
+	noneEnd = llvmGetInsertBlock(s.builder)
+	llvmBuildBr(s.builder, mergeBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	llvmPositionBuilderAtEnd(s.builder, mergeBB)
 	resultLLVMType, err := s.g.lowerType(resultType)
 	if err != nil {
 		return nil, nil, err
 	}
-	phi := C.LLVMBuildPhi(s.builder, resultLLVMType, cStringFree("valuephi"))
-	values := []C.LLVMValueRef{someValue, noneValue}
-	blocks := []C.LLVMBasicBlockRef{presentEnd, noneEnd}
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
+	phi := llvmBuildPhi(s.builder, resultLLVMType, cStringFree("valuephi"))
+	values := []llvmIRValueRef{someValue, noneValue}
+	blocks := []llvmIRBlockRef{presentEnd, noneEnd}
+	llvmAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), llvmIRUnsigned(len(values)))
 	return phi, resultType, nil
 }

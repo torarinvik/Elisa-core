@@ -2,19 +2,13 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
 )
 
-func (s *functionState) emitCatchExpr(expr *ast.CatchExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitCatchExpr(expr *ast.CatchExpr) (llvmIRValueRef, semantic.Type, error) {
 	resultType := s.exprType(expr)
 	unionType, ok := s.exprType(expr.Value).(*semantic.ErrorUnionType)
 	if !ok {
@@ -36,7 +30,7 @@ func (s *functionState) emitCatchExpr(expr *ast.CatchExpr) (C.LLVMValueRef, sema
 	if err != nil {
 		return nil, nil, err
 	}
-	successCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), errorCode, zeroCode, cStringFree("catch.ok"))
+	successCond := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), errorCode, zeroCode, cStringFree("catch.ok"))
 	var errorBindingArm *ast.CatchArm
 	for i := range expr.Arms {
 		if expr.Arms[i].ErrorBinding {
@@ -44,21 +38,21 @@ func (s *functionState) emitCatchExpr(expr *ast.CatchExpr) (C.LLVMValueRef, sema
 			break
 		}
 	}
-	successBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("catch.value"))
-	dispatchBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("catch.dispatch"))
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("catch.merge"))
+	successBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("catch.value"))
+	dispatchBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("catch.dispatch"))
+	mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("catch.merge"))
 	failName := "catch.fail"
 	if errorBindingArm != nil {
 		failName = "catch.error"
 	}
-	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(failName))
-	C.LLVMBuildCondBr(s.builder, successCond, successBB, dispatchBB)
+	failBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(failName))
+	llvmBuildCondBr(s.builder, successCond, successBB, dispatchBB)
 
-	incomingValues := make([]C.LLVMValueRef, 0, len(expr.Arms)+1)
-	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, len(expr.Arms)+1)
+	incomingValues := make([]llvmIRValueRef, 0, len(expr.Arms)+1)
+	incomingBlocks := make([]llvmIRBlockRef, 0, len(expr.Arms)+1)
 	covered := map[string]bool{}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, successBB)
+	llvmPositionBuilderAtEnd(s.builder, successBB)
 	s.pushScope()
 	// A void error union has no success payload to bind; only extract+bind when the
 	// ok value is non-void (otherwise extractErrorUnionPayload would fail).
@@ -81,17 +75,17 @@ func (s *functionState) emitCatchExpr(expr *ast.CatchExpr) (C.LLVMValueRef, sema
 		return nil, nil, err
 	}
 	if reachable && !s.currentBlockTerminated() {
-		armEnd := C.LLVMGetInsertBlock(s.builder)
+		armEnd := llvmGetInsertBlock(s.builder)
 		incomingBlocks = append(incomingBlocks, armEnd)
 		if !isVoidType(resultType) {
 			incomingValues = append(incomingValues, armValue)
 		}
-		C.LLVMBuildBr(s.builder, mergeBB)
+		llvmBuildBr(s.builder, mergeBB)
 	}
 	s.popScope()
 
-	C.LLVMPositionBuilderAtEnd(s.builder, dispatchBB)
-	switchInst := C.LLVMBuildSwitch(s.builder, errorCode, failBB, C.unsigned(len(expr.Arms)))
+	llvmPositionBuilderAtEnd(s.builder, dispatchBB)
+	switchInst := llvmBuildSwitch(s.builder, errorCode, failBB, llvmIRUnsigned(len(expr.Arms)))
 	for _, arm := range expr.Arms {
 		if arm.ErrorBinding {
 			continue
@@ -112,9 +106,9 @@ func (s *functionState) emitCatchExpr(expr *ast.CatchExpr) (C.LLVMValueRef, sema
 		if err != nil {
 			return nil, nil, err
 		}
-		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("catch.arm"))
-		C.LLVMAddCase(switchInst, tagConst, bodyBB)
-		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
+		bodyBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("catch.arm"))
+		llvmAddCase(switchInst, tagConst, bodyBB)
+		llvmPositionBuilderAtEnd(s.builder, bodyBB)
 		s.pushScope()
 		// Bind the matched variant's payload (`E.Bad(x, y):`). The error-set value is a
 		// {code, flat-per-variant-payloads} struct (see buildErrorSetValue); this variant's
@@ -132,7 +126,7 @@ func (s *functionState) emitCatchExpr(expr *ast.CatchExpr) (C.LLVMValueRef, sema
 				if binder == "_" || i >= len(fieldTypes) {
 					continue
 				}
-				fieldVal := C.LLVMBuildExtractValue(s.builder, errorValue, C.unsigned(base+i), cStringFree("catch.payload"))
+				fieldVal := llvmBuildExtractValue(s.builder, errorValue, llvmIRUnsigned(base+i), cStringFree("catch.payload"))
 				payloadPtr, perr := s.emitStackTempValue(fieldVal, fieldTypes[i], "catch.payload")
 				if perr != nil {
 					s.popScope()
@@ -147,17 +141,17 @@ func (s *functionState) emitCatchExpr(expr *ast.CatchExpr) (C.LLVMValueRef, sema
 			return nil, nil, err
 		}
 		if reachable && !s.currentBlockTerminated() {
-			armEnd := C.LLVMGetInsertBlock(s.builder)
+			armEnd := llvmGetInsertBlock(s.builder)
 			incomingBlocks = append(incomingBlocks, armEnd)
 			if !isVoidType(resultType) {
 				incomingValues = append(incomingValues, armValue)
 			}
-			C.LLVMBuildBr(s.builder, mergeBB)
+			llvmBuildBr(s.builder, mergeBB)
 		}
 		s.popScope()
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+	llvmPositionBuilderAtEnd(s.builder, failBB)
 	if errorBindingArm != nil {
 		s.pushScope()
 		errorPtr, err := s.emitStackTempValue(errorValue, unionType.Errors, "catch.error")
@@ -172,32 +166,32 @@ func (s *functionState) emitCatchExpr(expr *ast.CatchExpr) (C.LLVMValueRef, sema
 			return nil, nil, err
 		}
 		if reachable && !s.currentBlockTerminated() {
-			armEnd := C.LLVMGetInsertBlock(s.builder)
+			armEnd := llvmGetInsertBlock(s.builder)
 			incomingBlocks = append(incomingBlocks, armEnd)
 			if !isVoidType(resultType) {
 				incomingValues = append(incomingValues, armValue)
 			}
-			C.LLVMBuildBr(s.builder, mergeBB)
+			llvmBuildBr(s.builder, mergeBB)
 		}
 		s.popScope()
 	} else if len(covered) == len(unionType.Errors.Tags) || semantic.IsNeverType(resultType) {
-		C.LLVMBuildUnreachable(s.builder)
+		llvmBuildUnreachable(s.builder)
 	} else {
-		failEnd := C.LLVMGetInsertBlock(s.builder)
+		failEnd := llvmGetInsertBlock(s.builder)
 		incomingBlocks = append(incomingBlocks, failEnd)
 		if !isVoidType(resultType) {
 			llvmType, err := s.g.lowerType(resultType)
 			if err != nil {
 				return nil, nil, err
 			}
-			incomingValues = append(incomingValues, C.LLVMGetUndef(llvmType))
+			incomingValues = append(incomingValues, llvmGetUndef(llvmType))
 		}
-		C.LLVMBuildBr(s.builder, mergeBB)
+		llvmBuildBr(s.builder, mergeBB)
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	llvmPositionBuilderAtEnd(s.builder, mergeBB)
 	if len(incomingBlocks) == 0 {
-		C.LLVMBuildUnreachable(s.builder)
+		llvmBuildUnreachable(s.builder)
 		return nil, resultType, nil
 	}
 	if isVoidType(resultType) {
@@ -210,27 +204,27 @@ func (s *functionState) emitCatchExpr(expr *ast.CatchExpr) (C.LLVMValueRef, sema
 	if err != nil {
 		return nil, nil, err
 	}
-	phi := C.LLVMBuildPhi(s.builder, phiType, cStringFree("catchphi"))
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
+	phi := llvmBuildPhi(s.builder, phiType, cStringFree("catchphi"))
+	llvmAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), llvmIRUnsigned(len(incomingValues)))
 	return phi, resultType, nil
 }
-func (s *functionState) emitUnwrapElseExpr(expr *ast.UnwrapElseExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitUnwrapElseExpr(expr *ast.UnwrapElseExpr) (llvmIRValueRef, semantic.Type, error) {
 	valueType := s.exprType(expr.Value)
 	resultType := s.exprType(expr)
 	value, _, err := s.emitExpr(expr.Value, valueType)
 	if err != nil {
 		return nil, nil, err
 	}
-	var okCond C.LLVMValueRef
-	var okValue C.LLVMValueRef
+	var okCond llvmIRValueRef
+	var okValue llvmIRValueRef
 	switch t := valueType.(type) {
 	case *semantic.RefType:
 		llvmRefType, err := s.g.lowerType(valueType)
 		if err != nil {
 			return nil, nil, err
 		}
-		nullValue := C.LLVMConstNull(llvmRefType)
-		okCond = C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), value, nullValue, cStringFree("unwrap.nonnull"))
+		nullValue := llvmConstNull(llvmRefType)
+		okCond = llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntNE), value, nullValue, cStringFree("unwrap.nonnull"))
 		okValue = value
 	case *semantic.OptionalType:
 		okCond, err = s.extractOptionalPresent(value, t)
@@ -246,42 +240,42 @@ func (s *functionState) emitUnwrapElseExpr(expr *ast.UnwrapElseExpr) (C.LLVMValu
 	default:
 		return nil, nil, fmt.Errorf("else recovery requires an optional value or nullable ref")
 	}
-	okBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("unwrap.ok"))
-	fallbackBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("unwrap.fallback"))
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("unwrap.merge"))
-	C.LLVMBuildCondBr(s.builder, okCond, okBB, fallbackBB)
+	okBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("unwrap.ok"))
+	fallbackBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("unwrap.fallback"))
+	mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("unwrap.merge"))
+	llvmBuildCondBr(s.builder, okCond, okBB, fallbackBB)
 
-	incomingValues := make([]C.LLVMValueRef, 0, 2)
-	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, 2)
+	incomingValues := make([]llvmIRValueRef, 0, 2)
+	incomingBlocks := make([]llvmIRBlockRef, 0, 2)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, okBB)
+	llvmPositionBuilderAtEnd(s.builder, okBB)
 	if !s.currentBlockTerminated() {
-		okEnd := C.LLVMGetInsertBlock(s.builder)
-		C.LLVMBuildBr(s.builder, mergeBB)
+		okEnd := llvmGetInsertBlock(s.builder)
+		llvmBuildBr(s.builder, mergeBB)
 		if !isVoidType(resultType) {
 			incomingValues = append(incomingValues, okValue)
 		}
 		incomingBlocks = append(incomingBlocks, okEnd)
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, fallbackBB)
+	llvmPositionBuilderAtEnd(s.builder, fallbackBB)
 	recovery := astRecoveryClauseForExpr(expr.Recovery, expr.Fallback, expr.Position)
 	fallbackValue, reachable, err := s.emitRecoveryClause(recovery, resultType, nil, nil)
 	if err != nil {
 		return nil, nil, err
 	}
 	if reachable && !s.currentBlockTerminated() {
-		fallbackEnd := C.LLVMGetInsertBlock(s.builder)
-		C.LLVMBuildBr(s.builder, mergeBB)
+		fallbackEnd := llvmGetInsertBlock(s.builder)
+		llvmBuildBr(s.builder, mergeBB)
 		if !isVoidType(resultType) {
 			incomingValues = append(incomingValues, fallbackValue)
 		}
 		incomingBlocks = append(incomingBlocks, fallbackEnd)
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	llvmPositionBuilderAtEnd(s.builder, mergeBB)
 	if len(incomingBlocks) == 0 {
-		C.LLVMBuildUnreachable(s.builder)
+		llvmBuildUnreachable(s.builder)
 		return nil, resultType, nil
 	}
 	if isVoidType(resultType) {
@@ -294,7 +288,7 @@ func (s *functionState) emitUnwrapElseExpr(expr *ast.UnwrapElseExpr) (C.LLVMValu
 	if err != nil {
 		return nil, nil, err
 	}
-	phi := C.LLVMBuildPhi(s.builder, phiType, cStringFree("unwrapphi"))
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
+	phi := llvmBuildPhi(s.builder, phiType, cStringFree("unwrapphi"))
+	llvmAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), llvmIRUnsigned(len(incomingValues)))
 	return phi, resultType, nil
 }

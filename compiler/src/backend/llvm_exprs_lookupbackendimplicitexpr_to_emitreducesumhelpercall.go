@@ -2,78 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <string.h>
-#include <llvm-c/Core.h>
-
-static int elisacoreLLVMIsZeroValue(LLVMValueRef value) {
-	return LLVMIsAConstant(value) != NULL && LLVMIsNull(value);
-}
-
-static LLVMMetadataRef elisa_coreAliasMDString(LLVMContextRef ctx, const char* value) {
-	if (value == NULL) {
-		return LLVMMDStringInContext2(ctx, "", 0);
-	}
-	return LLVMMDStringInContext2(ctx, value, strlen(value));
-}
-
-static LLVMMetadataRef elisa_coreAliasMDNode(LLVMContextRef ctx, LLVMMetadataRef* operands, size_t count) {
-	return LLVMMDNodeInContext2(ctx, operands, count);
-}
-
-static unsigned elisa_coreMetadataKindID(LLVMContextRef ctx, const char* kindName) {
-	return LLVMGetMDKindIDInContext(ctx, kindName, strlen(kindName));
-}
-
-static void elisa_coreSetMetadataList(LLVMValueRef inst, LLVMContextRef ctx, const char* kindName, LLVMMetadataRef* scopes, size_t count) {
-	if (inst == NULL || ctx == NULL || kindName == NULL || count == 0) {
-		return;
-	}
-	LLVMMetadataRef list = elisa_coreAliasMDNode(ctx, scopes, count);
-	LLVMValueRef listValue = LLVMMetadataAsValue(ctx, list);
-	LLVMSetMetadata(inst, elisa_coreMetadataKindID(ctx, kindName), listValue);
-}
-
-static LLVMMetadataRef elisa_coreCreateAliasScopeDomain(LLVMContextRef ctx, const char* domainName) {
-	LLVMMetadataRef operands[1];
-	operands[0] = elisa_coreAliasMDString(ctx, domainName);
-	return elisa_coreAliasMDNode(ctx, operands, 1);
-}
-
-static LLVMMetadataRef elisa_coreCreateAliasScope(LLVMContextRef ctx, LLVMMetadataRef domain, const char* scopeName) {
-	LLVMMetadataRef operands[2];
-	operands[0] = elisa_coreAliasMDString(ctx, scopeName);
-	operands[1] = domain;
-	return elisa_coreAliasMDNode(ctx, operands, 2);
-}
-
-static void elisa_coreAttachAliasScopeMetadata(LLVMValueRef inst, LLVMContextRef ctx, const char* domainName, const char* aliasScopeName,
-	const char* noAliasScope1Name, int hasNoAliasScope1, const char* noAliasScope2Name, int hasNoAliasScope2) {
-	if (inst == NULL || ctx == NULL || domainName == NULL || aliasScopeName == NULL) {
-		return;
-	}
-	LLVMMetadataRef domain = elisa_coreCreateAliasScopeDomain(ctx, domainName);
-	LLVMMetadataRef aliasScope = elisa_coreCreateAliasScope(ctx, domain, aliasScopeName);
-	LLVMMetadataRef aliasScopes[1];
-	aliasScopes[0] = aliasScope;
-	elisa_coreSetMetadataList(inst, ctx, "alias.scope", aliasScopes, 1);
-
-	LLVMMetadataRef noAliasScopes[2];
-	size_t noAliasCount = 0;
-	if (hasNoAliasScope1 && noAliasScope1Name != NULL) {
-		noAliasScopes[noAliasCount++] = elisa_coreCreateAliasScope(ctx, domain, noAliasScope1Name);
-	}
-	if (hasNoAliasScope2 && noAliasScope2Name != NULL) {
-		noAliasScopes[noAliasCount++] = elisa_coreCreateAliasScope(ctx, domain, noAliasScope2Name);
-	}
-	if (noAliasCount != 0) {
-		elisa_coreSetMetadataList(inst, ctx, "noalias", noAliasScopes, noAliasCount);
-	}
-}
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -142,7 +70,7 @@ func backendExplicitMoveOperand(expr ast.Expr) (ast.Expr, bool) {
 		return nil, false
 	}
 }
-func (s *functionState) emitProofCarryingViewHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitProofCarryingViewHelperCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	helperName := callIdentName(expr)
 	if s == nil || s.g == nil || s.g.result == nil || !s.g.result.IsCompilerBuiltinHelperCall(expr, helperName) {
 		return nil, nil, false, nil
@@ -168,7 +96,7 @@ func (s *functionState) emitProofCarryingViewHelperCall(expr *ast.CallExpr) (C.L
 		return nil, nil, false, nil
 	}
 }
-func (s *functionState) emitIterableBoolAggregateHelperCall(expr *ast.CallExpr, helperName string, stopOnTrue bool) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitIterableBoolAggregateHelperCall(expr *ast.CallExpr, helperName string, stopOnTrue bool) (llvmIRValueRef, semantic.Type, bool, error) {
 	if len(expr.Args) != 1 {
 		return nil, nil, true, fmt.Errorf("%s expects 1 argument, got %d", helperName, len(expr.Args))
 	}
@@ -207,30 +135,30 @@ func (s *functionState) emitIterableBoolAggregateHelperCall(expr *ast.CallExpr, 
 	if err != nil {
 		return nil, nil, true, err
 	}
-	zeroIndex := C.LLVMConstInt(usizeLLVMType, 0, 0)
-	one := C.LLVMConstInt(usizeLLVMType, 1, 0)
-	defaultBool := C.LLVMConstInt(boolLLVMType, 0, 0)
-	terminalBool := C.LLVMConstInt(boolLLVMType, 1, 0)
+	zeroIndex := llvmConstInt(usizeLLVMType, 0, 0)
+	one := llvmConstInt(usizeLLVMType, 1, 0)
+	defaultBool := llvmConstInt(boolLLVMType, 0, 0)
+	terminalBool := llvmConstInt(boolLLVMType, 1, 0)
 	if !stopOnTrue {
-		defaultBool = C.LLVMConstInt(boolLLVMType, 1, 0)
-		terminalBool = C.LLVMConstInt(boolLLVMType, 0, 0)
+		defaultBool = llvmConstInt(boolLLVMType, 1, 0)
+		terminalBool = llvmConstInt(boolLLVMType, 0, 0)
 	}
 
-	entryBlock := C.LLVMGetInsertBlock(s.builder)
-	loopCondBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(helperName+".cond"))
-	loopBodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(helperName+".body"))
-	loopContinueBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(helperName+".continue"))
-	loopShortCircuitBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(helperName+".short_circuit"))
-	loopEndBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(helperName+".end"))
-	C.LLVMBuildBr(s.builder, loopCondBB)
+	entryBlock := llvmGetInsertBlock(s.builder)
+	loopCondBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(helperName+".cond"))
+	loopBodyBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(helperName+".body"))
+	loopContinueBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(helperName+".continue"))
+	loopShortCircuitBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(helperName+".short_circuit"))
+	loopEndBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(helperName+".end"))
+	llvmBuildBr(s.builder, loopCondBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, loopCondBB)
-	indexValue := C.LLVMBuildPhi(s.builder, usizeLLVMType, cStringFree(helperName+".index"))
-	C.LLVMAddIncoming(indexValue, llvmValueSlicePtr([]C.LLVMValueRef{zeroIndex}), llvmBlockSlicePtr([]C.LLVMBasicBlockRef{entryBlock}), 1)
-	hasMore := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), indexValue, countValue, cStringFree(helperName+".has_more"))
-	C.LLVMBuildCondBr(s.builder, hasMore, loopBodyBB, loopEndBB)
+	llvmPositionBuilderAtEnd(s.builder, loopCondBB)
+	indexValue := llvmBuildPhi(s.builder, usizeLLVMType, cStringFree(helperName+".index"))
+	llvmAddIncoming(indexValue, llvmValueSlicePtr([]llvmIRValueRef{zeroIndex}), llvmBlockSlicePtr([]llvmIRBlockRef{entryBlock}), 1)
+	hasMore := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntULT), indexValue, countValue, cStringFree(helperName+".has_more"))
+	llvmBuildCondBr(s.builder, hasMore, loopBodyBB, loopEndBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, loopBodyBB)
+	llvmPositionBuilderAtEnd(s.builder, loopBodyBB)
 	itemValue, itemType, err := s.emitIterLoopElementValue(iterSourceExpr, iterSourceAlloca, iterSourceType, indexValue, helperName)
 	if err != nil {
 		return nil, nil, true, err
@@ -244,27 +172,27 @@ func (s *functionState) emitIterableBoolAggregateHelperCall(expr *ast.CallExpr, 
 		return nil, nil, true, err
 	}
 	if stopOnTrue {
-		C.LLVMBuildCondBr(s.builder, itemBool, loopShortCircuitBB, loopContinueBB)
+		llvmBuildCondBr(s.builder, itemBool, loopShortCircuitBB, loopContinueBB)
 	} else {
-		C.LLVMBuildCondBr(s.builder, itemBool, loopContinueBB, loopShortCircuitBB)
+		llvmBuildCondBr(s.builder, itemBool, loopContinueBB, loopShortCircuitBB)
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, loopContinueBB)
-	nextIndex := C.LLVMBuildAdd(s.builder, indexValue, one, cStringFree(helperName+".index.next"))
-	continueEnd := C.LLVMGetInsertBlock(s.builder)
-	C.LLVMBuildBr(s.builder, loopCondBB)
-	C.LLVMAddIncoming(indexValue, llvmValueSlicePtr([]C.LLVMValueRef{nextIndex}), llvmBlockSlicePtr([]C.LLVMBasicBlockRef{continueEnd}), 1)
+	llvmPositionBuilderAtEnd(s.builder, loopContinueBB)
+	nextIndex := llvmBuildAdd(s.builder, indexValue, one, cStringFree(helperName+".index.next"))
+	continueEnd := llvmGetInsertBlock(s.builder)
+	llvmBuildBr(s.builder, loopCondBB)
+	llvmAddIncoming(indexValue, llvmValueSlicePtr([]llvmIRValueRef{nextIndex}), llvmBlockSlicePtr([]llvmIRBlockRef{continueEnd}), 1)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, loopShortCircuitBB)
-	shortCircuitEnd := C.LLVMGetInsertBlock(s.builder)
-	C.LLVMBuildBr(s.builder, loopEndBB)
+	llvmPositionBuilderAtEnd(s.builder, loopShortCircuitBB)
+	shortCircuitEnd := llvmGetInsertBlock(s.builder)
+	llvmBuildBr(s.builder, loopEndBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, loopEndBB)
-	resultValue := C.LLVMBuildPhi(s.builder, boolLLVMType, cStringFree(helperName+".result"))
-	C.LLVMAddIncoming(resultValue, llvmValueSlicePtr([]C.LLVMValueRef{defaultBool, terminalBool}), llvmBlockSlicePtr([]C.LLVMBasicBlockRef{loopCondBB, shortCircuitEnd}), 2)
+	llvmPositionBuilderAtEnd(s.builder, loopEndBB)
+	resultValue := llvmBuildPhi(s.builder, boolLLVMType, cStringFree(helperName+".result"))
+	llvmAddIncoming(resultValue, llvmValueSlicePtr([]llvmIRValueRef{defaultBool, terminalBool}), llvmBlockSlicePtr([]llvmIRBlockRef{loopCondBB, shortCircuitEnd}), 2)
 	return resultValue, boolType, true, nil
 }
-func (s *functionState) emitEnumerateHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitEnumerateHelperCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if len(expr.Args) != 1 {
 		return nil, nil, true, fmt.Errorf("enumerate expects 1 argument, got %d", len(expr.Args))
 	}
@@ -284,12 +212,12 @@ func (s *functionState) emitEnumerateHelperCall(expr *ast.CallExpr) (C.LLVMValue
 	if err != nil {
 		return nil, nil, true, err
 	}
-	resultValue := C.LLVMGetUndef(resultLLVMType)
-	resultValue = C.LLVMBuildInsertValue(s.builder, resultValue, sourceValue, 0, cStringFree("enumerate.source.insert"))
+	resultValue := llvmGetUndef(resultLLVMType)
+	resultValue = llvmBuildInsertValue(s.builder, resultValue, sourceValue, 0, cStringFree("enumerate.source.insert"))
 	return resultValue, resultType, true, nil
 }
 
-func (s *functionState) emitReadonlyHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitReadonlyHelperCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if len(expr.Args) != 1 {
 		return nil, nil, true, fmt.Errorf("readonly expects 1 argument, got %d", len(expr.Args))
 	}
@@ -299,7 +227,7 @@ func (s *functionState) emitReadonlyHelperCall(expr *ast.CallExpr) (C.LLVMValueR
 	}
 	return value, actualType, true, nil
 }
-func (s *functionState) emitSplitAtHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitSplitAtHelperCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if len(expr.Args) != 2 {
 		return nil, nil, true, fmt.Errorf("split_at expects 2 arguments, got %d", len(expr.Args))
 	}
@@ -317,12 +245,12 @@ func (s *functionState) emitSplitAtHelperCall(expr *ast.CallExpr) (C.LLVMValueRe
 	if err != nil {
 		return nil, nil, true, err
 	}
-	viewLen := C.LLVMBuildExtractValue(s.builder, viewValue, 1, cStringFree("split.view.len"))
+	viewLen := llvmBuildExtractValue(s.builder, viewValue, 1, cStringFree("split.view.len"))
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	zero := C.LLVMConstInt(usizeLLVMType, 0, 0)
+	zero := llvmConstInt(usizeLLVMType, 0, 0)
 	leftValue, err := s.emitArenaViewSliceValue(viewValue, viewType, zero, indexValue, "split.left")
 	if err != nil {
 		return nil, nil, true, err
@@ -335,12 +263,12 @@ func (s *functionState) emitSplitAtHelperCall(expr *ast.CallExpr) (C.LLVMValueRe
 	if err != nil {
 		return nil, nil, true, err
 	}
-	resultValue := C.LLVMGetUndef(resultLLVMType)
-	resultValue = C.LLVMBuildInsertValue(s.builder, resultValue, leftValue, 0, cStringFree("split.left.insert"))
-	resultValue = C.LLVMBuildInsertValue(s.builder, resultValue, rightValue, 1, cStringFree("split.right.insert"))
+	resultValue := llvmGetUndef(resultLLVMType)
+	resultValue = llvmBuildInsertValue(s.builder, resultValue, leftValue, 0, cStringFree("split.left.insert"))
+	resultValue = llvmBuildInsertValue(s.builder, resultValue, rightValue, 1, cStringFree("split.right.insert"))
 	return resultValue, resultType, true, nil
 }
-func (s *functionState) emitChunksExactHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitChunksExactHelperCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if len(expr.Args) != 2 {
 		return nil, nil, true, fmt.Errorf("chunks_exact expects 2 arguments, got %d", len(expr.Args))
 	}
@@ -358,22 +286,22 @@ func (s *functionState) emitChunksExactHelperCall(expr *ast.CallExpr) (C.LLVMVal
 	if err != nil {
 		return nil, nil, true, err
 	}
-	viewLen := C.LLVMBuildExtractValue(s.builder, viewValue, 1, cStringFree("chunks.view.len"))
+	viewLen := llvmBuildExtractValue(s.builder, viewValue, 1, cStringFree("chunks.view.len"))
 	if err := s.emitChunksExactValidation(chunkSizeValue, viewLen, "chunks_exact"); err != nil {
 		return nil, nil, true, err
 	}
-	chunksLen := C.LLVMBuildUDiv(s.builder, viewLen, chunkSizeValue, cStringFree("chunks.len"))
+	chunksLen := llvmBuildUDiv(s.builder, viewLen, chunkSizeValue, cStringFree("chunks.len"))
 	resultLLVMType, err := s.g.lowerType(resultType)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	resultValue := C.LLVMGetUndef(resultLLVMType)
-	resultValue = C.LLVMBuildInsertValue(s.builder, resultValue, viewValue, 0, cStringFree("chunks.source.insert"))
-	resultValue = C.LLVMBuildInsertValue(s.builder, resultValue, chunkSizeValue, 1, cStringFree("chunks.chunk_size.insert"))
-	resultValue = C.LLVMBuildInsertValue(s.builder, resultValue, chunksLen, 2, cStringFree("chunks.len.insert"))
+	resultValue := llvmGetUndef(resultLLVMType)
+	resultValue = llvmBuildInsertValue(s.builder, resultValue, viewValue, 0, cStringFree("chunks.source.insert"))
+	resultValue = llvmBuildInsertValue(s.builder, resultValue, chunkSizeValue, 1, cStringFree("chunks.chunk_size.insert"))
+	resultValue = llvmBuildInsertValue(s.builder, resultValue, chunksLen, 2, cStringFree("chunks.len.insert"))
 	return resultValue, resultType, true, nil
 }
-func (s *functionState) emitReduceSumHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitReduceSumHelperCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if len(expr.Args) < 2 {
 		return nil, nil, true, fmt.Errorf("reduce_sum expects at least 2 arguments, got %d", len(expr.Args))
 	}
@@ -394,7 +322,7 @@ func (s *functionState) emitReduceSumHelperCall(expr *ast.CallExpr) (C.LLVMValue
 	if err != nil {
 		return nil, nil, true, err
 	}
-	extraArgs := make([]C.LLVMValueRef, 0, len(expr.Args)-2)
+	extraArgs := make([]llvmIRValueRef, 0, len(expr.Args)-2)
 	for i, arg := range expr.Args[2:] {
 		var expected semantic.Type
 		if i+1 < len(callbackType.Params) {
@@ -410,7 +338,7 @@ func (s *functionState) emitReduceSumHelperCall(expr *ast.CallExpr) (C.LLVMValue
 	if err != nil {
 		return nil, nil, true, err
 	}
-	totalValue := C.LLVMBuildExtractValue(s.builder, srcValue, 1, cStringFree("reduce_sum.total"))
+	totalValue := llvmBuildExtractValue(s.builder, srcValue, 1, cStringFree("reduce_sum.total"))
 	usizeType := s.g.namedType("usize")
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
@@ -420,30 +348,30 @@ func (s *functionState) emitReduceSumHelperCall(expr *ast.CallExpr) (C.LLVMValue
 	if err != nil {
 		return nil, nil, true, err
 	}
-	zeroIndex := C.LLVMConstInt(usizeLLVMType, 0, 0)
-	one := C.LLVMConstInt(usizeLLVMType, 1, 0)
+	zeroIndex := llvmConstInt(usizeLLVMType, 0, 0)
+	one := llvmConstInt(usizeLLVMType, 1, 0)
 	accZero, err := s.zeroValue(resultType)
 	if err != nil {
 		return nil, nil, true, err
 	}
 
-	entryBlock := C.LLVMGetInsertBlock(s.builder)
-	loopCondBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("reduce_sum.cond"))
-	loopBodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("reduce_sum.body"))
-	loopEndBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("reduce_sum.end"))
-	C.LLVMBuildBr(s.builder, loopCondBB)
+	entryBlock := llvmGetInsertBlock(s.builder)
+	loopCondBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("reduce_sum.cond"))
+	loopBodyBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("reduce_sum.body"))
+	loopEndBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("reduce_sum.end"))
+	llvmBuildBr(s.builder, loopCondBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, loopCondBB)
-	indexValue := C.LLVMBuildPhi(s.builder, usizeLLVMType, cStringFree("reduce_sum.index"))
-	accValue := C.LLVMBuildPhi(s.builder, resultLLVMType, cStringFree("reduce_sum.acc"))
-	initValues := []C.LLVMValueRef{zeroIndex, accZero}
-	initBlocks := []C.LLVMBasicBlockRef{entryBlock, entryBlock}
-	C.LLVMAddIncoming(indexValue, llvmValueSlicePtr(initValues[:1]), llvmBlockSlicePtr(initBlocks[:1]), 1)
-	C.LLVMAddIncoming(accValue, llvmValueSlicePtr(initValues[1:]), llvmBlockSlicePtr(initBlocks[1:]), 1)
-	hasMore := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), indexValue, totalValue, cStringFree("reduce_sum.has_more"))
-	C.LLVMBuildCondBr(s.builder, hasMore, loopBodyBB, loopEndBB)
+	llvmPositionBuilderAtEnd(s.builder, loopCondBB)
+	indexValue := llvmBuildPhi(s.builder, usizeLLVMType, cStringFree("reduce_sum.index"))
+	accValue := llvmBuildPhi(s.builder, resultLLVMType, cStringFree("reduce_sum.acc"))
+	initValues := []llvmIRValueRef{zeroIndex, accZero}
+	initBlocks := []llvmIRBlockRef{entryBlock, entryBlock}
+	llvmAddIncoming(indexValue, llvmValueSlicePtr(initValues[:1]), llvmBlockSlicePtr(initBlocks[:1]), 1)
+	llvmAddIncoming(accValue, llvmValueSlicePtr(initValues[1:]), llvmBlockSlicePtr(initBlocks[1:]), 1)
+	hasMore := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntULT), indexValue, totalValue, cStringFree("reduce_sum.has_more"))
+	llvmBuildCondBr(s.builder, hasMore, loopBodyBB, loopEndBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, loopBodyBB)
+	llvmPositionBuilderAtEnd(s.builder, loopBodyBB)
 	srcElemPtr, err := s.emitDenseViewIndexedAddress(srcDataPtr, srcElemType, indexValue, "reduce_sum.src")
 	if err != nil {
 		return nil, nil, true, err
@@ -452,7 +380,7 @@ func (s *functionState) emitReduceSumHelperCall(expr *ast.CallExpr) (C.LLVMValue
 	if err != nil {
 		return nil, nil, true, err
 	}
-	callArgs := make([]C.LLVMValueRef, 0, len(extraArgs)+1)
+	callArgs := make([]llvmIRValueRef, 0, len(extraArgs)+1)
 	callArgs = append(callArgs, srcElem)
 	callArgs = append(callArgs, extraArgs...)
 	mappedValue, err := s.emitFunctionValueCall(callbackValue, callbackType, callArgs, "reduce_sum.call")
@@ -467,16 +395,16 @@ func (s *functionState) emitReduceSumHelperCall(expr *ast.CallExpr) (C.LLVMValue
 	if err != nil {
 		return nil, nil, true, err
 	}
-	nextIndex := C.LLVMBuildAdd(s.builder, indexValue, one, cStringFree("reduce_sum.index.next"))
-	bodyEnd := C.LLVMGetInsertBlock(s.builder)
-	C.LLVMBuildBr(s.builder, loopCondBB)
-	nextIndexValues := []C.LLVMValueRef{nextIndex}
-	nextIndexBlocks := []C.LLVMBasicBlockRef{bodyEnd}
-	C.LLVMAddIncoming(indexValue, llvmValueSlicePtr(nextIndexValues), llvmBlockSlicePtr(nextIndexBlocks), 1)
-	nextAccValues := []C.LLVMValueRef{nextAcc}
-	nextAccBlocks := []C.LLVMBasicBlockRef{bodyEnd}
-	C.LLVMAddIncoming(accValue, llvmValueSlicePtr(nextAccValues), llvmBlockSlicePtr(nextAccBlocks), 1)
+	nextIndex := llvmBuildAdd(s.builder, indexValue, one, cStringFree("reduce_sum.index.next"))
+	bodyEnd := llvmGetInsertBlock(s.builder)
+	llvmBuildBr(s.builder, loopCondBB)
+	nextIndexValues := []llvmIRValueRef{nextIndex}
+	nextIndexBlocks := []llvmIRBlockRef{bodyEnd}
+	llvmAddIncoming(indexValue, llvmValueSlicePtr(nextIndexValues), llvmBlockSlicePtr(nextIndexBlocks), 1)
+	nextAccValues := []llvmIRValueRef{nextAcc}
+	nextAccBlocks := []llvmIRBlockRef{bodyEnd}
+	llvmAddIncoming(accValue, llvmValueSlicePtr(nextAccValues), llvmBlockSlicePtr(nextAccBlocks), 1)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, loopEndBB)
+	llvmPositionBuilderAtEnd(s.builder, loopEndBB)
 	return accValue, resultType, true, nil
 }

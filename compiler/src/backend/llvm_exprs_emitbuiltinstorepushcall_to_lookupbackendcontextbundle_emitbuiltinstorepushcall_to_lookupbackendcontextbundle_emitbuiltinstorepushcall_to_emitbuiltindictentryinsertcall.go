@@ -2,19 +2,13 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
 )
 
-func (s *functionState) emitBuiltinStorePushCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitBuiltinStorePushCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
 	if !ok || fieldExpr == nil || fieldExpr.Field != "push" || fieldExpr.Object == nil {
 		return nil, nil, false, nil
@@ -45,7 +39,7 @@ func (s *functionState) emitBuiltinStorePushCall(expr *ast.CallExpr) (C.LLVMValu
 	if err != nil {
 		return nil, nil, true, err
 	}
-	var rowIndexValue C.LLVMValueRef
+	var rowIndexValue llvmIRValueRef
 	var rowIndexType semantic.Type
 	for i, name := range storeType.StoreFieldOrder {
 		fieldPtr, darrayType, err := s.emitBuiltinStoreFieldDArrayPtr(storePtr, loweredStoreType, name)
@@ -64,12 +58,12 @@ func (s *functionState) emitBuiltinStorePushCall(expr *ast.CallExpr) (C.LLVMValu
 		if err != nil {
 			return nil, nil, true, err
 		}
-		currentCount := C.LLVMBuildLoad2(s.builder, usizeLLVMType, countPtr, cStringFree("store."+name+".push.count"))
+		currentCount := llvmBuildLoad2(s.builder, usizeLLVMType, countPtr, cStringFree("store."+name+".push.count"))
 		if i == 0 {
 			rowIndexValue = currentCount
 			rowIndexType = usizeType
 		}
-		neededValue, err := s.emitCheckedUSizeAdd(currentCount, C.LLVMConstInt(usizeLLVMType, 1, 0), "store."+name+".push.needed")
+		neededValue, err := s.emitCheckedUSizeAdd(currentCount, llvmConstInt(usizeLLVMType, 1, 0), "store."+name+".push.needed")
 		if err != nil {
 			return nil, nil, true, err
 		}
@@ -80,15 +74,15 @@ func (s *functionState) emitBuiltinStorePushCall(expr *ast.CallExpr) (C.LLVMValu
 		if err != nil {
 			return nil, nil, true, err
 		}
-		voidPtrType := C.LLVMPointerTypeInContext(s.g.context, 0)
-		itemsValue := C.LLVMBuildLoad2(s.builder, voidPtrType, itemsPtr, cStringFree("store."+name+".push.items"))
+		voidPtrType := llvmPointerTypeInContext(s.g.context, 0)
+		itemsValue := llvmBuildLoad2(s.builder, voidPtrType, itemsPtr, cStringFree("store."+name+".push.items"))
 		elemLLVMType, err := s.g.lowerType(darrayType.Elem)
 		if err != nil {
 			return nil, nil, true, err
 		}
-		slotPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, itemsValue, llvmValueSlicePtr([]C.LLVMValueRef{currentCount}), 1, cStringFree("store."+name+".push.slot"))
-		C.LLVMBuildStore(s.builder, itemValue, slotPtr)
-		C.LLVMBuildStore(s.builder, neededValue, countPtr)
+		slotPtr := llvmBuildGEP2(s.builder, elemLLVMType, itemsValue, llvmValueSlicePtr([]llvmIRValueRef{currentCount}), 1, cStringFree("store."+name+".push.slot"))
+		llvmBuildStore(s.builder, itemValue, slotPtr)
+		llvmBuildStore(s.builder, neededValue, countPtr)
 	}
 	resultType := builtinStorePushResultType(storeType, s.g.namedType("u32"))
 	if storeType.StoreDecl != nil && storeType.StoreDecl.Soa {
@@ -103,7 +97,7 @@ func (s *functionState) emitBuiltinStorePushCall(expr *ast.CallExpr) (C.LLVMValu
 	}
 	return storePtr, resultType, true, nil
 }
-func (s *functionState) emitBuiltinStoreReserveCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitBuiltinStoreReserveCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
 	if !ok || fieldExpr == nil || fieldExpr.Field != "reserve" || fieldExpr.Object == nil {
 		return nil, nil, false, nil
@@ -149,7 +143,7 @@ func (s *functionState) emitBuiltinStoreReserveCall(expr *ast.CallExpr) (C.LLVMV
 	}
 	return storePtr, builtinStoreResultRefType(storeType), true, nil
 }
-func (s *functionState) emitBuiltinStoreClearCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitBuiltinStoreClearCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
 	if !ok || fieldExpr == nil || fieldExpr.Field != "clear" || fieldExpr.Object == nil {
 		return nil, nil, false, nil
@@ -179,11 +173,11 @@ func (s *functionState) emitBuiltinStoreClearCall(expr *ast.CallExpr) (C.LLVMVal
 		if err != nil {
 			return nil, nil, true, err
 		}
-		C.LLVMBuildStore(s.builder, C.LLVMConstInt(usizeLLVMType, 0, 0), countPtr)
+		llvmBuildStore(s.builder, llvmConstInt(usizeLLVMType, 0, 0), countPtr)
 	}
 	return storePtr, builtinStoreResultRefType(storeType), true, nil
 }
-func (s *functionState) emitBuiltinStoreTruncateCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitBuiltinStoreTruncateCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
 	if !ok || fieldExpr == nil || fieldExpr.Field != "truncate" || fieldExpr.Object == nil {
 		return nil, nil, false, nil
@@ -217,19 +211,19 @@ func (s *functionState) emitBuiltinStoreTruncateCall(expr *ast.CallExpr) (C.LLVM
 		if err != nil {
 			return nil, nil, true, err
 		}
-		currentCount := C.LLVMBuildLoad2(s.builder, usizeLLVMType, countPtr, cStringFree("store."+name+".truncate.count"))
-		shouldStore := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), limitValue, currentCount, cStringFree("store."+name+".truncate.lt"))
-		storeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("store."+name+".truncate.store"))
-		mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("store."+name+".truncate.merge"))
-		C.LLVMBuildCondBr(s.builder, shouldStore, storeBB, mergeBB)
-		C.LLVMPositionBuilderAtEnd(s.builder, storeBB)
-		C.LLVMBuildStore(s.builder, limitValue, countPtr)
-		C.LLVMBuildBr(s.builder, mergeBB)
-		C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+		currentCount := llvmBuildLoad2(s.builder, usizeLLVMType, countPtr, cStringFree("store."+name+".truncate.count"))
+		shouldStore := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntULT), limitValue, currentCount, cStringFree("store."+name+".truncate.lt"))
+		storeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("store."+name+".truncate.store"))
+		mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("store."+name+".truncate.merge"))
+		llvmBuildCondBr(s.builder, shouldStore, storeBB, mergeBB)
+		llvmPositionBuilderAtEnd(s.builder, storeBB)
+		llvmBuildStore(s.builder, limitValue, countPtr)
+		llvmBuildBr(s.builder, mergeBB)
+		llvmPositionBuilderAtEnd(s.builder, mergeBB)
 	}
 	return storePtr, builtinStoreResultRefType(storeType), true, nil
 }
-func (s *functionState) emitBuiltinStoreRowsCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitBuiltinStoreRowsCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
 	if !ok || fieldExpr == nil || fieldExpr.Field != "rows" || fieldExpr.Object == nil {
 		return nil, nil, false, nil
@@ -254,11 +248,11 @@ func (s *functionState) emitBuiltinStoreRowsCall(expr *ast.CallExpr) (C.LLVMValu
 	if err != nil {
 		return nil, nil, true, err
 	}
-	value := C.LLVMGetUndef(rowViewLLVMType)
-	value = C.LLVMBuildInsertValue(s.builder, value, storePtr, 0, cStringFree("store.rows.store"))
+	value := llvmGetUndef(rowViewLLVMType)
+	value = llvmBuildInsertValue(s.builder, value, storePtr, 0, cStringFree("store.rows.store"))
 	return value, resultType, true, nil
 }
-func (s *functionState) emitBuiltinStoreRowsFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitBuiltinStoreRowsFieldExpr(expr *ast.FieldExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if expr == nil || expr.Field != "rows" || expr.Object == nil {
 		return nil, nil, false, nil
 	}
@@ -279,11 +273,11 @@ func (s *functionState) emitBuiltinStoreRowsFieldExpr(expr *ast.FieldExpr) (C.LL
 	if err != nil {
 		return nil, nil, true, err
 	}
-	value := C.LLVMGetUndef(rowViewLLVMType)
-	value = C.LLVMBuildInsertValue(s.builder, value, storePtr, 0, cStringFree("soa.rows.store"))
+	value := llvmGetUndef(rowViewLLVMType)
+	value = llvmBuildInsertValue(s.builder, value, storePtr, 0, cStringFree("soa.rows.store"))
 	return value, resultType, true, nil
 }
-func (s *functionState) emitBuiltinSOACountFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitBuiltinSOACountFieldExpr(expr *ast.FieldExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if expr == nil || expr.Field != "count" || expr.Object == nil {
 		return nil, nil, false, nil
 	}
@@ -302,7 +296,7 @@ func (s *functionState) emitBuiltinSOACountFieldExpr(expr *ast.FieldExpr) (C.LLV
 	}
 	return countValue, s.g.namedType("usize"), true, nil
 }
-func (s *functionState) emitBuiltinSOARowIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitBuiltinSOARowIndexExpr(expr *ast.IndexExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if expr == nil || expr.Fallback != nil {
 		return nil, nil, false, nil
 	}
@@ -333,12 +327,12 @@ func (s *functionState) emitBuiltinSOARowIndexExpr(expr *ast.IndexExpr) (C.LLVMV
 	if err != nil {
 		return nil, nil, true, err
 	}
-	rowValue := C.LLVMGetUndef(rowLLVMType)
-	rowValue = C.LLVMBuildInsertValue(s.builder, rowValue, storePtr, 0, cStringFree("soa.row.store"))
-	rowValue = C.LLVMBuildInsertValue(s.builder, rowValue, indexValue, 1, cStringFree("soa.row.index"))
+	rowValue := llvmGetUndef(rowLLVMType)
+	rowValue = llvmBuildInsertValue(s.builder, rowValue, storePtr, 0, cStringFree("soa.row.store"))
+	rowValue = llvmBuildInsertValue(s.builder, rowValue, indexValue, 1, cStringFree("soa.row.index"))
 	return rowValue, resultType, true, nil
 }
-func (s *functionState) emitBuiltinSOAValidCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitBuiltinSOAValidCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
 	if !ok || fieldExpr == nil || fieldExpr.Field != "valid" || fieldExpr.Object == nil {
 		return nil, nil, false, nil
@@ -368,10 +362,10 @@ func (s *functionState) emitBuiltinSOAValidCall(expr *ast.CallExpr) (C.LLVMValue
 	if err != nil {
 		return nil, nil, true, err
 	}
-	value := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), rowValue, countValue, cStringFree("soa.valid"))
+	value := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntULT), rowValue, countValue, cStringFree("soa.valid"))
 	return value, s.g.namedType("bool"), true, nil
 }
-func (s *functionState) emitReadableStoreReceiverPtr(receiver ast.Expr, receiverType semantic.Type, receiverRefType *semantic.RefType) (C.LLVMValueRef, error) {
+func (s *functionState) emitReadableStoreReceiverPtr(receiver ast.Expr, receiverType semantic.Type, receiverRefType *semantic.RefType) (llvmIRValueRef, error) {
 	if receiverRefType != nil {
 		ptr, _, err := s.emitExpr(receiver, receiverRefType)
 		return ptr, err
@@ -388,16 +382,16 @@ func (s *functionState) emitReadableStoreReceiverPtr(receiver ast.Expr, receiver
 	if err != nil {
 		return nil, err
 	}
-	C.LLVMBuildStore(s.builder, value, tempAlloca)
+	llvmBuildStore(s.builder, value, tempAlloca)
 	return tempAlloca, nil
 }
-func (s *functionState) emitBuiltinStoreCountValue(storePtr C.LLVMValueRef, storeType *semantic.StructType, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitBuiltinStoreCountValue(storePtr llvmIRValueRef, storeType *semantic.StructType, name string) (llvmIRValueRef, error) {
 	if storeType == nil || len(storeType.StoreFieldOrder) == 0 {
 		usizeType, err := s.g.lowerType(s.g.namedType("usize"))
 		if err != nil {
 			return nil, err
 		}
-		return C.LLVMConstInt(usizeType, 0, 0), nil
+		return llvmConstInt(usizeType, 0, 0), nil
 	}
 	firstField := storeType.StoreFieldOrder[0]
 	columnPtr, darrayType, err := s.emitBuiltinStoreFieldDArrayPtr(storePtr, storeType, firstField)

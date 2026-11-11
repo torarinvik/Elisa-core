@@ -2,11 +2,6 @@
 
 package backend
 
-/*
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/semantic"
 )
@@ -38,14 +33,14 @@ func externNicheOptionalPayload(fn *semantic.FuncType, t semantic.Type) (semanti
 // convertExternOptionalArgs rewrites each optional argument that crosses as a niche
 // pointer, leaving every other argument as it was. Returns a new slice rather than
 // editing the caller's, matching convertByvalArgs.
-func (s *functionState) convertExternOptionalArgs(fn *semantic.FuncType, args []C.LLVMValueRef) []C.LLVMValueRef {
-	var out []C.LLVMValueRef
+func (s *functionState) convertExternOptionalArgs(fn *semantic.FuncType, args []llvmIRValueRef) []llvmIRValueRef {
+	var out []llvmIRValueRef
 	for i := 0; i < len(fn.Params) && i < len(args); i++ {
 		if _, ok := externNicheOptionalPayload(fn, fn.Params[i]); !ok {
 			continue
 		}
 		if out == nil {
-			out = make([]C.LLVMValueRef, len(args))
+			out = make([]llvmIRValueRef, len(args))
 			copy(out, args)
 		}
 		out[i] = s.emitExternOptionalToNiche(args[i])
@@ -58,25 +53,25 @@ func (s *functionState) convertExternOptionalArgs(fn *semantic.FuncType, args []
 
 // emitExternOptionalToNiche lowers an Elisa optional argument to the bare pointer the C
 // callee expects: the payload when present, null when absent.
-func (s *functionState) emitExternOptionalToNiche(value C.LLVMValueRef) C.LLVMValueRef {
-	ptrType := C.LLVMPointerTypeInContext(s.g.context, 0)
-	present := C.LLVMBuildExtractValue(s.builder, value, 0, cStringFree("extern.opt.arg.present"))
-	payload := C.LLVMBuildExtractValue(s.builder, value, 1, cStringFree("extern.opt.arg.payload"))
+func (s *functionState) emitExternOptionalToNiche(value llvmIRValueRef) llvmIRValueRef {
+	ptrType := llvmPointerTypeInContext(s.g.context, 0)
+	present := llvmBuildExtractValue(s.builder, value, 0, cStringFree("extern.opt.arg.present"))
+	payload := llvmBuildExtractValue(s.builder, value, 1, cStringFree("extern.opt.arg.payload"))
 	// select, not a branch: both operands are already materialized values.
-	return C.LLVMBuildSelect(s.builder, present, payload, C.LLVMConstNull(ptrType), cStringFree("extern.opt.arg.niche"))
+	return llvmBuildSelect(s.builder, present, payload, llvmConstNull(ptrType), cStringFree("extern.opt.arg.niche"))
 }
 
 // emitExternOptionalFromNiche rebuilds an Elisa optional from the bare pointer a C
 // function returned: absent when null, present carrying the pointer otherwise.
-func (s *functionState) emitExternOptionalFromNiche(ptr C.LLVMValueRef, optional semantic.Type) (C.LLVMValueRef, error) {
+func (s *functionState) emitExternOptionalFromNiche(ptr llvmIRValueRef, optional semantic.Type) (llvmIRValueRef, error) {
 	optionalType, err := s.g.lowerType(optional)
 	if err != nil {
 		return nil, err
 	}
-	ptrType := C.LLVMPointerTypeInContext(s.g.context, 0)
-	present := C.LLVMBuildICmp(s.builder, C.LLVMIntNE, ptr, C.LLVMConstNull(ptrType), cStringFree("extern.opt.present"))
-	result := C.LLVMGetUndef(optionalType)
-	result = C.LLVMBuildInsertValue(s.builder, result, present, 0, cStringFree("extern.opt.tag"))
+	ptrType := llvmPointerTypeInContext(s.g.context, 0)
+	present := llvmBuildICmp(s.builder, llvmIntNE, ptr, llvmConstNull(ptrType), cStringFree("extern.opt.present"))
+	result := llvmGetUndef(optionalType)
+	result = llvmBuildInsertValue(s.builder, result, present, 0, cStringFree("extern.opt.tag"))
 	payload := ptr
 	if opt, ok := optional.(*semantic.OptionalType); ok && semantic.IsResourceStructType(opt.Value) {
 		// The payload is the resource STRUCT; wrap the handle (llvm_extern_resource_abi.go).
@@ -86,6 +81,6 @@ func (s *functionState) emitExternOptionalFromNiche(ptr C.LLVMValueRef, optional
 		}
 		payload = wrapped
 	}
-	result = C.LLVMBuildInsertValue(s.builder, result, payload, 1, cStringFree("extern.opt.val"))
+	result = llvmBuildInsertValue(s.builder, result, payload, 1, cStringFree("extern.opt.val"))
 	return result, nil
 }

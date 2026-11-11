@@ -2,10 +2,6 @@
 
 package backend
 
-// #include <stdlib.h>
-// #include "llvm-c/Core.h"
-import "C"
-
 import (
 	"elisacore/src/semantic"
 )
@@ -40,7 +36,7 @@ func (g *llvmGenerator) optionalEnumNicheField(t semantic.Type) (*semantic.EnumT
 // take the handle's type (so the record carries one narrow slot, no presence flag), everything
 // else lowers as usual. Field byte offsets derive from this same lowering, so sizing and access
 // stay consistent by construction.
-func (g *llvmGenerator) lowerEnumPayloadFieldType(t semantic.Type) (C.LLVMTypeRef, error) {
+func (g *llvmGenerator) lowerEnumPayloadFieldType(t semantic.Type) (llvmIRTypeRef, error) {
 	if enumType, ok := g.optionalEnumNicheField(t); ok {
 		return g.lowerPackedEnumType(enumType)
 	}
@@ -48,40 +44,40 @@ func (g *llvmGenerator) lowerEnumPayloadFieldType(t semantic.Type) (C.LLVMTypeRe
 }
 
 // optionalEnumNicheSentinel returns the absent-marker constant in the handle's own width.
-func (s *functionState) optionalEnumNicheSentinel(enumType *semantic.EnumType) (C.LLVMValueRef, error) {
+func (s *functionState) optionalEnumNicheSentinel(enumType *semantic.EnumType) (llvmIRValueRef, error) {
 	handleType, err := s.g.lowerPackedEnumType(enumType)
 	if err != nil {
 		return nil, err
 	}
-	return C.LLVMConstInt(handleType, C.ulonglong(enumType.Root().NullSentinelValue()), 0), nil
+	return llvmConstInt(handleType, llvmIRUnsignedLongLong(enumType.Root().NullSentinelValue()), 0), nil
 }
 
 // packOptionalEnumNicheValue converts the generic `{bool, handle}` carrier into the record's
 // niche slot: present ? handle : sentinel.
-func (s *functionState) packOptionalEnumNicheValue(carrierValue C.LLVMValueRef, enumType *semantic.EnumType, name string) (C.LLVMValueRef, error) {
-	present := C.LLVMBuildExtractValue(s.builder, carrierValue, 0, cStringFree(name+".niche.present"))
-	handleValue := C.LLVMBuildExtractValue(s.builder, carrierValue, 1, cStringFree(name+".niche.handle"))
+func (s *functionState) packOptionalEnumNicheValue(carrierValue llvmIRValueRef, enumType *semantic.EnumType, name string) (llvmIRValueRef, error) {
+	present := llvmBuildExtractValue(s.builder, carrierValue, 0, cStringFree(name+".niche.present"))
+	handleValue := llvmBuildExtractValue(s.builder, carrierValue, 1, cStringFree(name+".niche.handle"))
 	sentinel, err := s.optionalEnumNicheSentinel(enumType)
 	if err != nil {
 		return nil, err
 	}
-	return C.LLVMBuildSelect(s.builder, present, handleValue, sentinel, cStringFree(name+".niche.pack")), nil
+	return llvmBuildSelect(s.builder, present, handleValue, sentinel, cStringFree(name+".niche.pack")), nil
 }
 
 // unpackOptionalEnumNicheValue converts the record's niche slot back into the generic carrier:
 // {handle != sentinel, handle}.
-func (s *functionState) unpackOptionalEnumNicheValue(nicheValue C.LLVMValueRef, optionalType *semantic.OptionalType, enumType *semantic.EnumType, name string) (C.LLVMValueRef, error) {
+func (s *functionState) unpackOptionalEnumNicheValue(nicheValue llvmIRValueRef, optionalType *semantic.OptionalType, enumType *semantic.EnumType, name string) (llvmIRValueRef, error) {
 	sentinel, err := s.optionalEnumNicheSentinel(enumType)
 	if err != nil {
 		return nil, err
 	}
-	present := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), nicheValue, sentinel, cStringFree(name+".niche.unpack.present"))
+	present := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntNE), nicheValue, sentinel, cStringFree(name+".niche.unpack.present"))
 	carrierType, err := s.g.lowerType(optionalType)
 	if err != nil {
 		return nil, err
 	}
-	carrier := C.LLVMGetUndef(carrierType)
-	carrier = C.LLVMBuildInsertValue(s.builder, carrier, present, 0, cStringFree(name+".niche.unpack.flag"))
-	carrier = C.LLVMBuildInsertValue(s.builder, carrier, nicheValue, 1, cStringFree(name+".niche.unpack.value"))
+	carrier := llvmGetUndef(carrierType)
+	carrier = llvmBuildInsertValue(s.builder, carrier, present, 0, cStringFree(name+".niche.unpack.flag"))
+	carrier = llvmBuildInsertValue(s.builder, carrier, nicheValue, 1, cStringFree(name+".niche.unpack.value"))
 	return carrier, nil
 }

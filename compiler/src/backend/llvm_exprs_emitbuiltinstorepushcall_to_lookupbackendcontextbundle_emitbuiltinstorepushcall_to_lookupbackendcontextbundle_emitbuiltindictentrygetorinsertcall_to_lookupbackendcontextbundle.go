@@ -2,85 +2,13 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <string.h>
-#include <llvm-c/Core.h>
-
-static int elisacoreLLVMIsZeroValue(LLVMValueRef value) {
-	return LLVMIsAConstant(value) != NULL && LLVMIsNull(value);
-}
-
-static LLVMMetadataRef elisa_coreAliasMDString(LLVMContextRef ctx, const char* value) {
-	if (value == NULL) {
-		return LLVMMDStringInContext2(ctx, "", 0);
-	}
-	return LLVMMDStringInContext2(ctx, value, strlen(value));
-}
-
-static LLVMMetadataRef elisa_coreAliasMDNode(LLVMContextRef ctx, LLVMMetadataRef* operands, size_t count) {
-	return LLVMMDNodeInContext2(ctx, operands, count);
-}
-
-static unsigned elisa_coreMetadataKindID(LLVMContextRef ctx, const char* kindName) {
-	return LLVMGetMDKindIDInContext(ctx, kindName, strlen(kindName));
-}
-
-static void elisa_coreSetMetadataList(LLVMValueRef inst, LLVMContextRef ctx, const char* kindName, LLVMMetadataRef* scopes, size_t count) {
-	if (inst == NULL || ctx == NULL || kindName == NULL || count == 0) {
-		return;
-	}
-	LLVMMetadataRef list = elisa_coreAliasMDNode(ctx, scopes, count);
-	LLVMValueRef listValue = LLVMMetadataAsValue(ctx, list);
-	LLVMSetMetadata(inst, elisa_coreMetadataKindID(ctx, kindName), listValue);
-}
-
-static LLVMMetadataRef elisa_coreCreateAliasScopeDomain(LLVMContextRef ctx, const char* domainName) {
-	LLVMMetadataRef operands[1];
-	operands[0] = elisa_coreAliasMDString(ctx, domainName);
-	return elisa_coreAliasMDNode(ctx, operands, 1);
-}
-
-static LLVMMetadataRef elisa_coreCreateAliasScope(LLVMContextRef ctx, LLVMMetadataRef domain, const char* scopeName) {
-	LLVMMetadataRef operands[2];
-	operands[0] = elisa_coreAliasMDString(ctx, scopeName);
-	operands[1] = domain;
-	return elisa_coreAliasMDNode(ctx, operands, 2);
-}
-
-static void elisa_coreAttachAliasScopeMetadata(LLVMValueRef inst, LLVMContextRef ctx, const char* domainName, const char* aliasScopeName,
-	const char* noAliasScope1Name, int hasNoAliasScope1, const char* noAliasScope2Name, int hasNoAliasScope2) {
-	if (inst == NULL || ctx == NULL || domainName == NULL || aliasScopeName == NULL) {
-		return;
-	}
-	LLVMMetadataRef domain = elisa_coreCreateAliasScopeDomain(ctx, domainName);
-	LLVMMetadataRef aliasScope = elisa_coreCreateAliasScope(ctx, domain, aliasScopeName);
-	LLVMMetadataRef aliasScopes[1];
-	aliasScopes[0] = aliasScope;
-	elisa_coreSetMetadataList(inst, ctx, "alias.scope", aliasScopes, 1);
-
-	LLVMMetadataRef noAliasScopes[2];
-	size_t noAliasCount = 0;
-	if (hasNoAliasScope1 && noAliasScope1Name != NULL) {
-		noAliasScopes[noAliasCount++] = elisa_coreCreateAliasScope(ctx, domain, noAliasScope1Name);
-	}
-	if (hasNoAliasScope2 && noAliasScope2Name != NULL) {
-		noAliasScopes[noAliasCount++] = elisa_coreCreateAliasScope(ctx, domain, noAliasScope2Name);
-	}
-	if (noAliasCount != 0) {
-		elisa_coreSetMetadataList(inst, ctx, "noalias", noAliasScopes, noAliasCount);
-	}
-}
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
 )
 
-func (s *functionState) emitBuiltinDictEntryGetOrInsertCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitBuiltinDictEntryGetOrInsertCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
 	if !ok || fieldExpr == nil || fieldExpr.Field != "get_or_insert" || fieldExpr.Object == nil {
 		return nil, nil, false, nil
@@ -108,7 +36,7 @@ func (s *functionState) emitBuiltinDictEntryGetOrInsertCall(expr *ast.CallExpr) 
 		}
 		owner.arenaRef = arenaRef
 	}
-	var entryPtr C.LLVMValueRef
+	var entryPtr llvmIRValueRef
 	var err error
 	if receiverRefType != nil {
 		entryPtr, _, err = s.emitExpr(fieldExpr.Object, receiverRefType)
@@ -137,34 +65,34 @@ func (s *functionState) emitBuiltinDictEntryGetOrInsertCall(expr *ast.CallExpr) 
 	if err != nil {
 		return nil, nil, true, err
 	}
-	var dictValue, keyValue, cachedValue C.LLVMValueRef
-	var valuePtrPtr C.LLVMValueRef
+	var dictValue, keyValue, cachedValue llvmIRValueRef
+	var valuePtrPtr llvmIRValueRef
 	if entryPtr != nil {
-		dictPtr := C.LLVMBuildStructGEP2(s.builder, entryLLVMType, entryPtr, 0, cStringFree("dict.entry.get_or_insert.dict.ptr"))
-		keyPtr := C.LLVMBuildStructGEP2(s.builder, entryLLVMType, entryPtr, 1, cStringFree("dict.entry.get_or_insert.key.ptr"))
-		valuePtrPtr = C.LLVMBuildStructGEP2(s.builder, entryLLVMType, entryPtr, 2, cStringFree("dict.entry.get_or_insert.value.ptr"))
-		dictValue = C.LLVMBuildLoad2(s.builder, dictRefLLVMType, dictPtr, cStringFree("dict.entry.get_or_insert.dict"))
-		keyValue = C.LLVMBuildLoad2(s.builder, keyLLVMType, keyPtr, cStringFree("dict.entry.get_or_insert.key"))
-		cachedValue = C.LLVMBuildLoad2(s.builder, valueRefLLVMType, valuePtrPtr, cStringFree("dict.entry.get_or_insert.cached"))
+		dictPtr := llvmBuildStructGEP2(s.builder, entryLLVMType, entryPtr, 0, cStringFree("dict.entry.get_or_insert.dict.ptr"))
+		keyPtr := llvmBuildStructGEP2(s.builder, entryLLVMType, entryPtr, 1, cStringFree("dict.entry.get_or_insert.key.ptr"))
+		valuePtrPtr = llvmBuildStructGEP2(s.builder, entryLLVMType, entryPtr, 2, cStringFree("dict.entry.get_or_insert.value.ptr"))
+		dictValue = llvmBuildLoad2(s.builder, dictRefLLVMType, dictPtr, cStringFree("dict.entry.get_or_insert.dict"))
+		keyValue = llvmBuildLoad2(s.builder, keyLLVMType, keyPtr, cStringFree("dict.entry.get_or_insert.key"))
+		cachedValue = llvmBuildLoad2(s.builder, valueRefLLVMType, valuePtrPtr, cStringFree("dict.entry.get_or_insert.cached"))
 	} else {
 		entryValue, err := s.emitBuiltinDictEntryValue(fieldExpr.Object, entryType, receiverRefType)
 		if err != nil {
 			return nil, nil, true, err
 		}
-		dictValue = C.LLVMBuildExtractValue(s.builder, entryValue, 0, cStringFree("dict.entry.get_or_insert.dict"))
-		keyValue = C.LLVMBuildExtractValue(s.builder, entryValue, 1, cStringFree("dict.entry.get_or_insert.key"))
-		cachedValue = C.LLVMBuildExtractValue(s.builder, entryValue, 2, cStringFree("dict.entry.get_or_insert.cached"))
+		dictValue = llvmBuildExtractValue(s.builder, entryValue, 0, cStringFree("dict.entry.get_or_insert.dict"))
+		keyValue = llvmBuildExtractValue(s.builder, entryValue, 1, cStringFree("dict.entry.get_or_insert.key"))
+		cachedValue = llvmBuildExtractValue(s.builder, entryValue, 2, cStringFree("dict.entry.get_or_insert.cached"))
 	}
-	nullValue := C.LLVMConstNull(valueRefLLVMType)
-	hasCached := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), cachedValue, nullValue, cStringFree("dict.entry.get_or_insert.has"))
-	nonNullBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("dict.entry.get_or_insert.nonnull"))
-	insertBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("dict.entry.get_or_insert.insert"))
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("dict.entry.get_or_insert.merge"))
-	C.LLVMBuildCondBr(s.builder, hasCached, nonNullBB, insertBB)
-	C.LLVMPositionBuilderAtEnd(s.builder, nonNullBB)
-	C.LLVMBuildBr(s.builder, mergeBB)
-	nonNullEnd := C.LLVMGetInsertBlock(s.builder)
-	C.LLVMPositionBuilderAtEnd(s.builder, insertBB)
+	nullValue := llvmConstNull(valueRefLLVMType)
+	hasCached := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntNE), cachedValue, nullValue, cStringFree("dict.entry.get_or_insert.has"))
+	nonNullBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("dict.entry.get_or_insert.nonnull"))
+	insertBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("dict.entry.get_or_insert.insert"))
+	mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("dict.entry.get_or_insert.merge"))
+	llvmBuildCondBr(s.builder, hasCached, nonNullBB, insertBB)
+	llvmPositionBuilderAtEnd(s.builder, nonNullBB)
+	llvmBuildBr(s.builder, mergeBB)
+	nonNullEnd := llvmGetInsertBlock(s.builder)
+	llvmPositionBuilderAtEnd(s.builder, insertBB)
 	insertedArg, _, err := s.emitExpr(expr.Args[0], entryType.Dict.Value)
 	if err != nil {
 		return nil, nil, true, err
@@ -177,18 +105,18 @@ func (s *functionState) emitBuiltinDictEntryGetOrInsertCall(expr *ast.CallExpr) 
 	if err != nil {
 		return nil, nil, true, err
 	}
-	insertedValue := s.buildCall(getOrInsertLLVMType, getOrInsertCallee, []C.LLVMValueRef{owner.arenaRef, dictValue, keyValue, insertedArg}, "dict.entry.get_or_insert.result")
+	insertedValue := s.buildCall(getOrInsertLLVMType, getOrInsertCallee, []llvmIRValueRef{owner.arenaRef, dictValue, keyValue, insertedArg}, "dict.entry.get_or_insert.result")
 	if valuePtrPtr != nil {
-		C.LLVMBuildStore(s.builder, insertedValue, valuePtrPtr)
+		llvmBuildStore(s.builder, insertedValue, valuePtrPtr)
 	}
-	C.LLVMBuildBr(s.builder, mergeBB)
-	insertEnd := C.LLVMGetInsertBlock(s.builder)
-	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
-	phi := C.LLVMBuildPhi(s.builder, valueRefLLVMType, cStringFree("dict.entry.get_or_insert.phi"))
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr([]C.LLVMValueRef{cachedValue, insertedValue}), llvmBlockSlicePtr([]C.LLVMBasicBlockRef{nonNullEnd, insertEnd}), 2)
+	llvmBuildBr(s.builder, mergeBB)
+	insertEnd := llvmGetInsertBlock(s.builder)
+	llvmPositionBuilderAtEnd(s.builder, mergeBB)
+	phi := llvmBuildPhi(s.builder, valueRefLLVMType, cStringFree("dict.entry.get_or_insert.phi"))
+	llvmAddIncoming(phi, llvmValueSlicePtr([]llvmIRValueRef{cachedValue, insertedValue}), llvmBlockSlicePtr([]llvmIRBlockRef{nonNullEnd, insertEnd}), 2)
 	return phi, valueRefType, true, nil
 }
-func (s *functionState) emitBuiltinDictEntryFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitBuiltinDictEntryFieldExpr(expr *ast.FieldExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if expr == nil || expr.Object == nil {
 		return nil, nil, false, nil
 	}
@@ -207,12 +135,12 @@ func (s *functionState) emitBuiltinDictEntryFieldExpr(expr *ast.FieldExpr) (C.LL
 	}
 	switch expr.Field {
 	case "value":
-		value := C.LLVMBuildExtractValue(s.builder, entryValue, 2, cStringFree("dict.entry.value"))
+		value := llvmBuildExtractValue(s.builder, entryValue, 2, cStringFree("dict.entry.value"))
 		return value, valueRefType, true, nil
 	case "found":
-		value := C.LLVMBuildExtractValue(s.builder, entryValue, 2, cStringFree("dict.entry.found.value"))
-		nullValue := C.LLVMConstNull(valueRefLLVMType)
-		found := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), value, nullValue, cStringFree("dict.entry.found"))
+		value := llvmBuildExtractValue(s.builder, entryValue, 2, cStringFree("dict.entry.found.value"))
+		nullValue := llvmConstNull(valueRefLLVMType)
+		found := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntNE), value, nullValue, cStringFree("dict.entry.found"))
 		return found, s.g.namedType("bool"), true, nil
 	default:
 		return nil, nil, false, nil
@@ -232,7 +160,7 @@ func backendStructLikeValueType(t semantic.Type) bool {
 	return false
 }
 
-func (s *functionState) emitCallArg(arg ast.Expr, expected semantic.Type, fnType *semantic.FuncType, index int) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitCallArg(arg ast.Expr, expected semantic.Type, fnType *semantic.FuncType, index int) (llvmIRValueRef, semantic.Type, error) {
 	// A region-polymorphic callee's hidden __region_auto argument normally comes
 	// from the caller's visible region binding. While a synthesized auto region
 	// emits a non-escaping region-carrying local initializer, however, the current
@@ -287,7 +215,7 @@ func (s *functionState) emitCallArg(arg ast.Expr, expected semantic.Type, fnType
 	return s.emitExpr(arg, expected)
 }
 
-func (s *functionState) regionPolyImplicitArgForActiveInitializer(expected semantic.Type, fnType *semantic.FuncType, index int) (C.LLVMValueRef, bool, error) {
+func (s *functionState) regionPolyImplicitArgForActiveInitializer(expected semantic.Type, fnType *semantic.FuncType, index int) (llvmIRValueRef, bool, error) {
 	if s == nil || fnType == nil || index < 0 {
 		return nil, false, nil
 	}

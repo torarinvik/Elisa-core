@@ -2,17 +2,12 @@
 
 package backend
 
-/*
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/semantic"
 	"fmt"
 )
 
-func (ops *packedStoreOps) allocateStorage(enumType *semantic.EnumType, totalSizeValue C.LLVMValueRef, hasTail bool, fixedTagValue C.LLVMValueRef, name string) (C.LLVMValueRef, C.LLVMValueRef, C.LLVMValueRef, error) {
+func (ops *packedStoreOps) allocateStorage(enumType *semantic.EnumType, totalSizeValue llvmIRValueRef, hasTail bool, fixedTagValue llvmIRValueRef, name string) (llvmIRValueRef, llvmIRValueRef, llvmIRValueRef, error) {
 	if enumType == nil || !enumType.Packed {
 		return nil, nil, nil, fmt.Errorf("missing packed enum storage metadata")
 	}
@@ -35,10 +30,10 @@ func (ops *packedStoreOps) allocateStorage(enumType *semantic.EnumType, totalSiz
 			return nil, nil, nil, fmt.Errorf("missing builtin PackedStoreIndexAllocResult type for packed enum allocation")
 		}
 		allocHelperName := "ctx_packed_store_alloc_fixed_tagged_index_result"
-		allocArgs := []C.LLVMValueRef{arenaValue, stateValue, fixedTagValue}
+		allocArgs := []llvmIRValueRef{arenaValue, stateValue, fixedTagValue}
 		if hasTail {
 			allocHelperName = "ctx_packed_store_alloc_index_result"
-			allocArgs = []C.LLVMValueRef{arenaValue, totalSizeValue, stateValue}
+			allocArgs = []llvmIRValueRef{arenaValue, totalSizeValue, stateValue}
 		}
 		allocHelperType := ops.cachedRuntimeHelperType(allocHelperName, func() *semantic.FuncType {
 			params := []semantic.Type{ops.arenaRefType(), ops.voidRefType(), ops.s.g.namedType("u32")}
@@ -56,8 +51,8 @@ func (ops *packedStoreOps) allocateStorage(enumType *semantic.EnumType, totalSiz
 			return nil, nil, nil, err
 		}
 		allocResult := ops.s.buildCall(allocLLVMFnType, allocCallee, allocArgs, "packed.index.alloc")
-		allocPtr := C.LLVMBuildExtractValue(ops.s.builder, allocResult, 0, cStringFree("packed.alloc.ptr"))
-		indexValue := C.LLVMBuildExtractValue(ops.s.builder, allocResult, 1, cStringFree("packed.alloc.index"))
+		allocPtr := llvmBuildExtractValue(ops.s.builder, allocResult, 0, cStringFree("packed.alloc.ptr"))
+		indexValue := llvmBuildExtractValue(ops.s.builder, allocResult, 1, cStringFree("packed.alloc.index"))
 		enumValue, err := ops.s.coerceValue(indexValue, ops.s.g.namedType("u32"), enumType)
 		if err != nil {
 			return nil, nil, nil, err
@@ -77,10 +72,10 @@ func (ops *packedStoreOps) allocateStorage(enumType *semantic.EnumType, totalSiz
 			return nil, nil, nil, fmt.Errorf("missing builtin PackedStoreIndexAllocResult type for variant-sparse packed enum allocation")
 		}
 		allocHelperName := "ctx_packed_store_alloc_fixed_tagged_variant_sparse_result"
-		allocArgs := []C.LLVMValueRef{arenaValue, stateValue, fixedTagValue}
+		allocArgs := []llvmIRValueRef{arenaValue, stateValue, fixedTagValue}
 		if hasTail {
 			allocHelperName = "ctx_packed_store_alloc_tagged_variant_sparse_result"
-			allocArgs = []C.LLVMValueRef{arenaValue, totalSizeValue, stateValue, fixedTagValue}
+			allocArgs = []llvmIRValueRef{arenaValue, totalSizeValue, stateValue, fixedTagValue}
 		}
 		allocHelperType := ops.cachedRuntimeHelperType(allocHelperName, func() *semantic.FuncType {
 			params := []semantic.Type{ops.arenaRefType(), ops.voidRefType(), ops.s.g.namedType("u32")}
@@ -98,8 +93,8 @@ func (ops *packedStoreOps) allocateStorage(enumType *semantic.EnumType, totalSiz
 			return nil, nil, nil, err
 		}
 		allocResult := ops.s.buildCall(allocLLVMFnType, allocCallee, allocArgs, "packed.variant_sparse.alloc")
-		allocPtr := C.LLVMBuildExtractValue(ops.s.builder, allocResult, 0, cStringFree("packed.alloc.ptr"))
-		indexValue := C.LLVMBuildExtractValue(ops.s.builder, allocResult, 1, cStringFree("packed.alloc.index"))
+		allocPtr := llvmBuildExtractValue(ops.s.builder, allocResult, 0, cStringFree("packed.alloc.ptr"))
+		indexValue := llvmBuildExtractValue(ops.s.builder, allocResult, 1, cStringFree("packed.alloc.index"))
 		if err := ops.s.emitHandleOverflowGuard(enumType, indexValue); err != nil {
 			return nil, nil, nil, err
 		}
@@ -138,9 +133,9 @@ func (ops *packedStoreOps) allocateStorage(enumType *semantic.EnumType, totalSiz
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		allocResult := ops.s.buildCall(allocLLVMFnType, allocCallee, []C.LLVMValueRef{arenaValue, stateValue}, "packed.aos.alloc")
-		allocPtr := C.LLVMBuildExtractValue(ops.s.builder, allocResult, 0, cStringFree("packed.aos.alloc.ptr"))
-		indexValue := C.LLVMBuildExtractValue(ops.s.builder, allocResult, 1, cStringFree("packed.aos.alloc.index"))
+		allocResult := ops.s.buildCall(allocLLVMFnType, allocCallee, []llvmIRValueRef{arenaValue, stateValue}, "packed.aos.alloc")
+		allocPtr := llvmBuildExtractValue(ops.s.builder, allocResult, 0, cStringFree("packed.aos.alloc.ptr"))
+		indexValue := llvmBuildExtractValue(ops.s.builder, allocResult, 1, cStringFree("packed.aos.alloc.index"))
 		if enumType.HandleIsPointer() {
 			// docs/82 `handle: ptr`: the handle is the record address itself (the AoS chunk
 			// store never relocates, so the address is stable for the store's lifetime).
@@ -148,7 +143,7 @@ func (ops *packedStoreOps) allocateStorage(enumType *semantic.EnumType, totalSiz
 			if err != nil {
 				return nil, nil, nil, err
 			}
-			handleValue := C.LLVMBuildPtrToInt(ops.s.builder, allocPtr, handleType, cStringFree("packed.aos.alloc.handle"))
+			handleValue := llvmBuildPtrToInt(ops.s.builder, allocPtr, handleType, cStringFree("packed.aos.alloc.handle"))
 			return allocPtr, handleValue, rowSizeValue, nil
 		}
 		if err := ops.s.emitHandleOverflowGuard(enumType, indexValue); err != nil {
@@ -169,7 +164,7 @@ func (ops *packedStoreOps) allocateStorage(enumType *semantic.EnumType, totalSiz
 // index reaches the width's null sentinel would silently truncate into a wrong (or null) handle —
 // so it traps at the allocation site instead, the same discipline as reserve_commit exhaustion.
 // Default-width (u32) and wider stores emit nothing: the runtime index can never exceed them.
-func (s *functionState) emitHandleOverflowGuard(enumType *semantic.EnumType, indexValue C.LLVMValueRef) error {
+func (s *functionState) emitHandleOverflowGuard(enumType *semantic.EnumType, indexValue llvmIRValueRef) error {
 	if enumType == nil {
 		return nil
 	}
@@ -178,20 +173,20 @@ func (s *functionState) emitHandleOverflowGuard(enumType *semantic.EnumType, ind
 	if bits >= 32 {
 		return nil
 	}
-	sentinel := C.LLVMConstInt(C.LLVMTypeOf(indexValue), C.ulonglong(root.NullSentinelValue()), 0)
-	fits := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), indexValue, sentinel, cStringFree("handle.fits"))
-	okBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("handle.ok"))
-	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("handle.overflow"))
-	C.LLVMBuildCondBr(s.builder, fits, okBB, failBB)
-	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+	sentinel := llvmConstInt(llvmTypeOf(indexValue), llvmIRUnsignedLongLong(root.NullSentinelValue()), 0)
+	fits := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntULT), indexValue, sentinel, cStringFree("handle.fits"))
+	okBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("handle.ok"))
+	failBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("handle.overflow"))
+	llvmBuildCondBr(s.builder, fits, okBB, failBB)
+	llvmPositionBuilderAtEnd(s.builder, failBB)
 	if err := s.emitTrapUnreachable("handle.overflow.trap"); err != nil {
 		return err
 	}
-	C.LLVMPositionBuilderAtEnd(s.builder, okBB)
+	llvmPositionBuilderAtEnd(s.builder, okBB)
 	return nil
 }
 
-func (ops *packedStoreOps) recordTag(tagValue C.LLVMValueRef, _ string) error {
+func (ops *packedStoreOps) recordTag(tagValue llvmIRValueRef, _ string) error {
 	arenaValue, err := ops.arenaValue("packed.arena")
 	if err != nil {
 		return err
@@ -212,10 +207,10 @@ func (ops *packedStoreOps) recordTag(tagValue C.LLVMValueRef, _ string) error {
 	if err != nil {
 		return err
 	}
-	ops.s.buildCall(recordLLVMType, recordCallee, []C.LLVMValueRef{arenaValue, tagValue, stateValue}, "")
+	ops.s.buildCall(recordLLVMType, recordCallee, []llvmIRValueRef{arenaValue, tagValue, stateValue}, "")
 	return nil
 }
-func (ops *packedStoreOps) recordPrefixWords(rowPtr C.LLVMValueRef, _ string) error {
+func (ops *packedStoreOps) recordPrefixWords(rowPtr llvmIRValueRef, _ string) error {
 	if ops == nil || ops.s == nil || ops.s.g == nil || ops.s.g.packedLoweringForStore(ops.storeType) != packedEnumABIIndexSOA {
 		return nil
 	}
@@ -238,10 +233,10 @@ func (ops *packedStoreOps) recordPrefixWords(rowPtr C.LLVMValueRef, _ string) er
 	if err != nil {
 		return err
 	}
-	ops.s.buildCall(recordLLVMType, recordCallee, []C.LLVMValueRef{arenaValue, rowPtr, stateValue}, "")
+	ops.s.buildCall(recordLLVMType, recordCallee, []llvmIRValueRef{arenaValue, rowPtr, stateValue}, "")
 	return nil
 }
-func (ops *packedStoreOps) recordSideWords(wordsPtr C.LLVMValueRef, handleValue C.LLVMValueRef, _ string) error {
+func (ops *packedStoreOps) recordSideWords(wordsPtr llvmIRValueRef, handleValue llvmIRValueRef, _ string) error {
 	if ops == nil || ops.s == nil || ops.s.g == nil || ops.storeType == nil || ops.storeType.Enum == nil {
 		return nil
 	}
@@ -280,6 +275,6 @@ func (ops *packedStoreOps) recordSideWords(wordsPtr C.LLVMValueRef, handleValue 
 	if err != nil {
 		return err
 	}
-	ops.s.buildCall(recordLLVMType, recordCallee, []C.LLVMValueRef{arenaValue, wordsPtr, stateValue, indexValue}, "")
+	ops.s.buildCall(recordLLVMType, recordCallee, []llvmIRValueRef{arenaValue, wordsPtr, stateValue, indexValue}, "")
 	return nil
 }

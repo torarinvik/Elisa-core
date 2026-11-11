@@ -2,12 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -15,7 +9,7 @@ import (
 	"fmt"
 )
 
-func (s *functionState) emitErrorTagExpr(expr *ast.FieldExpr, errorType *semantic.ErrorSetType) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitErrorTagExpr(expr *ast.FieldExpr, errorType *semantic.ErrorSetType) (llvmIRValueRef, semantic.Type, error) {
 	if errorType == nil {
 		return nil, nil, fmt.Errorf("missing error set for tag expression")
 	}
@@ -49,9 +43,9 @@ func (s *functionState) errorConstructorInfo(expr *ast.CallExpr) (*semantic.Erro
 	return errorType, qualifiedTag, ok
 }
 
-func (s *functionState) emitErrorConstructorValue(expr *ast.CallExpr, errorType *semantic.ErrorSetType, qualifiedTag string) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitErrorConstructorValue(expr *ast.CallExpr, errorType *semantic.ErrorSetType, qualifiedTag string) (llvmIRValueRef, semantic.Type, error) {
 	payloadTypes := errorType.PayloadForTag(qualifiedTag)
-	args := make([]C.LLVMValueRef, 0, len(expr.Args))
+	args := make([]llvmIRValueRef, 0, len(expr.Args))
 	for i, arg := range expr.Args {
 		var expected semantic.Type
 		if i < len(payloadTypes) {
@@ -70,13 +64,13 @@ func (s *functionState) emitErrorConstructorValue(expr *ast.CallExpr, errorType 
 	return value, errorType, nil
 }
 
-func (s *functionState) emitRaiseExpr(expr *ast.RaiseExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitRaiseExpr(expr *ast.RaiseExpr) (llvmIRValueRef, semantic.Type, error) {
 	currentUnion, ok := s.fnType.Return.(*semantic.ErrorUnionType)
 	if !ok {
 		return nil, nil, fmt.Errorf("raise requires an error-union return type")
 	}
 	var (
-		errorValue C.LLVMValueRef
+		errorValue llvmIRValueRef
 		errorType  semantic.Type
 		err        error
 	)
@@ -139,7 +133,7 @@ func astRecoveryClauseForExpr(recovery *ast.RecoveryClause, fallback ast.Expr, p
 	return &ast.RecoveryClause{Position: pos, Kind: ast.RecoveryValue, Value: fallback}
 }
 
-func (s *functionState) emitRecoveryClause(recovery *ast.RecoveryClause, resultType semantic.Type, errorValue C.LLVMValueRef, errorType semantic.Type) (C.LLVMValueRef, bool, error) {
+func (s *functionState) emitRecoveryClause(recovery *ast.RecoveryClause, resultType semantic.Type, errorValue llvmIRValueRef, errorType semantic.Type) (llvmIRValueRef, bool, error) {
 	if recovery == nil {
 		return nil, false, fmt.Errorf("missing recovery clause")
 	}
@@ -197,7 +191,7 @@ func (s *functionState) emitRecoveryClause(recovery *ast.RecoveryClause, resultT
 	}
 }
 
-func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitTryExpr(expr *ast.TryExpr) (llvmIRValueRef, semantic.Type, error) {
 	resultType := s.exprType(expr)
 	recovery := astRecoveryClauseForExpr(expr.Recovery, expr.Fallback, expr.Position)
 	// Decide fallibility from the EMITTED operand type rather than s.exprType:
@@ -222,14 +216,14 @@ func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic
 		if err != nil {
 			return nil, nil, err
 		}
-		successCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), errorCode, zeroCode, cStringFree("try.ok"))
+		successCond := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), errorCode, zeroCode, cStringFree("try.ok"))
 
 		if recovery == nil {
-			okBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("try.ok"))
-			errBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("try.err"))
-			C.LLVMBuildCondBr(s.builder, successCond, okBB, errBB)
+			okBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("try.ok"))
+			errBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("try.err"))
+			llvmBuildCondBr(s.builder, successCond, okBB, errBB)
 
-			C.LLVMPositionBuilderAtEnd(s.builder, errBB)
+			llvmPositionBuilderAtEnd(s.builder, errBB)
 			if _, ok := s.fnType.Return.(*semantic.ErrorUnionType); !ok {
 				return nil, nil, fmt.Errorf("try propagation requires an error-union function return")
 			}
@@ -237,7 +231,7 @@ func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic
 				return nil, nil, err
 			}
 
-			C.LLVMPositionBuilderAtEnd(s.builder, okBB)
+			llvmPositionBuilderAtEnd(s.builder, okBB)
 			if isVoidType(resultType) {
 				return nil, resultType, nil
 			}
@@ -248,17 +242,17 @@ func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic
 			return payload, resultType, nil
 		}
 
-		okBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("try.value"))
-		fallbackBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("try.fallback"))
-		mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("try.merge"))
-		C.LLVMBuildCondBr(s.builder, successCond, okBB, fallbackBB)
+		okBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("try.value"))
+		fallbackBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("try.fallback"))
+		mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("try.merge"))
+		llvmBuildCondBr(s.builder, successCond, okBB, fallbackBB)
 
-		incomingValues := make([]C.LLVMValueRef, 0, 2)
-		incomingBlocks := make([]C.LLVMBasicBlockRef, 0, 2)
+		incomingValues := make([]llvmIRValueRef, 0, 2)
+		incomingBlocks := make([]llvmIRBlockRef, 0, 2)
 		mergeReachable := false
 
-		C.LLVMPositionBuilderAtEnd(s.builder, okBB)
-		var okValue C.LLVMValueRef
+		llvmPositionBuilderAtEnd(s.builder, okBB)
+		var okValue llvmIRValueRef
 		if !isVoidType(resultType) {
 			okValue, err = s.extractErrorUnionPayload(fallibleValue, unionType)
 			if err != nil {
@@ -266,8 +260,8 @@ func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic
 			}
 		}
 		if !s.currentBlockTerminated() {
-			okEnd := C.LLVMGetInsertBlock(s.builder)
-			C.LLVMBuildBr(s.builder, mergeBB)
+			okEnd := llvmGetInsertBlock(s.builder)
+			llvmBuildBr(s.builder, mergeBB)
 			mergeReachable = true
 			if !isVoidType(resultType) {
 				incomingValues = append(incomingValues, okValue)
@@ -275,14 +269,14 @@ func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic
 			}
 		}
 
-		C.LLVMPositionBuilderAtEnd(s.builder, fallbackBB)
+		llvmPositionBuilderAtEnd(s.builder, fallbackBB)
 		fallbackValue, reachable, err := s.emitRecoveryClause(recovery, resultType, errorValue, unionType.Errors)
 		if err != nil {
 			return nil, nil, err
 		}
 		if reachable && !s.currentBlockTerminated() {
-			fallbackEnd := C.LLVMGetInsertBlock(s.builder)
-			C.LLVMBuildBr(s.builder, mergeBB)
+			fallbackEnd := llvmGetInsertBlock(s.builder)
+			llvmBuildBr(s.builder, mergeBB)
 			mergeReachable = true
 			if !isVoidType(resultType) {
 				incomingValues = append(incomingValues, fallbackValue)
@@ -290,9 +284,9 @@ func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic
 			}
 		}
 
-		C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+		llvmPositionBuilderAtEnd(s.builder, mergeBB)
 		if !mergeReachable {
-			C.LLVMBuildUnreachable(s.builder)
+			llvmBuildUnreachable(s.builder)
 			return nil, resultType, nil
 		}
 		if isVoidType(resultType) {
@@ -305,8 +299,8 @@ func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic
 		if err != nil {
 			return nil, nil, err
 		}
-		phi := C.LLVMBuildPhi(s.builder, phiType, cStringFree("tryphi"))
-		C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
+		phi := llvmBuildPhi(s.builder, phiType, cStringFree("tryphi"))
+		llvmAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), llvmIRUnsigned(len(incomingValues)))
 		return phi, resultType, nil
 	}
 	optionalType, ok := operandType.(*semantic.OptionalType)
@@ -323,17 +317,17 @@ func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic
 	if err != nil {
 		return nil, nil, err
 	}
-	okBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("try.value"))
-	fallbackBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("try.fallback"))
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("try.merge"))
-	C.LLVMBuildCondBr(s.builder, presentValue, okBB, fallbackBB)
+	okBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("try.value"))
+	fallbackBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("try.fallback"))
+	mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("try.merge"))
+	llvmBuildCondBr(s.builder, presentValue, okBB, fallbackBB)
 
-	incomingValues := make([]C.LLVMValueRef, 0, 2)
-	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, 2)
+	incomingValues := make([]llvmIRValueRef, 0, 2)
+	incomingBlocks := make([]llvmIRBlockRef, 0, 2)
 	mergeReachable := false
 
-	C.LLVMPositionBuilderAtEnd(s.builder, okBB)
-	var okValue C.LLVMValueRef
+	llvmPositionBuilderAtEnd(s.builder, okBB)
+	var okValue llvmIRValueRef
 	if !isVoidType(resultType) {
 		okValue, err = s.extractOptionalPayload(fallibleValue, optionalType)
 		if err != nil {
@@ -341,8 +335,8 @@ func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic
 		}
 	}
 	if !s.currentBlockTerminated() {
-		okEnd := C.LLVMGetInsertBlock(s.builder)
-		C.LLVMBuildBr(s.builder, mergeBB)
+		okEnd := llvmGetInsertBlock(s.builder)
+		llvmBuildBr(s.builder, mergeBB)
 		mergeReachable = true
 		if !isVoidType(resultType) {
 			incomingValues = append(incomingValues, okValue)
@@ -350,14 +344,14 @@ func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic
 		}
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, fallbackBB)
+	llvmPositionBuilderAtEnd(s.builder, fallbackBB)
 	fallbackValue, reachable, err := s.emitRecoveryClause(recovery, resultType, nil, nil)
 	if err != nil {
 		return nil, nil, err
 	}
 	if reachable && !s.currentBlockTerminated() {
-		fallbackEnd := C.LLVMGetInsertBlock(s.builder)
-		C.LLVMBuildBr(s.builder, mergeBB)
+		fallbackEnd := llvmGetInsertBlock(s.builder)
+		llvmBuildBr(s.builder, mergeBB)
 		mergeReachable = true
 		if !isVoidType(resultType) {
 			incomingValues = append(incomingValues, fallbackValue)
@@ -365,9 +359,9 @@ func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic
 		}
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	llvmPositionBuilderAtEnd(s.builder, mergeBB)
 	if !mergeReachable {
-		C.LLVMBuildUnreachable(s.builder)
+		llvmBuildUnreachable(s.builder)
 		return nil, resultType, nil
 	}
 	if isVoidType(resultType) {
@@ -380,7 +374,7 @@ func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic
 	if err != nil {
 		return nil, nil, err
 	}
-	phi := C.LLVMBuildPhi(s.builder, phiType, cStringFree("tryphi"))
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
+	phi := llvmBuildPhi(s.builder, phiType, cStringFree("tryphi"))
+	llvmAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), llvmIRUnsigned(len(incomingValues)))
 	return phi, resultType, nil
 }
