@@ -116,3 +116,40 @@ func TestSMTTransformedCacheOnlyReusesUnsatAndSeparatesIdentity(t *testing.T) {
 		}
 	}
 }
+
+func TestSMTModelFreeSATReusesRenamedQueryAcrossAnalyzers(t *testing.T) {
+	dir := t.TempDir()
+	newAnalyzer := func(analysis, solver string) *Analyzer {
+		return &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
+			smtProofCache: &smtProofCache{directory: dir, identity: analysis, proofIdentity: solver},
+		}}
+	}
+	original := "(declare-const v_old Int)\n(assert (> v_old 0))\n"
+	renamed := strings.ReplaceAll(original, "v_old", "v_new")
+	newAnalyzer("analysis-before", "solver").smtCheckTransformedVerdict(original, true, func() (smt.Result, map[string]string) {
+		return smt.Sat, map[string]string{"v_old": "1"}
+	})
+	replay := newAnalyzer("analysis-after", "solver")
+	result, model := replay.smtCheckTransformedVerdict(renamed, true, func() (smt.Result, map[string]string) {
+		t.Fatal("renamed model-free query started solver work")
+		return smt.Unknown, nil
+	})
+	if result != smt.Sat || model != nil || replay.smtStats.PersistentCacheHits != 1 {
+		t.Fatalf("unexpected cached result: %v, %v, stats=%+v", result, model, replay.smtStats)
+	}
+
+	for _, test := range []struct {
+		shareSAT bool
+		solver   string
+	}{
+		{true, "other-solver"},
+		{false, "solver"},
+	} {
+		result, model := newAnalyzer("analysis-after", test.solver).smtCheckTransformedVerdict(renamed, test.shareSAT, func() (smt.Result, map[string]string) {
+			return smt.Unknown, nil
+		})
+		if result != smt.Unknown || model != nil {
+			t.Fatalf("incompatible caller reused model-free SAT: %v, %v", result, model)
+		}
+	}
+}

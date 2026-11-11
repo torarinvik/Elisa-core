@@ -18,14 +18,14 @@ import (
 	"elisacore/src/smt"
 )
 
-// This cache stores only definitive UNSAT answers to complete queries. It does
-// not authorize skipping semantic analysis, and never stores timeout decisions.
-// A separate alpha-renamed index reuses definitive proofs after generated symbol
-// locations move; declined verdicts and their counterexamples remain exact-text.
+// This cache stores definitive UNSAT answers and model-free SAT answers to
+// complete queries. It never stores timeout decisions. An alpha-renamed index
+// reuses these verdicts after generated symbol locations move. Model-bearing
+// declines and their counterexamples remain exact-text.
 const smtProofCacheSchema = "elisa-exact-smt-proof-v1"
 
 // identity binds decline records, whose counterexample text the analyzer formats.
-// proofIdentity binds unsat records, which depend only on the exact query text and
+// proofIdentity binds model-free records, which depend only on the query and
 // on how the smt package runs the solver; an embedding compiler may key it on that
 // package alone so analyzer changes keep the proofs.
 type smtProofCache struct{ directory, identity, proofIdentity string }
@@ -240,8 +240,8 @@ func smtProofCacheKey(identity, query string) string {
 	}
 	return hex.EncodeToString(hash.Sum(nil))
 }
-func smtProofChecksum(key string) string {
-	hash := sha256.Sum256([]byte(smtProofCacheSchema + "\x00" + key + "\x00unsat"))
+func smtProofChecksum(key, verdict string) string {
+	hash := sha256.Sum256([]byte(smtProofCacheSchema + "\x00" + key + "\x00" + verdict))
 	return hex.EncodeToString(hash[:])
 }
 func (c *smtProofCache) path(key string) string {
@@ -269,14 +269,14 @@ func (c *smtProofCache) lookupProof(query string) (smtProofKeys, bool) {
 
 func (c *smtProofCache) lookupProofWithExact(query, exact string) (smtProofKeys, bool) {
 	keys := smtProofKeys{exact: exact}
-	if c.containsKey(keys.exact) {
+	if c.containsVerdict(keys.exact, "unsat") {
 		return keys, true
 	}
 	keys.alpha, _ = c.alphaKey(query)
-	return keys, keys.alpha != "" && c.containsKey(keys.alpha)
+	return keys, keys.alpha != "" && c.containsVerdict(keys.alpha, "unsat")
 }
 
-func (c *smtProofCache) containsKey(key string) bool {
+func (c *smtProofCache) containsVerdict(key, verdict string) bool {
 	f, err := os.Open(c.path(key))
 	if err != nil {
 		return false
@@ -290,7 +290,7 @@ func (c *smtProofCache) containsKey(key string) bool {
 	if json.Unmarshal(payload, &record) != nil {
 		return false
 	}
-	return record.Schema == smtProofCacheSchema && record.Key == key && record.Verdict == "unsat" && record.Checksum == smtProofChecksum(key)
+	return record.Schema == smtProofCacheSchema && record.Key == key && record.Verdict == verdict && record.Checksum == smtProofChecksum(key, verdict)
 }
 func (c *smtProofCache) publish(query string) {
 	if c == nil {
@@ -305,15 +305,35 @@ func (c *smtProofCache) publishProof(keys smtProofKeys) {
 	if c == nil || keys.exact == "" {
 		return
 	}
-	c.publishKey(keys.exact)
+	c.publishVerdict(keys.exact, "unsat")
 	if keys.alpha != "" {
-		c.publishKey(keys.alpha)
+		c.publishVerdict(keys.alpha, "unsat")
 	}
 }
-func (c *smtProofCache) publishKey(key string) {
-	payload, err := json.Marshal(smtProofCacheRecord{smtProofCacheSchema, key, "unsat", smtProofChecksum(key)})
+func (c *smtProofCache) publishVerdict(key, verdict string) {
+	payload, err := json.Marshal(smtProofCacheRecord{smtProofCacheSchema, key, verdict, smtProofChecksum(key, verdict)})
 	if err == nil {
 		writeSMTCacheRecord(c.path(key), ".proof-*", payload)
+	}
+}
+
+// Model-free SAT has no counterexample to relabel, so it can use the same
+// solver identity and alpha-equivalence as a proof. Keep its domain separate
+// from both UNSAT records and model-bearing declines.
+func (keys smtProofKeys) modelFreeSATKey() string {
+	if keys.alpha != "" {
+		return smtProofCacheKey("model-free-sat-v1", keys.alpha)
+	}
+	return smtProofCacheKey("model-free-sat-v1", keys.exact)
+}
+
+func (c *smtProofCache) containsModelFreeSAT(keys smtProofKeys) bool {
+	return c != nil && keys.exact != "" && c.containsVerdict(keys.modelFreeSATKey(), "sat")
+}
+
+func (c *smtProofCache) publishModelFreeSAT(keys smtProofKeys) {
+	if c != nil && keys.exact != "" {
+		c.publishVerdict(keys.modelFreeSATKey(), "sat")
 	}
 }
 

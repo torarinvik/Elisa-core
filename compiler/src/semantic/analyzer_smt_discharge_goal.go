@@ -393,6 +393,13 @@ func (a *Analyzer) smtCheckRawQueryWithLogLabel(query string, label string, logO
 		return hit.proven, hit.ce
 	}
 	defer a.releaseSMTFlight(query, flight)
+	if a.smtProofCache.containsModelFreeSAT(proofKeys) {
+		a.recordSMTAttempt(query)
+		a.smtStats.CacheHits++
+		a.smtStats.PersistentCacheHits++
+		a.smtStats.Declined++
+		return false, ""
+	}
 	solver := a.openSMT()
 	if solver == nil {
 		return false, ""
@@ -409,8 +416,9 @@ func (a *Analyzer) smtCheckRawQueryWithLogLabel(query string, label string, logO
 	}
 	if res == smt.Sat {
 		a.smtStats.Declined++
-		// Raw-query SAT checks do not collect a model. Do not cache this decline: the same SMT-LIB
-		// text can also be a regular negated obligation whose diagnostic needs a counterexample.
+		// Keep raw SAT out of the regular decline cache. The same SMT-LIB
+		// text may need a counterexample when checked as a negated obligation.
+		a.smtProofCache.publishModelFreeSAT(proofKeys)
 		return false, ""
 	}
 	a.smtStats.Declined++

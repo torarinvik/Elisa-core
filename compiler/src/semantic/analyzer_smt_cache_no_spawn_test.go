@@ -168,6 +168,17 @@ func TestSMTRawSatDoesNotHideRegularCounterexample(t *testing.T) {
 		t.Fatal("raw SAT decline without a model was cached under the regular VC query key")
 	}
 
+	replay := &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
+		smtEnabled: true, smtProofCacheInitialized: true, smtProofCache: a.smtProofCache,
+		smtBinary: filepath.Join(t.TempDir(), "missing-z3"),
+	}}
+	if proven, ce := replay.smtCheckRawQueryWithLogLabel(query, "requires-vacuity", "fn"); proven || ce != "" {
+		t.Fatalf("cached raw SAT result=(%v,%q), want (false, empty)", proven, ce)
+	}
+	if replay.smtUnavailable || replay.smtSolver != nil || replay.smtStats.PersistentCacheHits != 1 {
+		t.Fatalf("raw SAT did not reuse the cached verdict: %+v", replay.smtStats)
+	}
+
 	proven, ce := a.smtCheckQuery(tr, "", obligation)
 	if proven || ce != "x=1" {
 		t.Fatalf("regular VC result=(%v,%q), want false with counterexample x=1", proven, ce)

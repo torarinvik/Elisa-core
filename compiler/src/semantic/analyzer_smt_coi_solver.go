@@ -72,6 +72,12 @@ func (a *Analyzer) smtCheckTransformedVerdict(query string, shareSat bool, check
 		resolveExact(smt.Unsat)
 		return smt.Unsat, nil
 	}
+	if shareSat && a.smtProofCache.containsModelFreeSAT(keys) {
+		a.smtStats.CacheHits++
+		a.smtStats.PersistentCacheHits++
+		resolveExact(smt.Sat)
+		return smt.Sat, nil
+	}
 	// Distinct outer queries can produce the same transformed obligation.
 	// Share only definitive proofs; SAT models and Unknown remain local.
 	var flightKey string
@@ -110,8 +116,11 @@ func (a *Analyzer) smtCheckTransformedVerdict(query string, shareSat bool, check
 		if flight != nil {
 			a.resolveSMTFlight(flightKey, smtQueryResult{proven: true})
 		}
-	} else if result == smt.Sat && shareSat && flight != nil {
-		a.resolveSMTFlight(flightKey, smtQueryResult{proven: false})
+	} else if result == smt.Sat && shareSat {
+		a.smtProofCache.publishModelFreeSAT(keys)
+		if flight != nil {
+			a.resolveSMTFlight(flightKey, smtQueryResult{proven: false})
+		}
 	}
 	return result, model
 }
