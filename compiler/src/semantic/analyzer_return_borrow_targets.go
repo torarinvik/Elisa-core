@@ -58,10 +58,13 @@ func (a *Analyzer) computeReturnBorrowMayTarget(holder Type, referent Type) bool
 // Target and component walks are sequential. Reuse their cycle guard and
 // result storage across queries, clearing references before returning scratch.
 type returnBorrowTargetScratch struct {
-	seen         map[Type]bool
-	targets      []Type
-	components   []Type
-	componentIDs []canonicalTypeIDResult
+	seen             map[Type]bool
+	targets          []Type
+	components       []Type
+	componentIDs     []canonicalTypeIDResult
+	componentIDSet   map[TypeID]struct{}
+	otherComponents  []Type
+	bridgeComponents []Type
 }
 
 var returnBorrowTargetScratchPool = sync.Pool{New: func() any {
@@ -79,7 +82,11 @@ func (a *Analyzer) computeReturnBorrowTargetsReach(holder Type, referent Type, i
 		clear(scratch.seen)
 		clear(scratch.targets)
 		clear(scratch.components)
-		clear(scratch.componentIDs)
+		clear(scratch.componentIDSet)
+		clear(scratch.otherComponents)
+		clear(scratch.bridgeComponents)
+		scratch.otherComponents = scratch.otherComponents[:0]
+		scratch.bridgeComponents = scratch.bridgeComponents[:0]
 		scratch.targets = scratch.targets[:0]
 		scratch.components = scratch.components[:0]
 		scratch.componentIDs = scratch.componentIDs[:0]
@@ -102,6 +109,9 @@ func (a *Analyzer) computeReturnBorrowTargetsReach(holder Type, referent Type, i
 	collectReturnBorrowComponents(referent, inlineOnly, &scratch.components, &opaque, scratch.seen)
 	if opaque {
 		return true
+	}
+	if len(scratch.targets) > 1 && len(scratch.targets)*len(scratch.components) >= 128 {
+		return scratch.anyMatchingComponent()
 	}
 	// Computing each side's canonical ID once avoids repeating the type walk
 	// for every target/component pair.
