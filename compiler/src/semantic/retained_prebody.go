@@ -84,10 +84,11 @@ func capturePreBody(a *Analyzer, decls []scopedDecl) *preBodyState {
 	}
 	functions := make([]*ast.FuncDecl, 0, len(decls))
 	p.keyOf = collectRetainedPreBodyFunctionKeys(decls, &functions)
+	classificationsWithoutStores := make(map[retainedClassifyPreparation]string)
 	for _, fn := range functions {
 		key := p.keyOf[fn]
 		p.fingerprint[key] = a.preBodyFunctionFingerprint(fn)
-		p.classification[key] = a.preBodyFunctionClassification(fn)
+		p.classification[key] = a.preBodyFunctionClassification(fn, classificationsWithoutStores)
 		p.prepared[retainedLineKey(fn.Pos())+"|"+fn.Name] = fn
 		if t, ok := a.paramStoreTargets[fn]; ok {
 			p.targets[fn] = t
@@ -154,7 +155,7 @@ func (a *Analyzer) preBodyFunctionFingerprint(fn *ast.FuncDecl) string {
 
 // Keep classifier dependencies separate from signature checks for newly added
 // functions, whose prepared bodies already come from the full scratch phase.
-func (a *Analyzer) preBodyFunctionClassification(fn *ast.FuncDecl) string {
+func (a *Analyzer) preBodyFunctionClassification(fn *ast.FuncDecl, withoutStores map[retainedClassifyPreparation]string) string {
 	// Named contracts are specifications, not callable values. Symbol collection
 	// deliberately skips them, so no callable classifier row can exist. Their
 	// full specification is independently fingerprinted and contract edits still
@@ -178,8 +179,17 @@ func (a *Analyzer) preBodyFunctionClassification(fn *ast.FuncDecl) string {
 	if !known {
 		return "unavailable"
 	}
+	stores := a.preBodyClassify.storeNeeds[ft]
+	if len(stores) == 0 && withoutStores != nil {
+		if text, ok := withoutStores[decision]; ok {
+			return text
+		}
+		text := fmt.Sprintf("storeNeeds=[]; preparation=%+v", decision)
+		withoutStores[decision] = text
+		return text
+	}
 	var needs []string
-	for name := range a.preBodyClassify.storeNeeds[ft] {
+	for name := range stores {
 		needs = append(needs, name)
 	}
 	sort.Strings(needs)

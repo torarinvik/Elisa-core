@@ -60,10 +60,10 @@ def consume(value: i64) -> i64:
 
 func TestRetainedContractMarkerDoesNotClassifyUnknownCallable(t *testing.T) {
 	a := &Analyzer{}
-	if got := a.preBodyFunctionClassification(&ast.FuncDecl{Name: "Spec", IsContract: true}); got != "non-callable named contract" {
+	if got := a.preBodyFunctionClassification(&ast.FuncDecl{Name: "Spec", IsContract: true}, nil); got != "non-callable named contract" {
 		t.Fatalf("contract marker=%q", got)
 	}
-	if got := a.preBodyFunctionClassification(&ast.FuncDecl{Name: "callable"}); got != "unavailable" {
+	if got := a.preBodyFunctionClassification(&ast.FuncDecl{Name: "callable"}, nil); got != "unavailable" {
 		t.Fatalf("missing callable authority was accepted: %q", got)
 	}
 }
