@@ -63,6 +63,7 @@ func (a *Analyzer) computeTransitiveStoreNeeds(funcs []*ast.FuncDecl, regionBack
 	builds := map[*FuncType]map[string]string{}
 	// All signatures in this pass read the same declaration shapes.
 	fieldOrders := map[*StructType][]string{}
+	emptyTypeRoots := make(map[Type]bool)
 	var order []*FuncType
 	sig := make(map[string]*EnumType)
 	for _, fn := range funcs {
@@ -73,7 +74,7 @@ func (a *Analyzer) computeTransitiveStoreNeeds(funcs []*ast.FuncDecl, regionBack
 		if _, seen := callees[ft]; !seen {
 			callees[ft] = map[*FuncType]bool{}
 			order = append(order, ft)
-			collectPackedEnumsInSignatureWithOrder(ft, true, sig, fieldOrders)
+			collectPackedEnumsInSignatureWithOrder(ft, true, sig, fieldOrders, emptyTypeRoots)
 			for name, et := range sig {
 				// Pointer handles are self-contained for reads. Construction
 				// can still require a store, which is recorded below.
@@ -373,7 +374,7 @@ func FuncTypeConsumesPackedEnumRoot(ft *FuncType, rootName string) bool {
 var packedTypeSeenPool = sync.Pool{New: func() any { return make(map[Type]int, 32) }}
 
 func collectPackedEnumsInSignature(ft *FuncType, includeReturn bool, out map[string]*EnumType) {
-	collectPackedEnumsInSignatureWithOrder(ft, includeReturn, out, nil)
+	collectPackedEnumsInSignatureWithOrder(ft, includeReturn, out, nil, nil)
 }
 
 type packedTypeWalk struct {
@@ -381,16 +382,43 @@ type packedTypeWalk struct {
 	fieldOrders map[*StructType][]string
 }
 
-func collectPackedEnumsInSignatureWithOrder(ft *FuncType, includeReturn bool, out map[string]*EnumType, fieldOrders map[*StructType][]string) {
+func collectPackedEnumsInSignatureWithOrder(ft *FuncType, includeReturn bool, out map[string]*EnumType, fieldOrders map[*StructType][]string, emptyTypeRoots map[Type]bool) {
 	walk := packedTypeWalk{seen: packedTypeSeenPool.Get().(map[Type]int), fieldOrders: fieldOrders}
 	explicitCount := min(funcTypeExplicitParamCount(ft), len(ft.Params))
 	for i := 0; i < explicitCount; i++ {
-		walk.collect(ft.Params[i], out, 0)
+		walk.collectSignatureRoot(ft.Params[i], out, emptyTypeRoots)
 	}
 	if includeReturn {
-		walk.collect(ft.Return, out, 0)
+		walk.collectSignatureRoot(ft.Return, out, emptyTypeRoots)
 	}
 	releasePackedTypeSeen(walk.seen)
+}
+
+// Only cache an empty root when it was walked without earlier roots
+// pruning its graph. Nonempty roots still share traversal state within
+// the signature so depth limits and first-witness selection are unchanged.
+func (walk packedTypeWalk) collectSignatureRoot(t Type, out map[string]*EnumType, emptyTypeRoots map[Type]bool) {
+	if emptyTypeRoots == nil {
+		walk.collect(t, out, 0)
+		return
+	}
+	t = StripAggregateStateType(t)
+	switch t.(type) {
+	case *RefType, *OptionalType, *ErrorUnionType, *EnumType, *PackedVariantViewType, *DArrayType, *StructType, *TupleType:
+	default:
+		return
+	}
+	if emptyTypeRoots[t] {
+		return
+	}
+	isolated := len(walk.seen) == 0 && len(out) == 0
+	walk.collect(t, out, 0)
+	if isolated && len(out) == 0 {
+		emptyTypeRoots[t] = true
+		if len(walk.seen) <= packedTypeSeenKeepLimit {
+			clear(walk.seen)
+		}
+	}
 }
 
 func collectPackedEnumsInType(t Type, out map[string]*EnumType) {
@@ -399,8 +427,10 @@ func collectPackedEnumsInType(t Type, out map[string]*EnumType) {
 	releasePackedTypeSeen(walk.seen)
 }
 
+const packedTypeSeenKeepLimit = 4096
+
 func releasePackedTypeSeen(seen map[Type]int) {
-	if len(seen) <= 4096 {
+	if len(seen) <= packedTypeSeenKeepLimit {
 		clear(seen)
 		packedTypeSeenPool.Put(seen)
 	}

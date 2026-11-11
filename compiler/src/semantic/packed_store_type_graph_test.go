@@ -38,6 +38,24 @@ func TestPackedStoreTypeGraphCyclesAndDistinctRoots(t *testing.T) {
 	}
 }
 
+func TestPackedStoreSignatureCachesOnlyEmptyRoot(t *testing.T) {
+	packed := &EnumType{Name: "Root", Packed: true}
+	var deep Type = packed
+	for range collectPackedEnumsMaxDepth + 1 {
+		deep = &TupleType{Fields: []TupleField{{Type: deep}}}
+	}
+	roots := map[string]*EnumType{}
+	empty := map[Type]bool{}
+	signature := &FuncType{Params: []Type{deep}, Return: packed}
+	for range 2 {
+		collectPackedEnumsInSignatureWithOrder(signature, true, roots, nil, empty)
+		if !empty[deep] || empty[packed] || len(roots) != 1 || roots["Root"] != packed {
+			t.Fatalf("depth-limited parameter lost the shallower return root: roots=%v", roots)
+		}
+		clear(roots)
+	}
+}
+
 func BenchmarkPackedStoreSharedTypeGraph(b *testing.B) {
 	var typ Type = &BuiltinType{Name: "i64"}
 	for i := 0; i < 7; i++ {
