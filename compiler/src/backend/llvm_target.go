@@ -393,8 +393,14 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 		if fastCheckedMul(g) == 2 {
 			return fmt.Errorf("checked multiplication versioning cleanup failed")
 		}
-		if unrollBoundedDivisionLoops(g) == 2 {
+		loopCleanup := unrollBoundedDivisionLoops(g)
+		if loopCleanup == 2 {
 			return fmt.Errorf("bounded division loop cleanup failed")
+		}
+		if loopCleanup != 0 {
+			if err := simplifyLateLoopFacts(g); err != nil {
+				return err
+			}
 		}
 		if specializeShortTrips(g) == 2 {
 			return fmt.Errorf("short-trip specialization cleanup failed")
@@ -522,4 +528,18 @@ func parseLLVMIRForSplitHalfTest(ir string) (*llvmGenerator, error) {
 		C.LLVMDisposeMessage(message)
 	}
 	return &llvmGenerator{context: context, module: module}, nil
+}
+
+// Late loop rewrites expose new branch facts after LLVM's default pipeline.
+// Keep policy here so adjusting cleanup does not rebuild the native pass library.
+func simplifyLateLoopFacts(g *llvmGenerator) error {
+	options := C.LLVMCreatePassBuilderOptions()
+	defer C.LLVMDisposePassBuilderOptions(options)
+	pipeline := cString("function(sccp,instcombine<no-verify-fixpoint>,simplifycfg)")
+	defer C.free(unsafe.Pointer(pipeline))
+	if failure := C.LLVMRunPasses(g.module, pipeline, g.targetMachine, options); failure != nil {
+		message := C.LLVMGetErrorMessage(failure)
+		return fmt.Errorf("late loop fact cleanup failed: %s", disposeLLVMErrorMessage(message, "unknown LLVM pass pipeline error"))
+	}
+	return nil
 }
