@@ -334,12 +334,17 @@ func (b *AnalysisBuild) marshalState(capacity int, externalSource bool) ([]byte,
 	// visited so far. Preserve the live indexes for an in-process advance.
 	storeScanIndexes := a.storeScanIndexCache
 	a.storeScanIndexCache = nil
+	// The graph codec preserves slice backing storage. History only uses its
+	// live entries, so spare capacity must not pull old queries into the file.
+	history := a.smtHistory
+	a.smtHistory = history[:len(history):len(history)]
 	source := r.src
 	if externalSource {
 		b.externalSourceDigest = sha256.Sum256(source)
 		r.src = nil
 	}
 	defer func() {
+		a.smtHistory = history
 		r.src = source
 		b.externalSourceDigest = [sha256.Size]byte{}
 		r.pristine = pristine

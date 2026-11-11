@@ -515,3 +515,28 @@ func TestAnalysisBuildExternalSourceCheckpoint(t *testing.T) {
 		t.Fatalf("resumed analysis did not finish successfully: %v", err)
 	}
 }
+
+func TestAnalysisBuildCheckpointStoresOnlyLiveSMTHistory(t *testing.T) {
+	source := []byte(retainedBefore)
+	build, err := BeginAnalysisBuild(retainedParse(t, retainedBefore), nil, source, AnalyzeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := build.retained.a
+	a.smtHistory = []string{"current query", "previous body query"}[:1]
+	data, err := build.MarshalState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cap(a.smtHistory) != 2 || a.smtHistory[:2][1] != "previous body query" {
+		t.Fatal("checkpoint changed live analyzer storage")
+	}
+	restored, err := RestoreAnalysisBuild(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	history := restored.retained.a.smtHistory
+	if len(history) != 1 || cap(history) != 1 || history[0] != "current query" {
+		t.Fatalf("unexpected restored SMT history: %q, capacity %d", history, cap(history))
+	}
+}

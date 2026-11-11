@@ -293,6 +293,7 @@ const smtHistoryLimit = 4096
 // does not depend on which verdicts were cached, so a retry replays the same session cold or warm.
 func (a *Analyzer) noteSMTHistory(query string) {
 	if a.smtHistoryFor != a.currentFuncDecl {
+		clear(a.smtHistory)
 		a.smtHistory, a.smtHistoryFor = a.smtHistory[:0], a.currentFuncDecl
 	}
 	if a.smtEscalation == 0 && len(a.smtHistory) < smtHistoryLimit {
