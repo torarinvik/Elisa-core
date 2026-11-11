@@ -125,3 +125,71 @@ join:
 		})
 	}
 }
+
+func TestLiteralDivisorSpecializationRequiresDirectConstantCalls(t *testing.T) {
+	if !boundedDivisionUnrollSupported() {
+		t.Skip("requires LLVM 23")
+	}
+	const source = `
+target triple = "arm64-apple-macosx"
+define internal i32 @digits(i32 %n, i32 %base) {
+entry:
+  %safe = freeze i32 %base
+  %q1 = udiv i32 %n, %safe
+  %r1 = urem i32 %n, %safe
+  %q2 = udiv i32 %q1, %safe
+  %r2 = urem i32 %q1, %safe
+  %q3 = udiv i32 %q2, %safe
+  %r3 = urem i32 %q2, %safe
+  %q4 = udiv i32 %q3, %safe
+  %r4 = urem i32 %q3, %safe
+  %s1 = add i32 %r1, %r2
+  %s2 = add i32 %r3, %r4
+  %s3 = add i32 %s1, %s2
+  %sum = add i32 %s3, %q4
+  ret i32 %sum
+}
+
+define i32 @two_bases(i32 %value, i32 %runtime_base) {
+entry:
+  %decimal = call i32 @digits(i32 %value, i32 10)
+  %hex = call i32 @digits(i32 %value, i32 16)
+  %sum = add i32 %decimal, %hex
+  ret i32 %sum
+}
+`
+	for _, test := range []struct {
+		name string
+		ir   string
+		fold bool
+	}{
+		{"distinct literals", source, true},
+		{"runtime divisor", strings.Replace(source, "%value, i32 16)", "%value, i32 %runtime_base)", 1), false},
+		{"equal literals", strings.Replace(source, "%value, i32 16)", "%value, i32 10)", 1), false},
+		{"address taken", source + "@address = global ptr @digits\n", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			g, err := parseLLVMIRForSplitHalfTest(test.ir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer g.dispose()
+			if err := g.ensureTargetMachine(); err != nil {
+				t.Fatal(err)
+			}
+			if unrollBoundedDivisionLoops(g) == 2 {
+				t.Fatal("LLVM cleanup failed")
+			}
+			if err := g.verify(); err != nil {
+				t.Fatal(err)
+			}
+			ir := g.printModule()
+			if strings.Contains(ir, "@digits.literal_divisor") != test.fold {
+				t.Fatalf("unexpected divisor specialization:\n%s", ir)
+			}
+			if test.fold && strings.Contains(ir, ", %safe") {
+				t.Fatalf("specialized helper still has a runtime divisor:\n%s", ir)
+			}
+		})
+	}
+}

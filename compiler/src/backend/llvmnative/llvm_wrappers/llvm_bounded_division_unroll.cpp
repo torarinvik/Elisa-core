@@ -330,6 +330,7 @@ static unsigned elisacoreReuseEdgeDivisions(Module &M) {
 #include "llvm_factored_unsigned_division.cpp"
 #include "llvm_remainder_recurrence.cpp"
 #include "llvm_constant_paths.cpp"
+#include "llvm_literal_divisor_specialization.cpp"
 #include "llvm_bounded_carry.cpp"
 
 #else
@@ -368,6 +369,9 @@ extern "C" unsigned elisacoreOptimizeBoundedDivisionLoops(LLVMModuleRef M, LLVMT
     Changed += elisacoreSplitRemainderRecurrences(*llvm::unwrap(M));
     Changed += elisacoreFoldConstantIntegerPaths(*llvm::unwrap(M));
     Changed += elisacoreNarrowBoundedCarries(*llvm::unwrap(M));
+    unsigned Specialized = elisacoreSpecializeLiteralDivisors(*llvm::unwrap(M), T);
+    if (Specialized == 2) return 2;
+    Changed += Specialized;
   }
 #endif
   return Changed ? 1 : 0;
