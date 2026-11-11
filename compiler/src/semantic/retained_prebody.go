@@ -83,7 +83,8 @@ func capturePreBody(a *Analyzer, decls []scopedDecl) *preBodyState {
 		regionIndex:    map[*ast.FuncDecl]map[int]bool{},
 	}
 	functions := make([]*ast.FuncDecl, 0, len(decls))
-	p.keyOf = collectRetainedPreBodyFunctionKeys(decls, &functions)
+	nested := make(map[ast.Decl][]*ast.FuncDecl)
+	p.keyOf = collectRetainedPreBodyFunctionKeys(decls, &functions, nested)
 	classificationsWithoutStores := make(map[retainedClassifyPreparation]string)
 	for _, fn := range functions {
 		key := p.keyOf[fn]
@@ -98,7 +99,7 @@ func capturePreBody(a *Analyzer, decls []scopedDecl) *preBodyState {
 		}
 	}
 	var resolvedTypeNameLocations map[ast.TypeExpr]resolvedTypeNameLocation
-	p.resolvedTypeNames, resolvedTypeNameLocations = captureResolvedTypeNameContributions(a.resolvedTypeNames, decls, p.keyOf, true)
+	p.resolvedTypeNames, resolvedTypeNameLocations = captureResolvedTypeNameContributionsWithNested(a.resolvedTypeNames, decls, p.keyOf, true, nested)
 	p.resolvedTypeNameSourceOwners = resolvedTypeNameSourceOwners(resolvedTypeNameLocations)
 	p.resolvedTypeNameRows = resolvedTypeNameBodyRows(a.resolvedTypeNames, resolvedTypeNameLocations)
 	if a.retained != nil {

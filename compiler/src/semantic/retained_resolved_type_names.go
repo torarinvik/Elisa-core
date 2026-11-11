@@ -101,6 +101,10 @@ func retainedPreBodyFunctionKeySet(decls []scopedDecl) map[string]bool {
 // An analyzer-created key with no source-node identity is not authorized by a
 // matching position; admission declines it, while cleanup preserves it.
 func captureResolvedTypeNameContributions(rows map[ast.TypeExpr]string, decls []scopedDecl, functionKeys map[*ast.FuncDecl]string, failUnknown bool) (certificate resolvedTypeNameContributions, locations map[ast.TypeExpr]resolvedTypeNameLocation) {
+	return captureResolvedTypeNameContributionsWithNested(rows, decls, functionKeys, failUnknown, nil)
+}
+
+func captureResolvedTypeNameContributionsWithNested(rows map[ast.TypeExpr]string, decls []scopedDecl, functionKeys map[*ast.FuncDecl]string, failUnknown bool, nested map[ast.Decl][]*ast.FuncDecl) (certificate resolvedTypeNameContributions, locations map[ast.TypeExpr]resolvedTypeNameLocation) {
 	if functionKeys == nil {
 		functionKeys = retainedPreBodyFunctionKeys(decls)
 	}
@@ -267,9 +271,8 @@ func captureResolvedTypeNameContributions(rows map[ast.TypeExpr]string, decls []
 			certificate.failure = err.Error()
 			return certificate, locations
 		}
-		for _, declaration := range retainedWalkDecls(&ast.File{Decls: []ast.Decl{root}}) {
-			fn, ok := declaration.(*ast.FuncDecl)
-			if !ok || functionPaths[fn] {
+		for _, fn := range retainedNestedFunctions(root, nested) {
+			if functionPaths[fn] {
 				continue
 			}
 			key := functionKeys[fn]
