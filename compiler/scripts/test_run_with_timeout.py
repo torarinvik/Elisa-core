@@ -87,15 +87,16 @@ class RunWithTimeoutTests(unittest.TestCase):
         )
         self.assertEqual(missing.returncode, 127, missing.stderr)
 
-    def test_every_stage0_build_entrypoint_uses_fixed_5_second_runner(self) -> None:
+    def test_every_stage0_build_entrypoint_uses_fixed_3_second_runner(self) -> None:
         provenance = (ROOT / "scripts" / "stage0_provenance.py").read_text(encoding="utf-8")
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
         hook = (ROOT / "githooks" / "install-elisac.sh").read_text(encoding="utf-8")
-        self.assertIn('            "5",\n            "--grace-seconds",\n            "0",\n            "--",\n            "go",\n            "build",', provenance)
+        self.assertIn('"3", "--grace-seconds", "0", "--",', provenance)
         self.assertEqual(makefile.count('"$(PYTHON_BIN)" "$(ELISA_STAGE0_PROVENANCE_SCRIPT)" build'), 2)
-        self.assertIn('"$(PYTHON_BIN)" "$(ELISA_STAGE0_TIMEOUT_SCRIPT)" 5 --grace-seconds 0 -- go build', makefile)
+        self.assertIn('"$(PYTHON_BIN)" "$(ELISA_STAGE0_TIMEOUT_SCRIPT)" 3 --grace-seconds 0 -- go build', makefile)
         self.assertIn("ELISA_STAGE0_TIMEOUT_SCRIPT ?= $(CURDIR)/scripts/run_with_timeout.py", makefile)
-        self.assertIn('"$PYTHON_TOOL" "$PROVENANCE_SCRIPT" build', hook)
+        self.assertEqual(makefile.count('3 --grace-seconds 0 -- env -i'), 2)
+        self.assertIn('3 --grace-seconds 0 -- env ELISA_REBUILD_SUPERVISED=1 "$PYTHON_TOOL" "$PROVENANCE_SCRIPT" build', hook)
 
 
 if __name__ == "__main__":

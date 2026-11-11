@@ -78,6 +78,7 @@ LOCAL_RECEIPT_RESTORE="$LOCAL_BACKUP_DIR/elisac.provenance.restore.json"
 INSTALL_BIN="${HOME}/.elisac/elisac-stage0"
 PROVENANCE_SCRIPT="${ELISA_STAGE0_PROVENANCE_SCRIPT:-$COMPILER_DIR/scripts/stage0_provenance.py}"
 PYTHON_TOOL="${PYTHON_BIN:-python3}"
+TIMEOUT_SCRIPT="$COMPILER_DIR/scripts/run_with_timeout.py"
 
 # The bundled helper stages a fresh build and atomically publishes a checked
 # binary/receipt pair. Do not fall back to VCS timestamps: default binary bytes
@@ -86,7 +87,7 @@ if [ ! -f "$PROVENANCE_SCRIPT" ] || ! command -v "$PYTHON_TOOL" >/dev/null 2>&1;
     echo "[hook] Stage0 provenance helper/Python unavailable; installed compiler retained" >&2
     exit 0
 fi
-if ! "$PYTHON_TOOL" "$PROVENANCE_SCRIPT" build --root "$COMPILER_DIR" --binary "$INSTALL_BIN" >/tmp/elisac-autoinstall.log 2>&1; then
+if ! "$PYTHON_TOOL" "$TIMEOUT_SCRIPT" 3 --grace-seconds 0 -- env ELISA_REBUILD_SUPERVISED=1 "$PYTHON_TOOL" "$PROVENANCE_SCRIPT" build --root "$COMPILER_DIR" --binary "$INSTALL_BIN" >/tmp/elisac-autoinstall.log 2>&1; then
     echo "[hook] elisac provenance build FAILED (binary left as-is); see /tmp/elisac-autoinstall.log" >&2
     exit 0
 fi
