@@ -10,6 +10,9 @@ const (
 	// A capacity hint need only sample the start of a block. An outer block
 	// can contain an arbitrarily large nested block that contributes one item.
 	maxIndentedEstimateTokens = 1024
+	// Nested tokens add no capacity to the enclosing block. Bound the
+	// lookahead past an indent separately from the flat-item sample.
+	maxNestedEstimateTokens = 96
 )
 
 func boundedEstimate(value int) int {
@@ -35,30 +38,39 @@ func (p *Parser) estimateIndentedItemsFrom(start int, stop lexer.TokenKind) int 
 		return 0
 	}
 	count := 0
-	depth := 0
 	atLineStart := true
 	end := start + min(len(p.tokens)-start, maxIndentedEstimateTokens)
 	for i := start; i < end; i++ {
 		switch p.tokens[i].Kind {
 		case lexer.TOKEN_INDENT:
-			depth++
-			atLineStart = false
-		case lexer.TOKEN_DEDENT:
-			if depth == 0 && stop == lexer.TOKEN_DEDENT {
+			depth := 1
+			nestedEnd := i + min(end-i, maxNestedEstimateTokens)
+			for i++; i < nestedEnd && depth != 0; i++ {
+				switch p.tokens[i].Kind {
+				case lexer.TOKEN_INDENT:
+					depth++
+				case lexer.TOKEN_DEDENT:
+					depth--
+				case lexer.TOKEN_EOF:
+					return count
+				}
+			}
+			if depth != 0 {
 				return count
 			}
-			if depth > 0 {
-				depth--
+			i--
+			atLineStart = false
+		case lexer.TOKEN_DEDENT:
+			if stop == lexer.TOKEN_DEDENT {
+				return count
 			}
 			atLineStart = false
 		case lexer.TOKEN_EOF:
-			return boundedEstimate(count)
+			return count
 		case lexer.TOKEN_NEWLINE:
-			if depth == 0 {
-				atLineStart = true
-			}
+			atLineStart = true
 		default:
-			if depth == 0 && atLineStart {
+			if atLineStart {
 				count++
 				atLineStart = false
 			}
