@@ -193,14 +193,17 @@ func advanceAnalysisDiskBuildWithCheckpoint(program *loadedProgram, file, pristi
 		reportAnalysisIncomplete(stderr, "initial analysis encountered a transient solver outcome; rerun to retry from the last clean boundary or from source")
 		return nil, nil
 	}
+	// A new build needs an independent syntax tree, but it can borrow the
+	// primary parse's tokens. The restoration future has already joined.
+	if build == nil && pristine == nil {
+		pristine, _ = parseAnalysisBuildPristine(program)
+	}
+	// Neither declaration analysis nor checkpoint restoration needs tokens.
+	// Let GC reclaim the request's token array during the semantic phases.
+	program.tokenCache.releaseRequestTokens()
 	if build == nil {
-		// A new build needs an independent syntax tree, but the invocation's
-		// immutable token snapshot can be shared with the primary parse.
 		if pristine == nil {
-			pristine, _ = parseAnalysisBuildPristine(program)
-			if pristine == nil {
-				return semantic.AnalyzeWithOptions(file, options), nil
-			}
+			return semantic.AnalyzeWithOptions(file, options), nil
 		}
 		var err error
 		build, err = semantic.BeginAnalysisBuild(file, pristine, program.source, options)
