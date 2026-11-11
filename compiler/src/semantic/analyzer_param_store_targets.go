@@ -163,14 +163,41 @@ const storeTargetGlobal = -1
 //   - a relayed store: a resolved callee that maps its position-p param into its position-q param,
 //     where the call passes srcParam at p and tgtParam at q.
 func (a *Analyzer) walkParamStores(body []ast.Stmt, pidx map[string]int, out map[*ast.FuncDecl][]map[int]bool, addStore func(src, tgt string), markGlobal func(src string), observe func(*ast.FuncDecl)) {
-	locals := map[string]int{}
-	aliases := map[string]int{}
+	type binding uint8
+	const (
+		unbound binding = iota
+		local
+		writeThrough
+	)
+	bindings := map[string]binding{}
+	type introduction struct {
+		name     string
+		previous binding
+	}
+	var inline [8]introduction
+	introduced := inline[:0]
+	bind := func(name string, kind binding) {
+		introduced = append(introduced, introduction{name, bindings[name]})
+		bindings[name] = kind
+	}
+	restore := func(start int) {
+		for i := len(introduced) - 1; i >= start; i-- {
+			entry := introduced[i]
+			if entry.previous == unbound {
+				delete(bindings, entry.name)
+			} else {
+				bindings[entry.name] = entry.previous
+			}
+		}
+		introduced = introduced[:start]
+	}
 	add := func(src, tgt string) {
-		if aliases[tgt] > 0 {
+		switch bindings[tgt] {
+		case writeThrough:
 			// An iterator binding can write through to storage outside this
 			// function. Its spelling must not select a shadowed parameter.
 			markGlobal(src)
-		} else if locals[tgt] == 0 {
+		case unbound:
 			addStore(src, tgt)
 		}
 	}
@@ -179,28 +206,16 @@ func (a *Analyzer) walkParamStores(body []ast.Stmt, pidx map[string]int, out map
 	global := markGlobal
 	var walk func(v reflect.Value)
 	list := func(stmts []ast.Stmt, tail ast.Expr) {
-		var introduced []struct {
-			name    string
-			aliases int
-		}
+		start := len(introduced)
 		for _, stmt := range stmts {
 			walk(reflect.ValueOf(stmt))
 			// A declaration's initializer sees the previous binding.
 			if decl, ok := stmt.(*ast.VarDeclStmt); ok && decl != nil && decl.Name != "" {
-				introduced = append(introduced, struct {
-					name    string
-					aliases int
-				}{decl.Name, aliases[decl.Name]})
-				locals[decl.Name]++
-				aliases[decl.Name] = 0
+				bind(decl.Name, local)
 			}
 		}
 		walk(reflect.ValueOf(tail))
-		for i := len(introduced) - 1; i >= 0; i-- {
-			binding := introduced[i]
-			locals[binding.name]--
-			aliases[binding.name] = binding.aliases
-		}
+		restore(start)
 	}
 	walk = func(v reflect.Value) {
 		for v.Kind() == reflect.Interface {
@@ -225,23 +240,19 @@ func (a *Analyzer) walkParamStores(body []ast.Stmt, pidx map[string]int, out map
 				walk(reflect.ValueOf(n.Source))
 				names := parallelForMoveBindNames(n.Pattern)
 				names = append(names, parallelForMatchArmPatternNames(n.PatternFilter)...)
-				previousAliases := make([]int, len(names))
-				for i, name := range names {
-					previousAliases[i] = aliases[name]
-					locals[name]++
-					aliases[name] = 0
-					if n.Mode == ast.IterBindMutableRef {
-						aliases[name] = 1
-					}
+				start := len(introduced)
+				kind := local
+				if n.Mode == ast.IterBindMutableRef {
+					kind = writeThrough
+				}
+				for _, name := range names {
+					bind(name, kind)
 				}
 				walk(reflect.ValueOf(n.PatternFilter))
 				walk(reflect.ValueOf(n.WhereFilter))
 				walk(reflect.ValueOf(n.Filter))
 				list(n.Body, nil)
-				for i := len(names) - 1; i >= 0; i-- {
-					locals[names[i]]--
-					aliases[names[i]] = previousAliases[i]
-				}
+				restore(start)
 				return
 			case *ast.ExprBlock:
 				// Locals declared in the block remain visible in its tail value.
