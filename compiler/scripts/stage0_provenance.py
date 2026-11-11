@@ -513,7 +513,7 @@ def build(root: Path, binary: Path) -> Path:
         if os.environ.get("ELISA_REBUILD_SUPERVISED") != "1":
             command[:0] = [
                 sys.executable, str(Path(__file__).with_name("run_with_timeout.py")),
-                "5", "--grace-seconds", "0", "--",
+                "3", "--grace-seconds", "0", "--",
             ]
         try:
             result = subprocess.run(command, cwd=root, check=False, capture_output=True, text=True)
