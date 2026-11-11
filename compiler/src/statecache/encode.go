@@ -142,12 +142,12 @@ func (r *Registry) encode(root any, framed bool, capacity int) ([]byte, error) {
 	}
 	framing := len(e.data)
 	if framed {
-		// Reserve the frame table in the output buffer rather than allocating
-		// and copying a second, potentially large, zero-filled byte slice.
+		// Reserve the frame table in the output buffer. Every slot is
+		// overwritten before publication, including the dictionary offset
+		// and the root body size.
 		size := 8 * (e.nodes.count + 2)
 		e.data = slices.Grow(e.data, size)
 		e.data = e.data[:framing+size]
-		clear(e.data[framing:])
 	}
 	if framed && r.parallelDecode && e.nodes.count >= parallelFramedEncodeMin {
 		if err := e.writeFramedBodies(framing); err != nil {
@@ -190,6 +190,10 @@ func (r *Registry) encode(root any, framed bool, capacity int) ([]byte, error) {
 }
 func (e *encoder) uint(v uint64) {
 	if e.scanning {
+		return
+	}
+	if v < 0x80 {
+		e.data = append(e.data, byte(v))
 		return
 	}
 	e.data = binary.AppendUvarint(e.data, v)
@@ -243,8 +247,8 @@ func (e *encoder) value(v reflect.Value) error {
 }
 
 func (e *encoder) valueAtDepth(v reflect.Value) error {
-	t := v.Type()
-	switch v.Kind() {
+	kind := v.Kind()
+	switch kind {
 	case reflect.Interface:
 		if v.IsNil() {
 			e.uint(0)
@@ -263,10 +267,11 @@ func (e *encoder) valueAtDepth(v reflect.Value) error {
 			return nil
 		}
 
+		t := v.Type()
 		address := uintptr(v.UnsafePointer())
 		var key identity
 		var prior uint64
-		if v.Kind() == reflect.Slice {
+		if kind == reflect.Slice {
 			key = identity{typ: t, pointer: address, length: v.Len(), capacity: v.Cap()}
 			prior = e.objects[key]
 		} else {
@@ -280,7 +285,7 @@ func (e *encoder) valueAtDepth(v reflect.Value) error {
 			return fmt.Errorf("state graph changed while encoding %s", t)
 		}
 		id := uint64(e.nodes.count + 1)
-		if v.Kind() == reflect.Slice {
+		if kind == reflect.Slice {
 			e.objects[key] = id
 		} else {
 			e.pointerObjects.add(address, t, id)
@@ -292,6 +297,7 @@ func (e *encoder) valueAtDepth(v reflect.Value) error {
 		return e.body(v)
 
 	case reflect.Struct:
+		t := v.Type()
 		var fields []int
 		if e.scanning {
 			fields = e.registry.scanFields[t]
@@ -344,7 +350,7 @@ func (e *encoder) valueAtDepth(v reflect.Value) error {
 			}
 		}
 	case reflect.Array:
-		if e.scanning && !e.registry.hasObjects[t.Elem()] {
+		if e.scanning && !e.registry.hasObjects[v.Type().Elem()] {
 			return nil
 		}
 		for i := 0; i < v.Len(); i++ {
@@ -371,11 +377,11 @@ func (e *encoder) valueAtDepth(v reflect.Value) error {
 		e.str(v.String())
 	case reflect.Func, reflect.Chan, reflect.UnsafePointer, reflect.Uintptr:
 		if !v.IsZero() {
-			return fmt.Errorf("process-local value %s cannot be persisted", t)
+			return fmt.Errorf("process-local value %s cannot be persisted", v.Type())
 		}
 		e.uint(0)
 	default:
-		return fmt.Errorf("unsupported state type %s", t)
+		return fmt.Errorf("unsupported state type %s", v.Type())
 	}
 	return nil
 }
