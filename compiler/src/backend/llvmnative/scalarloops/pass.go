@@ -13,5 +13,14 @@ package scalarloops
 #cgo linux LDFLAGS: -L/usr/lib/llvm-23/lib -Wl,-rpath,/usr/lib/llvm-23/lib -L/usr/lib/llvm-21/lib -L/usr/lib/llvm-20/lib -L/usr/lib/llvm-19/lib -L/usr/lib/llvm-18/lib -L/usr/lib/llvm-17/lib -L/usr/lib/llvm-16/lib -L/usr/lib/llvm-15/lib -lLLVM
 #cgo windows CXXFLAGS: -std=c++17 -IC:/msys64/mingw64/include
 #cgo windows LDFLAGS: -LC:/msys64/mingw64/lib -lLLVM-22
+struct LLVMOpaqueModule;
+unsigned elisacoreFoldConditionalDoubling(struct LLVMOpaqueModule *);
 */
 import "C"
+
+import "unsafe"
+
+// FoldConditionalDoubling exposes native shift and subtract operations in wrapping recurrences.
+func FoldConditionalDoubling(module unsafe.Pointer) {
+	C.elisacoreFoldConditionalDoubling((*C.struct_LLVMOpaqueModule)(module))
+}

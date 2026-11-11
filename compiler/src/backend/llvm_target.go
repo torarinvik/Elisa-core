@@ -92,7 +92,7 @@ import "C"
 import (
 	"elisacore/src/backend/llvmnative"
 	// Link scalar loop matchers used by the bounded division pass.
-	_ "elisacore/src/backend/llvmnative/scalarloops"
+	"elisacore/src/backend/llvmnative/scalarloops"
 	"elisacore/src/semantic"
 	"fmt"
 	"os"
@@ -442,6 +442,7 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 		C.elisacoreCsscAbsoluteRangeChecks(g.module, g.targetMachine)
 		C.elisacoreInlineSmallRecursiveFunctions(g.module, g.targetMachine)
 		C.elisacoreUnrollGuardedReductions(g.module)
+		scalarloops.FoldConditionalDoubling(unsafe.Pointer(g.module))
 	}
 	if err := g.verify(); err != nil {
 		return fmt.Errorf("optimized LLVM module failed verification: %w", err)
