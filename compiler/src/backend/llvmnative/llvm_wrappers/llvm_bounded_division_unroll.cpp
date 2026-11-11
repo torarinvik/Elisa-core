@@ -299,6 +299,7 @@ extern "C" unsigned elisacoreUnrollBoundedDivisionLoops(LLVMModuleRef Ref) {
 #include "llvm_shift_parity.cpp"
 #include "llvm_ring_index_bounds.cpp"
 #include "llvm_decimal_digit_count.cpp"
+#include "llvm_halving_runs.cpp"
 #include "llvm_shift_bit_reverse.cpp"
 extern "C" bool elisacoreFoldPowerPositionInFunction(LLVMValueRef);
 
@@ -347,6 +348,7 @@ extern "C" unsigned elisacoreOptimizeBoundedDivisionLoops(LLVMModuleRef M, LLVMT
     Changed += elisacoreFoldPowerPosition(*llvm::unwrap(M));
     Changed += elisacoreFoldRingIndexBounds(*llvm::unwrap(M));
     Changed += elisacoreFoldDecimalDigitCounts(*llvm::unwrap(M));
+    Changed += elisacoreFoldHalvingRuns(*llvm::unwrap(M));
     Changed += elisacoreFoldRangeAndLoops(*llvm::unwrap(M));
     Changed += elisacoreFoldScalarLoopIdioms(*llvm::unwrap(M));
     Changed += elisacoreFoldMaskedSingleBits(*llvm::unwrap(M));
