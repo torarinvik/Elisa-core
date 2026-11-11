@@ -34,8 +34,9 @@ type smtGlobalLocalNameCache struct {
 	names   []string
 }
 
-// The parallel body's global symbol kinds and mutability are fixed at fork.
-// Each worker owns this cache; a changed scope or definition version rebuilds it.
+// Global symbol kinds and mutability are fixed when the symbols are defined.
+// Serial analysis and each worker own their cache; changing the scope or
+// defining a symbol rebuilds the list.
 func (a *Analyzer) smtGlobalImmutableLocalNames(sc *Scope) []string {
 	cache := &a.smtGlobalLocalNames
 	if cache.scope == sc && cache.version == sc.symbolsVersion {
@@ -68,7 +69,7 @@ func (a *Analyzer) smtImmutableLocalHypotheses(tr *smtTranslator) string {
 		// immutable locals, and sorting all of them on every query was ~9 s of a stage1 build.
 		// The filter is exactly the per-name skip below, so the emitted hypotheses are unchanged.
 		var names []string
-		if a.parallel != nil && sc == a.globalScope {
+		if sc == a.globalScope {
 			names = a.smtGlobalImmutableLocalNames(sc)
 		} else {
 			for name, sym := range sc.Symbols {
@@ -86,10 +87,11 @@ func (a *Analyzer) smtImmutableLocalHypotheses(tr *smtTranslator) string {
 			sym := sc.Symbols[name]
 			seen[name] = true // a closer scope's binding shadows an outer one
 			vd, ok := sym.Node.(*ast.VarDeclStmt)
-			if ok && vd != nil && vd.Value != nil && sym.Type != nil && !IsNumericType(sym.Type) {
-				a.smtAggregateCallLocalEnsures(tr, sc, sym, vd)
+			if !ok || vd == nil || vd.Value == nil || sym.Type == nil {
+				continue
 			}
-			if !ok || vd == nil || vd.Value == nil || sym.Type == nil || !IsNumericType(sym.Type) {
+			if !IsNumericType(sym.Type) {
+				a.smtAggregateCallLocalEnsures(tr, sc, sym, vd)
 				continue
 			}
 			a.smtCallLocalResultOnlyEnsures(tr, &b, name, sym, vd.Value)
