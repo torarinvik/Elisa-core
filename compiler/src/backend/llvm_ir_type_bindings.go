@@ -42,3 +42,15 @@ func llvmInt32TypeInContext(context llvmIRContextRef) llvmIRTypeRef {
 }
 func llvmGetTypeKind(typ llvmIRTypeRef) llvmIRTypeKind { return C.LLVMGetTypeKind(typ) }
 func llvmTypeOf(value llvmIRValueRef) llvmIRTypeRef    { return C.LLVMTypeOf(value) }
+
+func llvmStructGetTypeAtIndex(typ llvmIRTypeRef, index llvmIRUnsigned) llvmIRTypeRef {
+	return C.LLVMStructGetTypeAtIndex(typ, index)
+}
+func llvmTypeString(typ llvmIRTypeRef) string {
+	message := C.LLVMPrintTypeToString(typ)
+	if message == nil {
+		return ""
+	}
+	defer C.LLVMDisposeMessage(message)
+	return C.GoString(message)
+}

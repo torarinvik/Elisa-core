@@ -2,17 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-
-static void elisacoreSetInstructionCallConvLocal(LLVMValueRef Call, unsigned CallConv) {
-	LLVMSetInstructionCallConv(Call, CallConv);
-}
-
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -20,7 +9,7 @@ import (
 	"unsafe"
 )
 
-func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (llvmIRValueRef, semantic.Type, error) {
 	if expr == nil {
 		return nil, nil, fmt.Errorf("cannot emit nil expression")
 	}
@@ -52,7 +41,7 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 	}
 
 	var (
-		value C.LLVMValueRef
+		value llvmIRValueRef
 		err   error
 	)
 
@@ -69,7 +58,7 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 		if lerr != nil {
 			return nil, nil, lerr
 		}
-		return C.LLVMGetUndef(llvmType), actualType, nil
+		return llvmGetUndef(llvmType), actualType, nil
 	case *ast.Ident:
 		if s.isUnboundImplicitPackedStoreIdent(n) {
 			storeType := actualType
@@ -223,7 +212,7 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 	}
 	return value, actualType, nil
 }
-func (s *functionState) emitExprBlock(expr *ast.ExprBlock, expected semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitExprBlock(expr *ast.ExprBlock, expected semantic.Type) (llvmIRValueRef, semantic.Type, error) {
 	if expr == nil {
 		return nil, nil, fmt.Errorf("invalid expression block")
 	}
@@ -270,7 +259,7 @@ func (s *functionState) emitExprBlock(expr *ast.ExprBlock, expected semantic.Typ
 // emitDivergingExprBlock emits a value-less branch block whose last statement leaves
 // (docs/119 §4.1: `else: return -1`). There is no value: the block ends terminated and
 // the enclosing ternary leaves this arm out of its phi.
-func (s *functionState) emitDivergingExprBlock(expr *ast.ExprBlock, expected semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitDivergingExprBlock(expr *ast.ExprBlock, expected semantic.Type) (llvmIRValueRef, semantic.Type, error) {
 	savedPackedStores := s.packedStores
 	s.packedStores = s.clonePackedStores()
 	s.pushScope()
@@ -296,10 +285,10 @@ func (s *functionState) emitDivergingExprBlock(expr *ast.ExprBlock, expected sem
 	s.discardScopeCleanups(scope)
 	return nil, expected, nil
 }
-func (s *functionState) emitMoveExpr(expr *ast.MoveExpr, expected semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitMoveExpr(expr *ast.MoveExpr, expected semantic.Type) (llvmIRValueRef, semantic.Type, error) {
 	return s.emitMovedValue(expr.Operand, expected)
 }
-func (s *functionState) emitMovedValue(operand ast.Expr, expected semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitMovedValue(operand ast.Expr, expected semantic.Type) (llvmIRValueRef, semantic.Type, error) {
 	if binding, ok := s.lookupScopedMoveBinding(operand); ok {
 		value, err := s.loadValue(binding.ptr, binding.typ, binding.name)
 		if err != nil {
@@ -338,24 +327,24 @@ func (s *functionState) lookupScopedMoveBinding(expr ast.Expr) (scopedCleanupBin
 	}
 	return scopedCleanupBinding{}, false
 }
-func (s *functionState) buildCall(llvmFnType C.LLVMTypeRef, callee C.LLVMValueRef, args []C.LLVMValueRef, name string) C.LLVMValueRef {
+func (s *functionState) buildCall(llvmFnType llvmIRTypeRef, callee llvmIRValueRef, args []llvmIRValueRef, name string) llvmIRValueRef {
 	argCount := len(args)
 	argPtr := llvmValueSlicePtr(args)
 	nameC := cString(name)
-	defer C.free(unsafe.Pointer(nameC))
-	return C.LLVMBuildCall2(s.builder, llvmFnType, callee, argPtr, C.unsigned(argCount), nameC)
+	defer llvmFree(unsafe.Pointer(nameC))
+	return llvmBuildCall2(s.builder, llvmFnType, callee, argPtr, llvmIRUnsigned(argCount), nameC)
 }
 
-func (s *functionState) buildTypedCall(llvmFnType C.LLVMTypeRef, callee C.LLVMValueRef, args []C.LLVMValueRef, name string, fn *semantic.FuncType) C.LLVMValueRef {
+func (s *functionState) buildTypedCall(llvmFnType llvmIRTypeRef, callee llvmIRValueRef, args []llvmIRValueRef, name string, fn *semantic.FuncType) llvmIRValueRef {
 	call := s.buildCall(llvmFnType, callee, args, name)
 	if s != nil && s.g != nil {
 		if callConv, ok := s.g.llvmCallConvForFunc(fn); ok {
-			C.elisacoreSetInstructionCallConvLocal(call, callConv)
+			llvmSetInstructionCallConv(call, callConv)
 		}
 	}
 	return call
 }
-func (s *functionState) emitIdent(expr *ast.Ident) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitIdent(expr *ast.Ident) (llvmIRValueRef, semantic.Type, error) {
 	if actualType := s.exprType(expr); semantic.IsNullType(actualType) {
 		return s.emitNullLiteral()
 	} else if viewType, ok := actualType.(*semantic.PackedVariantViewType); ok {

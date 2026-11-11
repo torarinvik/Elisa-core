@@ -120,3 +120,10 @@ func llvmBuildSwitch(builder llvmIRBuilderRef, value llvmIRValueRef, fallback ll
 func llvmAddCase(branch, value llvmIRValueRef, block llvmIRBlockRef) {
 	C.LLVMAddCase(branch, value, block)
 }
+
+func llvmBuildCall2(builder llvmIRBuilderRef, typ llvmIRTypeRef, callee llvmIRValueRef, arguments *llvmIRValueRef, count llvmIRUnsigned, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildCall2(builder, typ, callee, arguments, count, name)
+}
+func llvmSetInstructionCallConv(call llvmIRValueRef, convention llvmIRUnsigned) {
+	C.LLVMSetInstructionCallConv(call, convention)
+}
