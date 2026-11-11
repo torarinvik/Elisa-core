@@ -133,54 +133,7 @@ static bool matchSymmetricRangeCheck(ICmpInst &Cmp, BinaryOperator *&Add,
   return Limit->getValue() == ExpectedLimit;
 }
 
-// On Apple M5, scalar CSSC min/max lengthens the dependency chain of
-// a running extremum immediately clamped by another extremum.
-static bool preferCompareSelectExtrema(Function &F, LoopInfo &LI,
-                                       const TargetMachine &TM) {
-  if (!TM.getTargetTriple().isMacOSX() || TM.getTargetCPU() != "apple-m5")
-    return false;
-  for (BasicBlock &BB : F)
-    for (Instruction &I : BB)
-      if (auto *Call = dyn_cast<CallBase>(&I); Call && Call->isInlineAsm())
-        return false;
-  for (Loop *L : LI.getTopLevelLoops()) {
-    BasicBlock *Latch = L->getLoopLatch();
-    if (!Latch) continue;
-    for (PHINode &Phi : L->getHeader()->phis()) {
-      auto *Running = dyn_cast<IntrinsicInst>(Phi.getIncomingValueForBlock(Latch));
-      if (!Running || !Phi.getType()->isIntegerTy(32) ||
-          !L->contains(Running->getParent()))
-        continue;
-      Intrinsic::ID ClampID;
-      switch (Running->getIntrinsicID()) {
-      case Intrinsic::umax: ClampID = Intrinsic::umin; break;
-      case Intrinsic::umin: ClampID = Intrinsic::umax; break;
-      default: continue;
-      }
-      if (Running->getArgOperand(0) != &Phi && Running->getArgOperand(1) != &Phi)
-        continue;
-      for (User *Use : Running->users())
-        if (auto *Clamp = dyn_cast<IntrinsicInst>(Use);
-            Clamp && Clamp->getIntrinsicID() == ClampID &&
-            Clamp->getParent() == Running->getParent())
-          return true;
-    }
-  }
-  return false;
-}
-
-static void useCompareSelectExtrema(Function &F, const TargetMachine &TM) {
-  SmallVector<StringRef, 32> Features;
-  TM.getTargetFeatureString().split(Features, ',', -1, false);
-  std::string Selected;
-  for (StringRef Feature : Features) {
-    if (Feature == "+cssc" || Feature == "-cssc") continue;
-    Selected += Feature;
-    Selected += ',';
-  }
-  Selected += "-cssc";
-  F.addFnAttr("target-features", Selected);
-}
+#include "llvm_cssc_extrema.h"
 
 // Tune CSSC lowering and map the unsigned range-check idiom for [-B, B] to llvm.abs plus an
 // unsigned comparison when the selected AArch64 CPU has CSSC. INT_MIN remains

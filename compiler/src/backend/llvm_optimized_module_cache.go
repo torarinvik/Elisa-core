@@ -132,7 +132,7 @@ func optimizedModuleCacheKey(g *llvmGenerator, level OptimizationLevel, triple, 
 		!g.emitDebugInfo, g.emitDebugInfo, g.emitTrace,
 	}
 	if level == OptimizationLevel3 && !g.emitDebugInfo {
-		values = append(values, "validation-peel-unroll-v2", "remainder-tail-v3", "small-zero-fill-v1", "private-bool-pack-v2", "short-trip-v4", "checkedmul-fast-v1", "bounded-unswitch-v1", "private-stack-init-sink-v1", "scratch-prefix-zero-v1", "covered-array-zero-v1", "reverse-array-coverage-v1", "apple-m5-running-extrema-v1", "guarded-f64-reduction-unroll-v1", "covered-array-revisit-v1", "bounded-division-unroll-v2", "sqrt-nnan-proof-v2")
+		values = append(values, "validation-peel-unroll-v2", "remainder-tail-v3", "small-zero-fill-v1", "private-bool-pack-v2", "short-trip-v4", "checkedmul-fast-v1", "bounded-unswitch-v1", "private-stack-init-sink-v1", "scratch-prefix-zero-v1", "covered-array-zero-v1", "reverse-array-coverage-v1", "apple-m5-running-extrema-v2", "guarded-f64-reduction-unroll-v1", "covered-array-revisit-v1", "bounded-division-unroll-v2", "sqrt-nnan-proof-v2")
 	}
 	config, _ := json.Marshal(values)
 	return string(config)
