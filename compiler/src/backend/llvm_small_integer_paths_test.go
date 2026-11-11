@@ -38,6 +38,10 @@ invalid:
 		cast string
 	}{
 		{"small pure domain", source, true, ""},
+		{"biased low tail", strings.Replace(source, "  %valid = icmp ult i64 %input, 16",
+			"  %key = add i64 %input, -10\n  %valid = icmp ult i64 %key, 16", 1), true, ""},
+		{"biased high tail", strings.Replace(source, "  %valid = icmp ult i64 %input, 16",
+			"  %key = add i64 %input, -26\n  %valid = icmp uge i64 %key, -16", 1), true, ""},
 		{"signed guard", strings.Replace(source, "icmp ult i64 %input", "icmp slt i64 %input", 1), false, ""},
 		{"large domain", strings.Replace(source, "%input, 16", "%input, 129", 1), false, ""},
 		{"observable operation", strings.Replace(source, "  %next = add", "  call void @observe(i64 %updated)\n  %next = add", 1), false, ""},

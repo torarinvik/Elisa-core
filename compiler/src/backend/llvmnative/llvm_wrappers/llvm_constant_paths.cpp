@@ -53,9 +53,7 @@ static Constant *evaluatePathInstruction(Instruction &I, const PathValues &Value
 
 static ConstantInt *evaluateIntegerPath(BasicBlock *Block, BasicBlock *Previous,
                                         const DataLayout &DL, unsigned &Budget,
-                                        Argument *Input = nullptr, ConstantInt *Known = nullptr) {
-  PathValues Values;
-  if (Input) Values[Input] = Known;
+                                        PathValues Values = PathValues()) {
   SmallVector<std::pair<PHINode *, Constant *>, 8> Incoming;
   unsigned Steps = 0;
   while (Budget && Steps < 18000) {
@@ -97,33 +95,55 @@ static ConstantInt *evaluateIntegerPath(BasicBlock *Block, BasicBlock *Previous,
 // A small unsigned domain makes every execution on the accepted edge
 // concrete. Keep the original guard and invalid-input path.
 static bool foldSmallIntegerDomain(CondBrInst &Entry, ICmpInst &Test,
-                                   Argument &Input, ConstantInt &Bound,
-                                   unsigned &Budget) {
+                                   ConstantInt &Bound, unsigned &Budget) {
   Function &F = *Entry.getFunction();
   constexpr unsigned MaxDomain = 128;
   constexpr unsigned MaxTableBytes = 768;
+  Value *Key = Test.getOperand(0);
   auto *ReturnType = dyn_cast<IntegerType>(F.getReturnType());
-  if (F.arg_size() != 1 || !Input.getType()->isIntegerTy(64) ||
-      !ReturnType || ReturnType->getBitWidth() > 64 || Bound.getValue().ugt(MaxDomain))
+  if (F.arg_size() != 1 || !Key->getType()->isIntegerTy(64) ||
+      !ReturnType || ReturnType->getBitWidth() > 64 || !Test.isUnsigned())
     return false;
-  unsigned Limit = Bound.getZExtValue();
-  unsigned Accepted = 0;
-  switch (Test.getPredicate()) {
-  case ICmpInst::ICMP_ULE: ++Limit; break;
-  case ICmpInst::ICMP_UGT: ++Limit; Accepted = 1; break;
-  case ICmpInst::ICMP_ULT: break;
-  case ICmpInst::ICMP_UGE: Accepted = 1; break;
-  default: return false;
+
+  // LLVM often expresses a nonzero-based interval by adding a constant
+  // before the comparison. Invert that addition in the original bit width.
+  Value *Input = Key;
+  APInt Bias(64, 0);
+  if (auto *Add = dyn_cast<BinaryOperator>(Key)) {
+    auto *Offset = dyn_cast<ConstantInt>(Add->getOperand(1));
+    if (Add->getOpcode() != Instruction::Add || !Offset) return false;
+    Input = Add->getOperand(0);
+    Bias = Offset->getValue();
   }
-  if (Limit < 8 || Limit > MaxDomain) return false;
+  Value *ArgumentValue = Input;
+  if (auto *Freeze = dyn_cast<FreezeInst>(Input)) ArgumentValue = Freeze->getOperand(0);
+  if (!isa<Argument>(ArgumentValue)) return false;
+
+  unsigned Limit = 0, Accepted = 0;
+  APInt Lower(64, 0);
+  for (unsigned Edge : {0u, 1u}) {
+    auto Predicate = Edge == 0 ? Test.getPredicate() : Test.getInversePredicate();
+    auto Range = ConstantRange::makeExactICmpRegion(Predicate, Bound.getValue());
+    if (Range.isEmptySet() || Range.isFullSet()) continue;
+    APInt Size = Range.getUpper() - Range.getLower();
+    if (Size.ult(8) || Size.ugt(MaxDomain)) continue;
+    Lower = Range.getLower();
+    Limit = Size.getZExtValue();
+    Accepted = Edge;
+    break;
+  }
+  if (!Limit) return false;
   BasicBlock *Start = Entry.getSuccessor(Accepted);
   SmallVector<ConstantInt *, 64> Results;
   bool WorthTable = false, Signed = false;
   for (unsigned I = 0; I < Limit; ++I) {
     unsigned Before = Budget;
-    auto *Known = ConstantInt::get(cast<IntegerType>(Input.getType()), I);
+    APInt KeyValue = Lower + I;
+    PathValues Known;
+    Known[Input] = ConstantInt::get(F.getContext(), KeyValue - Bias);
+    Known[Key] = ConstantInt::get(F.getContext(), KeyValue);
     auto *Result = evaluateIntegerPath(Start, Entry.getParent(),
-                                       F.getParent()->getDataLayout(), Budget, &Input, Known);
+                                       F.getParent()->getDataLayout(), Budget, std::move(Known));
     if (!Result) return false;
     Results.push_back(Result);
     Signed |= Result->isNegative();
@@ -151,11 +171,12 @@ static bool foldSmallIntegerDomain(CondBrInst &Entry, ICmpInst &Test,
                                    ConstantArray::get(TableType, Packed), "integer.path.results");
   Table->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
   IRBuilder<> Guard(&Test);
-  Value *Stable = Guard.CreateFreeze(&Input);
+  Value *Stable = Guard.CreateFreeze(Key);
   Test.setOperand(0, Stable);
   BasicBlock *Lookup = BasicBlock::Create(M.getContext(), "integer.path.lookup", &F);
   IRBuilder<> B(Lookup);
-  Value *Address = B.CreateInBoundsGEP(TableType, Table, {B.getInt64(0), Stable});
+  Value *Index = B.CreateSub(Stable, ConstantInt::get(M.getContext(), Lower));
+  Value *Address = B.CreateInBoundsGEP(TableType, Table, {B.getInt64(0), Index});
   B.CreateRet(B.CreateIntCast(B.CreateLoad(Storage, Address), ReturnType, Signed));
   Entry.setSuccessor(Accepted, Lookup);
   Start->removePredecessor(Entry.getParent());
@@ -175,13 +196,13 @@ static unsigned elisacoreFoldConstantIntegerPaths(Module &M) {
     auto *Entry = dyn_cast<CondBrInst>(F.getEntryBlock().getTerminator());
     if (!Entry || Entry->getSuccessor(0) == Entry->getSuccessor(1)) continue;
     auto *Test = dyn_cast<ICmpInst>(Entry->getCondition());
-    auto *Input = Test ? dyn_cast<Argument>(Test->getOperand(0)) : nullptr;
     auto *Bound = Test ? dyn_cast<ConstantInt>(Test->getOperand(1)) : nullptr;
-    if (!Input || !Bound) continue;
+    if (!Bound) continue;
     if (!Test->isEquality()) {
-      Changed += foldSmallIntegerDomain(*Entry, *Test, *Input, *Bound, Budget);
+      Changed += foldSmallIntegerDomain(*Entry, *Test, *Bound, Budget);
       continue;
     }
+    if (!isa<Argument>(Test->getOperand(0))) continue;
 
     for (unsigned Edge : {0u, 1u}) {
       BasicBlock *Start = Entry->getSuccessor(Edge);
