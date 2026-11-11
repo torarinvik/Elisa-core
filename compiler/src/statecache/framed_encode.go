@@ -16,6 +16,10 @@ const parallelFramedEncodeMin = 4096
 // one buffer.
 const framedEncodeChunk = 256
 
+// Workers give completed chunks their own portion of a slab so joining the
+// chunks requires only the final copy into the checkpoint.
+const maxFramedEncodeSlab = 256 << 10
+
 // stringInterner assigns framed dictionary IDs concurrently. IDs stay dense and
 // the table is ordered by ID, which is all the decoder requires.
 type stringInterner struct {
@@ -58,17 +62,23 @@ func (e *encoder) writeFramedBodies(framing int) error {
 	var errOnce sync.Once
 	var wg sync.WaitGroup
 	workers := min(8, runtime.GOMAXPROCS(0))
+	slabSize := min(maxFramedEncodeSlab, count/workers*8)
 	for w := 0; w < workers; w++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			worker := &encoder{registry: e.registry, objects: e.objects, pointerObjects: e.pointerObjects, framed: true, interner: interner}
+			var remaining []byte
+			var previousSize int
 			for !failed.Load() {
 				k := int(next.Add(1)) - 1
 				if k >= chunks {
 					return
 				}
-				worker.data = worker.data[:0]
+				if cap(remaining) < min(slabSize, max(1, previousSize)) {
+					remaining = make([]byte, 0, slabSize)
+				}
+				worker.data = remaining
 				for i := k * framedEncodeChunk; i < min((k+1)*framedEncodeChunk, count); i++ {
 					before := len(worker.data)
 					node := e.nodes.at(i)
@@ -81,7 +91,11 @@ func (e *encoder) writeFramedBodies(framing int) error {
 					}
 					binary.LittleEndian.PutUint64(bodySizes[8*i:], uint64(len(worker.data)-before))
 				}
-				buffers[k] = append([]byte(nil), worker.data...)
+				previousSize = len(worker.data)
+				buffers[k] = worker.data[:previousSize:previousSize]
+				// The published prefix stays immutable even if the next
+				// chunk appends into the tail of this same allocation.
+				remaining = worker.data[previousSize:]
 			}
 		}()
 	}
