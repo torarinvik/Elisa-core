@@ -267,18 +267,38 @@ func (a *Analyzer) smtCheckSlicedOnce(solver smt.Solver, query, goalAssert strin
 		next = sliced
 	}
 	weaker, weakenOK := smtWithoutQuantifiedHypothesesCommands(query, goalAssert, commands)
-	if prefetcher, canPrefetch := solver.(smt.Prefetcher); canPrefetch && weakenOK {
-		if pending := prefetcher.StartPrefetch(next, vars, checkBudget, a.smtLogLabelText("query", goalAssert, query)); pending != nil {
+	// Related quantified callee clauses can overwhelm an otherwise simple
+	// arithmetic proof. Try a bounded weakening first, accepting UNSAT only.
+	if weakenOK {
+		prefetcher, canPrefetch := solver.(smt.Prefetcher)
+		var prefetch *smt.Prefetch
+		weakening.query = weaker
+		a.smtSetLogLabelForQuery(solver, "quantifier-weakening", goalAssert, weaker)
+		budget := int64(smtDeadPathBudget)
+		if a.smtEscalation > 0 {
+			// A reported obligation: its cheap weakening also gets the larger budget.
+			budget *= smtEscalationFactor
+		}
+		res, model := a.smtCheckTransformedVerdict(weaker, true, func() (smt.Result, map[string]string) {
+			// Cache and shared-flight hits never reach this callback. Starting
+			// speculation here avoids solving a full query already proven by
+			// the cached weakening, while overlapping both checks on a miss.
+			if canPrefetch {
+				prefetch = prefetcher.StartPrefetch(next, vars, checkBudget, a.smtLogLabelText("query", goalAssert, query))
+			}
+			return budgeted.CheckBudgetValues(weaker, vars, budget)
+		})
+		if prefetch != nil {
 			defer func() {
-				if pending != nil {
-					prefetcher.DiscardPrefetch(pending)
+				if prefetch != nil {
+					prefetcher.DiscardPrefetch(prefetch)
 				}
 			}()
 			direct := check
 			check = func(q string) (smt.Result, map[string]string) {
-				if pending != nil && q == next {
-					taken := pending
-					pending = nil
+				if prefetch != nil && q == next {
+					taken := prefetch
+					prefetch = nil
 					if res, model, ok := prefetcher.TakePrefetch(taken, q, vars, checkBudget); ok {
 						return res, model
 					}
@@ -286,33 +306,17 @@ func (a *Analyzer) smtCheckSlicedOnce(solver smt.Solver, query, goalAssert strin
 				return direct(q)
 			}
 		}
-	}
-	// Related quantified callee clauses can overwhelm an otherwise simple
-	// arithmetic proof. Try a bounded weakening first, accepting UNSAT only.
-	if canBudget {
-		if weakenOK {
-			weakening.query = weaker
-			a.smtSetLogLabelForQuery(solver, "quantifier-weakening", goalAssert, weaker)
-			budget := int64(smtDeadPathBudget)
-			if a.smtEscalation > 0 {
-				// A reported obligation: its cheap weakening also gets the larger budget.
-				budget *= smtEscalationFactor
-			}
-			res, model := a.smtCheckTransformedVerdict(weaker, true, func() (smt.Result, map[string]string) {
-				return budgeted.CheckBudgetValues(weaker, vars, budget)
-			})
-			if res == smt.Unsat {
-				return res, model
-			}
-			// A definite SAT answer for these same weakened assertions is
-			// conclusive even if the full query later returns unknown.
-			if res == smt.Sat {
-				weakening.sat = true
-			}
-			a.smtSetLogLabelForQuery(solver, "query", goalAssert, query)
+		if res == smt.Unsat {
+			return res, model
 		}
+		// A definite SAT answer for these same weakened assertions is
+		// conclusive even if the full query later returns unknown.
+		if res == smt.Sat {
+			weakening.sat = true
+		}
+		a.smtSetLogLabelForQuery(solver, "query", goalAssert, query)
 	}
-	if !ok || !canBudget {
+	if !ok {
 		return check(query)
 	}
 	res, model := a.smtCheckTransformedProof(sliced, func() (smt.Result, map[string]string) { return check(sliced) })

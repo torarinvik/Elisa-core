@@ -25,34 +25,59 @@ func (s *transformedCountingSolver) CheckBudget(q string, budget int64) smt.Resu
 	return r
 }
 
+type transformedPrefetchCountingSolver struct {
+	transformedCountingSolver
+	starts int
+}
+
+func (s *transformedPrefetchCountingSolver) StartPrefetch(string, []string, int64, string) *smt.Prefetch {
+	s.starts++
+	return nil
+}
+
+func (s *transformedPrefetchCountingSolver) TakePrefetch(*smt.Prefetch, string, []string, int64) (smt.Result, map[string]string, bool) {
+	panic("no prefetch was started")
+}
+
+func (s *transformedPrefetchCountingSolver) DiscardPrefetch(*smt.Prefetch) {
+	panic("no prefetch was started")
+}
+
 func TestSMTTransformedProofSurvivesNewSolverAndChangedOuterQuery(t *testing.T) {
-	for _, goal := range []string{"(assert (not (>= x 0)))", "(assert (not (forall ((j Int)) (= (+ x j) (+ 3 j)))))"} {
+	for _, test := range []struct {
+		goal       string
+		prefetches int
+	}{
+		{goal: "(assert (not (>= x 0)))", prefetches: 1},
+		{goal: "(assert (not (forall ((j Int)) (= (+ x j) (+ 3 j)))))"},
+	} {
+		goal := test.goal
 		t.Run(goal, func(t *testing.T) {
 			cache := &smtProofCache{directory: t.TempDir(), identity: "transformed-test"}
 			query := "(declare-const x Int)\n(declare-fun p (Int) Bool)\n(assert (= x 3))\n(assert (forall ((i Int)) (p (+ i 0))))\n" + goal + "\n"
-			first := &transformedCountingSolver{Solver: openCOISolver(t, 500000)}
+			first := &transformedPrefetchCountingSolver{transformedCountingSolver: transformedCountingSolver{Solver: openCOISolver(t, 500000)}}
 			a := &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
 				smtProofCache: cache,
 			}}
 			if result, _ := a.smtCheckSliced(first, query, goal, nil); result != smt.Unsat {
 				t.Fatalf("first proof: %v", result)
 			}
-			if first.checks == 0 {
-				t.Fatal("first proof did not run a solver")
+			if first.checks == 0 || first.starts != test.prefetches {
+				t.Fatalf("unexpected work for uncached proof: checks=%d prefetches=%d", first.checks, first.starts)
 			}
 			changed := strings.Replace(query, "(+ i 0)", "(+ i 1)", 1)
 			if cache.contains(changed) {
 				t.Fatal("outer query should not have been published")
 			}
-			second := &transformedCountingSolver{Solver: openCOISolver(t, 500000)}
+			second := &transformedPrefetchCountingSolver{transformedCountingSolver: transformedCountingSolver{Solver: openCOISolver(t, 500000)}}
 			b := &Analyzer{analyzerProofSolverState: analyzerProofSolverState{
 				smtProofCache: &smtProofCache{directory: cache.directory, identity: cache.identity},
 			}}
 			if result, _ := b.smtCheckSliced(second, changed, goal, nil); result != smt.Unsat {
 				t.Fatalf("reused proof: %v", result)
 			}
-			if second.checks != 0 || b.smtStats.PersistentCacheHits != 1 {
-				t.Fatalf("transformed proof missed: checks=%d stats=%+v", second.checks, b.smtStats)
+			if second.checks != 0 || second.starts != 0 || b.smtStats.PersistentCacheHits != 1 {
+				t.Fatalf("cached weakening started solver work: checks=%d prefetches=%d stats=%+v", second.checks, second.starts, b.smtStats)
 			}
 		})
 	}
