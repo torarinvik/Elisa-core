@@ -382,7 +382,17 @@ extern "C" unsigned elisacoreUnrollLaggedRecurrences(LLVMModuleRef Ref) {
 
 #include "llvm_shift_parity.cpp"
 #include "llvm_shift_bit_reverse.cpp"
-#include "llvm_power_position.cpp"
+extern "C" bool elisacoreFoldPowerPositionInFunction(LLVMValueRef);
+
+static unsigned elisacoreFoldPowerPosition(Module &M) {
+  if (!M.getTargetTriple().isAArch64()) return 0;
+  unsigned Changed = 0;
+  for (Function &F : M) {
+    if (!BDU_SkipFunction(F, M) && F.size() <= 128 &&
+        elisacoreFoldPowerPositionInFunction(wrap(&F))) ++Changed;
+  }
+  return Changed;
+}
 #include "llvm_range_and.cpp"
 #include "llvm_scalar_loop_idioms.cpp"
 #include "llvm_shift_xor.cpp"

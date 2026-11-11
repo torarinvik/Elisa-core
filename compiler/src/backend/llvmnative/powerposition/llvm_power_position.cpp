@@ -1,3 +1,14 @@
+#include <llvm-c/Core.h>
+#include <llvm/Config/llvm-config.h>
+
+#if LLVM_VERSION_MAJOR >= 23
+#include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/Module.h>
+#include <llvm/Transforms/Utils/BasicBlockUtils.h>
+#include <llvm/Support/CBindingWrapping.h>
+
+using namespace llvm;
+
 // Recover the exponent of the greatest power of two not exceeding a positive
 // input. Recognize both the doubling loop and the fully unrolled search.
 namespace {
@@ -213,17 +224,12 @@ static bool foldPowerPositionChain(BasicBlock &Entry) {
 }
 } // namespace
 
-static unsigned elisacoreFoldPowerPosition(Module &M) {
-  if (!M.getTargetTriple().isAArch64()) return 0;
-  unsigned Changed = 0;
-  for (Function &F : M) {
-    if (BDU_SkipFunction(F, M) || F.size() > 128) continue;
-    for (BasicBlock &B : F) {
-      if (!foldHighestPowerOfTwoLoop(B) && !foldPowerPositionLoop(B) &&
-          !foldPowerPositionChain(B)) continue;
-      ++Changed;
-      break;
-    }
+extern "C" bool elisacoreFoldPowerPositionInFunction(LLVMValueRef Ref) {
+  auto &F = *cast<Function>(unwrap(Ref));
+  for (BasicBlock &B : F) {
+    if (foldHighestPowerOfTwoLoop(B) || foldPowerPositionLoop(B) ||
+        foldPowerPositionChain(B)) return true;
   }
-  return Changed;
+  return false;
 }
+#endif

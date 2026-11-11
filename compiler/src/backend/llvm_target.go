@@ -91,6 +91,8 @@ import "C"
 
 import (
 	"elisacore/src/backend/llvmnative"
+	// Link the power-search matcher used by the bounded division pass.
+	_ "elisacore/src/backend/llvmnative/powerposition"
 	"elisacore/src/semantic"
 	"fmt"
 	"os"
