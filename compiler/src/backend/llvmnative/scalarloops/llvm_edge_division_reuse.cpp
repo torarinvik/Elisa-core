@@ -247,6 +247,75 @@ static bool carryFactorQuotient(BasicBlock &Loop) {
   return true;
 }
 
+// The latch has already divided by the next cursor. Reuse its unsigned
+// quotient for the signed division when induction proves a positive cursor
+// and the entry guard proves a stable nonnegative dividend.
+static bool reuseUnsignedInductionQuotient(BasicBlock &Header) {
+  if (Header.isEHPad() || Header.hasAddressTaken()) return false;
+  auto *Div = dyn_cast<BinaryOperator>(&*Header.getFirstNonPHIIt());
+  if (!Div || Div->getOpcode() != Instruction::SDiv || Div->isExact() ||
+      !Div->getType()->isIntegerTy(64) || Div->hasMetadataOtherThanDebugLoc())
+    return false;
+  auto *Cursor = dyn_cast<PHINode>(Div->getOperand(1));
+  Value *Dividend = Div->getOperand(0);
+  if (!Cursor || Cursor->getParent() != &Header || Cursor->getNumIncomingValues() != 2 ||
+      !isa<FreezeInst>(Dividend))
+    return false;
+
+  unsigned Initial = 0;
+  auto *Start = dyn_cast<ConstantInt>(Cursor->getIncomingValue(Initial));
+  if (!Start) Start = dyn_cast<ConstantInt>(Cursor->getIncomingValue(++Initial));
+  if (!Start || Start->isNegative() || Start->isOne() || !Start->getValue().isPowerOf2())
+    return false;
+  BasicBlock *Entry = Cursor->getIncomingBlock(Initial);
+  BasicBlock *Latch = Cursor->getIncomingBlock(1 - Initial);
+  if (Entry == Latch || Entry == &Header || Latch == &Header) return false;
+  auto *EntryBranch = dyn_cast<CondBrInst>(Entry->getTerminator());
+  auto *Guard = EntryBranch ? dyn_cast<ICmpInst>(EntryBranch->getCondition()) : nullptr;
+  auto *Bound = Guard ? dyn_cast<ConstantInt>(Guard->getOperand(1)) : nullptr;
+  if (!Guard || !Guard->hasSameSign() || Guard->getOperand(0) != Dividend ||
+      !Bound || Bound->isNegative())
+    return false;
+
+  auto *Next = dyn_cast<BinaryOperator>(Cursor->getIncomingValue(1 - Initial));
+  auto *Step = Next ? dyn_cast<ConstantInt>(Next->getOperand(1)) : nullptr;
+  if (!Next || Next->getOpcode() != Instruction::Add || Next->getOperand(0) != Cursor ||
+      !Step || !Step->isOne())
+    return false;
+  auto *Back = dyn_cast<CondBrInst>(Latch->getTerminator());
+  auto *Test = Back ? dyn_cast<ICmpInst>(Back->getCondition()) : nullptr;
+  if (!Test) return false;
+  bool ContinueTrue = Back->getSuccessor(0) == &Header;
+  if (ContinueTrue == (Back->getSuccessor(1) == &Header)) return false;
+
+  auto Pred = ContinueTrue ? Test->getPredicate() : Test->getInversePredicate();
+  Value *Other = Test->getOperand(1);
+  if (Test->getOperand(0) != Next) {
+    if (Other != Next) return false;
+    Other = Test->getOperand(0);
+    Pred = ICmpInst::getSwappedPredicate(Pred);
+  }
+  auto *Quotient = dyn_cast<BinaryOperator>(Other);
+  if ((Pred != ICmpInst::ICMP_SLE && Pred != ICmpInst::ICMP_SLT &&
+       Pred != ICmpInst::ICMP_ULE && Pred != ICmpInst::ICMP_ULT) ||
+      !Quotient || Quotient->getOpcode() != Instruction::UDiv || Quotient->isExact() ||
+      Quotient->getOperand(0) != Dividend || Quotient->getOperand(1) != Next)
+    return false;
+
+  // The seed is in [2, INT64_MAX). Thus the increment stays positive.
+  // A taken backedge requires Next <= Dividend / Next <= INT64_MAX / 2,
+  // restoring the bound on the next iteration.
+  IRBuilder<> B(Entry->getTerminator());
+  Value *First = B.CreateLShr(Dividend, Start->getValue().exactLogBase2(),
+                             "initial.induction.quotient");
+  auto *Carried = PHINode::Create(Div->getType(), 2, "induction.quotient", Div->getIterator());
+  Carried->addIncoming(First, Entry);
+  Carried->addIncoming(Quotient, Latch);
+  Div->replaceAllUsesWith(Carried);
+  Div->eraseFromParent();
+  return true;
+}
+
 static bool reuseEdgeDivision(BasicBlock &Join) {
   auto *Div = dyn_cast<BinaryOperator>(&*Join.getFirstNonPHIIt());
   if (!Div || (Div->getOpcode() != Instruction::SDiv &&
@@ -321,7 +390,9 @@ static bool reuseEdgeDivision(BasicBlock &Join) {
 extern "C" bool elisacoreReuseEdgeDivisionsInFunction(LLVMValueRef Ref) {
   auto &F = *cast<Function>(unwrap(Ref));
   for (BasicBlock &B : F) {
-    if (skipRedundantFactorDivision(B) || carryFactorQuotient(B) || reuseJoinedQuotient(B) || reuseEdgeDivision(B)) return true;
+    if (skipRedundantFactorDivision(B) || carryFactorQuotient(B) ||
+        reuseUnsignedInductionQuotient(B) || reuseJoinedQuotient(B) ||
+        reuseEdgeDivision(B)) return true;
   }
   return false;
 }
