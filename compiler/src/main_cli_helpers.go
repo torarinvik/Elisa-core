@@ -139,11 +139,11 @@ func outputPathForEmit(inputPath string, explicit string, ext string) string {
 	return base + ext
 }
 func readSourceWithIncludes(filename string, seen map[string]bool) ([]byte, error) {
-	var out bytes.Buffer
-	if err := writeSourceWithIncludesActive(&out, filename, seen, map[string]bool{}); err != nil {
+	var out sourceSplice
+	if err := writeSourceWithIncludesLabels(&out, filename, seen, map[string]bool{}, nil, nil, sourceLabelResolver{}); err != nil {
 		return nil, err
 	}
-	return out.Bytes(), nil
+	return out.bytes(), nil
 }
 func writeSourceWithIncludes(out *bytes.Buffer, filename string, seen map[string]bool) error {
 	return writeSourceWithIncludesActive(out, filename, seen, map[string]bool{})
@@ -153,13 +153,6 @@ func writeSourceWithIncludesActive(out *bytes.Buffer, filename string, included 
 	// A nil resolver option retains direct relative/absolute path resolution and
 	// filesystem errors, while sharing the project's streaming splice logic.
 	return writeSourceWithIncludesPrefixed(out, filename, included, active, nil, nil)
-}
-
-// writeLineDirective emits a `#line <num> <path>` source-attribution marker at
-// column 0. The lexer consumes these to retarget token positions to the real
-// file/line after `include` flattens the tree into one buffer.
-func writeLineDirective(out *bytes.Buffer, line int, file string) {
-	fmt.Fprintf(out, "#line %d %s\n", line, file)
 }
 
 func leadingWhitespaceBytes(line []byte) []byte {

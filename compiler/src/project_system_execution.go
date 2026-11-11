@@ -102,11 +102,11 @@ func buildProjectLoadedProgram(target *resolvedProjectTarget) (*loadedProgram, e
 	return &loadedProgram{filename: target.entryPath, source: combined.Bytes(), easm: modules}, nil
 }
 func readSourceWithIncludesWithOptions(filename string, seen map[string]bool, options sourceExpandOptions) ([]byte, error) {
-	var out bytes.Buffer
-	if err := writeSourceWithIncludesWithOptionsActive(&out, filename, seen, map[string]bool{}, options); err != nil {
+	var out sourceSplice
+	if err := writeSourceWithIncludesLabels(&out, filename, seen, map[string]bool{}, &options, nil, sourceLabelResolver{}); err != nil {
 		return nil, err
 	}
-	return out.Bytes(), nil
+	return out.bytes(), nil
 }
 func writeSourceWithIncludesWithOptions(out *bytes.Buffer, filename string, seen map[string]bool, options sourceExpandOptions) error {
 	return writeSourceWithIncludesWithOptionsActive(out, filename, seen, map[string]bool{}, options)
@@ -121,10 +121,10 @@ func writeSourceWithIncludesWithOptionsActive(out *bytes.Buffer, filename string
 // to non-#line lines, without materializing and copying a temporary expanded buffer at
 // every include depth.
 func writeSourceWithIncludesPrefixed(out *bytes.Buffer, filename string, included map[string]bool, active map[string]bool, options *sourceExpandOptions, prefixes [][]byte) error {
-	return writeSourceWithIncludesLabels(out, filename, included, active, options, prefixes, sourceLabelResolver{})
+	return writeSourceWithIncludesLabels(&sourceSplice{buffer: out}, filename, included, active, options, prefixes, sourceLabelResolver{})
 }
 
-func writeSourceWithIncludesLabels(out *bytes.Buffer, filename string, included map[string]bool, active map[string]bool, options *sourceExpandOptions, prefixes [][]byte, labels sourceLabelResolver) error {
+func writeSourceWithIncludesLabels(out *sourceSplice, filename string, included map[string]bool, active map[string]bool, options *sourceExpandOptions, prefixes [][]byte, labels sourceLabelResolver) error {
 	abs, err := filepath.Abs(filename)
 	if err != nil {
 		return err
@@ -144,7 +144,10 @@ func writeSourceWithIncludesLabels(out *bytes.Buffer, filename string, included 
 	}
 	included[abs] = true
 	sourceLabel := labels.resolve(abs)
-	writeLineDirective(out, 1, sourceLabel)
+	out.lineDirective(1, sourceLabel)
+	// An unindented splice can write consecutive ordinary lines at once.
+	// Flush the run before an include or a rewritten source-map marker.
+	written := 0
 	start := 0
 	curLine := 1
 	for start <= len(raw) {
@@ -156,7 +159,15 @@ func writeSourceWithIncludesLabels(out *bytes.Buffer, filename string, included 
 			end = len(raw)
 		}
 		line := raw[start:end]
+		next := end
+		if hasNewline {
+			next++
+		}
 		if includePath, ok := parseIncludeDirectiveBytes(bytes.TrimSpace(line)); ok {
+			if len(prefixes) == 0 {
+				out.write(raw[written:start])
+				written = next
+			}
 			resolved := includePath
 			if options == nil {
 				if !filepath.IsAbs(resolved) {
@@ -169,51 +180,61 @@ func writeSourceWithIncludesLabels(out *bytes.Buffer, filename string, included 
 				}
 			}
 			indent := leadingWhitespaceBytes(line)
-			outLenBefore := out.Len()
-			childPrefixes := append(prefixes, indent)
+			outLenBefore := out.len()
+			childPrefixes := prefixes
+			if len(indent) != 0 {
+				out.useBuffer()
+				childPrefixes = append(prefixes, indent)
+			}
 			if err := writeSourceWithIncludesLabels(out, resolved, included, active, options, childPrefixes, labels); err != nil {
 				return err
 			}
-			if out.Len() == outLenBefore || out.Bytes()[out.Len()-1] != '\n' {
-				out.WriteByte('\n')
+			if out.len() == outLenBefore || !out.endsInNewline() {
+				out.write(sourceSpliceNewline)
 			}
 			// Resume attribution to the parent file after the spliced include.
-			writeLineDirective(out, curLine+1, sourceLabel)
+			out.lineDirective(curLine+1, sourceLabel)
 		} else {
 			// #line is an internal source-map directive. Keep source-authored
 			// spellings as ordinary comments so they cannot forge declaration
 			// provenance for trusted-runtime compiler proofs.
 			trimmed := bytes.TrimLeft(line, " \t")
 			if bytes.HasPrefix(trimmed, []byte("#line ")) || bytes.HasPrefix(trimmed, []byte("#line\t")) {
-				if len(line) > 0 {
-					for _, prefix := range prefixes {
-						out.Write(prefix)
-					}
+				if len(prefixes) == 0 {
+					out.write(raw[written:start])
+					written = next
+				}
+				for _, prefix := range prefixes {
+					out.write(prefix)
 				}
 				indent := len(line) - len(trimmed)
-				out.Write(line[:indent])
-				out.WriteString("# line")
-				out.Write(trimmed[len("#line"):])
-			} else {
-				if len(line) > 0 && !bytes.HasPrefix(line, []byte("#line ")) {
+				out.write(line[:indent])
+				out.write([]byte("# line"))
+				out.write(trimmed[len("#line"):])
+				if hasNewline {
+					out.write(sourceSpliceNewline)
+				}
+			} else if len(prefixes) != 0 {
+				if len(line) > 0 {
 					for _, prefix := range prefixes {
-						out.Write(prefix)
+						out.write(prefix)
 					}
 				}
-				out.Write(line)
-			}
-			if hasNewline {
-				out.WriteByte('\n')
+				out.write(raw[start:next])
 			}
 		}
 		if !hasNewline {
 			break
 		}
-		start = end + 1
+		start = next
 		curLine++
+	}
+	if len(prefixes) == 0 {
+		out.write(raw[written:])
 	}
 	return nil
 }
+
 func resolveExpandedIncludePath(currentDir string, includePath string, includeDirs []string) (string, error) {
 	// An absolute include path is used verbatim. filepath.Join(currentDir,
 	// includePath) does NOT honor an absolute second arg — it concatenates — so
