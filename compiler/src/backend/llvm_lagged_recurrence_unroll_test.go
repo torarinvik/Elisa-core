@@ -35,6 +35,24 @@ func TestScaledLaggedRecurrencePeelsAndUnrolls(t *testing.T) {
 	testLaggedRecurrenceUnroll(t, boundedLaggedRecurrenceIR, true)
 }
 
+func TestPlainLaggedRecurrencePeelsAndUnrolls(t *testing.T) {
+	source := strings.Replace(boundedLaggedRecurrenceIR, "  %scale = shl i64 %current, 1\n", "", 1)
+	source = strings.Replace(source, "add i64 %scale, %previous", "add i64 %current, %previous", 1)
+	t.Run("branch", func(t *testing.T) {
+		testLaggedRecurrenceUnroll(t, source, true)
+	})
+	t.Run("switch", func(t *testing.T) {
+		source := strings.Replace(source, "  %short = icmp ult i64 %limit, 2\n  br i1 %short, label %exit, label %loop", `  switch i64 %limit, label %loop [
+    i64 0, label %short
+    i64 1, label %short
+  ]
+short:
+  br label %exit`, 1)
+		source = strings.Replace(source, "[ %limit, %valid ]", "[ %limit, %short ]", 1)
+		testLaggedRecurrenceUnroll(t, source, true)
+	})
+}
+
 func TestAffineLaggedRecurrencePreservesOverflowContract(t *testing.T) {
 	source := strings.ReplaceAll(boundedLaggedRecurrenceIR, "shl i64 %current, 1", "add i64 %current, 1")
 	t.Run("wrapping", func(t *testing.T) {
@@ -70,7 +88,8 @@ func testLaggedRecurrenceUnroll(t *testing.T, source string, wantUnroll bool) st
 		t.Fatal(err)
 	}
 	ir := g.printModule()
-	if got := strings.Contains(ir, "icmp eq i64 %limit, 2") && strings.Contains(ir, "add i64 %niter, 4"); got != wantUnroll {
+	peeled := strings.Contains(ir, "icmp eq i64 %limit, 2") || strings.Contains(ir, "i64 2, label")
+	if got := peeled && strings.Contains(ir, "add i64 %niter, 4"); got != wantUnroll {
 		t.Fatalf("peeled four-step body=%t, want %t:\n%s", got, wantUnroll, ir)
 	}
 	return ir

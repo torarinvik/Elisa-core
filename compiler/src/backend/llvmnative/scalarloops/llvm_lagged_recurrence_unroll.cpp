@@ -2,11 +2,13 @@
 #include <llvm/Config/llvm-config.h>
 
 #if LLVM_VERSION_MAJOR >= 23
+#include <llvm/IR/ConstantRange.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Analysis/AssumptionCache.h>
 #include <llvm/Analysis/LoopInfo.h>
+#include <llvm/Analysis/LazyValueInfo.h>
 #include <llvm/Analysis/OptimizationRemarkEmitter.h>
 #include <llvm/Analysis/ScalarEvolution.h>
 #include <llvm/Analysis/TargetTransformInfo.h>
@@ -75,7 +77,7 @@ static bool rebaseLaggedRecurrence(const AffineLaggedRecurrence &R, Loop &L) {
 static unsigned laggedRecurrenceUnrollFactor(BasicBlock &B, AffineLaggedRecurrence &Affine) {
   auto *Branch = dyn_cast<CondBrInst>(B.getTerminator());
   auto *Cmp = Branch ? dyn_cast<ICmpInst>(Branch->getCondition()) : nullptr;
-  if (!Cmp || !Cmp->isEquality() || B.size() != 8 ||
+  if (!Cmp || !Cmp->isEquality() || (B.size() != 7 && B.size() != 8) ||
       Branch->getSuccessor(Cmp->getPredicate() == ICmpInst::ICMP_EQ ? 1 : 0) != &B ||
       Branch->getSuccessor(Cmp->getPredicate() == ICmpInst::ICMP_EQ ? 0 : 1) == &B)
     return 0;
@@ -145,14 +147,35 @@ static unsigned laggedRecurrenceUnrollFactor(BasicBlock &B, AffineLaggedRecurren
                    Previous->getIncomingValueForBlock(&B) == Current &&
                    Current->getIncomingValueForBlock(&B) == Sum ? 4 : 0;
   }
-  if (PhiCount != 4) return 0;
   PHINode *A = Shift(Sum->getOperand(0)), *Next = Shift(Sum->getOperand(1));
   if (!A || !Next || A == Next) return 0;
   if (A->getIncomingValueForBlock(&B) != Next) std::swap(A, Next);
   if (A->getIncomingValueForBlock(&B) != Next) return 0;
+  if (PhiCount == 3)
+    return Next->getIncomingValueForBlock(&B) == Sum ? 4 : 0;
+  if (PhiCount != 4) return 0;
   auto *Newest = Shift(Next->getIncomingValueForBlock(&B));
   return Newest && Newest != A && Newest != Next &&
          Newest->getIncomingValueForBlock(&B) == Sum ? 3 : 0;
+}
+
+// An entry switch may exclude short inputs without exposing the bound
+// to ScalarEvolution. The matcher already proves a unit-step counter.
+static unsigned laggedRecurrenceSwitchTripBound(Loop &L, LazyValueInfo &LVI) {
+  BasicBlock *Header = L.getHeader(), *Entry = L.getLoopPredecessor();
+  auto *Dispatch = Entry ? dyn_cast<SwitchInst>(Entry->getTerminator()) : nullptr;
+  if (!Dispatch || Dispatch->getDefaultDest() != Header) return 0;
+  auto *Cmp = cast<ICmpInst>(cast<CondBrInst>(Header->getTerminator())->getCondition());
+  auto *Counter = cast<PHINode>(Cmp->getOperand(0));
+  auto *Start = dyn_cast<ConstantInt>(Counter->getIncomingValueForBlock(Entry));
+  Value *Limit = Cmp->getOperand(1);
+  if (!Start || Limit != Dispatch->getCondition()) return 0;
+  ConstantRange Range = LVI.getConstantRangeOnEdge(Limit, Entry, Header, Cmp);
+  if (Range.isEmptySet() || Range.getUnsignedMin().ult(Start->getValue()) ||
+      Range.getUnsignedMax().isMaxValue())
+    return 0;
+  APInt Trips = Range.getUnsignedMax() - Start->getValue() + 1;
+  return Trips.getLimitedValue(257);
 }
 
 extern "C" unsigned elisacoreUnrollLaggedRecurrences(LLVMModuleRef Ref) {
@@ -183,6 +206,8 @@ extern "C" unsigned elisacoreUnrollLaggedRecurrences(LLVMModuleRef Ref) {
           L->getNumBlocks() != 1) break;
       auto &SE = FAM.getResult<ScalarEvolutionAnalysis>(F);
       unsigned MaxTrips = SE.getSmallConstantMaxTripCount(L);
+      if (!MaxTrips && Factor == 4)
+        MaxTrips = laggedRecurrenceSwitchTripBound(*L, FAM.getResult<LazyValueAnalysis>(F));
       if (MaxTrips < 16 || MaxTrips > 256) break;
       auto &DT = FAM.getResult<DominatorTreeAnalysis>(F);
       auto &AC = FAM.getResult<AssumptionAnalysis>(F);
