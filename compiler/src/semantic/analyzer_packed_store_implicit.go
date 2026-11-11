@@ -114,31 +114,7 @@ func (a *Analyzer) computeTransitiveStoreNeeds(funcs []*ast.FuncDecl, regionBack
 			}
 		}
 	}
-	for changed := true; changed; {
-		changed = false
-		for _, ft := range order {
-			for g := range callees[ft] {
-				for name, et := range needs[g] {
-					if needs[ft][name] == nil {
-						if needs[ft] == nil {
-							needs[ft] = make(map[string]*EnumType)
-						}
-						needs[ft][name] = et
-						changed = true
-					}
-				}
-				for name, witness := range builds[g] {
-					if _, ok := builds[ft][name]; !ok {
-						if builds[ft] == nil {
-							builds[ft] = map[string]string{}
-						}
-						builds[ft][name] = witness
-						changed = true
-					}
-				}
-			}
-		}
-	}
+	propagatePackedStoreNeeds(order, callees, needs, builds)
 	a.packedStoreBuilders = builds
 	return needs, signatureNeeds
 }
