@@ -53,6 +53,18 @@ func clearAnalysisDiskObserverEnvironment(t *testing.T) {
 	}
 }
 
+func TestLexerCapacityReportPreservesCompilerCacheIdentity(t *testing.T) {
+	clearAnalysisDiskObserverEnvironment(t)
+	before := compilerCacheEnvKey()
+	t.Setenv("ELISACORE_LEXER_CAPACITY_REPORT", "1")
+	if !buildCacheEnvironmentEqual(before, compilerCacheEnvKey()) {
+		t.Fatal("lexer capacity reporting changed compiler cache identity")
+	}
+	if !buildCacheRequestObserverEnabled() {
+		t.Fatal("object replay could suppress lexer capacity reporting")
+	}
+}
+
 func TestAnalysisDiskRequestObserverPredicate(t *testing.T) {
 	clearAnalysisDiskObserverEnvironment(t)
 	if analysisDiskRequestObserverEnabled() {
