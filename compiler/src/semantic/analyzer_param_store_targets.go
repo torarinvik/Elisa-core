@@ -24,37 +24,41 @@ import (
 // existing structural transfer rules; it does not establish alias completeness.
 func (a *Analyzer) computeParamStoreTargets(funcs []*ast.FuncDecl) map[*ast.FuncDecl][]map[int]bool {
 	out := make(map[*ast.FuncDecl][]map[int]bool, len(funcs))
-	idx := make(map[*ast.FuncDecl]map[string]int, len(funcs))
-	for _, fn := range funcs {
-		if fn == nil {
-			continue
-		}
-		p := a.readOnlyExpandedFuncDeclParams(fn)
-		ts := make([]map[int]bool, len(p))
-		for i := range ts {
-			ts[i] = map[int]bool{}
-		}
-		out[fn] = ts
-		m := map[string]int{}
-		for i := range p {
-			m[p[i].Name] = i
-		}
-		idx[fn] = m
+	type candidate struct {
+		fn    *ast.FuncDecl
+		names map[string]int
 	}
-	// Every emitted relationship passes markTarget's source-storage gate. If
-	// no expanded parameter can carry storage, no body syntax or callee summary
-	// can add an edge for this function. Derive eligibility from current types
-	// each analysis; never replay it across type changes.
-	active := make([]*ast.FuncDecl, 0, len(funcs))
+	var active []candidate
 	for _, fn := range funcs {
-		if fn == nil {
+		if fn == nil || out[fn] != nil {
 			continue
 		}
-		for i := range out[fn] {
-			if typeCarriesRegionStorage(a.paramStorageType(fn, i)) {
-				active = append(active, fn)
-				break
+		params := a.readOnlyExpandedFuncDeclParams(fn)
+		targets := make([]map[int]bool, len(params))
+		for i := range targets {
+			targets[i] = map[int]bool{}
+		}
+		out[fn] = targets
+		// Every emitted relationship passes markTarget's source-storage gate.
+		// Scalar-only signatures keep their empty summaries without building a
+		// parameter-name index or scheduling a body scan.
+		ft := a.funcTypeForRegionPoly(fn)
+		if ft == nil {
+			continue
+		}
+		for _, typ := range ft.Params[:min(len(ft.Params), len(params))] {
+			if !typeCarriesRegionStorage(typ) {
+				continue
 			}
+			if active == nil {
+				active = make([]candidate, 0, len(funcs))
+			}
+			names := make(map[string]int, len(params))
+			for index, param := range params {
+				names[param.Name] = index
+			}
+			active = append(active, candidate{fn: fn, names: names})
+			break
 		}
 	}
 	if len(active) == 0 {
@@ -63,18 +67,18 @@ func (a *Analyzer) computeParamStoreTargets(funcs []*ast.FuncDecl) map[*ast.Func
 	// Discover reverse edges during the initial transfer pass. Allocate pending
 	// work only when a changed callee has an already-observed caller; independent
 	// functions need neither a queue nor per-function scheduling metadata.
-	var dependents map[*ast.FuncDecl]map[*ast.FuncDecl]bool
-	var queued map[*ast.FuncDecl]bool
-	var queue []*ast.FuncDecl
+	var dependents map[*ast.FuncDecl]map[int]bool
+	var queued []bool
+	var queue []int
 	head, tail, pending := 0, 0, 0
 	enqueueCallers := func(fn *ast.FuncDecl) {
 		for caller := range dependents[fn] {
+			if queue == nil {
+				queue = make([]int, len(active))
+				queued = make([]bool, len(active))
+			}
 			if queued[caller] {
 				continue
-			}
-			if queue == nil {
-				queue = make([]*ast.FuncDecl, len(active))
-				queued = make(map[*ast.FuncDecl]bool)
 			}
 			queue[tail] = caller
 			tail = (tail + 1) % len(queue)
@@ -82,9 +86,9 @@ func (a *Analyzer) computeParamStoreTargets(funcs []*ast.FuncDecl) map[*ast.Func
 			queued[caller] = true
 		}
 	}
-	scan := func(fn *ast.FuncDecl, observe func(*ast.FuncDecl)) bool {
+	scan := func(entry candidate, observe func(*ast.FuncDecl)) bool {
 		changed := false
-		pidx := idx[fn]
+		fn, pidx := entry.fn, entry.names
 		// markTarget records that source param `srcName` is stored into target index `ti`
 		// (a sibling param index, or the sentinel storeTargetGlobal for program-lifetime storage).
 		markTarget := func(srcName string, ti int) {
@@ -120,27 +124,27 @@ func (a *Analyzer) computeParamStoreTargets(funcs []*ast.FuncDecl) map[*ast.Func
 		a.walkParamStores(fn.Body, pidx, out, addStore, markGlobal, observe)
 		return changed
 	}
-	for _, fn := range active {
+	for index, entry := range active {
 		observe := func(callee *ast.FuncDecl) {
 			if dependents == nil {
-				dependents = make(map[*ast.FuncDecl]map[*ast.FuncDecl]bool)
+				dependents = make(map[*ast.FuncDecl]map[int]bool)
 			}
 			if dependents[callee] == nil {
-				dependents[callee] = make(map[*ast.FuncDecl]bool)
+				dependents[callee] = make(map[int]bool)
 			}
-			dependents[callee][fn] = true
+			dependents[callee][index] = true
 		}
-		if scan(fn, observe) {
-			enqueueCallers(fn)
+		if scan(entry, observe) {
+			enqueueCallers(entry.fn)
 		}
 	}
 	for pending > 0 {
-		fn := queue[head]
+		index := queue[head]
 		head = (head + 1) % len(queue)
 		pending--
-		queued[fn] = false
-		if scan(fn, nil) {
-			enqueueCallers(fn)
+		queued[index] = false
+		if entry := active[index]; scan(entry, nil) {
+			enqueueCallers(entry.fn)
 		}
 	}
 	return out
