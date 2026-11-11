@@ -1,9 +1,10 @@
 package semantic
 
 import (
-	"elisacore/src/lexer"
 	"reflect"
 	"sync"
+
+	"elisacore/src/lexer"
 )
 
 var syntaxWalkFieldPlans sync.Map // reflect.Type -> immutable []int
@@ -21,14 +22,28 @@ func syntaxWalkFields(typ reflect.Type) []int {
 	fields := make([]int, 0, typ.NumField())
 	for i := 0; i < typ.NumField(); i++ {
 		field := typ.Field(i)
-		if field.Type == syntaxWalkPositionType {
-			continue
-		}
-		switch field.Type.Kind() {
-		case reflect.Pointer, reflect.Interface, reflect.Struct, reflect.Slice, reflect.Array:
+		if syntaxWalkMayReachNode(field.Type) {
 			fields = append(fields, i)
 		}
 	}
 	cached, _ := syntaxWalkFieldPlans.LoadOrStore(typ, fields)
 	return cached.([]int)
+}
+
+// Scalar-only composites such as call argument names have no syntax to visit.
+func syntaxWalkMayReachNode(typ reflect.Type) bool {
+	if typ.Kind() == reflect.Slice || typ.Kind() == reflect.Array {
+		typ = typ.Elem()
+		if typ.Kind() == reflect.Struct {
+			return typ != syntaxWalkPositionType
+		}
+	}
+	switch typ.Kind() {
+	case reflect.Pointer, reflect.Interface, reflect.Slice, reflect.Array:
+		return true
+	case reflect.Struct:
+		return typ != syntaxWalkPositionType && len(syntaxWalkFields(typ)) != 0
+	default:
+		return false
+	}
 }
