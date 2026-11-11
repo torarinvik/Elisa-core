@@ -16,17 +16,50 @@ type identity struct {
 	capacity int
 }
 
-// Pointer and map identities have no slice dimensions. Keep their keys compact
-// because they account for most objects in large AST/semantic snapshots.
+// Most addresses have one concrete type. Keep the common lookup keyed by
+// address, while preserving distinct identities for typed aliases.
 type pointerIdentity struct {
 	typ     reflect.Type
 	pointer uintptr
 }
+
+type pointerObject struct {
+	typ reflect.Type
+	id  uint64
+}
+
+type pointerObjectIndex struct {
+	byAddress map[uintptr]pointerObject
+	aliases   map[pointerIdentity]uint64
+}
+
+func (index *pointerObjectIndex) lookup(address uintptr, typ reflect.Type) uint64 {
+	object := index.byAddress[address]
+	if object.typ == typ {
+		return object.id
+	}
+	if object.id != 0 {
+		return index.aliases[pointerIdentity{typ, address}]
+	}
+	return 0
+}
+
+func (index *pointerObjectIndex) add(address uintptr, typ reflect.Type, id uint64) {
+	if index.byAddress[address].id == 0 {
+		index.byAddress[address] = pointerObject{typ, id}
+		return
+	}
+	if index.aliases == nil {
+		index.aliases = make(map[pointerIdentity]uint64)
+	}
+	index.aliases[pointerIdentity{typ, address}] = id
+}
+
 type encoder struct {
 	registry        *Registry
 	data            bytes.Buffer
 	objects         map[identity]uint64
-	pointerObjects  map[pointerIdentity]uint64
+	pointerObjects  pointerObjectIndex
 	depth           int
 	allocationCount int
 	allocations     []allocation
@@ -60,7 +93,7 @@ func (r *Registry) EncodeFramedWithCapacity(root any, capacity int) ([]byte, err
 }
 
 func (r *Registry) encode(root any, framed bool, capacity int) ([]byte, error) {
-	e := &encoder{registry: r, objects: map[identity]uint64{}, pointerObjects: map[pointerIdentity]uint64{}, scanning: true, strings: map[string]uint64{}, framed: framed}
+	e := &encoder{registry: r, objects: map[identity]uint64{}, pointerObjects: pointerObjectIndex{byAddress: map[uintptr]pointerObject{}}, scanning: true, strings: map[string]uint64{}, framed: framed}
 	v := reflect.ValueOf(root)
 	if !v.IsValid() || r.ids[v.Type()] == 0 {
 		return nil, fmt.Errorf("unregistered state root")
@@ -215,13 +248,14 @@ func (e *encoder) valueAtDepth(v reflect.Value) error {
 			return nil
 		}
 
-		key := objectIdentity(v)
-		pointerKey := pointerIdentity{typ: key.typ, pointer: key.pointer}
+		address := uintptr(v.UnsafePointer())
+		var key identity
 		var prior uint64
 		if v.Kind() == reflect.Slice {
+			key = identity{typ: t, pointer: address, length: v.Len(), capacity: v.Cap()}
 			prior = e.objects[key]
 		} else {
-			prior = e.pointerObjects[pointerKey]
+			prior = e.pointerObjects.lookup(address, t)
 		}
 		if prior != 0 {
 			e.uint(prior)
@@ -234,7 +268,7 @@ func (e *encoder) valueAtDepth(v reflect.Value) error {
 		if v.Kind() == reflect.Slice {
 			e.objects[key] = id
 		} else {
-			e.pointerObjects[pointerKey] = id
+			e.pointerObjects.add(address, t, id)
 		}
 		e.nodes.add(stateNode{value: v})
 		if allocationSize(v) != 0 {
@@ -323,19 +357,6 @@ func (e *encoder) valueAtDepth(v reflect.Value) error {
 	return nil
 }
 
-func objectIdentity(v reflect.Value) identity {
-	key := identity{typ: v.Type()}
-	if v.Kind() == reflect.Map {
-		key.pointer = uintptr(v.UnsafePointer())
-	} else {
-		key.pointer = v.Pointer()
-	}
-	if v.Kind() == reflect.Slice {
-		key.length = v.Len()
-		key.capacity = v.Cap()
-	}
-	return key
-}
 func (e *encoder) body(v reflect.Value) error {
 	switch v.Kind() {
 	case reflect.Pointer:
