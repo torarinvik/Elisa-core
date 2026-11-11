@@ -389,11 +389,14 @@ static bool reuseEdgeDivision(BasicBlock &Join) {
 
 extern "C" bool elisacoreReuseEdgeDivisionsInFunction(LLVMValueRef Ref) {
   auto &F = *cast<Function>(unwrap(Ref));
+  unsigned Changed = 0;
   for (BasicBlock &B : F) {
-    if (skipRedundantFactorDivision(B) || carryFactorQuotient(B) ||
-        reuseUnsignedInductionQuotient(B) || reuseJoinedQuotient(B) ||
-        reuseEdgeDivision(B)) return true;
+    if (!skipRedundantFactorDivision(B) && !carryFactorQuotient(B) &&
+        !reuseUnsignedInductionQuotient(B) && !reuseJoinedQuotient(B) &&
+        !reuseEdgeDivision(B)) continue;
+    // Inlining can leave multiple copies of the same quotient loop.
+    if (++Changed == 4) break;
   }
-  return false;
+  return Changed != 0;
 }
 #endif
