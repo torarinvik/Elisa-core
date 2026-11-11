@@ -121,6 +121,10 @@ func writeSourceWithIncludesWithOptionsActive(out *bytes.Buffer, filename string
 // to non-#line lines, without materializing and copying a temporary expanded buffer at
 // every include depth.
 func writeSourceWithIncludesPrefixed(out *bytes.Buffer, filename string, included map[string]bool, active map[string]bool, options *sourceExpandOptions, prefixes [][]byte) error {
+	return writeSourceWithIncludesLabels(out, filename, included, active, options, prefixes, sourceLabelResolver{})
+}
+
+func writeSourceWithIncludesLabels(out *bytes.Buffer, filename string, included map[string]bool, active map[string]bool, options *sourceExpandOptions, prefixes [][]byte, labels sourceLabelResolver) error {
 	abs, err := filepath.Abs(filename)
 	if err != nil {
 		return err
@@ -139,10 +143,7 @@ func writeSourceWithIncludesPrefixed(out *bytes.Buffer, filename string, include
 		return err
 	}
 	included[abs] = true
-	sourceLabel := abs
-	if canonical, err := filepath.EvalSymlinks(abs); err == nil {
-		sourceLabel = filepath.Clean(canonical)
-	}
+	sourceLabel := labels.resolve(abs)
 	writeLineDirective(out, 1, sourceLabel)
 	start := 0
 	curLine := 1
@@ -170,7 +171,7 @@ func writeSourceWithIncludesPrefixed(out *bytes.Buffer, filename string, include
 			indent := leadingWhitespaceBytes(line)
 			outLenBefore := out.Len()
 			childPrefixes := append(prefixes, indent)
-			if err := writeSourceWithIncludesPrefixed(out, resolved, included, active, options, childPrefixes); err != nil {
+			if err := writeSourceWithIncludesLabels(out, resolved, included, active, options, childPrefixes, labels); err != nil {
 				return err
 			}
 			if out.Len() == outLenBefore || out.Bytes()[out.Len()-1] != '\n' {
