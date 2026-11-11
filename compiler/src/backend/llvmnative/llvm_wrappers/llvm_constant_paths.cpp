@@ -100,8 +100,11 @@ static bool foldSmallIntegerDomain(CondBrInst &Entry, ICmpInst &Test,
                                    Argument &Input, ConstantInt &Bound,
                                    unsigned &Budget) {
   Function &F = *Entry.getFunction();
+  constexpr unsigned MaxDomain = 128;
+  constexpr unsigned MaxTableBytes = 768;
+  auto *ReturnType = dyn_cast<IntegerType>(F.getReturnType());
   if (F.arg_size() != 1 || !Input.getType()->isIntegerTy(64) ||
-      !F.getReturnType()->isIntegerTy(64) || Bound.getValue().ugt(64))
+      !ReturnType || ReturnType->getBitWidth() > 64 || Bound.getValue().ugt(MaxDomain))
     return false;
   unsigned Limit = Bound.getZExtValue();
   unsigned Accepted = 0;
@@ -112,10 +115,10 @@ static bool foldSmallIntegerDomain(CondBrInst &Entry, ICmpInst &Test,
   case ICmpInst::ICMP_UGE: Accepted = 1; break;
   default: return false;
   }
-  if (Limit < 8 || Limit > 64) return false;
+  if (Limit < 8 || Limit > MaxDomain) return false;
   BasicBlock *Start = Entry.getSuccessor(Accepted);
-  SmallVector<Constant *, 64> Results;
-  bool WorthTable = false;
+  SmallVector<ConstantInt *, 64> Results;
+  bool WorthTable = false, Signed = false;
   for (unsigned I = 0; I < Limit; ++I) {
     unsigned Before = Budget;
     auto *Known = ConstantInt::get(cast<IntegerType>(Input.getType()), I);
@@ -123,13 +126,29 @@ static bool foldSmallIntegerDomain(CondBrInst &Entry, ICmpInst &Test,
                                        F.getParent()->getDataLayout(), Budget, &Input, Known);
     if (!Result) return false;
     Results.push_back(Result);
+    Signed |= Result->isNegative();
     WorthTable |= Before - Budget >= 32;
   }
   if (!WorthTable) return false;
+  unsigned Bits = 1;
+  for (ConstantInt *Result : Results)
+    Bits = std::max(Bits, Signed ? Result->getValue().getSignificantBits()
+                                : Result->getValue().getActiveBits());
+  unsigned Width = 8;
+  while (Width < Bits) Width *= 2;
+  if (Limit * (Width / 8) > MaxTableBytes) return false;
+
   Module &M = *F.getParent();
-  auto *TableType = ArrayType::get(F.getReturnType(), Results.size());
+  auto *Storage = IntegerType::get(M.getContext(), Width);
+  SmallVector<Constant *, 64> Packed;
+  for (ConstantInt *Result : Results) {
+    const APInt &Value = Result->getValue();
+    Packed.push_back(ConstantInt::get(Storage, Signed ? Value.sextOrTrunc(Width)
+                                                      : Value.zextOrTrunc(Width)));
+  }
+  auto *TableType = ArrayType::get(Storage, Packed.size());
   auto *Table = new GlobalVariable(M, TableType, true, GlobalValue::PrivateLinkage,
-                                   ConstantArray::get(TableType, Results), "integer.path.results");
+                                   ConstantArray::get(TableType, Packed), "integer.path.results");
   Table->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
   IRBuilder<> Guard(&Test);
   Value *Stable = Guard.CreateFreeze(&Input);
@@ -137,7 +156,7 @@ static bool foldSmallIntegerDomain(CondBrInst &Entry, ICmpInst &Test,
   BasicBlock *Lookup = BasicBlock::Create(M.getContext(), "integer.path.lookup", &F);
   IRBuilder<> B(Lookup);
   Value *Address = B.CreateInBoundsGEP(TableType, Table, {B.getInt64(0), Stable});
-  B.CreateRet(B.CreateLoad(F.getReturnType(), Address));
+  B.CreateRet(B.CreateIntCast(B.CreateLoad(Storage, Address), ReturnType, Signed));
   Entry.setSuccessor(Accepted, Lookup);
   Start->removePredecessor(Entry.getParent());
   removeUnreachableBlocks(F);
