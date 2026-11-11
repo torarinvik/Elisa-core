@@ -1,8 +1,10 @@
 package parser
 
 import (
-	"elisacore/src/ast"
 	"reflect"
+
+	"elisacore/src/ast"
+	"elisacore/src/astscan"
 )
 
 // Results belong to one read-only scan; no AST or result survives a parse.
@@ -35,7 +37,7 @@ func (scan *autoRegionScan) exprBlockBodyNeedsAutoRegion(block *ast.ExprBlock) b
 
 func (scan *autoRegionScan) functionBodyNeedsAutoRegion(stmts []ast.Stmt) bool {
 	var hasExprBlocks bool
-	if scan.containsAutoRegionAllocation(reflect.ValueOf(stmts), &hasExprBlocks) {
+	if scan.containsAutoRegionAllocation(stmts, &hasExprBlocks) {
 		return true
 	}
 	// Value blocks (docs/119): a loop EXPRESSION (`for … |acc| -> acc:`), a multi-line
@@ -406,7 +408,6 @@ func isAutoAllocValue(value ast.Expr) bool {
 }
 
 var (
-	autoRegionAllocExprType     = reflect.TypeFor[*ast.AllocExpr]()
 	autoRegionCallExprType      = reflect.TypeFor[*ast.CallExpr]()
 	autoRegionExprBlockType     = reflect.TypeFor[*ast.ExprBlock]()
 	autoRegionStructLitExprType = reflect.TypeFor[*ast.StructLitExpr]()
@@ -414,44 +415,23 @@ var (
 
 // Remember value blocks during the allocation walk so ordinary bodies do not
 // need another whole-tree scan to look for them.
-func (scan *autoRegionScan) containsAutoRegionAllocation(value reflect.Value, hasExprBlocks *bool) bool {
-	switch value.Kind() {
-	case reflect.Pointer:
-		if value.IsNil() {
+func (scan *autoRegionScan) containsAutoRegionAllocation(stmts []ast.Stmt, hasExprBlocks *bool) bool {
+	found := false
+	astscan.WalkPruned(stmts, func(node any) bool {
+		if found {
 			return false
 		}
-		switch value.Type() {
-		case autoRegionExprBlockType:
+		switch node := node.(type) {
+		case *ast.ExprBlock:
 			*hasExprBlocks = true
-		case autoRegionAllocExprType:
-			alloc := value.Interface().(*ast.AllocExpr)
-			if alloc.AutoRegion || alloc.Owner == nil {
-				return true
-			}
-		case autoRegionStructLitExprType:
-			if scan.structLiteralAllocatesContainerArg(value.Interface().(*ast.StructLitExpr)) {
-				return true
-			}
+		case *ast.AllocExpr:
+			found = node.AutoRegion || node.Owner == nil
+		case *ast.StructLitExpr:
+			found = scan.structLiteralAllocatesContainerArg(node)
 		}
-		return scan.containsAutoRegionAllocation(value.Elem(), hasExprBlocks)
-	case reflect.Interface:
-		return scan.containsAutoRegionAllocation(value.Elem(), hasExprBlocks)
-	case reflect.Struct:
-		// Child plans contain only exported fields, so the pointer cases
-		// can convert matching nodes to their AST type directly.
-		for _, index := range autoRegionChildFields(value.Type()) {
-			if scan.containsAutoRegionAllocation(value.Field(index), hasExprBlocks) {
-				return true
-			}
-		}
-	case reflect.Slice, reflect.Array:
-		for index := 0; index < value.Len(); index++ {
-			if scan.containsAutoRegionAllocation(value.Index(index), hasExprBlocks) {
-				return true
-			}
-		}
-	}
-	return false
+		return !found
+	})
+	return found
 }
 
 // exprBlocksNeedAutoRegion reports whether any value-position ExprBlock nested anywhere
