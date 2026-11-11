@@ -5,6 +5,7 @@ package backend
 /*
 #include <string.h>
 #include <llvm-c/Core.h>
+#include <llvm-c/TargetMachine.h>
 
 // Attaches !prof branch_weights {likely, unlikely} to a conditional branch.
 static void elisacoreSetLikelyBranchWeights(LLVMContextRef ctx, LLVMValueRef br, unsigned likely, unsigned unlikely) {
@@ -17,15 +18,17 @@ static void elisacoreSetLikelyBranchWeights(LLVMContextRef ctx, LLVMValueRef br,
 	unsigned kind = LLVMGetMDKindIDInContext(ctx, "prof", strlen("prof"));
 	LLVMSetMetadata(br, kind, LLVMMetadataAsValue(ctx, node));
 }
+
+unsigned elisacoreValidatedIndexBounds(LLVMModuleRef);
+unsigned elisacoreOptimizeIndexBounds(LLVMModuleRef, LLVMTargetMachineRef);
 */
 import "C"
 
 import (
-	"strconv"
-
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
 	"elisacore/src/semantic"
+	"strconv"
 )
 
 // Consecutive-index check merging.
@@ -324,3 +327,10 @@ func (indexMergeShapeError) Error() string {
 }
 
 var errIndexMergeShape error = indexMergeShapeError{}
+
+func proveIndexBounds(g *llvmGenerator) int {
+	return int(C.elisacoreValidatedIndexBounds(g.module))
+}
+func optimizeIndexBounds(g *llvmGenerator) int {
+	return int(C.elisacoreOptimizeIndexBounds(g.module, g.targetMachine))
+}
