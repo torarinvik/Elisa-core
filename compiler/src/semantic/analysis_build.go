@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"fmt"
 	"reflect"
 	"sync/atomic"
@@ -18,19 +19,20 @@ import (
 // completed RetainedAnalysis, which supports incremental edits.
 type AnalysisBuild struct {
 	// Recorded parser notices can be replayed for an exact bootstrap resume.
-	SourceParseRecorded bool
-	SourceParseNotices  []string
-	retained            *RetainedAnalysis
-	file                *ast.File
-	loweredFile         *ast.File
-	next                int
-	postNext            int
-	started             bool
-	done                bool
-	LastStats           AnalysisBuildStats
-	lateStarted         bool
-	lateNext            int
-	lateLast            map[*ast.FuncDecl]int
+	SourceParseRecorded  bool
+	SourceParseNotices   []string
+	externalSourceDigest [sha256.Size]byte
+	retained             *RetainedAnalysis
+	file                 *ast.File
+	loweredFile          *ast.File
+	next                 int
+	postNext             int
+	started              bool
+	done                 bool
+	LastStats            AnalysisBuildStats
+	lateStarted          bool
+	lateNext             int
+	lateLast             map[*ast.FuncDecl]int
 }
 
 // AnalysisBuildStats describes the latest step, including the indivisible
@@ -290,6 +292,16 @@ func (b *AnalysisBuild) MarshalState() ([]byte, error) {
 // MarshalStateWithCapacity uses a prior checkpoint's size as an allocation hint.
 // It preserves the same schema and validation as MarshalState.
 func (b *AnalysisBuild) MarshalStateWithCapacity(capacity int) ([]byte, error) {
+	return b.marshalState(capacity, false)
+}
+
+// MarshalStateWithExternalSource omits the expanded source when the caller can
+// supply it again at restore time. The payload binds the exact source digest.
+func (b *AnalysisBuild) MarshalStateWithExternalSource(capacity int) ([]byte, error) {
+	return b.marshalState(capacity, true)
+}
+
+func (b *AnalysisBuild) marshalState(capacity int, externalSource bool) ([]byte, error) {
 	pendingRetainedMu.Lock()
 	defer pendingRetainedMu.Unlock()
 	if err := b.validate(); err != nil {
@@ -322,7 +334,14 @@ func (b *AnalysisBuild) MarshalStateWithCapacity(capacity int) ([]byte, error) {
 	// visited so far. Preserve the live indexes for an in-process advance.
 	storeScanIndexes := a.storeScanIndexCache
 	a.storeScanIndexCache = nil
+	source := r.src
+	if externalSource {
+		b.externalSourceDigest = sha256.Sum256(source)
+		r.src = nil
+	}
 	defer func() {
+		r.src = source
+		b.externalSourceDigest = [sha256.Size]byte{}
 		r.pristine = pristine
 		a.storeScanIndexCache = storeScanIndexes
 	}()
@@ -330,6 +349,16 @@ func (b *AnalysisBuild) MarshalStateWithCapacity(capacity int) ([]byte, error) {
 }
 
 func RestoreAnalysisBuild(data []byte) (*AnalysisBuild, error) {
+	return restoreAnalysisBuild(data, nil, false)
+}
+
+// RestoreAnalysisBuildWithSource accepts checkpoints whose expanded source is
+// supplied by the caller, as well as self-contained checkpoints.
+func RestoreAnalysisBuildWithSource(data, source []byte) (*AnalysisBuild, error) {
+	return restoreAnalysisBuild(data, source, true)
+}
+
+func restoreAnalysisBuild(data, source []byte, externalSource bool) (*AnalysisBuild, error) {
 	value, err := semanticStateRegistry().Decode(data)
 	if err != nil {
 		return nil, err
@@ -349,6 +378,13 @@ func RestoreAnalysisBuild(data []byte) (*AnalysisBuild, error) {
 	}
 	if why := b.retained.a.proofReportCheckpointError(); why != "" {
 		return nil, fmt.Errorf("proof report checkpoint: %s", why)
+	}
+	if b.externalSourceDigest != ([sha256.Size]byte{}) {
+		if !externalSource || b.retained.src != nil || sha256.Sum256(source) != b.externalSourceDigest {
+			return nil, fmt.Errorf("analysis build source mismatch")
+		}
+		b.retained.src = source
+		b.externalSourceDigest = [sha256.Size]byte{}
 	}
 	b.retained.post = func(decls []scopedDecl, appended map[*ast.FuncDecl]*FuncType) {
 		b.retained.a.runPostPhases(decls, b.retained.options, nil, appended)

@@ -90,7 +90,7 @@ func restoreAnalysisDiskBuildCheckpoint(artifact analysisDiskArtifact, program *
 	started := time.Now()
 	var checkpoint *analysisDiskBuildCheckpoint
 	err := artifact.withPayload(func(data []byte) error {
-		build, err := semantic.RestoreAnalysisBuild(data)
+		build, err := semantic.RestoreAnalysisBuildWithSource(data, program.source)
 		if err != nil {
 			return err
 		}
@@ -238,7 +238,7 @@ func advanceAnalysisDiskBuildWithCheckpoint(program *loadedProgram, file *ast.Fi
 		if hint == 0 && len(program.source) >= 4<<20 {
 			hint = 8 * min(len(program.source), 32<<20)
 		}
-		data, err := build.MarshalStateWithCapacity(hint)
+		data, err := build.MarshalStateWithExternalSource(hint)
 		if err == nil {
 			budgetStateBytes = len(data) + len(data)/16
 			capacityHint = min(budgetStateBytes, 1<<30)

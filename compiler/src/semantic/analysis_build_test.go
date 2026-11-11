@@ -481,3 +481,37 @@ func TestAnalysisBuildEmptyLatePhaseAndInvalidCursor(t *testing.T) {
 	}
 	assertIncrementalResultParity(t, AnalyzeWithOptions(retainedParse(t, ""), AnalyzeOptions{}), result)
 }
+
+func TestAnalysisBuildExternalSourceCheckpoint(t *testing.T) {
+	source := []byte(retainedBefore)
+	options := AnalyzeOptions{}
+	build, err := BeginAnalysisBuild(retainedParse(t, retainedBefore), nil, source, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := build.MarshalStateWithExternalSource(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	filename := build.file.Filename
+	if !build.MatchesInvocation(filename, source, options) {
+		t.Fatal("checkpoint changed the live build source")
+	}
+	if _, err := RestoreAnalysisBuild(data); err == nil {
+		t.Fatal("restored a checkpoint without its external source")
+	}
+	if _, err := RestoreAnalysisBuildWithSource(data, append([]byte(retainedBefore), '\n')); err == nil {
+		t.Fatal("restored a checkpoint with different source")
+	}
+	restored, err := RestoreAnalysisBuildWithSource(data, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !restored.MatchesInvocation(filename, source, options) {
+		t.Fatal("restored build did not recover the source")
+	}
+	result, state, err := restored.Advance(0, 0)
+	if err != nil || result == nil || state == nil || len(result.Errors()) != 0 {
+		t.Fatalf("resumed analysis did not finish successfully: %v", err)
+	}
+}
