@@ -69,7 +69,8 @@ type encoder struct {
 	framed          bool
 	stringTable     []string
 	// interner replaces strings/stringTable once framed bodies are written in parallel.
-	interner *stringInterner
+	interner   *stringInterner
+	mapScratch map[reflect.Type]mapEncodeScratch
 }
 
 func (r *Registry) Encode(root any) ([]byte, error) { return r.encode(root, false, 0) }
@@ -393,7 +394,10 @@ func (e *encoder) body(v reflect.Value) error {
 		if e.scanning && !e.registry.hasObjects[v.Type().Elem()] {
 			return nil
 		}
-		full := v.Slice(0, v.Cap())
+		full := v
+		if v.Len() != v.Cap() {
+			full = v.Slice(0, v.Cap())
+		}
 		if v.Type().Elem().Kind() == reflect.Uint8 {
 			if !e.scanning {
 				e.data.Write(full.Bytes())
@@ -406,6 +410,9 @@ func (e *encoder) body(v reflect.Value) error {
 			}
 		}
 	case reflect.Map:
+		if !e.scanning && v.CanInterface() {
+			return e.writeMap(v)
+		}
 		keys := !e.scanning || e.registry.hasObjects[v.Type().Key()]
 		values := !e.scanning || e.registry.hasObjects[v.Type().Elem()]
 		if !keys && !values {
