@@ -165,12 +165,20 @@ func captureResolvedTypeNameContributions(rows map[ast.TypeExpr]string, decls []
 			if skipNestedFunctions && typ == reflect.TypeOf((*ast.FuncDecl)(nil)) {
 				return nil
 			}
+			node := value.Interface()
+			// These leaves cannot own type-expression keys or contain cycles.
+			// Avoid a reflective descent and cycle-table updates for each one.
+			switch node.(type) {
+			case *ast.Ident, *ast.IntLit, *ast.FloatLit, *ast.StringLit,
+				*ast.CharLit, *ast.BoolLit, *ast.NullLit, *ast.ZeroedLit:
+				return nil
+			}
 			ptr := resolvedTypeNamePointer{typ: typ, ptr: value.Pointer()}
 			if active[ptr] {
 				return fmt.Errorf("cyclic AST ownership graph")
 			}
 			active[ptr] = true
-			if expr, ok := value.Interface().(ast.TypeExpr); ok {
+			if expr, ok := node.(ast.TypeExpr); ok {
 				location := locations[expr]
 				if location.owner != "" && (location.owner != owner || location.region != region) {
 					ambiguous[expr] = true
