@@ -301,6 +301,9 @@ func (s *functionState) emitRegionDeclImpl(n *ast.RegionStmt, loopReset bool) er
 	// first block on demand, and arena_free over a never-allocated arena is a no-op. So a
 	// region that never allocates costs nothing beyond the stack slot.
 	if n.Lazy {
+		if backendIsCompilerGeneratedAutoRegion(n) && s.g.optLevel != OptimizationLevel0 && !s.g.emitDebugInfo {
+			s.emptyArenaCandidates = append(s.emptyArenaCandidates, alloca)
+		}
 		s.treeAllocOwner.storeAnchorBlock, s.treeAllocOwner.storeAnchorInstr = s.captureStoreAnchor()
 		return nil
 	}

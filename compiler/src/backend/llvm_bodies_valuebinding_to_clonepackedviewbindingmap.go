@@ -103,6 +103,7 @@ type functionState struct {
 	// set by emitIndexAddress and consumed once by emitRuntimePointerIndexedAddressWithType.
 	pendingDisjointScope *disjointParamScope
 	regions              []regionBinding
+	emptyArenaCandidates []llvmIRValueRef
 	// darrayStackTag routes a fresh inferred-region darray (by name) to its assigned parallel
 	// arena (multi-stack regions, Phase B1b): name -> region arena tag "__auto_N#k". Populated at
 	// region entry from Result.RegionStacks, cleared at region exit. Empty for ordinary code.

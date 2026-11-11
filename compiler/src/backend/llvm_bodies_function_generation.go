@@ -282,6 +282,7 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 		}
 	}
 
+	state.elideUnusedAutoArenas()
 	return nil
 }
 func (s *functionState) emitFunctionReturn(value C.LLVMValueRef, actual semantic.Type) error {
