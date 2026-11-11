@@ -75,9 +75,10 @@ type resolvedTypeNamePointer struct {
 }
 
 type resolvedTypeNameOwnershipField struct {
-	index     int
-	name      string
-	published bool
+	pathSuffix string
+	index      int
+	name       string
+	published  bool
 }
 
 var (
@@ -179,14 +180,11 @@ func captureResolvedTypeNameContributions(rows map[ast.TypeExpr]string, decls []
 			return err
 		case reflect.Struct:
 			typ := value.Type()
-			if typ.PkgPath() != resolvedTypeNameASTPackage {
-				return nil
-			}
 			for _, field := range resolvedTypeNameOwnershipFields(typ) {
 				if !field.published {
 					return fmt.Errorf("unpublished AST ownership field %s.%s", typ, field.name)
 				}
-				if err := walk(value.Field(field.index), owner, region, append(append(path, '.'), field.name...), skipNestedFunctions, depth+1); err != nil {
+				if err := walk(value.Field(field.index), owner, region, append(path, field.pathSuffix...), skipNestedFunctions, depth+1); err != nil {
 					return err
 				}
 			}
@@ -392,10 +390,14 @@ func resolvedTypeNameOwnershipFields(typ reflect.Type) []resolvedTypeNameOwnersh
 		return cached.([]resolvedTypeNameOwnershipField)
 	}
 	var plan []resolvedTypeNameOwnershipField
+	if typ.PkgPath() != resolvedTypeNameASTPackage {
+		resolvedTypeNameOwnershipPlan.LoadOrStore(typ, plan)
+		return nil
+	}
 	for i, field := range reflectFields(typ) {
 		published := field.IsExported()
 		if !published || resolvedTypeNameFieldMayContainAST(field.Type) {
-			plan = append(plan, resolvedTypeNameOwnershipField{index: i, name: field.Name, published: published})
+			plan = append(plan, resolvedTypeNameOwnershipField{index: i, name: field.Name, pathSuffix: "." + field.Name, published: published})
 		}
 	}
 	actual, _ := resolvedTypeNameOwnershipPlan.LoadOrStore(typ, plan)
