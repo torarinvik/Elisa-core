@@ -73,3 +73,55 @@ invalid:
 		})
 	}
 }
+
+func TestZeroProductBypassRequiresEquivalentReturn(t *testing.T) {
+	if !boundedDivisionUnrollSupported() {
+		t.Skip("requires LLVM 23")
+	}
+	const source = `
+target triple = "arm64-apple-macosx"
+define i64 @zero_product(i64 %key, i64 %other) {
+guard:
+  %is_zero = icmp eq i64 %key, 0
+  br i1 %is_zero, label %join, label %product
+product:
+  %square = mul nuw nsw i64 %key, %key
+  %cube = mul nuw nsw i64 %square, %key
+  br label %join
+join:
+  %result = phi i64 [ 0, %guard ], [ %cube, %product ]
+  ret i64 %result
+}
+`
+	for _, test := range []struct {
+		name string
+		ir   string
+		fold bool
+	}{
+		{"zero bypass", source, true},
+		{"different bypass value", strings.Replace(source, "[ 0, %guard ]", "[ 1, %guard ]", 1), false},
+		{"unknown multiplier", strings.Replace(source, "%square, %key", "%square, %other", 1), false},
+		{"poison multiplier", strings.Replace(source, "%square, %key", "%square, poison", 1), false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			g, err := parseLLVMIRForSplitHalfTest(test.ir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer g.dispose()
+			if err := g.ensureTargetMachine(); err != nil {
+				t.Fatal(err)
+			}
+			if unrollBoundedDivisionLoops(g) == 2 {
+				t.Fatal("LLVM cleanup failed")
+			}
+			if err := g.verify(); err != nil {
+				t.Fatal(err)
+			}
+			ir := g.printModule()
+			if strings.Contains(ir, "br i1 %is_zero") == test.fold {
+				t.Fatalf("unexpected zero branch:\n%s", ir)
+			}
+		})
+	}
+}

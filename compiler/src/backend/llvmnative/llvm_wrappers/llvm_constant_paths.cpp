@@ -183,6 +183,63 @@ static bool foldSmallIntegerDomain(CondBrInst &Entry, ICmpInst &Test,
   removeUnreachableBlocks(F);
   return true;
 }
+
+// A collapsed counted loop can retain its zero-trip bypass even when the
+// resulting product already yields zero there. Only speculate a short chain
+// of integer multiplications whose operands are defined and whose result is
+// proved zero on the bypass edge. Multiplication by zero cannot overflow.
+static bool foldZeroProductBypass(BasicBlock &Guard) {
+  auto *Branch = dyn_cast<CondBrInst>(Guard.getTerminator());
+  auto *Compare = Branch ? dyn_cast<ICmpInst>(Branch->getCondition()) : nullptr;
+  if (!Compare || !Compare->isEquality()) return false;
+  auto *Bound = dyn_cast<ConstantInt>(Compare->getOperand(1));
+  if (!Bound || !Bound->isZero()) return false;
+  Value *Key = Compare->getOperand(0);
+  const unsigned ZeroEdge = Compare->getPredicate() == ICmpInst::ICMP_EQ ? 0 : 1;
+  BasicBlock *Join = Branch->getSuccessor(ZeroEdge);
+  BasicBlock *Product = Branch->getSuccessor(1 - ZeroEdge);
+  if (Join == Product || Product->getSinglePredecessor() != &Guard ||
+      !isa<UncondBrInst>(Product->getTerminator()) ||
+      Product->getSingleSuccessor() != Join || Product->size() < 2 ||
+      Product->size() > 4 || !isa<ReturnInst>(Join->getTerminator()) ||
+      Join->phis().empty())
+    return false;
+
+  SmallVector<Value *, 4> Zeros{Key};
+  auto isZero = [&](Value *V) {
+    auto *C = dyn_cast<ConstantInt>(V);
+    return C ? C->isZero() : llvm::is_contained(Zeros, V);
+  };
+  for (Instruction &I : *Product) {
+    if (&I == Product->getTerminator()) break;
+    auto *Mul = dyn_cast<BinaryOperator>(&I);
+    if (!Mul || Mul->getOpcode() != Instruction::Mul || !I.getType()->isIntegerTy())
+      return false;
+    Value *L = Mul->getOperand(0);
+    Value *R = Mul->getOperand(1);
+    const bool LeftZero = isZero(L);
+    const bool RightZero = isZero(R);
+    if (!(LeftZero && (RightZero || isa<ConstantInt>(R))) &&
+        !(RightZero && isa<ConstantInt>(L)))
+      return false;
+    Zeros.push_back(Mul);
+  }
+  for (PHINode &Phi : Join->phis()) {
+    Value *Bypass = Phi.getIncomingValueForBlock(&Guard);
+    Value *Computed = Phi.getIncomingValueForBlock(Product);
+    if (Bypass != Computed &&
+        (!isa<ConstantInt>(Bypass) || !isZero(Bypass) || !isZero(Computed)))
+      return false;
+  }
+
+  Join->removePredecessor(&Guard);
+  IRBuilder<> Builder(Branch);
+  Builder.SetCurrentDebugLocation(Branch->getDebugLoc());
+  Builder.CreateBr(Product);
+  Branch->eraseFromParent();
+  if (Compare->use_empty()) Compare->eraseFromParent();
+  return true;
+}
 } // namespace
 
 static unsigned elisacoreFoldConstantIntegerPaths(Module &M) {
@@ -193,6 +250,8 @@ static unsigned elisacoreFoldConstantIntegerPaths(Module &M) {
     if (F.size() < 3 || F.size() > 128 || !F.getReturnType()->isIntegerTy() ||
         BDU_SkipFunction(F, M))
       continue;
+    if (F.size() <= 32)
+      for (BasicBlock &Block : F) Changed += foldZeroProductBypass(Block);
     auto *Entry = dyn_cast<CondBrInst>(F.getEntryBlock().getTerminator());
     if (!Entry || Entry->getSuccessor(0) == Entry->getSuccessor(1)) continue;
     auto *Test = dyn_cast<ICmpInst>(Entry->getCondition());
