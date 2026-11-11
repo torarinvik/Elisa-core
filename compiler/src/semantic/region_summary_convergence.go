@@ -134,7 +134,7 @@ func (a *Analyzer) assumeSummaryForActive(decl *ast.FuncDecl) {
 
 func (a *Analyzer) snapshotSummary(decl *ast.FuncDecl) summarySnapshot {
 	ret, has := a.returnElementSummaries[decl]
-	return summarySnapshot{hasReturn: has, ret: ret, analyzed: a.ambientFillAnalyzed[decl], fresh: a.ambientFillFresh[decl], freshParams: maps.Clone(a.ambientFillFreshParams[decl])}
+	return summarySnapshot{hasReturn: has, ret: ret, analyzed: a.ambientFillAnalyzed[decl], fresh: a.ambientFillFresh[decl], freshParams: a.ambientFillFreshParams[decl]}
 }
 
 func (s summarySnapshot) equal(other summarySnapshot) bool {
@@ -152,14 +152,17 @@ func (a *Analyzer) convergeSummaries(root *ast.FuncDecl) {
 		a.convMembers = savedMembers
 	}()
 	converged := false
+	before := make(map[*ast.FuncDecl]summarySnapshot)
 	for round := 0; round < summaryConvergenceRounds && !converged; round++ {
-		before := map[*ast.FuncDecl]summarySnapshot{}
+		clear(before)
 		for member := range a.convMembers {
 			before[member] = a.snapshotSummary(member)
 			// Re-analyze every member against the current assumptions; the published summary
 			// stays in place as the assumption until the member's new one replaces it.
 			a.ambientFillAnalyzed[member] = false
 			delete(a.ambientFillFresh, member)
+			// Detach the previous parameter set before analysis can write
+			// this member's fresh parameters. The snapshot owns that set.
 			delete(a.ambientFillFreshParams, member)
 		}
 		a.analyzeQuietly(root)
