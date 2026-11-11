@@ -58,7 +58,13 @@ func analyzeWithLookupRecorder(file *ast.File, options AnalyzeOptions, bodies *i
 	foldCharClassifierTables(activeFile)
 	census := analyzeASTCensus(activeFile)
 	exprCapacity := census.exprs
-	exprFactsCapacity := census.exprs / 8
+	if setup != nil && setup.build != nil {
+		// A resumable build starts with declarations and may stop after a
+		// small body prefix. Restored maps are sized from the entries actually
+		// serialized, so reserving for the whole program here is wasted.
+		exprCapacity = min(exprCapacity, 64<<10)
+	}
+	exprFactsCapacity := exprCapacity / 8
 	if exprFactsCapacity < 32 {
 		exprFactsCapacity = 32
 	}
