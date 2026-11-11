@@ -56,7 +56,7 @@ func (invocation *incrementalBodyInvocation) prepareEnsureProofMemo(a *Analyzer,
 	if len(fn.EnsureValues) > 256 {
 		return
 	}
-	tree, _, err := functionSyntaxFingerprint(fn)
+	tree, err := functionSyntaxDigest(fn)
 	if err != nil {
 		return
 	}
@@ -259,7 +259,7 @@ func (invocation *incrementalBodyInvocation) hasEnsureProof(fn *ast.FuncDecl, cl
 	if !ok {
 		return false
 	}
-	tree, _, err := functionSyntaxFingerprint(fn)
+	tree, err := functionSyntaxDigest(fn)
 	if err != nil || tree != input.tree {
 		return false
 	}
@@ -276,7 +276,7 @@ func (invocation *incrementalBodyInvocation) recordEnsureProof(fn *ast.FuncDecl,
 	if !ok || !hasClause {
 		return
 	}
-	tree, _, err := functionSyntaxFingerprint(fn)
+	tree, err := functionSyntaxDigest(fn)
 	if err != nil || tree != input.tree {
 		return
 	}
@@ -298,7 +298,7 @@ func (invocation *incrementalBodyInvocation) publishEnsureProofs() {
 		if !ok {
 			continue
 		}
-		tree, _, err := functionSyntaxFingerprint(fn)
+		tree, err := functionSyntaxDigest(fn)
 		if err != nil || tree != input.tree {
 			continue
 		}

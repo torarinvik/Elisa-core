@@ -322,7 +322,7 @@ func captureResolvedTypeNameContributionsWithNested(rows map[ast.TypeExpr]string
 			}
 			continue // Preserve an ambiguous key; it has no exclusive owner.
 		}
-		digest, _, err := functionSyntaxFingerprint(expr)
+		digest, err := functionSyntaxDigest(expr)
 		if err != nil {
 			certificate.failure = "unsupported resolved type name syntax: " + err.Error()
 			return certificate, locations
@@ -477,7 +477,7 @@ func resolvedTypeNameDeclarationBase(namespace string, decl ast.Decl) (string, e
 			header.Members = nil
 			identity = &header
 		}
-		digest, _, err := functionSyntaxFingerprint(identity)
+		digest, err := functionSyntaxDigest(identity)
 		if err != nil {
 			return "", err
 		}

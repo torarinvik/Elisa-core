@@ -41,7 +41,7 @@ func NewFunctionIdentity(fn *ast.FuncDecl, scope FunctionIdentityContext) (Funct
 	}
 	signature := *fn
 	signature.Body = nil
-	digest, _, err := functionSyntaxFingerprint(&signature)
+	digest, err := functionSyntaxDigest(&signature)
 	if err != nil {
 		return FunctionIdentity{}, err
 	}
@@ -78,7 +78,7 @@ func IndexFunctionNodes(fn *ast.FuncDecl) (*FunctionNodeIndex, error) {
 	if fn == nil {
 		return nil, fmt.Errorf("missing function")
 	}
-	digest, _, err := functionSyntaxFingerprint(fn)
+	digest, err := functionSyntaxDigest(fn)
 	if err != nil {
 		return nil, err
 	}
@@ -183,6 +183,7 @@ type functionSyntaxEncoder struct {
 	// Liveness needs the same graph validation and node order, but no digest.
 	// Count its logical encoding bytes to preserve the exact byte budget.
 	nodesOnly    bool
+	omitNodes    bool
 	encodedBytes int
 	depth, work  int
 	failure      error
@@ -222,7 +223,16 @@ func functionSyntaxStructFields(typ reflect.Type) []functionSyntaxField {
 }
 
 func functionSyntaxFingerprint(value any) ([32]byte, []PositionedFunctionNode, error) {
-	encoder := &functionSyntaxEncoder{seen: map[functionSyntaxPointer]uint64{}}
+	return encodeFunctionSyntaxFingerprint(value, false)
+}
+
+func functionSyntaxDigest(value any) ([32]byte, error) {
+	digest, _, err := encodeFunctionSyntaxFingerprint(value, true)
+	return digest, err
+}
+
+func encodeFunctionSyntaxFingerprint(value any, omitNodes bool) ([32]byte, []PositionedFunctionNode, error) {
+	encoder := &functionSyntaxEncoder{seen: map[functionSyntaxPointer]uint64{}, omitNodes: omitNodes}
 	encoder.WriteString("elisa-function-syntax-v1\x00")
 	if err := encoder.encode(reflect.ValueOf(value)); err != nil {
 		return [32]byte{}, nil, err
@@ -340,8 +350,10 @@ func (e *functionSyntaxEncoder) encode(value reflect.Value) error {
 		}
 		e.marker(1)
 		e.seen[key] = uint64(len(e.seen))
-		if node, ok := value.Interface().(PositionedFunctionNode); ok {
-			e.nodes = append(e.nodes, node)
+		if !e.omitNodes {
+			if node, ok := value.Interface().(PositionedFunctionNode); ok {
+				e.nodes = append(e.nodes, node)
+			}
 		}
 		return e.encode(value.Elem())
 	case reflect.Struct:

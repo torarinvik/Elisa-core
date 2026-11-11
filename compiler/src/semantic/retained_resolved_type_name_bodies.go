@@ -139,8 +139,8 @@ func resolvedTypeNameFastBodySourceOwners(edits [][3]*ast.FuncDecl, preparedBodi
 			if preparedExpr == nil || reflect.TypeOf(sourceExpr) != reflect.TypeOf(preparedExpr) {
 				return nil, fmt.Errorf("fast-prepared body changes a TypeExpr path or kind")
 			}
-			sourceDigest, _, sourceErr := functionSyntaxFingerprint(sourceExpr)
-			preparedDigest, _, preparedErr := functionSyntaxFingerprint(preparedExpr)
+			sourceDigest, sourceErr := functionSyntaxDigest(sourceExpr)
+			preparedDigest, preparedErr := functionSyntaxDigest(preparedExpr)
 			if sourceErr != nil || preparedErr != nil || sourceDigest != preparedDigest {
 				return nil, fmt.Errorf("fast-prepared body changes TypeExpr syntax")
 			}
@@ -157,7 +157,7 @@ func resolvedTypeNameSyntaxKey(expr ast.TypeExpr) (string, error) {
 	if expr == nil {
 		return "", fmt.Errorf("missing type expression")
 	}
-	digest, _, err := functionSyntaxFingerprint(expr)
+	digest, err := functionSyntaxDigest(expr)
 	if err != nil {
 		return "", err
 	}
@@ -351,7 +351,7 @@ func resolvedTypeNamePreparedBodyContribution(a *Analyzer, functionKey string, s
 				continue
 			}
 		}
-		digest, _, err := functionSyntaxFingerprint(expr)
+		digest, err := functionSyntaxDigest(expr)
 		if err != nil {
 			return "", fmt.Errorf("prepared body type syntax: %w", err)
 		}
@@ -377,7 +377,7 @@ func resolvedTypeNameBodySyntaxFingerprint(fn *ast.FuncDecl) (string, error) {
 	}
 	rows := []string{}
 	for expr, paths := range locations {
-		digest, _, err := functionSyntaxFingerprint(expr)
+		digest, err := functionSyntaxDigest(expr)
 		if err != nil {
 			return "", err
 		}
@@ -415,8 +415,8 @@ func rebindResolvedTypeNameBodyRows(a *Analyzer, sourceOwners map[ast.TypeExpr]r
 		if newExpr == nil {
 			return nil, fmt.Errorf("prepared body lost a resolved type-name path")
 		}
-		oldDigest, _, oldErr := functionSyntaxFingerprint(expr)
-		newDigest, _, newErr := functionSyntaxFingerprint(newExpr)
+		oldDigest, oldErr := functionSyntaxDigest(expr)
+		newDigest, newErr := functionSyntaxDigest(newExpr)
 		if oldErr != nil || newErr != nil || oldDigest != newDigest || reflect.TypeOf(expr) != reflect.TypeOf(newExpr) {
 			return nil, fmt.Errorf("prepared body changes a resolved TypeExpr path or syntax")
 		}

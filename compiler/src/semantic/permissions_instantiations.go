@@ -25,7 +25,7 @@ func permissionInstantiation(ref ast.PermissionRef) (permissionInstantiationID, 
 		TypeArgs []ast.TypeExpr
 		Via      []ast.PermissionRef
 	}{ref.TypeArgs, ref.Via}
-	digest, _, err := functionSyntaxFingerprint(value)
+	digest, err := functionSyntaxDigest(value)
 	return permissionInstantiationID{digest, true}, err == nil
 }
 
