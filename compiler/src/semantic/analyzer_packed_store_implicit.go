@@ -164,10 +164,10 @@ func (a *Analyzer) funcOwnsRegion(fn *ast.FuncDecl) bool {
 			return false
 		}
 		key := reflect.ValueOf(node).Pointer()
-		if seen[key] {
+		if seen.values[key] {
 			return false
 		}
-		seen[key] = true
+		seen.values[key] = true
 		switch n := node.(type) {
 		case *ast.RegionStmt:
 			found = true

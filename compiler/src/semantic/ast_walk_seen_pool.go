@@ -15,9 +15,13 @@ type fillWalkSeen struct {
 const fillWalkSeenMaxEntries = 1 << 16
 
 func (s *fillWalkSeen) reset() bool {
+	return s.resetWithLimit(fillWalkSeenMaxEntries)
+}
+
+func (s *fillWalkSeen) resetWithLimit(limit int) bool {
 	used := len(s.values)
 	// Avoid retaining an exceptional whole-program walk in every worker's pool.
-	if used > fillWalkSeenMaxEntries {
+	if used > limit {
 		return false
 	}
 	s.peak = max(s.peak, used)

@@ -161,7 +161,7 @@ func walkStoreScanNodes(stmts []ast.Stmt, visit func(any)) {
 	// visits exactly what the reflective fallback does, without reflection.
 	seen := borrowStoreScanSeen()
 	defer releaseStoreScanSeen(seen)
-	astscan.WalkStatements(stmts, visit, seen)
+	astscan.WalkStatements(stmts, visit, seen.values)
 }
 
 // The pre-body passes walk every function body dozens of times; a fresh visited set
@@ -169,20 +169,20 @@ func walkStoreScanNodes(stmts []ast.Stmt, visit func(any)) {
 // quarter of a retained update). Walks nest through visit callbacks, so the sets
 // come from a pool rather than one shared map. A set grown by a very large body is
 // dropped: clearing it costs its capacity, not its use, on every later small walk.
-var storeScanSeenPool = sync.Pool{New: func() any { return make(map[uintptr]bool, 256) }}
+var storeScanSeenPool = sync.Pool{
+	New: func() any { return &fillWalkSeen{values: make(map[uintptr]bool, 256)} },
+}
 
 const storeScanSeenKeepLimit = 1 << 14
 
-func borrowStoreScanSeen() map[uintptr]bool {
-	return storeScanSeenPool.Get().(map[uintptr]bool)
+func borrowStoreScanSeen() *fillWalkSeen {
+	return storeScanSeenPool.Get().(*fillWalkSeen)
 }
 
-func releaseStoreScanSeen(seen map[uintptr]bool) {
-	if len(seen) > storeScanSeenKeepLimit {
-		return
+func releaseStoreScanSeen(seen *fillWalkSeen) {
+	if seen.resetWithLimit(storeScanSeenKeepLimit) {
+		storeScanSeenPool.Put(seen)
 	}
-	clear(seen)
-	storeScanSeenPool.Put(seen)
 }
 
 // storeScanWalkReflect is the reflective store-scan walk, the specification the generated walker

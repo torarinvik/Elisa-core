@@ -156,15 +156,12 @@ func BenchmarkStoreScanHeaderCompound(b *testing.B) {
 		b.Run(label, func(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
-				var seen map[uintptr]bool
 				if pooled {
-					seen = borrowStoreScanSeen()
-				} else {
-					seen = map[uintptr]bool{}
-				}
-				storeScanMentionsSink = storeScanMentionsHeaderWalk(reflect.ValueOf(expr), names, seen)
-				if pooled {
+					seen := borrowStoreScanSeen()
+					storeScanMentionsSink = storeScanMentionsHeaderWalk(reflect.ValueOf(expr), names, seen.values)
 					releaseStoreScanSeen(seen)
+				} else {
+					storeScanMentionsSink = storeScanMentionsHeaderWalk(reflect.ValueOf(expr), names, map[uintptr]bool{})
 				}
 			}
 		})
