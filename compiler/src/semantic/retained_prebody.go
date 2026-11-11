@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 
 	"elisacore/src/ast"
@@ -113,19 +114,39 @@ func capturePreBody(a *Analyzer, decls []scopedDecl) *preBodyState {
 func (a *Analyzer) preBodyFunctionFingerprint(fn *ast.FuncDecl) string {
 	var b strings.Builder
 	b.WriteString(retainedHeader(fn))
-	fmt.Fprintf(&b, "\x00targets=%v", a.paramStoreTargets[fn])
-	fmt.Fprintf(&b, "\x00regionIndex=%v", a.regionParamCalleeParamIndex[fn.Name])
+	b.WriteString("\x00targets=[")
+	for i, targets := range a.paramStoreTargets[fn] {
+		if i != 0 {
+			b.WriteByte(' ')
+		}
+		if len(targets) == 0 {
+			b.WriteString("map[]")
+		} else {
+			fmt.Fprint(&b, targets)
+		}
+	}
+	b.WriteByte(']')
+	b.WriteString("\x00regionIndex=")
+	if indices := a.regionParamCalleeParamIndex[fn.Name]; len(indices) != 0 {
+		fmt.Fprint(&b, indices)
+	} else {
+		b.WriteString("map[]")
+	}
 	if sym := a.funcDeclSymbols[fn]; sym != nil {
 		if ft, ok := sym.Type.(*FuncType); ok {
-			fmt.Fprintf(&b, "\x00type=%s", ft.String())
-			fmt.Fprintf(&b, "\x00callerArena=%v", a.regionPolyReturnsCallerArena[ft])
+			b.WriteString("\x00type=")
+			b.WriteString(ft.String())
+			b.WriteString("\x00callerArena=")
+			b.WriteString(strconv.FormatBool(a.regionPolyReturnsCallerArena[ft]))
 			// Only the roots: the value is one witness name, picked by map order.
 			roots := make([]string, 0, len(a.packedStoreBuilders[ft]))
 			for root := range a.packedStoreBuilders[ft] {
 				roots = append(roots, root)
 			}
 			sort.Strings(roots)
-			fmt.Fprintf(&b, "\x00packedBuilders=%v", roots)
+			b.WriteString("\x00packedBuilders=[")
+			b.WriteString(strings.Join(roots, " "))
+			b.WriteByte(']')
 		}
 	}
 	return retainedNormalized(b.String())
