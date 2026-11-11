@@ -53,11 +53,20 @@ type resolvedTypeNameLocation struct {
 
 // resolvedTypeNameSourceOwner records source ownership before body analysis
 // can attach shared declaration TypeExpr nodes beneath local rewrite wrappers.
-type resolvedTypeNameSourceOwner struct {
-	owner     string
-	region    string
-	path      string
-	ambiguous bool
+// Source ownership reuses the captured location records. Interpretation remains
+// separate: multiple paths within one owner are valid contribution locations,
+// but cannot authorize exclusive source-node retirement or body rebinding.
+type resolvedTypeNameSourceOwner = resolvedTypeNameLocation
+
+func (owner resolvedTypeNameLocation) sourceAmbiguous() bool {
+	return owner.ambiguous || owner.firstPath == "" || len(owner.morePaths) != 0
+}
+
+func (owner resolvedTypeNameLocation) sourcePath() string {
+	if len(owner.morePaths) != 0 {
+		return ""
+	}
+	return owner.firstPath
 }
 
 type resolvedTypeNamePointer struct {
@@ -544,20 +553,14 @@ func resolvedTypeNameBodyRows(rows map[ast.TypeExpr]string, locations map[ast.Ty
 	return byFunction
 }
 
+// resolvedTypeNameSourceOwners transfers the captured location map to its
+// immutable source-ownership role. Callers may read locations afterwards, but
+// updates must clone the map, as retained body replay already does.
 func resolvedTypeNameSourceOwners(locations map[ast.TypeExpr]resolvedTypeNameLocation) map[ast.TypeExpr]resolvedTypeNameSourceOwner {
-	owners := make(map[ast.TypeExpr]resolvedTypeNameSourceOwner, len(locations))
-	for expr, location := range locations {
-		owner := resolvedTypeNameSourceOwner{
-			owner:     location.owner,
-			region:    location.region,
-			ambiguous: location.ambiguous || location.firstPath == "" || len(location.morePaths) != 0,
-		}
-		if len(location.morePaths) == 0 {
-			owner.path = location.firstPath
-		}
-		owners[expr] = owner
+	if locations == nil {
+		return map[ast.TypeExpr]resolvedTypeNameSourceOwner{}
 	}
-	return owners
+	return locations
 }
 
 // importResolvedTypeNameBodyRows carries certified facts onto the body AST

@@ -144,7 +144,7 @@ func resolvedTypeNameFastBodySourceOwners(edits [][3]*ast.FuncDecl, preparedBodi
 			if sourceErr != nil || preparedErr != nil || sourceDigest != preparedDigest {
 				return nil, fmt.Errorf("fast-prepared body changes TypeExpr syntax")
 			}
-			owners[preparedExpr] = resolvedTypeNameSourceOwner{owner: "fn:" + key, region: "body", path: path}
+			owners[preparedExpr] = resolvedTypeNameSourceOwner{owner: "fn:" + key, region: "body", firstPath: path}
 		}
 	}
 	return owners, nil
@@ -347,7 +347,7 @@ func resolvedTypeNamePreparedBodyContribution(a *Analyzer, functionKey string, s
 			continue
 		}
 		if owner, known := sourceOwners[expr]; known {
-			if owner.ambiguous || owner.owner != ownerKey || owner.region != "body" {
+			if owner.sourceAmbiguous() || owner.owner != ownerKey || owner.region != "body" {
 				continue
 			}
 		}
@@ -408,10 +408,10 @@ func rebindResolvedTypeNameBodyRows(a *Analyzer, sourceOwners map[ast.TypeExpr]r
 		if !owned || sourceOwner.owner != "fn:"+ownerKey || sourceOwner.region != "body" {
 			continue
 		}
-		if sourceOwner.ambiguous || sourceOwner.path == "" {
+		if sourceOwner.sourceAmbiguous() || sourceOwner.sourcePath() == "" {
 			return nil, fmt.Errorf("old body TypeExpr has no unique source path")
 		}
-		newExpr := newPaths[sourceOwner.path]
+		newExpr := newPaths[sourceOwner.sourcePath()]
 		if newExpr == nil {
 			return nil, fmt.Errorf("prepared body lost a resolved type-name path")
 		}
@@ -455,7 +455,7 @@ func prepareResolvedTypeNameRetirement(a *Analyzer, sourceOwners map[ast.TypeExp
 	}
 	for expr, value := range a.resolvedTypeNames {
 		owner, ok := sourceOwners[expr]
-		if !ok || owner.ambiguous {
+		if !ok || owner.sourceAmbiguous() {
 			continue // Synthetic or shared post-body keys have no exclusive deletion authority.
 		}
 		if retireAll[owner.owner] || owner.region == "body" && retireBodies[owner.owner] {

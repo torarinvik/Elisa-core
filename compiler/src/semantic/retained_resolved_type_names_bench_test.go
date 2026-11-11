@@ -26,3 +26,17 @@ func BenchmarkResolvedTypeNameCapture(b *testing.B) {
 		}
 	}
 }
+
+var resolvedTypeNameOwnersBenchmarkSink map[ast.TypeExpr]resolvedTypeNameSourceOwner
+
+func BenchmarkResolvedTypeNameSourceOwners(b *testing.B) {
+	locations := make(map[ast.TypeExpr]resolvedTypeNameLocation, 32768)
+	for i := 0; i < 32768; i++ {
+		locations[&ast.NamedType{Name: "Box"}] = resolvedTypeNameLocation{owner: "fn:Bench::f#0", region: "body", firstPath: "$[0].Type"}
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		resolvedTypeNameOwnersBenchmarkSink = resolvedTypeNameSourceOwners(locations)
+	}
+}
