@@ -1,3 +1,17 @@
+//go:build cgo
+
+#include <cstdint>
+#include <llvm-c/Core.h>
+#include <llvm/Config/llvm-config.h>
+
+#if LLVM_VERSION_MAJOR >= 23
+#include <llvm/ADT/SmallVector.h>
+#include <llvm/IR/GlobalVariable.h>
+#include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/Module.h>
+
+using namespace llvm;
+
 // Count the visits to an unsigned divide-by-ten loop using the input's
 // highest set bit and one comparison against the next decimal power.
 namespace {
@@ -185,13 +199,14 @@ static bool foldDecimalDigitCount(BasicBlock &Body, GlobalVariable *&Powers) {
 }
 } // namespace
 
-static unsigned elisacoreFoldDecimalDigitCounts(Module &M) {
-  if (!M.getTargetTriple().isAArch64()) return 0;
+extern "C" unsigned elisacoreFoldDigitCountsInFunction(LLVMValueRef FunctionRef,
+                                                       LLVMValueRef *PowersRef) {
+  auto &F = *cast<Function>(unwrap(FunctionRef));
+  auto *Powers = cast_or_null<GlobalVariable>(unwrap(*PowersRef));
   unsigned Changed = 0;
-  GlobalVariable *Powers = nullptr;
-  for (Function &F : M) {
-    if (BDU_SkipFunction(F, M) || F.size() > 128) continue;
-    for (BasicBlock &BB : F) Changed += foldPowerOfTwoDigitCount(BB) || foldDecimalDigitCount(BB, Powers);
-  }
+  for (BasicBlock &BB : F)
+    Changed += foldPowerOfTwoDigitCount(BB) || foldDecimalDigitCount(BB, Powers);
+  *PowersRef = Powers ? wrap(Powers) : nullptr;
   return Changed;
 }
+#endif

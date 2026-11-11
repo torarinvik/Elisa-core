@@ -299,7 +299,18 @@ extern "C" unsigned elisacoreUnrollBoundedDivisionLoops(LLVMModuleRef Ref) {
 #include "llvm_shift_parity.cpp"
 #include "llvm_ring_index_bounds.cpp"
 #include "llvm_guarded_counter_bounds.cpp"
-#include "llvm_decimal_digit_count.cpp"
+extern "C" unsigned elisacoreFoldDigitCountsInFunction(LLVMValueRef, LLVMValueRef *);
+
+static unsigned foldRadixDigitCounts(Module &M) {
+  if (!M.getTargetTriple().isAArch64()) return 0;
+  unsigned Changed = 0;
+  LLVMValueRef Powers = nullptr;
+  for (Function &F : M) {
+    if (!BDU_SkipFunction(F, M) && F.size() <= 128)
+      Changed += elisacoreFoldDigitCountsInFunction(wrap(&F), &Powers);
+  }
+  return Changed;
+}
 #include "llvm_halving_runs.cpp"
 #include "llvm_shift_bit_reverse.cpp"
 extern "C" bool elisacoreFoldPowerPositionInFunction(LLVMValueRef);
@@ -352,7 +363,7 @@ extern "C" unsigned elisacoreOptimizeBoundedDivisionLoops(LLVMModuleRef M, LLVMT
     Changed += elisacoreFoldPowerPosition(*llvm::unwrap(M));
     Changed += elisacoreFoldRingIndexBounds(*llvm::unwrap(M));
     Changed += elisacoreFoldGuardedCounterBounds(*llvm::unwrap(M));
-    Changed += elisacoreFoldDecimalDigitCounts(*llvm::unwrap(M));
+    Changed += foldRadixDigitCounts(*llvm::unwrap(M));
     Changed += elisacoreFoldHalvingRuns(*llvm::unwrap(M));
     Changed += elisacoreFoldRangeAndLoops(*llvm::unwrap(M));
     Changed += elisacoreFoldScalarLoopIdioms(*llvm::unwrap(M));

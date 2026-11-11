@@ -22,7 +22,11 @@ unsigned elisacoreBiasValidationReturns(LLVMModuleRef);
 */
 import "C"
 
-import "unsafe"
+import (
+	// The bounded-division pass calls the radix-width matcher.
+	_ "elisacore/src/backend/llvmnative/digitcounts"
+	"unsafe"
+)
 
 // BiasValidationReturns adjusts branches in validation routines. Calling a native
 // pass through this package also links the shared translation unit's entry points
