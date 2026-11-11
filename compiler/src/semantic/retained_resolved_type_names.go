@@ -130,12 +130,23 @@ func captureResolvedTypeNameContributions(rows map[ast.TypeExpr]string, decls []
 		if !value.IsValid() {
 			return nil
 		}
-		switch value.Kind() {
-		case reflect.Interface:
+		// AST child fields are commonly interfaces wrapping a pointer. Charge
+		// both nodes to the traversal limits while keeping them in one frame.
+		if value.Kind() == reflect.Interface {
 			if value.IsNil() {
 				return nil
 			}
-			return walk(value.Elem(), owner, region, path, skipNestedFunctions, depth+1)
+			work++
+			if work > 32_000_000 {
+				return fmt.Errorf("AST ownership walk work budget exceeded (%d)", work)
+			}
+			depth++
+			if depth > 2048 {
+				return fmt.Errorf("AST ownership walk depth exceeded")
+			}
+			value = value.Elem()
+		}
+		switch value.Kind() {
 		case reflect.Pointer:
 			if value.IsNil() {
 				return nil
