@@ -228,6 +228,18 @@ func (p *Parser) parseConstModuleMemberDecl() *ast.ConstDecl {
 func (p *Parser) parseUsingDecl() *ast.UsingDecl {
 	pos := p.cur().Pos
 	p.expectIdentText("using")
+	first := p.parseUsingTarget(pos)
+	for p.match(lexer.TOKEN_COMMA) {
+		if p.peek() == lexer.TOKEN_NEWLINE || p.peek() == lexer.TOKEN_EOF {
+			break
+		}
+		p.pendingDecls = append(p.pendingDecls, p.parseUsingTarget(p.cur().Pos))
+	}
+	p.expectNewline()
+	return first
+}
+
+func (p *Parser) parseUsingTarget(pos lexer.Pos) *ast.UsingDecl {
 	// A `using` path walks modules (its last segment may be a member): `::` only.
 	namePos := p.cur().Pos
 	segments := []string{p.expect(lexer.TOKEN_IDENT).Text}
@@ -246,10 +258,8 @@ func (p *Parser) parseUsingDecl() *ast.UsingDecl {
 	}
 	if p.match(lexer.TOKEN_AS) {
 		alias := p.expect(lexer.TOKEN_IDENT).Text
-		p.expectNewline()
 		return &ast.UsingDecl{Position: pos, Name: strings.Join(segments, "."), Alias: alias}
 	}
-	p.expectNewline()
 	if len(segments) > 1 {
 		member := segments[len(segments)-1]
 		module := strings.Join(segments[:len(segments)-1], ".")
