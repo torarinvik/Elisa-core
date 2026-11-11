@@ -27,7 +27,10 @@ const MATH_LN10: f64 = 2.30258509299404568402
 @intrinsic("llvm.sqrt.f64")
 extern sqrt(x: f64) -> f64
 extern cbrt(x: f64) -> f64
+# These pure bindings let LLVM combine sine and cosine of the same angle.
+@intrinsic("llvm.sin.f64")
 extern sin(x: f64) -> f64
+@intrinsic("llvm.cos.f64")
 extern cos(x: f64) -> f64
 extern tan(x: f64) -> f64
 extern asin(x: f64) -> f64
@@ -60,7 +63,9 @@ extern fmax(x: f64, y: f64) -> f64
 
 @intrinsic("llvm.sqrt.f32")
 extern sqrtf(x: f32) -> f32
+@intrinsic("llvm.sin.f32")
 extern sinf(x: f32) -> f32
+@intrinsic("llvm.cos.f32")
 extern cosf(x: f32) -> f32
 extern tanf(x: f32) -> f32
 extern atan2f(y: f32, x: f32) -> f32
