@@ -232,7 +232,14 @@ func advanceAnalysisDiskBuildWithCheckpoint(program *loadedProgram, file *ast.Fi
 		post, phases := build.PostProgress()
 		saveStart := time.Now()
 		checkpointSized = false
-		data, err := build.MarshalStateWithCapacity(capacityHint)
+		// The first large checkpoint has no prior wire size. Reserve from
+		// source size to avoid copying a growing output buffer several times.
+		// Once published, use the measured size for subsequent checkpoints.
+		hint := capacityHint
+		if hint == 0 && len(program.source) >= 4<<20 {
+			hint = 8 * min(len(program.source), 32<<20)
+		}
+		data, err := build.MarshalStateWithCapacity(hint)
 		if err == nil {
 			budgetStateBytes = len(data) + len(data)/16
 			capacityHint = min(budgetStateBytes, 1<<30)
