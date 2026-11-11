@@ -58,24 +58,7 @@ func (e *encoder) bindAliases() error {
 		e.recordAllocation(node.value, uint64(i+1))
 	}
 
-	slices.SortFunc(e.allocations, func(a, b allocation) int {
-		if order := cmp.Compare(a.start, b.start); order != 0 {
-			return order
-		}
-		if order := cmp.Compare(b.end, a.end); order != 0 {
-			return order
-		}
-		// Prefer a backing slice to a pointer to its only element.
-		aSlice := e.nodes.at(int(a.id-1)).value.Kind() == reflect.Slice
-		bSlice := e.nodes.at(int(b.id-1)).value.Kind() == reflect.Slice
-		if aSlice == bSlice {
-			return 0
-		}
-		if aSlice {
-			return -1
-		}
-		return 1
-	})
+	e.sortAllocations()
 	var active []allocation
 	for _, current := range e.allocations {
 		kept := active[:0]
@@ -109,6 +92,69 @@ func (e *encoder) bindAliases() error {
 		active = append(active, current)
 	}
 	return nil
+}
+
+func (e *encoder) sortAllocations() {
+	order := func(a, b allocation) int {
+		if a.start != b.start {
+			return cmp.Compare(a.start, b.start)
+		}
+		if a.end != b.end {
+			return cmp.Compare(b.end, a.end)
+		}
+		// Prefer a backing slice to a pointer to its only element.
+		aSlice := e.nodes.at(int(a.id-1)).value.Kind() == reflect.Slice
+		bSlice := e.nodes.at(int(b.id-1)).value.Kind() == reflect.Slice
+		if aSlice == bSlice {
+			return 0
+		}
+		if aSlice {
+			return -1
+		}
+		return 1
+	}
+	if len(e.allocations) < 1<<17 {
+		slices.SortFunc(e.allocations, order)
+		return
+	}
+	// Sort large inventories by address with fixed-size buckets. The common
+	// high address bits need no passes. Equal starts use the original order.
+	const bits = 11
+	const mask = 1<<bits - 1
+	items := e.allocations
+	var differing uintptr
+	for _, item := range items {
+		differing |= item.start ^ items[0].start
+	}
+	scratch := make([]allocation, len(items))
+	for shift := uint(0); differing>>shift != 0; shift += bits {
+		var offsets [1 << bits]int
+		for _, item := range items {
+			offsets[(item.start>>shift)&mask]++
+		}
+		start := 0
+		for bucket, size := range offsets {
+			offsets[bucket] = start
+			start += size
+		}
+		for _, item := range items {
+			bucket := (item.start >> shift) & mask
+			scratch[offsets[bucket]] = item
+			offsets[bucket]++
+		}
+		items, scratch = scratch, items
+	}
+	for first := 0; first < len(items); {
+		last := first + 1
+		for last < len(items) && items[last].start == items[first].start {
+			last++
+		}
+		if last-first > 1 {
+			slices.SortFunc(items[first:last], order)
+		}
+		first = last
+	}
+	e.allocations = items
 }
 
 func (e *encoder) deriveAlias(owner, target allocation) (*nodeAlias, bool) {
