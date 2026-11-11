@@ -155,6 +155,15 @@ func (b *AnalysisBuild) AdvanceBefore(maxDeclarations int, budget time.Duration,
 	if completed > 0 && (maxDeclarations > 0 && completed >= maxDeclarations || budget > 0 && time.Since(started) >= budget) {
 		return nil, nil, nil
 	}
+	// Unfinished checkpoints can reconstruct their comparison parse from the
+	// exact expanded source. Only the published retained baseline needs it.
+	if r.pristine == nil {
+		pristine, why := proofReportBindingSource(b.file.Filename, r.src)
+		if why != "" {
+			return nil, nil, fmt.Errorf("restore checkpoint comparison syntax: %s", why)
+		}
+		r.pristine = pristine
+	}
 	result := a.finishProgramResult(b.file, b.loweredFile, r.decls, r.options, nil)
 	r.result = result
 	r.refreshPlainDefaultProducts()
@@ -278,6 +287,8 @@ func (b *AnalysisBuild) MarshalState() ([]byte, error) {
 // MarshalStateWithCapacity uses a prior checkpoint's size as an allocation hint.
 // It preserves the same schema and validation as MarshalState.
 func (b *AnalysisBuild) MarshalStateWithCapacity(capacity int) ([]byte, error) {
+	pendingRetainedMu.Lock()
+	defer pendingRetainedMu.Unlock()
 	if err := b.validate(); err != nil {
 		return nil, err
 	}
@@ -298,6 +309,12 @@ func (b *AnalysisBuild) MarshalStateWithCapacity(capacity int) ([]byte, error) {
 	if a.smtSnapshotTainted {
 		return nil, fmt.Errorf("solver query outcome was not reusable; retry analysis in the next process")
 	}
+	// The private build owns this independent comparison parse. Suspend its
+	// reference while encoding so checkpoints carry source bytes once; restore
+	// it before releasing the retained-analysis lock, including on error.
+	pristine := r.pristine
+	r.pristine = nil
+	defer func() { r.pristine = pristine }()
 	return semanticStateRegistry().EncodeFramedWithCapacity(b, capacity)
 }
 

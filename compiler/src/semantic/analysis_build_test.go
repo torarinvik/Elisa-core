@@ -33,13 +33,20 @@ def caller() -> i64:
 		}
 		paused := 0
 		for {
+			pristine := b.retained.pristine
 			data, err := b.MarshalState()
 			if err != nil {
 				t.Fatalf("case %d step %d checkpoint: %v", i, paused, err)
 			}
+			if b.retained.pristine != pristine {
+				t.Fatal("checkpoint changed the live comparison syntax")
+			}
 			b, err = RestoreAnalysisBuild(data)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if b.retained.pristine != nil {
+				t.Fatal("unfinished checkpoint stored reconstructible comparison syntax")
 			}
 			before, total := b.Progress()
 			postBefore, _ := b.PostProgress()
@@ -61,6 +68,9 @@ def caller() -> i64:
 			}
 			if state == nil {
 				t.Fatal("finished analysis omitted retained state")
+			}
+			if state.pristine == nil || state.pristine == result.File || state.pristine.Filename != result.File.Filename {
+				t.Fatal("finished analysis omitted independent comparison syntax")
 			}
 			cold := AnalyzeWithOptions(retainedParse(t, source), AnalyzeOptions{})
 			assertIncrementalResultParity(t, cold, result)
