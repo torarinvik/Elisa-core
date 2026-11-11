@@ -2,19 +2,13 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
 )
 
-func (s *functionState) emitBuiltinDArrayReserveCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitBuiltinDArrayReserveCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if expr == nil {
 		return nil, nil, false, nil
 	}
@@ -62,7 +56,7 @@ func (s *functionState) emitBuiltinDArrayReserveCall(expr *ast.CallExpr) (C.LLVM
 // emitBuiltinDArrayResizeCall lowers `da.resize(n)`: ensure capacity >= n (one growth, like
 // reserve) then seal count := n (like clear, but storing n instead of 0). The result is a
 // fixed-length array filled by index — no per-element push.
-func (s *functionState) emitBuiltinDArrayResizeCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitBuiltinDArrayResizeCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if expr == nil {
 		return nil, nil, false, nil
 	}
@@ -117,7 +111,7 @@ func (s *functionState) emitBuiltinDArrayResizeCall(expr *ast.CallExpr) (C.LLVMV
 			return nil, nil, true, err
 		}
 	}
-	C.LLVMBuildStore(s.builder, neededValue, countPtr)
+	llvmBuildStore(s.builder, neededValue, countPtr)
 	return darrayPtr, resultType, true, nil
 }
 
@@ -197,17 +191,17 @@ func darrayElemNeedsZeroInit(t semantic.Type, seen map[semantic.Type]bool) bool 
 // darray's backing store. The capacity is already >= neededCount (caller ran
 // emitBuiltinDArrayEnsureCapacity). A memset of a zero-length tail (shrink/no-op) is
 // harmless, so the only guard needed is a saturating subtraction.
-func (s *functionState) emitDArrayResizeZeroFillTail(darrayPtr C.LLVMValueRef, darrayType *semantic.DArrayType, countPtr C.LLVMValueRef, neededValue C.LLVMValueRef) error {
+func (s *functionState) emitDArrayResizeZeroFillTail(darrayPtr llvmIRValueRef, darrayType *semantic.DArrayType, countPtr llvmIRValueRef, neededValue llvmIRValueRef) error {
 	usizeType := s.g.namedType("usize")
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return err
 	}
-	oldCount := C.LLVMBuildLoad2(s.builder, usizeLLVMType, countPtr, cStringFree("darray.resize.oldcount"))
-	grows := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntUGT), neededValue, oldCount, cStringFree("darray.resize.grows"))
-	rawDelta := C.LLVMBuildSub(s.builder, neededValue, oldCount, cStringFree("darray.resize.rawdelta"))
-	zero := C.LLVMConstInt(usizeLLVMType, 0, 0)
-	deltaCount := C.LLVMBuildSelect(s.builder, grows, rawDelta, zero, cStringFree("darray.resize.delta"))
+	oldCount := llvmBuildLoad2(s.builder, usizeLLVMType, countPtr, cStringFree("darray.resize.oldcount"))
+	grows := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntUGT), neededValue, oldCount, cStringFree("darray.resize.grows"))
+	rawDelta := llvmBuildSub(s.builder, neededValue, oldCount, cStringFree("darray.resize.rawdelta"))
+	zero := llvmConstInt(usizeLLVMType, 0, 0)
+	deltaCount := llvmBuildSelect(s.builder, grows, rawDelta, zero, cStringFree("darray.resize.delta"))
 
 	elemSize, err := s.sizeOfType(darrayType.Elem)
 	if err != nil {
@@ -226,10 +220,10 @@ func (s *functionState) emitDArrayResizeZeroFillTail(darrayPtr C.LLVMValueRef, d
 	if err != nil {
 		return err
 	}
-	voidPtrType := C.LLVMPointerTypeInContext(s.g.context, 0)
-	itemsValue := C.LLVMBuildLoad2(s.builder, voidPtrType, itemsPtr, cStringFree("darray.resize.items"))
-	i8Type := C.LLVMInt8TypeInContext(s.g.context)
-	tailPtr := C.LLVMBuildGEP2(s.builder, i8Type, itemsValue, llvmValueSlicePtr([]C.LLVMValueRef{offsetBytes}), 1, cStringFree("darray.resize.tailptr"))
+	voidPtrType := llvmPointerTypeInContext(s.g.context, 0)
+	itemsValue := llvmBuildLoad2(s.builder, voidPtrType, itemsPtr, cStringFree("darray.resize.items"))
+	i8Type := llvmInt8TypeInContext(s.g.context)
+	tailPtr := llvmBuildGEP2(s.builder, i8Type, itemsValue, llvmValueSlicePtr([]llvmIRValueRef{offsetBytes}), 1, cStringFree("darray.resize.tailptr"))
 
 	voidType := s.g.namedType("void")
 	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
@@ -245,15 +239,15 @@ func (s *functionState) emitDArrayResizeZeroFillTail(darrayPtr C.LLVMValueRef, d
 	if err != nil {
 		return err
 	}
-	fillZero := C.LLVMConstInt(C.LLVMInt32TypeInContext(s.g.context), 0, 0)
+	fillZero := llvmConstInt(llvmInt32TypeInContext(s.g.context), 0, 0)
 	fillValue, err := s.coerceValue(fillZero, s.g.namedType("i32"), memsetValueType)
 	if err != nil {
 		return err
 	}
-	_ = s.buildCall(memsetLLVMType, memsetCallee, []C.LLVMValueRef{tailPtr, fillValue, tailBytes}, "darray.resize.zerofill")
+	_ = s.buildCall(memsetLLVMType, memsetCallee, []llvmIRValueRef{tailPtr, fillValue, tailBytes}, "darray.resize.zerofill")
 	return nil
 }
-func (s *functionState) emitBuiltinDArrayClearCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitBuiltinDArrayClearCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if expr == nil {
 		return nil, nil, false, nil
 	}
@@ -281,10 +275,10 @@ func (s *functionState) emitBuiltinDArrayClearCall(expr *ast.CallExpr) (C.LLVMVa
 	if err != nil {
 		return nil, nil, true, err
 	}
-	C.LLVMBuildStore(s.builder, C.LLVMConstInt(usizeLLVMType, 0, 0), countPtr)
+	llvmBuildStore(s.builder, llvmConstInt(usizeLLVMType, 0, 0), countPtr)
 	return darrayPtr, resultType, true, nil
 }
-func (s *functionState) emitBuiltinDArrayTruncateCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitBuiltinDArrayTruncateCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if expr == nil {
 		return nil, nil, false, nil
 	}
@@ -312,26 +306,26 @@ func (s *functionState) emitBuiltinDArrayTruncateCall(expr *ast.CallExpr) (C.LLV
 	if err != nil {
 		return nil, nil, true, err
 	}
-	currentCount := C.LLVMBuildLoad2(s.builder, usizeLLVMType, countPtr, cStringFree("darray.truncate.count"))
+	currentCount := llvmBuildLoad2(s.builder, usizeLLVMType, countPtr, cStringFree("darray.truncate.count"))
 	limitValue, _, err := s.emitExpr(expr.Args[0], usizeType)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	shouldStore := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), limitValue, currentCount, cStringFree("darray.truncate.lt"))
-	entryBlock := C.LLVMGetInsertBlock(s.builder)
-	storeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("darray.truncate.store"))
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("darray.truncate.merge"))
-	C.LLVMBuildCondBr(s.builder, shouldStore, storeBB, mergeBB)
+	shouldStore := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntULT), limitValue, currentCount, cStringFree("darray.truncate.lt"))
+	entryBlock := llvmGetInsertBlock(s.builder)
+	storeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("darray.truncate.store"))
+	mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("darray.truncate.merge"))
+	llvmBuildCondBr(s.builder, shouldStore, storeBB, mergeBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, storeBB)
-	C.LLVMBuildStore(s.builder, limitValue, countPtr)
-	C.LLVMBuildBr(s.builder, mergeBB)
+	llvmPositionBuilderAtEnd(s.builder, storeBB)
+	llvmBuildStore(s.builder, limitValue, countPtr)
+	llvmBuildBr(s.builder, mergeBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	llvmPositionBuilderAtEnd(s.builder, mergeBB)
 	_ = entryBlock
 	return darrayPtr, resultType, true, nil
 }
-func (s *functionState) emitBuiltinDArrayReceiverPtr(receiver ast.Expr, receiverRefType *semantic.RefType) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitBuiltinDArrayReceiverPtr(receiver ast.Expr, receiverRefType *semantic.RefType) (llvmIRValueRef, semantic.Type, error) {
 	if receiverRefType != nil {
 		ptr, _, err := s.emitExpr(receiver, receiverRefType)
 		return ptr, receiverRefType, err
@@ -343,7 +337,7 @@ func (s *functionState) emitBuiltinDArrayReceiverPtr(receiver ast.Expr, receiver
 	resultType := &semantic.RefType{Elem: s.exprType(receiver), Mutable: true, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	return ptr, resultType, nil
 }
-func (s *functionState) emitBuiltinDArrayCountPtr(darrayPtr C.LLVMValueRef, darrayType *semantic.DArrayType) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitBuiltinDArrayCountPtr(darrayPtr llvmIRValueRef, darrayType *semantic.DArrayType) (llvmIRValueRef, semantic.Type, error) {
 	if darrayType == nil {
 		return nil, nil, fmt.Errorf("missing darray type")
 	}
@@ -351,10 +345,10 @@ func (s *functionState) emitBuiltinDArrayCountPtr(darrayPtr C.LLVMValueRef, darr
 	if err != nil {
 		return nil, nil, err
 	}
-	countPtr := C.LLVMBuildStructGEP2(s.builder, containerType, darrayPtr, 1, cStringFree("darray.count.ptr"))
+	countPtr := llvmBuildStructGEP2(s.builder, containerType, darrayPtr, 1, cStringFree("darray.count.ptr"))
 	return countPtr, s.g.namedType("usize"), nil
 }
-func (s *functionState) emitBuiltinDArrayItemsPtr(darrayPtr C.LLVMValueRef, darrayType *semantic.DArrayType) (C.LLVMValueRef, error) {
+func (s *functionState) emitBuiltinDArrayItemsPtr(darrayPtr llvmIRValueRef, darrayType *semantic.DArrayType) (llvmIRValueRef, error) {
 	if darrayType == nil {
 		return nil, fmt.Errorf("missing darray type")
 	}
@@ -362,9 +356,9 @@ func (s *functionState) emitBuiltinDArrayItemsPtr(darrayPtr C.LLVMValueRef, darr
 	if err != nil {
 		return nil, err
 	}
-	return C.LLVMBuildStructGEP2(s.builder, containerType, darrayPtr, 0, cStringFree("darray.items.ptr")), nil
+	return llvmBuildStructGEP2(s.builder, containerType, darrayPtr, 0, cStringFree("darray.items.ptr")), nil
 }
-func (s *functionState) emitBuiltinDArrayCapacityPtr(darrayPtr C.LLVMValueRef, darrayType *semantic.DArrayType) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitBuiltinDArrayCapacityPtr(darrayPtr llvmIRValueRef, darrayType *semantic.DArrayType) (llvmIRValueRef, semantic.Type, error) {
 	if darrayType == nil {
 		return nil, nil, fmt.Errorf("missing darray type")
 	}
@@ -372,10 +366,10 @@ func (s *functionState) emitBuiltinDArrayCapacityPtr(darrayPtr C.LLVMValueRef, d
 	if err != nil {
 		return nil, nil, err
 	}
-	capacityPtr := C.LLVMBuildStructGEP2(s.builder, containerType, darrayPtr, 2, cStringFree("darray.capacity.ptr"))
+	capacityPtr := llvmBuildStructGEP2(s.builder, containerType, darrayPtr, 2, cStringFree("darray.capacity.ptr"))
 	return capacityPtr, s.g.namedType("usize"), nil
 }
-func (s *functionState) emitBuiltinStoreReceiverPtr(receiver ast.Expr, receiverRefType *semantic.RefType) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitBuiltinStoreReceiverPtr(receiver ast.Expr, receiverRefType *semantic.RefType) (llvmIRValueRef, semantic.Type, error) {
 	if receiverRefType != nil {
 		ptr, _, err := s.emitExpr(receiver, receiverRefType)
 		return ptr, receiverRefType.Elem, err
@@ -386,7 +380,7 @@ func (s *functionState) emitBuiltinStoreReceiverPtr(receiver ast.Expr, receiverR
 	}
 	return ptr, s.exprType(receiver), nil
 }
-func (s *functionState) emitBuiltinStoreFieldDArrayPtr(storePtr C.LLVMValueRef, storeType semantic.Type, fieldName string) (C.LLVMValueRef, *semantic.DArrayType, error) {
+func (s *functionState) emitBuiltinStoreFieldDArrayPtr(storePtr llvmIRValueRef, storeType semantic.Type, fieldName string) (llvmIRValueRef, *semantic.DArrayType, error) {
 	fieldType, index, _, _, err := s.g.fieldInfo(storeType, fieldName)
 	if err != nil {
 		return nil, nil, err
@@ -399,10 +393,10 @@ func (s *functionState) emitBuiltinStoreFieldDArrayPtr(storePtr C.LLVMValueRef, 
 	if err != nil {
 		return nil, nil, err
 	}
-	fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerType, storePtr, C.unsigned(index), cStringFree("store."+fieldName+".ptr"))
+	fieldPtr := llvmBuildStructGEP2(s.builder, containerType, storePtr, llvmIRUnsigned(index), cStringFree("store."+fieldName+".ptr"))
 	return fieldPtr, darrayType, nil
 }
-func (s *functionState) emitBuiltinDArrayEnsureCapacity(darrayPtr C.LLVMValueRef, darrayType *semantic.DArrayType, arenaRef C.LLVMValueRef, neededValue C.LLVMValueRef, name string) error {
+func (s *functionState) emitBuiltinDArrayEnsureCapacity(darrayPtr llvmIRValueRef, darrayType *semantic.DArrayType, arenaRef llvmIRValueRef, neededValue llvmIRValueRef, name string) error {
 	if darrayType == nil {
 		return fmt.Errorf("missing darray type")
 	}
@@ -414,33 +408,33 @@ func (s *functionState) emitBuiltinDArrayEnsureCapacity(darrayPtr C.LLVMValueRef
 	if err != nil {
 		return err
 	}
-	currentCapacity := C.LLVMBuildLoad2(s.builder, usizeLLVMType, capacityPtr, cStringFree(name+".capacity"))
-	hasCapacity := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntUGE), currentCapacity, neededValue, cStringFree(name+".capacity.ok"))
-	growBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".grow"))
-	contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".cont"))
-	C.LLVMBuildCondBr(s.builder, hasCapacity, contBB, growBB)
+	currentCapacity := llvmBuildLoad2(s.builder, usizeLLVMType, capacityPtr, cStringFree(name+".capacity"))
+	hasCapacity := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntUGE), currentCapacity, neededValue, cStringFree(name+".capacity.ok"))
+	growBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".grow"))
+	contBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".cont"))
+	llvmBuildCondBr(s.builder, hasCapacity, contBB, growBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, growBB)
-	zero := C.LLVMConstInt(usizeLLVMType, 0, 0)
+	llvmPositionBuilderAtEnd(s.builder, growBB)
+	zero := llvmConstInt(usizeLLVMType, 0, 0)
 	// Keep the compiler's builtin push lowering in lockstep with
 	// elisacore_std.collections' ARENA_DA_INIT_CAP. A stale 256 here defeats
 	// the runtime's small-seed policy and multiplies peak memory during the
 	// recursive AST construction that motivated that policy.
-	initCap := C.LLVMConstInt(usizeLLVMType, 8, 0)
+	initCap := llvmConstInt(usizeLLVMType, 8, 0)
 	doubledOrNeeded, err := s.emitSafeDoubledCapacity(currentCapacity, neededValue, usizeLLVMType, name)
 	if err != nil {
 		return err
 	}
-	baseCapacity := C.LLVMBuildSelect(
+	baseCapacity := llvmBuildSelect(
 		s.builder,
-		C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), currentCapacity, zero, cStringFree(name+".capacity.zero")),
+		llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), currentCapacity, zero, cStringFree(name+".capacity.zero")),
 		initCap,
 		doubledOrNeeded,
 		cStringFree(name+".capacity.base"),
 	)
-	newCapacity := C.LLVMBuildSelect(
+	newCapacity := llvmBuildSelect(
 		s.builder,
-		C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), baseCapacity, neededValue, cStringFree(name+".capacity.lt")),
+		llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntULT), baseCapacity, neededValue, cStringFree(name+".capacity.lt")),
 		neededValue,
 		baseCapacity,
 		cStringFree(name+".capacity.new"),
@@ -461,9 +455,9 @@ func (s *functionState) emitBuiltinDArrayEnsureCapacity(darrayPtr C.LLVMValueRef
 	if err != nil {
 		return err
 	}
-	voidPtrType := C.LLVMPointerTypeInContext(s.g.context, 0)
-	currentItems := C.LLVMBuildLoad2(s.builder, voidPtrType, itemsPtr, cStringFree(name+".items"))
-	isNull := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), currentItems, C.LLVMConstPointerNull(voidPtrType), cStringFree(name+".items.null"))
+	voidPtrType := llvmPointerTypeInContext(s.g.context, 0)
+	currentItems := llvmBuildLoad2(s.builder, voidPtrType, itemsPtr, cStringFree(name+".items"))
+	isNull := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), currentItems, llvmConstPointerNull(voidPtrType), cStringFree(name+".items.null"))
 
 	arenaType := s.g.namedType("Arena")
 	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
@@ -490,29 +484,29 @@ func (s *functionState) emitBuiltinDArrayEnsureCapacity(darrayPtr C.LLVMValueRef
 	if err != nil {
 		return err
 	}
-	allocBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".alloc"))
-	reallocBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".realloc"))
-	storeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".store"))
-	C.LLVMBuildCondBr(s.builder, isNull, allocBB, reallocBB)
+	allocBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".alloc"))
+	reallocBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".realloc"))
+	storeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".store"))
+	llvmBuildCondBr(s.builder, isNull, allocBB, reallocBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, allocBB)
-	allocated := s.buildCall(allocLLVMType, allocCallee, []C.LLVMValueRef{arenaRef, newSize}, name+".alloc")
-	allocEnd := C.LLVMGetInsertBlock(s.builder)
-	C.LLVMBuildBr(s.builder, storeBB)
+	llvmPositionBuilderAtEnd(s.builder, allocBB)
+	allocated := s.buildCall(allocLLVMType, allocCallee, []llvmIRValueRef{arenaRef, newSize}, name+".alloc")
+	allocEnd := llvmGetInsertBlock(s.builder)
+	llvmBuildBr(s.builder, storeBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, reallocBB)
-	reallocated := s.buildCall(reallocLLVMType, reallocCallee, []C.LLVMValueRef{arenaRef, currentItems, oldSize, newSize}, name+".realloc")
-	reallocEnd := C.LLVMGetInsertBlock(s.builder)
-	C.LLVMBuildBr(s.builder, storeBB)
+	llvmPositionBuilderAtEnd(s.builder, reallocBB)
+	reallocated := s.buildCall(reallocLLVMType, reallocCallee, []llvmIRValueRef{arenaRef, currentItems, oldSize, newSize}, name+".realloc")
+	reallocEnd := llvmGetInsertBlock(s.builder)
+	llvmBuildBr(s.builder, storeBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, storeBB)
-	newItems := C.LLVMBuildPhi(s.builder, voidPtrType, cStringFree(name+".items.new"))
-	C.LLVMAddIncoming(newItems, llvmValueSlicePtr([]C.LLVMValueRef{allocated, reallocated}), llvmBlockSlicePtr([]C.LLVMBasicBlockRef{allocEnd, reallocEnd}), 2)
-	C.LLVMBuildStore(s.builder, newItems, itemsPtr)
-	C.LLVMBuildStore(s.builder, newCapacity, capacityPtr)
-	C.LLVMBuildBr(s.builder, contBB)
+	llvmPositionBuilderAtEnd(s.builder, storeBB)
+	newItems := llvmBuildPhi(s.builder, voidPtrType, cStringFree(name+".items.new"))
+	llvmAddIncoming(newItems, llvmValueSlicePtr([]llvmIRValueRef{allocated, reallocated}), llvmBlockSlicePtr([]llvmIRBlockRef{allocEnd, reallocEnd}), 2)
+	llvmBuildStore(s.builder, newItems, itemsPtr)
+	llvmBuildStore(s.builder, newCapacity, capacityPtr)
+	llvmBuildBr(s.builder, contBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, contBB)
+	llvmPositionBuilderAtEnd(s.builder, contBB)
 	return nil
 }
 func builtinStoreResultRefType(storeType *semantic.StructType) *semantic.RefType {

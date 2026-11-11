@@ -2,14 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-
-void elisa_coreSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigned trueWeight, unsigned falseWeight);
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -145,7 +137,7 @@ func (s *functionState) bindConditionAliasValue(expr *ast.BinaryExpr) error {
 	if err != nil {
 		return err
 	}
-	C.LLVMBuildStore(s.builder, value, binding.ptr)
+	llvmBuildStore(s.builder, value, binding.ptr)
 	return nil
 }
 func (s *functionState) optionalBindSourceType(expr *ast.OptionalBindExpr) semantic.Type {
@@ -184,7 +176,7 @@ func (s *functionState) backendOptionalBindBoundType(expr *ast.OptionalBindExpr)
 	return backendConditionOptionalBindType(s.optionalBindSourceType(expr))
 }
 
-func (s *functionState) emitOptionalBindSourceValue(expr ast.Expr, sourceType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitOptionalBindSourceValue(expr ast.Expr, sourceType semantic.Type) (llvmIRValueRef, semantic.Type, error) {
 	if expr == nil || sourceType == nil {
 		return nil, nil, fmt.Errorf("invalid let condition source")
 	}
@@ -198,7 +190,7 @@ func (s *functionState) emitOptionalBindSourceValue(expr ast.Expr, sourceType se
 	}
 	return s.emitExpr(expr, sourceType)
 }
-func (s *functionState) emitOptionalBindTest(expr *ast.OptionalBindExpr) (C.LLVMValueRef, C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitOptionalBindTest(expr *ast.OptionalBindExpr) (llvmIRValueRef, llvmIRValueRef, semantic.Type, error) {
 	if expr == nil || expr.Value == nil {
 		return nil, nil, nil, fmt.Errorf("invalid let condition")
 	}
@@ -218,9 +210,9 @@ func (s *functionState) emitOptionalBindTest(expr *ast.OptionalBindExpr) (C.LLVM
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		startLEEnd := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULE), startValue, endValue, cStringFree("cond.slice.start_le_end"))
-		endLELen := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULE), endValue, lenValue, cStringFree("cond.slice.end_le_len"))
-		presentValue := C.LLVMBuildAnd(s.builder, startLEEnd, endLELen, cStringFree("cond.slice.in_range"))
+		startLEEnd := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntULE), startValue, endValue, cStringFree("cond.slice.start_le_end"))
+		endLELen := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntULE), endValue, lenValue, cStringFree("cond.slice.end_le_len"))
+		presentValue := llvmBuildAnd(s.builder, startLEEnd, endLELen, cStringFree("cond.slice.in_range"))
 		viewValue, viewType, err := s.emitSliceExpr(slice)
 		if err != nil {
 			return nil, nil, nil, err
@@ -248,8 +240,8 @@ func (s *functionState) emitOptionalBindTest(expr *ast.OptionalBindExpr) (C.LLVM
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		nullValue := C.LLVMConstNull(C.LLVMTypeOf(refValue))
-		presentValue := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), refValue, nullValue, cStringFree("cond.let.present"))
+		nullValue := llvmConstNull(llvmTypeOf(refValue))
+		presentValue := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntNE), refValue, nullValue, cStringFree("cond.let.present"))
 		boundType, _ := backendConditionOptionalBindType(valueType)
 		return presentValue, refValue, boundType, nil
 	}
@@ -268,14 +260,14 @@ func unwrapToSliceForBind(expr ast.Expr) (*ast.SliceExpr, bool) {
 	}
 }
 
-func (s *functionState) emitOptionalBindExpr(expr *ast.OptionalBindExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitOptionalBindExpr(expr *ast.OptionalBindExpr) (llvmIRValueRef, semantic.Type, error) {
 	presentValue, _, _, err := s.emitOptionalBindTest(expr)
 	if err != nil {
 		return nil, nil, err
 	}
 	return presentValue, s.g.namedType("bool"), nil
 }
-func (s *functionState) emitOptionalBindCondition(expr *ast.OptionalBindExpr, trueBB C.LLVMBasicBlockRef, falseBB C.LLVMBasicBlockRef, hint ast.BranchHint) error {
+func (s *functionState) emitOptionalBindCondition(expr *ast.OptionalBindExpr, trueBB llvmIRBlockRef, falseBB llvmIRBlockRef, hint ast.BranchHint) error {
 	presentValue, boundValue, _, err := s.emitOptionalBindTest(expr)
 	if err != nil {
 		return err
@@ -284,13 +276,13 @@ func (s *functionState) emitOptionalBindCondition(expr *ast.OptionalBindExpr, tr
 		s.buildCondBrWithHint(presentValue, trueBB, falseBB, hint)
 		return nil
 	}
-	bindBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("cond.let.bind"))
+	bindBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("cond.let.bind"))
 	s.buildCondBrWithHint(presentValue, bindBB, falseBB, hint)
-	C.LLVMPositionBuilderAtEnd(s.builder, bindBB)
+	llvmPositionBuilderAtEnd(s.builder, bindBB)
 	if binding, ok := s.lookupBinding(expr.Name); ok && binding.ptr != nil {
-		C.LLVMBuildStore(s.builder, boundValue, binding.ptr)
+		llvmBuildStore(s.builder, boundValue, binding.ptr)
 	}
-	C.LLVMBuildBr(s.builder, trueBB)
+	llvmBuildBr(s.builder, trueBB)
 	return nil
 }
 func stripOptionalAssignTargetExpr(expr ast.Expr) ast.Expr {
@@ -302,25 +294,25 @@ func stripOptionalAssignTargetExpr(expr ast.Expr) ast.Expr {
 		expr = paren.Inner
 	}
 }
-func (s *functionState) emitOptionalAssignThroughNullableRef(refValue C.LLVMValueRef, elemType semantic.Type, valueExpr ast.Expr, name string) error {
+func (s *functionState) emitOptionalAssignThroughNullableRef(refValue llvmIRValueRef, elemType semantic.Type, valueExpr ast.Expr, name string) error {
 	if refValue == nil || elemType == nil {
 		return fmt.Errorf("invalid ?= target")
 	}
-	nullValue := C.LLVMConstNull(C.LLVMTypeOf(refValue))
-	presentValue := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), refValue, nullValue, cStringFree(name+".present"))
-	assignBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".assign"))
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".merge"))
-	C.LLVMBuildCondBr(s.builder, presentValue, assignBB, mergeBB)
+	nullValue := llvmConstNull(llvmTypeOf(refValue))
+	presentValue := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntNE), refValue, nullValue, cStringFree(name+".present"))
+	assignBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".assign"))
+	mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".merge"))
+	llvmBuildCondBr(s.builder, presentValue, assignBB, mergeBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, assignBB)
+	llvmPositionBuilderAtEnd(s.builder, assignBB)
 	value, _, err := s.emitExpr(valueExpr, elemType)
 	if err != nil {
 		return err
 	}
-	C.LLVMBuildStore(s.builder, value, refValue)
-	C.LLVMBuildBr(s.builder, mergeBB)
+	llvmBuildStore(s.builder, value, refValue)
+	llvmBuildBr(s.builder, mergeBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	llvmPositionBuilderAtEnd(s.builder, mergeBB)
 	return nil
 }
 func (s *functionState) emitOptionalAssignStmt(stmt *ast.AssignStmt) error {
@@ -352,11 +344,11 @@ func (s *functionState) emitOptionalAssignStmt(stmt *ast.AssignStmt) error {
 		if err != nil {
 			return err
 		}
-		assignBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("opt.assign.field.assign"))
-		mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("opt.assign.field.merge"))
-		C.LLVMBuildCondBr(s.builder, presentValue, assignBB, mergeBB)
+		assignBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("opt.assign.field.assign"))
+		mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("opt.assign.field.merge"))
+		llvmBuildCondBr(s.builder, presentValue, assignBB, mergeBB)
 
-		C.LLVMPositionBuilderAtEnd(s.builder, assignBB)
+		llvmPositionBuilderAtEnd(s.builder, assignBB)
 		fieldPtr, fieldType, err := s.emitFieldAddressFromObjectValue(receiverValue, receiverType, target.Field, "opt.assign.field")
 		if err != nil {
 			return err
@@ -365,10 +357,10 @@ func (s *functionState) emitOptionalAssignStmt(stmt *ast.AssignStmt) error {
 		if err != nil {
 			return err
 		}
-		C.LLVMBuildStore(s.builder, value, fieldPtr)
-		C.LLVMBuildBr(s.builder, mergeBB)
+		llvmBuildStore(s.builder, value, fieldPtr)
+		llvmBuildBr(s.builder, mergeBB)
 
-		C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+		llvmPositionBuilderAtEnd(s.builder, mergeBB)
 		return nil
 	default:
 		return fmt.Errorf("invalid ?= target")

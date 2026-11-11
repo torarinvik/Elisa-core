@@ -2,12 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"fmt"
 
@@ -21,7 +15,7 @@ import (
 // (ctx_hash_cstr → FNV-1a); every fixed-size scalar key (integer/bool/char/const enum) is
 // zero-extended to u64 and finalized (ctx_hash_u64 → splitmix64). String views use
 // length-aware ctx_hash_sview; all hash functions return u64.
-func (s *functionState) emitHashBuiltinCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitHashBuiltinCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if expr == nil || callIdentName(expr) != "ctx_hash_value" {
 		return nil, nil, false, nil
 	}
@@ -48,7 +42,7 @@ func (s *functionState) emitHashBuiltinCall(expr *ast.CallExpr) (C.LLVMValueRef,
 		if err != nil {
 			return nil, nil, true, err
 		}
-		value, resultType, err := s.emitResolvedCall(callee, fnType, true, []C.LLVMValueRef{argValue}, nil)
+		value, resultType, err := s.emitResolvedCall(callee, fnType, true, []llvmIRValueRef{argValue}, nil)
 		return value, resultType, true, err
 	}
 
@@ -69,19 +63,19 @@ func (s *functionState) emitHashBuiltinCall(expr *ast.CallExpr) (C.LLVMValueRef,
 				return nil, nil, true, err
 			}
 		}
-		return s.buildCall(llvmType, callee, []C.LLVMValueRef{coerced}, "hash.cstr"), u64Type, true, nil
+		return s.buildCall(llvmType, callee, []llvmIRValueRef{coerced}, "hash.cstr"), u64Type, true, nil
 	}
 
 	// Fixed-size scalar key (integer / bool / char / const enum): zero-extend the value to u64
 	// and run the integer finalizer. Equal keys of a given concrete type always extend
 	// identically, so the hash is well-defined.
-	if C.LLVMGetTypeKind(C.LLVMTypeOf(argValue)) != C.LLVMIntegerTypeKind {
+	if llvmGetTypeKind(llvmTypeOf(argValue)) != llvmIntegerTypeKind {
 		return nil, nil, true, fmt.Errorf("ctx_hash_value: unsupported non-integer scalar key type %s", argType.String())
 	}
-	i64LLVM := C.LLVMInt64TypeInContext(s.g.context)
+	i64LLVM := llvmInt64TypeInContext(s.g.context)
 	extended := argValue
-	if C.LLVMGetIntTypeWidth(C.LLVMTypeOf(argValue)) < 64 {
-		extended = C.LLVMBuildZExt(s.builder, argValue, i64LLVM, cStringFree("hash.zext"))
+	if llvmGetIntTypeWidth(llvmTypeOf(argValue)) < 64 {
+		extended = llvmBuildZExt(s.builder, argValue, i64LLVM, cStringFree("hash.zext"))
 	}
 	callee, fnType, err := s.ensureRuntimeFunction("ctx_hash_u64", nil)
 	if err != nil {
@@ -91,14 +85,14 @@ func (s *functionState) emitHashBuiltinCall(expr *ast.CallExpr) (C.LLVMValueRef,
 	if err != nil {
 		return nil, nil, true, err
 	}
-	return s.buildCall(llvmType, callee, []C.LLVMValueRef{extended}, "hash.u64"), u64Type, true, nil
+	return s.buildCall(llvmType, callee, []llvmIRValueRef{extended}, "hash.u64"), u64Type, true, nil
 }
 
 // emitDictLiteralExpr lowers a `{k1: v1, k2: v2, ...}` dict literal: a zeroed (empty) dict is
 // materialized on the stack and each pair is inserted via the panic-on-OOM put helper, sourcing
 // the arena from the active region scope (the auto-region inference supplies one for a bare
 // literal). The populated dict value is returned. Mirrors the synthetic `dict.put` lowering.
-func (s *functionState) emitDictLiteralExpr(expr *ast.ListLitExpr, dictType *semantic.DictType) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitDictLiteralExpr(expr *ast.ListLitExpr, dictType *semantic.DictType) (llvmIRValueRef, semantic.Type, error) {
 	dictPtr, err := s.createEntryAllocaZeroed("dictlit", dictType)
 	if err != nil {
 		return nil, nil, err
@@ -134,16 +128,16 @@ func (s *functionState) emitDictLiteralExpr(expr *ast.ListLitExpr, dictType *sem
 		if err != nil {
 			return nil, nil, err
 		}
-		s.buildCall(putLLVM, putCallee, []C.LLVMValueRef{owner.arenaRef, dictPtr, keyValue, valueValue}, "dictlit.put")
+		s.buildCall(putLLVM, putCallee, []llvmIRValueRef{owner.arenaRef, dictPtr, keyValue, valueValue}, "dictlit.put")
 	}
 	dictLLVM, err := s.g.lowerType(dictType)
 	if err != nil {
 		return nil, nil, err
 	}
-	return C.LLVMBuildLoad2(s.builder, dictLLVM, dictPtr, cStringFree("dictlit.value")), dictType, nil
+	return llvmBuildLoad2(s.builder, dictLLVM, dictPtr, cStringFree("dictlit.value")), dictType, nil
 }
 
-func (s *functionState) emitSetLiteralExpr(expr *ast.ListLitExpr, setType *semantic.SetType) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitSetLiteralExpr(expr *ast.ListLitExpr, setType *semantic.SetType) (llvmIRValueRef, semantic.Type, error) {
 	setPtr, err := s.createEntryAllocaZeroed("setlit", setType)
 	if err != nil {
 		return nil, nil, err
@@ -175,11 +169,11 @@ func (s *functionState) emitSetLiteralExpr(expr *ast.ListLitExpr, setType *seman
 		if err != nil {
 			return nil, nil, err
 		}
-		s.buildCall(addLLVM, addCallee, []C.LLVMValueRef{owner.arenaRef, setPtr, elemValue}, "setlit.add")
+		s.buildCall(addLLVM, addCallee, []llvmIRValueRef{owner.arenaRef, setPtr, elemValue}, "setlit.add")
 	}
 	setLLVM, err := s.g.lowerType(setType)
 	if err != nil {
 		return nil, nil, err
 	}
-	return C.LLVMBuildLoad2(s.builder, setLLVM, setPtr, cStringFree("setlit.value")), setType, nil
+	return llvmBuildLoad2(s.builder, setLLVM, setPtr, cStringFree("setlit.value")), setType, nil
 }

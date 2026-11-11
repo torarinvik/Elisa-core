@@ -2,12 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"fmt"
 
@@ -15,7 +9,7 @@ import (
 	"elisacore/src/semantic"
 )
 
-func (s *functionState) emitFlagsIndexExpr(expr *ast.IndexExpr, flagType *semantic.ConstEnumType) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitFlagsIndexExpr(expr *ast.IndexExpr, flagType *semantic.ConstEnumType) (llvmIRValueRef, semantic.Type, error) {
 	if expr == nil || flagType == nil {
 		return nil, nil, fmt.Errorf("missing flags index metadata")
 	}
@@ -35,7 +29,7 @@ func (s *functionState) emitFlagsIndexExpr(expr *ast.IndexExpr, flagType *semant
 	if _, ok := semantic.FlagsInstanceType(flagsType); !ok {
 		return nil, nil, fmt.Errorf("flags membership indexing requires Flags[T], got %s", flagsType)
 	}
-	bitsValue := C.LLVMBuildExtractValue(s.builder, flagsValue, 0, cStringFree("flags.bits"))
+	bitsValue := llvmBuildExtractValue(s.builder, flagsValue, 0, cStringFree("flags.bits"))
 	indexValue, indexType, err := s.emitExpr(expr.Index, flagType)
 	if err != nil {
 		return nil, nil, err
@@ -49,10 +43,10 @@ func (s *functionState) emitFlagsIndexExpr(expr *ast.IndexExpr, flagType *semant
 	if err != nil {
 		return nil, nil, err
 	}
-	one := C.LLVMConstInt(u64LLVMType, 1, 0)
-	zero := C.LLVMConstInt(u64LLVMType, 0, 0)
-	maskValue := C.LLVMBuildShl(s.builder, one, indexValue, cStringFree("flags.mask"))
-	hitValue := C.LLVMBuildAnd(s.builder, bitsValue, maskValue, cStringFree("flags.hit"))
-	boolValue := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), hitValue, zero, cStringFree("flags.has"))
+	one := llvmConstInt(u64LLVMType, 1, 0)
+	zero := llvmConstInt(u64LLVMType, 0, 0)
+	maskValue := llvmBuildShl(s.builder, one, indexValue, cStringFree("flags.mask"))
+	hitValue := llvmBuildAnd(s.builder, bitsValue, maskValue, cStringFree("flags.hit"))
+	boolValue := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntNE), hitValue, zero, cStringFree("flags.has"))
 	return boolValue, s.g.namedType("bool"), nil
 }

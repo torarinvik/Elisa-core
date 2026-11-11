@@ -2,19 +2,13 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
 )
 
-func (s *functionState) emitBuiltinDArrayPushCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitBuiltinDArrayPushCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if expr == nil {
 		return nil, nil, false, nil
 	}
@@ -84,8 +78,8 @@ func (s *functionState) emitBuiltinDArrayPushCall(expr *ast.CallExpr) (C.LLVMVal
 	if err != nil {
 		return nil, nil, true, err
 	}
-	currentCount := C.LLVMBuildLoad2(s.builder, usizeLLVMType, countPtr, cStringFree("darray.push.count"))
-	neededValue, err := s.emitCheckedUSizeAdd(currentCount, C.LLVMConstInt(usizeLLVMType, 1, 0), "darray.push.needed")
+	currentCount := llvmBuildLoad2(s.builder, usizeLLVMType, countPtr, cStringFree("darray.push.count"))
+	neededValue, err := s.emitCheckedUSizeAdd(currentCount, llvmConstInt(usizeLLVMType, 1, 0), "darray.push.needed")
 	if err != nil {
 		return nil, nil, true, err
 	}
@@ -96,15 +90,15 @@ func (s *functionState) emitBuiltinDArrayPushCall(expr *ast.CallExpr) (C.LLVMVal
 	if err != nil {
 		return nil, nil, true, err
 	}
-	voidPtrType := C.LLVMPointerTypeInContext(s.g.context, 0)
-	itemsValue := C.LLVMBuildLoad2(s.builder, voidPtrType, itemsPtr, cStringFree("darray.push.items"))
+	voidPtrType := llvmPointerTypeInContext(s.g.context, 0)
+	itemsValue := llvmBuildLoad2(s.builder, voidPtrType, itemsPtr, cStringFree("darray.push.items"))
 	elemLLVMType, err := s.g.lowerType(darrayType.Elem)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	slotPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, itemsValue, llvmValueSlicePtr([]C.LLVMValueRef{currentCount}), 1, cStringFree("darray.push.slot"))
-	C.LLVMBuildStore(s.builder, itemValue, slotPtr)
-	C.LLVMBuildStore(s.builder, neededValue, countPtr)
+	slotPtr := llvmBuildGEP2(s.builder, elemLLVMType, itemsValue, llvmValueSlicePtr([]llvmIRValueRef{currentCount}), 1, cStringFree("darray.push.slot"))
+	llvmBuildStore(s.builder, itemValue, slotPtr)
+	llvmBuildStore(s.builder, neededValue, countPtr)
 	return darrayPtr, resultType, true, nil
 }
 
@@ -115,7 +109,7 @@ func (s *functionState) emitBuiltinDArrayPushCall(expr *ast.CallExpr) (C.LLVMVal
 // elements (sview, AST nodes, and compiler tables), which made the stage1 compiler trap in
 // its own semantic pass.  Keep the operation beside push/resize so the aggregate load uses
 // the same typed GEP path as ordinary darray indexing.
-func (s *functionState) emitBuiltinDArrayPopCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitBuiltinDArrayPopCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if expr == nil {
 		return nil, nil, false, nil
 	}
@@ -143,31 +137,31 @@ func (s *functionState) emitBuiltinDArrayPopCall(expr *ast.CallExpr) (C.LLVMValu
 	if err != nil {
 		return nil, nil, true, err
 	}
-	count := C.LLVMBuildLoad2(s.builder, usizeLLVMType, countPtr, cStringFree("darray.pop.count"))
-	zero := C.LLVMConstInt(usizeLLVMType, 0, 0)
-	nonEmpty := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntUGT), count, zero, cStringFree("darray.pop.nonempty"))
-	okBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("darray.pop.ok"))
-	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("darray.pop.empty"))
-	C.LLVMBuildCondBr(s.builder, nonEmpty, okBB, failBB)
-	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+	count := llvmBuildLoad2(s.builder, usizeLLVMType, countPtr, cStringFree("darray.pop.count"))
+	zero := llvmConstInt(usizeLLVMType, 0, 0)
+	nonEmpty := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntUGT), count, zero, cStringFree("darray.pop.nonempty"))
+	okBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("darray.pop.ok"))
+	failBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("darray.pop.empty"))
+	llvmBuildCondBr(s.builder, nonEmpty, okBB, failBB)
+	llvmPositionBuilderAtEnd(s.builder, failBB)
 	if err := s.emitTrapUnreachable("darray.pop.empty"); err != nil {
 		return nil, nil, true, err
 	}
-	C.LLVMPositionBuilderAtEnd(s.builder, okBB)
-	newCount := C.LLVMBuildSub(s.builder, count, C.LLVMConstInt(usizeLLVMType, 1, 0), cStringFree("darray.pop.newcount"))
-	C.LLVMBuildStore(s.builder, newCount, countPtr)
+	llvmPositionBuilderAtEnd(s.builder, okBB)
+	newCount := llvmBuildSub(s.builder, count, llvmConstInt(usizeLLVMType, 1, 0), cStringFree("darray.pop.newcount"))
+	llvmBuildStore(s.builder, newCount, countPtr)
 	itemsPtr, err := s.emitBuiltinDArrayItemsPtr(darrayPtr, darrayType)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	voidPtrType := C.LLVMPointerTypeInContext(s.g.context, 0)
-	itemsValue := C.LLVMBuildLoad2(s.builder, voidPtrType, itemsPtr, cStringFree("darray.pop.items"))
+	voidPtrType := llvmPointerTypeInContext(s.g.context, 0)
+	itemsValue := llvmBuildLoad2(s.builder, voidPtrType, itemsPtr, cStringFree("darray.pop.items"))
 	elemLLVMType, err := s.g.lowerType(darrayType.Elem)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	elemPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, itemsValue, llvmValueSlicePtr([]C.LLVMValueRef{newCount}), 1, cStringFree("darray.pop.element"))
-	value := C.LLVMBuildLoad2(s.builder, elemLLVMType, elemPtr, cStringFree("darray.pop.value"))
+	elemPtr := llvmBuildGEP2(s.builder, elemLLVMType, itemsValue, llvmValueSlicePtr([]llvmIRValueRef{newCount}), 1, cStringFree("darray.pop.element"))
+	value := llvmBuildLoad2(s.builder, elemLLVMType, elemPtr, cStringFree("darray.pop.value"))
 	return value, darrayType.Elem, true, nil
 }
 
@@ -195,7 +189,7 @@ func (s *functionState) darrayPushUsesBulkAppend(darrayType *semantic.DArrayType
 	}
 }
 
-func (s *functionState) emitBuiltinDArrayExtendCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitBuiltinDArrayExtendCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if expr == nil {
 		return nil, nil, false, nil
 	}
@@ -263,18 +257,18 @@ func (s *functionState) emitBuiltinDArrayExtendCall(expr *ast.CallExpr) (C.LLVMV
 	if err != nil {
 		return nil, nil, true, err
 	}
-	zeroCount := C.LLVMConstInt(usizeLLVMType, 0, 0)
-	isZero := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), sourceCount, zeroCount, cStringFree("darray.extend.count.zero"))
-	callBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("darray.extend.call"))
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("darray.extend.merge"))
-	C.LLVMBuildCondBr(s.builder, isZero, mergeBB, callBB)
+	zeroCount := llvmConstInt(usizeLLVMType, 0, 0)
+	isZero := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), sourceCount, zeroCount, cStringFree("darray.extend.count.zero"))
+	callBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("darray.extend.call"))
+	mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("darray.extend.merge"))
+	llvmBuildCondBr(s.builder, isZero, mergeBB, callBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, callBB)
+	llvmPositionBuilderAtEnd(s.builder, callBB)
 	countPtr, _, err := s.emitBuiltinDArrayCountPtr(darrayPtr, darrayType)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	currentCount := C.LLVMBuildLoad2(s.builder, usizeLLVMType, countPtr, cStringFree("darray.extend.count"))
+	currentCount := llvmBuildLoad2(s.builder, usizeLLVMType, countPtr, cStringFree("darray.extend.count"))
 	neededValue, err := s.emitCheckedUSizeAdd(currentCount, sourceCount, "darray.extend.needed")
 	if err != nil {
 		return nil, nil, true, err
@@ -286,13 +280,13 @@ func (s *functionState) emitBuiltinDArrayExtendCall(expr *ast.CallExpr) (C.LLVMV
 	if err != nil {
 		return nil, nil, true, err
 	}
-	voidPtrType := C.LLVMPointerTypeInContext(s.g.context, 0)
-	itemsValue := C.LLVMBuildLoad2(s.builder, voidPtrType, itemsPtr, cStringFree("darray.extend.items"))
+	voidPtrType := llvmPointerTypeInContext(s.g.context, 0)
+	itemsValue := llvmBuildLoad2(s.builder, voidPtrType, itemsPtr, cStringFree("darray.extend.items"))
 	elemLLVMType, err := s.g.lowerType(darrayType.Elem)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	dstPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, itemsValue, llvmValueSlicePtr([]C.LLVMValueRef{currentCount}), 1, cStringFree("darray.extend.dst"))
+	dstPtr := llvmBuildGEP2(s.builder, elemLLVMType, itemsValue, llvmValueSlicePtr([]llvmIRValueRef{currentCount}), 1, cStringFree("darray.extend.dst"))
 	elemSizeBytes, err := s.sizeOfType(darrayType.Elem)
 	if err != nil {
 		return nil, nil, true, err
@@ -313,14 +307,14 @@ func (s *functionState) emitBuiltinDArrayExtendCall(expr *ast.CallExpr) (C.LLVMV
 	if err != nil {
 		return nil, nil, true, err
 	}
-	_ = s.buildCall(memcpyLLVMType, memcpyCallee, []C.LLVMValueRef{dstPtr, sourceData, byteCount}, "darray.extend.memcpy")
-	C.LLVMBuildStore(s.builder, neededValue, countPtr)
-	C.LLVMBuildBr(s.builder, mergeBB)
+	_ = s.buildCall(memcpyLLVMType, memcpyCallee, []llvmIRValueRef{dstPtr, sourceData, byteCount}, "darray.extend.memcpy")
+	llvmBuildStore(s.builder, neededValue, countPtr)
+	llvmBuildBr(s.builder, mergeBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	llvmPositionBuilderAtEnd(s.builder, mergeBB)
 	return darrayPtr, resultType, true, nil
 }
-func (s *functionState) emitBuiltinDArrayExtendSource(arg ast.Expr, elemType semantic.Type) (C.LLVMValueRef, C.LLVMValueRef, error) {
+func (s *functionState) emitBuiltinDArrayExtendSource(arg ast.Expr, elemType semantic.Type) (llvmIRValueRef, llvmIRValueRef, error) {
 	sourceType := s.exprType(arg)
 	baseType, ok := builtinDArrayExtendSourceType(sourceType)
 	if !ok || baseType == nil {
@@ -328,7 +322,7 @@ func (s *functionState) emitBuiltinDArrayExtendSource(arg ast.Expr, elemType sem
 	}
 	switch tt := baseType.(type) {
 	case *semantic.DArrayType:
-		var arrayValue C.LLVMValueRef
+		var arrayValue llvmIRValueRef
 		if refType, ok := sourceType.(*semantic.RefType); ok && refType != nil {
 			ptr, _, err := s.emitExpr(arg, sourceType)
 			if err != nil {
@@ -345,11 +339,11 @@ func (s *functionState) emitBuiltinDArrayExtendSource(arg ast.Expr, elemType sem
 				return nil, nil, err
 			}
 		}
-		data := C.LLVMBuildExtractValue(s.builder, arrayValue, 0, cStringFree("darray.extend.src.data"))
-		count := C.LLVMBuildExtractValue(s.builder, arrayValue, 1, cStringFree("darray.extend.src.count"))
+		data := llvmBuildExtractValue(s.builder, arrayValue, 0, cStringFree("darray.extend.src.data"))
+		count := llvmBuildExtractValue(s.builder, arrayValue, 1, cStringFree("darray.extend.src.count"))
 		return data, count, nil
 	case *semantic.ViewType:
-		var viewValue C.LLVMValueRef
+		var viewValue llvmIRValueRef
 		if refType, ok := sourceType.(*semantic.RefType); ok && refType != nil {
 			ptr, _, err := s.emitExpr(arg, sourceType)
 			if err != nil {
@@ -366,13 +360,13 @@ func (s *functionState) emitBuiltinDArrayExtendSource(arg ast.Expr, elemType sem
 				return nil, nil, err
 			}
 		}
-		data := C.LLVMBuildExtractValue(s.builder, viewValue, 0, cStringFree("darray.extend.src.data"))
-		count := C.LLVMBuildExtractValue(s.builder, viewValue, 1, cStringFree("darray.extend.src.len"))
+		data := llvmBuildExtractValue(s.builder, viewValue, 0, cStringFree("darray.extend.src.data"))
+		count := llvmBuildExtractValue(s.builder, viewValue, 1, cStringFree("darray.extend.src.len"))
 		return data, count, nil
 	case *semantic.SViewType:
 		// sview is the same {data, len} fat pointer as a view[u8] — extract its bytes and
 		// feed the memcpy path (identical to the ViewType case above).
-		var sviewValue C.LLVMValueRef
+		var sviewValue llvmIRValueRef
 		if refType, ok := sourceType.(*semantic.RefType); ok && refType != nil {
 			ptr, _, err := s.emitExpr(arg, sourceType)
 			if err != nil {
@@ -389,8 +383,8 @@ func (s *functionState) emitBuiltinDArrayExtendSource(arg ast.Expr, elemType sem
 				return nil, nil, err
 			}
 		}
-		data := C.LLVMBuildExtractValue(s.builder, sviewValue, 0, cStringFree("darray.extend.src.data"))
-		count := C.LLVMBuildExtractValue(s.builder, sviewValue, 1, cStringFree("darray.extend.src.len"))
+		data := llvmBuildExtractValue(s.builder, sviewValue, 0, cStringFree("darray.extend.src.data"))
+		count := llvmBuildExtractValue(s.builder, sviewValue, 1, cStringFree("darray.extend.src.len"))
 		return data, count, nil
 	case *semantic.ArrayType:
 		arrayType, arrayPtr, ok, err := s.fixedArraySliceBase(arg)
@@ -405,22 +399,22 @@ func (s *functionState) emitBuiltinDArrayExtendSource(arg ast.Expr, elemType sem
 		if err != nil {
 			return nil, nil, err
 		}
-		count := C.LLVMConstInt(usizeLLVMType, C.ulonglong(arrayType.ConstSize), 0)
+		count := llvmConstInt(usizeLLVMType, llvmIRUnsignedLongLong(arrayType.ConstSize), 0)
 		elemRefType := &semantic.RefType{Elem: elemType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 		elemRefLLVMType, err := s.g.lowerType(elemRefType)
 		if err != nil {
 			return nil, nil, err
 		}
 		if arrayType.ConstSize == 0 {
-			return C.LLVMConstNull(elemRefLLVMType), count, nil
+			return llvmConstNull(elemRefLLVMType), count, nil
 		}
 		arrayLLVMType, err := s.g.lowerType(arrayType)
 		if err != nil {
 			return nil, nil, err
 		}
-		zeroIndex := C.LLVMConstInt(usizeLLVMType, 0, 0)
-		indices := []C.LLVMValueRef{zeroIndex, zeroIndex}
-		data := C.LLVMBuildGEP2(s.builder, arrayLLVMType, arrayPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("darray.extend.src.array.data"))
+		zeroIndex := llvmConstInt(usizeLLVMType, 0, 0)
+		indices := []llvmIRValueRef{zeroIndex, zeroIndex}
+		data := llvmBuildGEP2(s.builder, arrayLLVMType, arrayPtr, llvmValueSlicePtr(indices), llvmIRUnsigned(len(indices)), cStringFree("darray.extend.src.array.data"))
 		return data, count, nil
 	default:
 		return nil, nil, fmt.Errorf("unsupported darray extend source %T", baseType)

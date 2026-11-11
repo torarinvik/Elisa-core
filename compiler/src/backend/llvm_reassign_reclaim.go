@@ -2,11 +2,6 @@
 
 package backend
 
-/*
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -16,7 +11,7 @@ import (
 // (semantic.Result.ReassignReclaims proves nothing else references it). It runs after the new value
 // has been computed and before it is stored, so the old header is still in the slot. A darray whose
 // growth arena cannot be resolved here is simply not reclaimed.
-func (s *functionState) emitReassignReclaim(n *ast.AssignStmt, slotPtr C.LLVMValueRef, targetType semantic.Type) error {
+func (s *functionState) emitReassignReclaim(n *ast.AssignStmt, slotPtr llvmIRValueRef, targetType semantic.Type) error {
 	darrayType, ok := semantic.StripAggregateStateType(targetType).(*semantic.DArrayType)
 	if !ok || darrayType == nil {
 		return nil
@@ -48,15 +43,15 @@ func (s *functionState) emitReassignReclaim(n *ast.AssignStmt, slotPtr C.LLVMVal
 	if err != nil {
 		return err
 	}
-	voidPtrType := C.LLVMPointerTypeInContext(s.g.context, 0)
-	oldItems := C.LLVMBuildLoad2(s.builder, voidPtrType, itemsPtr, cStringFree("reclaim.old.items"))
-	oldCapacity := C.LLVMBuildLoad2(s.builder, usizeLLVMType, capacityPtr, cStringFree("reclaim.old.capacity"))
-	isNull := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), oldItems, C.LLVMConstPointerNull(voidPtrType), cStringFree("reclaim.old.null"))
-	freeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("reclaim.free"))
-	contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("reclaim.cont"))
-	C.LLVMBuildCondBr(s.builder, isNull, contBB, freeBB)
+	voidPtrType := llvmPointerTypeInContext(s.g.context, 0)
+	oldItems := llvmBuildLoad2(s.builder, voidPtrType, itemsPtr, cStringFree("reclaim.old.items"))
+	oldCapacity := llvmBuildLoad2(s.builder, usizeLLVMType, capacityPtr, cStringFree("reclaim.old.capacity"))
+	isNull := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), oldItems, llvmConstPointerNull(voidPtrType), cStringFree("reclaim.old.null"))
+	freeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("reclaim.free"))
+	contBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("reclaim.cont"))
+	llvmBuildCondBr(s.builder, isNull, contBB, freeBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, freeBB)
+	llvmPositionBuilderAtEnd(s.builder, freeBB)
 	oldBytes, err := s.emitCheckedElemByteCount(oldCapacity, elemSize, "reclaim.old")
 	if err != nil {
 		return err
@@ -75,9 +70,9 @@ func (s *functionState) emitReassignReclaim(n *ast.AssignStmt, slotPtr C.LLVMVal
 	if err != nil {
 		return err
 	}
-	s.buildCall(llvmType, callee, []C.LLVMValueRef{owner.arenaRef, oldItems, oldBytes}, "")
-	C.LLVMBuildBr(s.builder, contBB)
+	s.buildCall(llvmType, callee, []llvmIRValueRef{owner.arenaRef, oldItems, oldBytes}, "")
+	llvmBuildBr(s.builder, contBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, contBB)
+	llvmPositionBuilderAtEnd(s.builder, contBB)
 	return nil
 }

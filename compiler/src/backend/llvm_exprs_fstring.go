@@ -2,12 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -27,7 +21,7 @@ import (
 // length (no strlen); an sview extracts {data, len}; a dstr extracts {items, count}; a plain cstr
 // calls ctx_strlen. All four symbols are whitelisted native-runtime-support exports, so this works
 // in programs that never include the std runtime themselves.
-func (s *functionState) emitBuiltinFStrCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitBuiltinFStrCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if expr == nil {
 		return nil, nil, false, nil
 	}
@@ -52,8 +46,8 @@ func (s *functionState) emitBuiltinFStrCall(expr *ast.CallExpr) (C.LLVMValueRef,
 
 	// Evaluate every part once, in order, collecting (ptr, len).
 	type fstrPart struct {
-		ptr C.LLVMValueRef
-		len C.LLVMValueRef
+		ptr llvmIRValueRef
+		len llvmIRValueRef
 	}
 	parts := make([]fstrPart, 0, len(expr.Args))
 	for _, arg := range expr.Args {
@@ -62,7 +56,7 @@ func (s *functionState) emitBuiltinFStrCall(expr *ast.CallExpr) (C.LLVMValueRef,
 			if err != nil {
 				return nil, nil, true, err
 			}
-			parts = append(parts, fstrPart{ptr: value, len: C.LLVMConstInt(usizeLLVM, C.ulonglong(len(lit.Value)), 0)})
+			parts = append(parts, fstrPart{ptr: value, len: llvmConstInt(usizeLLVM, llvmIRUnsignedLongLong(len(lit.Value)), 0)})
 			continue
 		}
 		argType := s.exprType(arg)
@@ -79,10 +73,10 @@ func (s *functionState) emitBuiltinFStrCall(expr *ast.CallExpr) (C.LLVMValueRef,
 			if err != nil {
 				return nil, nil, true, err
 			}
-			ptr := C.LLVMBuildExtractValue(s.builder, value, 0, cStringFree("fstr.sview.ptr"))
-			ln := C.LLVMBuildExtractValue(s.builder, value, 1, cStringFree("fstr.sview.len"))
-			if C.LLVMTypeOf(ln) != usizeLLVM {
-				ln = C.LLVMBuildIntCast2(s.builder, ln, usizeLLVM, 0, cStringFree("fstr.sview.len.usize"))
+			ptr := llvmBuildExtractValue(s.builder, value, 0, cStringFree("fstr.sview.ptr"))
+			ln := llvmBuildExtractValue(s.builder, value, 1, cStringFree("fstr.sview.len"))
+			if llvmTypeOf(ln) != usizeLLVM {
+				ln = llvmBuildIntCast2(s.builder, ln, usizeLLVM, 0, cStringFree("fstr.sview.len.usize"))
 			}
 			parts = append(parts, fstrPart{ptr: ptr, len: ln})
 		case *semantic.DArrayType:
@@ -90,10 +84,10 @@ func (s *functionState) emitBuiltinFStrCall(expr *ast.CallExpr) (C.LLVMValueRef,
 			if err != nil {
 				return nil, nil, true, err
 			}
-			ptr := C.LLVMBuildExtractValue(s.builder, value, 0, cStringFree("fstr.dstr.items"))
-			ln := C.LLVMBuildExtractValue(s.builder, value, 1, cStringFree("fstr.dstr.count"))
-			if C.LLVMTypeOf(ln) != usizeLLVM {
-				ln = C.LLVMBuildIntCast2(s.builder, ln, usizeLLVM, 0, cStringFree("fstr.dstr.count.usize"))
+			ptr := llvmBuildExtractValue(s.builder, value, 0, cStringFree("fstr.dstr.items"))
+			ln := llvmBuildExtractValue(s.builder, value, 1, cStringFree("fstr.dstr.count"))
+			if llvmTypeOf(ln) != usizeLLVM {
+				ln = llvmBuildIntCast2(s.builder, ln, usizeLLVM, 0, cStringFree("fstr.dstr.count.usize"))
 			}
 			parts = append(parts, fstrPart{ptr: ptr, len: ln})
 		case *semantic.CStrType:
@@ -113,8 +107,8 @@ func (s *functionState) emitBuiltinFStrCall(expr *ast.CallExpr) (C.LLVMValueRef,
 			if err != nil {
 				return nil, nil, true, err
 			}
-			args := []C.LLVMValueRef{value}
-			ln := C.LLVMBuildCall2(s.builder, strlenLLVM, strlenCallee, llvmValueSlicePtr(args), C.unsigned(len(args)), cStringFree("fstr.cstr.len"))
+			args := []llvmIRValueRef{value}
+			ln := llvmBuildCall2(s.builder, strlenLLVM, strlenCallee, llvmValueSlicePtr(args), llvmIRUnsigned(len(args)), cStringFree("fstr.cstr.len"))
 			parts = append(parts, fstrPart{ptr: value, len: ln})
 		default:
 			return nil, nil, true, fmt.Errorf("f-string part has unsupported type %s", argType)
@@ -122,9 +116,9 @@ func (s *functionState) emitBuiltinFStrCall(expr *ast.CallExpr) (C.LLVMValueRef,
 	}
 
 	// total = sum of lengths.
-	total := C.LLVMConstInt(usizeLLVM, 0, 0)
+	total := llvmConstInt(usizeLLVM, 0, 0)
 	for _, part := range parts {
-		total = C.LLVMBuildAdd(s.builder, total, part.len, cStringFree("fstr.total"))
+		total = llvmBuildAdd(s.builder, total, part.len, cStringFree("fstr.total"))
 	}
 
 	// hdr = ctx_fstr_alloc(total); slot = alloca dstr; store hdr.
@@ -139,15 +133,15 @@ func (s *functionState) emitBuiltinFStrCall(expr *ast.CallExpr) (C.LLVMValueRef,
 	if err != nil {
 		return nil, nil, true, err
 	}
-	allocArgs := []C.LLVMValueRef{total}
-	hdr := C.LLVMBuildCall2(s.builder, allocLLVM, allocCallee, llvmValueSlicePtr(allocArgs), C.unsigned(len(allocArgs)), cStringFree("fstr.alloc"))
+	allocArgs := []llvmIRValueRef{total}
+	hdr := llvmBuildCall2(s.builder, allocLLVM, allocCallee, llvmValueSlicePtr(allocArgs), llvmIRUnsigned(len(allocArgs)), cStringFree("fstr.alloc"))
 
 	dstrLLVM, err := s.g.lowerType(dstrType)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	slot := C.LLVMBuildAlloca(s.builder, dstrLLVM, cStringFree("fstr.slot"))
-	C.LLVMBuildStore(s.builder, hdr, slot)
+	slot := llvmBuildAlloca(s.builder, dstrLLVM, cStringFree("fstr.slot"))
+	llvmBuildStore(s.builder, hdr, slot)
 
 	// append each part.
 	dstrRefType := &semantic.RefType{Elem: dstrType, Mutable: true, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
@@ -165,12 +159,12 @@ func (s *functionState) emitBuiltinFStrCall(expr *ast.CallExpr) (C.LLVMValueRef,
 	// A void call's result name must still be a NON-NIL C string (LLVM derefs Name[0]);
 	// cStringFree("") returns nil, so use cString (always non-nil) and free it.
 	emptyName := cString("")
-	defer C.free(unsafe.Pointer(emptyName))
+	defer llvmFree(unsafe.Pointer(emptyName))
 	for _, part := range parts {
-		appendArgs := []C.LLVMValueRef{slot, part.ptr, part.len}
-		C.LLVMBuildCall2(s.builder, appendLLVM, appendCallee, llvmValueSlicePtr(appendArgs), C.unsigned(len(appendArgs)), emptyName)
+		appendArgs := []llvmIRValueRef{slot, part.ptr, part.len}
+		llvmBuildCall2(s.builder, appendLLVM, appendCallee, llvmValueSlicePtr(appendArgs), llvmIRUnsigned(len(appendArgs)), emptyName)
 	}
 
-	result := C.LLVMBuildLoad2(s.builder, dstrLLVM, slot, cStringFree("fstr.result"))
+	result := llvmBuildLoad2(s.builder, dstrLLVM, slot, cStringFree("fstr.result"))
 	return result, dstrType, true, nil
 }

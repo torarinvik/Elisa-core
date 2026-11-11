@@ -2,12 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"fmt"
 
@@ -15,7 +9,7 @@ import (
 	"elisacore/src/semantic"
 )
 
-func (s *functionState) emitBuiltinCloneCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitBuiltinCloneCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if expr == nil || callSpecializedIdentName(expr) != "clone" || s == nil || s.g == nil || s.g.result == nil || !s.g.result.IsCompilerBuiltinHelperCall(expr, "clone") {
 		return nil, nil, false, nil
 	}
@@ -43,7 +37,7 @@ func (s *functionState) emitBuiltinCloneCall(expr *ast.CallExpr) (C.LLVMValueRef
 // semantic layer has already proven the size is a compile-time constant and the
 // elements are pure value data (no region owner needed), so this is a plain
 // elementwise value copy with no allocation.
-func (s *functionState) emitBuiltinCopyCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitBuiltinCopyCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if expr == nil || callSpecializedIdentName(expr) != "copy" || s == nil || s.g == nil || s.g.result == nil || !s.g.result.IsCompilerBuiltinHelperCall(expr, "copy") {
 		return nil, nil, false, nil
 	}
@@ -70,7 +64,7 @@ func (s *functionState) emitBuiltinCopyCall(expr *ast.CallExpr) (C.LLVMValueRef,
 	return value, targetType, true, nil
 }
 
-func (s *functionState) emitCloneValue(sourceValue C.LLVMValueRef, sourceType semantic.Type, targetType semantic.Type, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitCloneValue(sourceValue llvmIRValueRef, sourceType semantic.Type, targetType semantic.Type, name string) (llvmIRValueRef, error) {
 	targetType = semantic.StripAggregateStateType(targetType)
 	sourceType = semantic.StripAggregateStateType(sourceType)
 	if targetType == nil || sourceType == nil {
@@ -101,7 +95,7 @@ func (s *functionState) emitCloneValue(sourceValue C.LLVMValueRef, sourceType se
 	}
 }
 
-func (s *functionState) emitCloneStructLikeValue(sourceValue C.LLVMValueRef, targetType semantic.Type, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitCloneStructLikeValue(sourceValue llvmIRValueRef, targetType semantic.Type, name string) (llvmIRValueRef, error) {
 	fields, err := s.g.structLiteralFields(targetType)
 	if err != nil {
 		return nil, err
@@ -110,19 +104,19 @@ func (s *functionState) emitCloneStructLikeValue(sourceValue C.LLVMValueRef, tar
 	if err != nil {
 		return nil, err
 	}
-	value := C.LLVMGetUndef(llvmType)
+	value := llvmGetUndef(llvmType)
 	for _, field := range fields {
-		sourceField := C.LLVMBuildExtractValue(s.builder, sourceValue, C.unsigned(field.Index), cStringFree(name+"."+field.Decl.Name+".src"))
+		sourceField := llvmBuildExtractValue(s.builder, sourceValue, llvmIRUnsigned(field.Index), cStringFree(name+"."+field.Decl.Name+".src"))
 		clonedField, err := s.emitCloneValue(sourceField, field.Type, field.Type, name+"."+field.Decl.Name)
 		if err != nil {
 			return nil, err
 		}
-		value = C.LLVMBuildInsertValue(s.builder, value, clonedField, C.unsigned(field.Index), cStringFree(name+"."+field.Decl.Name+".dst"))
+		value = llvmBuildInsertValue(s.builder, value, clonedField, llvmIRUnsigned(field.Index), cStringFree(name+"."+field.Decl.Name+".dst"))
 	}
 	return value, nil
 }
 
-func (s *functionState) emitCloneArrayValue(sourceValue C.LLVMValueRef, sourceType semantic.Type, targetType *semantic.ArrayType, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitCloneArrayValue(sourceValue llvmIRValueRef, sourceType semantic.Type, targetType *semantic.ArrayType, name string) (llvmIRValueRef, error) {
 	sourceArray, ok := sourceType.(*semantic.ArrayType)
 	if !ok || sourceArray == nil || !targetType.HasConstSize {
 		return nil, fmt.Errorf("clone array expects a fixed array source")
@@ -131,19 +125,19 @@ func (s *functionState) emitCloneArrayValue(sourceValue C.LLVMValueRef, sourceTy
 	if err != nil {
 		return nil, err
 	}
-	value := C.LLVMGetUndef(llvmType)
+	value := llvmGetUndef(llvmType)
 	for i := int64(0); i < targetType.ConstSize; i++ {
-		sourceElem := C.LLVMBuildExtractValue(s.builder, sourceValue, C.unsigned(i), cStringFree(name+".src.elem"))
+		sourceElem := llvmBuildExtractValue(s.builder, sourceValue, llvmIRUnsigned(i), cStringFree(name+".src.elem"))
 		clonedElem, err := s.emitCloneValue(sourceElem, sourceArray.Elem, targetType.Elem, name+".elem")
 		if err != nil {
 			return nil, err
 		}
-		value = C.LLVMBuildInsertValue(s.builder, value, clonedElem, C.unsigned(i), cStringFree(name+".dst.elem"))
+		value = llvmBuildInsertValue(s.builder, value, clonedElem, llvmIRUnsigned(i), cStringFree(name+".dst.elem"))
 	}
 	return value, nil
 }
 
-func (s *functionState) emitCloneDArrayValue(sourceValue C.LLVMValueRef, sourceType semantic.Type, targetType *semantic.DArrayType, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitCloneDArrayValue(sourceValue llvmIRValueRef, sourceType semantic.Type, targetType *semantic.DArrayType, name string) (llvmIRValueRef, error) {
 	owner, ok := s.regionArenaOwner(targetType.Region)
 	if !ok {
 		owner, ok = s.lookupTreeAllocOwner()
@@ -164,9 +158,9 @@ func (s *functionState) emitCloneDArrayValue(sourceValue C.LLVMValueRef, sourceT
 	if err != nil {
 		return nil, err
 	}
-	zeroCount := C.LLVMConstInt(usizeLLVMType, 0, 0)
+	zeroCount := llvmConstInt(usizeLLVMType, 0, 0)
 
-	cloneDynamicElems := func(sourceData C.LLVMValueRef, sourceElemType semantic.Type, countValue C.LLVMValueRef) (C.LLVMValueRef, error) {
+	cloneDynamicElems := func(sourceData llvmIRValueRef, sourceElemType semantic.Type, countValue llvmIRValueRef) (llvmIRValueRef, error) {
 		elemSizeBytes, err := s.sizeOfType(targetType.Elem)
 		if err != nil {
 			return nil, err
@@ -183,74 +177,74 @@ func (s *functionState) emitCloneDArrayValue(sourceValue C.LLVMValueRef, sourceT
 		if err != nil {
 			return nil, err
 		}
-		indexPtr := C.LLVMBuildAlloca(s.builder, usizeLLVMType, cStringFree(name+".index"))
-		one := C.LLVMConstInt(usizeLLVMType, 1, 0)
-		C.LLVMBuildStore(s.builder, zeroCount, indexPtr)
-		loopBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".loop"))
-		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".body"))
-		endBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".end"))
-		C.LLVMBuildBr(s.builder, loopBB)
-		C.LLVMPositionBuilderAtEnd(s.builder, loopBB)
-		indexValue := C.LLVMBuildLoad2(s.builder, usizeLLVMType, indexPtr, cStringFree(name+".index.load"))
-		more := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), indexValue, countValue, cStringFree(name+".cond"))
-		C.LLVMBuildCondBr(s.builder, more, bodyBB, endBB)
+		indexPtr := llvmBuildAlloca(s.builder, usizeLLVMType, cStringFree(name+".index"))
+		one := llvmConstInt(usizeLLVMType, 1, 0)
+		llvmBuildStore(s.builder, zeroCount, indexPtr)
+		loopBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".loop"))
+		bodyBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".body"))
+		endBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".end"))
+		llvmBuildBr(s.builder, loopBB)
+		llvmPositionBuilderAtEnd(s.builder, loopBB)
+		indexValue := llvmBuildLoad2(s.builder, usizeLLVMType, indexPtr, cStringFree(name+".index.load"))
+		more := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntULT), indexValue, countValue, cStringFree(name+".cond"))
+		llvmBuildCondBr(s.builder, more, bodyBB, endBB)
 
-		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
-		sourcePtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, sourceData, llvmValueSlicePtr([]C.LLVMValueRef{indexValue}), 1, cStringFree(name+".src.ptr"))
-		sourceElem := C.LLVMBuildLoad2(s.builder, elemLLVMType, sourcePtr, cStringFree(name+".src.elem"))
+		llvmPositionBuilderAtEnd(s.builder, bodyBB)
+		sourcePtr := llvmBuildGEP2(s.builder, elemLLVMType, sourceData, llvmValueSlicePtr([]llvmIRValueRef{indexValue}), 1, cStringFree(name+".src.ptr"))
+		sourceElem := llvmBuildLoad2(s.builder, elemLLVMType, sourcePtr, cStringFree(name+".src.elem"))
 		clonedElem, err := s.emitCloneValue(sourceElem, sourceElemType, targetType.Elem, name+".elem")
 		if err != nil {
 			return nil, err
 		}
-		destPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, allocPtr, llvmValueSlicePtr([]C.LLVMValueRef{indexValue}), 1, cStringFree(name+".dst.ptr"))
-		C.LLVMBuildStore(s.builder, clonedElem, destPtr)
-		next := C.LLVMBuildAdd(s.builder, indexValue, one, cStringFree(name+".next"))
-		C.LLVMBuildStore(s.builder, next, indexPtr)
-		C.LLVMBuildBr(s.builder, loopBB)
+		destPtr := llvmBuildGEP2(s.builder, elemLLVMType, allocPtr, llvmValueSlicePtr([]llvmIRValueRef{indexValue}), 1, cStringFree(name+".dst.ptr"))
+		llvmBuildStore(s.builder, clonedElem, destPtr)
+		next := llvmBuildAdd(s.builder, indexValue, one, cStringFree(name+".next"))
+		llvmBuildStore(s.builder, next, indexPtr)
+		llvmBuildBr(s.builder, loopBB)
 
-		C.LLVMPositionBuilderAtEnd(s.builder, endBB)
-		materialized := C.LLVMGetUndef(llvmResultType)
-		materialized = C.LLVMBuildInsertValue(s.builder, materialized, allocPtr, 0, cStringFree(name+".items"))
-		materialized = C.LLVMBuildInsertValue(s.builder, materialized, countValue, 1, cStringFree(name+".count"))
-		materialized = C.LLVMBuildInsertValue(s.builder, materialized, countValue, 2, cStringFree(name+".capacity"))
+		llvmPositionBuilderAtEnd(s.builder, endBB)
+		materialized := llvmGetUndef(llvmResultType)
+		materialized = llvmBuildInsertValue(s.builder, materialized, allocPtr, 0, cStringFree(name+".items"))
+		materialized = llvmBuildInsertValue(s.builder, materialized, countValue, 1, cStringFree(name+".count"))
+		materialized = llvmBuildInsertValue(s.builder, materialized, countValue, 2, cStringFree(name+".capacity"))
 		return materialized, nil
 	}
 
-	buildMaterializedFromDynamicSource := func(sourceData C.LLVMValueRef, sourceElemType semantic.Type, countValue C.LLVMValueRef) (C.LLVMValueRef, error) {
-		zeroCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), countValue, zeroCount, cStringFree(name+".count.zero"))
-		allocBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".alloc"))
-		mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".merge"))
-		entryBlock := C.LLVMGetInsertBlock(s.builder)
-		C.LLVMBuildCondBr(s.builder, zeroCond, mergeBB, allocBB)
+	buildMaterializedFromDynamicSource := func(sourceData llvmIRValueRef, sourceElemType semantic.Type, countValue llvmIRValueRef) (llvmIRValueRef, error) {
+		zeroCond := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), countValue, zeroCount, cStringFree(name+".count.zero"))
+		allocBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".alloc"))
+		mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".merge"))
+		entryBlock := llvmGetInsertBlock(s.builder)
+		llvmBuildCondBr(s.builder, zeroCond, mergeBB, allocBB)
 
-		C.LLVMPositionBuilderAtEnd(s.builder, allocBB)
+		llvmPositionBuilderAtEnd(s.builder, allocBB)
 		materialized, err := cloneDynamicElems(sourceData, sourceElemType, countValue)
 		if err != nil {
 			return nil, err
 		}
-		allocEnd := C.LLVMGetInsertBlock(s.builder)
-		C.LLVMBuildBr(s.builder, mergeBB)
+		allocEnd := llvmGetInsertBlock(s.builder)
+		llvmBuildBr(s.builder, mergeBB)
 
-		C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
-		phi := C.LLVMBuildPhi(s.builder, llvmResultType, cStringFree(name+".result"))
-		C.LLVMAddIncoming(phi, llvmValueSlicePtr([]C.LLVMValueRef{zeroResult, materialized}), llvmBlockSlicePtr([]C.LLVMBasicBlockRef{entryBlock, allocEnd}), 2)
+		llvmPositionBuilderAtEnd(s.builder, mergeBB)
+		phi := llvmBuildPhi(s.builder, llvmResultType, cStringFree(name+".result"))
+		llvmAddIncoming(phi, llvmValueSlicePtr([]llvmIRValueRef{zeroResult, materialized}), llvmBlockSlicePtr([]llvmIRBlockRef{entryBlock, allocEnd}), 2)
 		return phi, nil
 	}
 
 	switch st := sourceType.(type) {
 	case *semantic.DArrayType:
-		sourceData := C.LLVMBuildExtractValue(s.builder, sourceValue, 0, cStringFree(name+".src.data"))
-		countValue := C.LLVMBuildExtractValue(s.builder, sourceValue, 1, cStringFree(name+".src.count"))
+		sourceData := llvmBuildExtractValue(s.builder, sourceValue, 0, cStringFree(name+".src.data"))
+		countValue := llvmBuildExtractValue(s.builder, sourceValue, 1, cStringFree(name+".src.count"))
 		return buildMaterializedFromDynamicSource(sourceData, st.Elem, countValue)
 	case *semantic.ViewType:
-		sourceData := C.LLVMBuildExtractValue(s.builder, sourceValue, 0, cStringFree(name+".src.data"))
-		countValue := C.LLVMBuildExtractValue(s.builder, sourceValue, 1, cStringFree(name+".src.len"))
+		sourceData := llvmBuildExtractValue(s.builder, sourceValue, 0, cStringFree(name+".src.data"))
+		countValue := llvmBuildExtractValue(s.builder, sourceValue, 1, cStringFree(name+".src.len"))
 		return buildMaterializedFromDynamicSource(sourceData, st.Elem, countValue)
 	case *semantic.SViewType:
 		// sview = { data ptr (field 0), len i64 (field 1) }. Deep-copy the viewed
 		// u8 bytes into the region, producing an owned darray[u8] / dstr.
-		sourceData := C.LLVMBuildExtractValue(s.builder, sourceValue, 0, cStringFree(name+".src.data"))
-		lenValue := C.LLVMBuildExtractValue(s.builder, sourceValue, 1, cStringFree(name+".src.len"))
+		sourceData := llvmBuildExtractValue(s.builder, sourceValue, 0, cStringFree(name+".src.data"))
+		lenValue := llvmBuildExtractValue(s.builder, sourceValue, 1, cStringFree(name+".src.len"))
 		countValue, err := s.coerceValue(lenValue, s.g.namedType("i64"), usizeType)
 		if err != nil {
 			return nil, err
@@ -267,8 +261,8 @@ func (s *functionState) emitCloneDArrayValue(sourceValue C.LLVMValueRef, sourceT
 		if err != nil {
 			return nil, err
 		}
-		countConst := C.LLVMConstInt(usizeLLVMType, C.ulonglong(st.ConstSize), 0)
-		byteCount := C.LLVMBuildMul(s.builder, countConst, C.LLVMConstInt(usizeLLVMType, C.ulonglong(elemSizeBytes), 0), cStringFree(name+".bytes"))
+		countConst := llvmConstInt(usizeLLVMType, llvmIRUnsignedLongLong(st.ConstSize), 0)
+		byteCount := llvmBuildMul(s.builder, countConst, llvmConstInt(usizeLLVMType, llvmIRUnsignedLongLong(elemSizeBytes), 0), cStringFree(name+".bytes"))
 		allocPtr, err := s.emitTreeOwnerAllocBytes(owner, byteCount, name)
 		if err != nil {
 			return nil, err
@@ -278,26 +272,26 @@ func (s *functionState) emitCloneDArrayValue(sourceValue C.LLVMValueRef, sourceT
 			return nil, err
 		}
 		for i := int64(0); i < st.ConstSize; i++ {
-			sourceElem := C.LLVMBuildExtractValue(s.builder, sourceValue, C.unsigned(i), cStringFree(name+".src.elem"))
+			sourceElem := llvmBuildExtractValue(s.builder, sourceValue, llvmIRUnsigned(i), cStringFree(name+".src.elem"))
 			clonedElem, err := s.emitCloneValue(sourceElem, st.Elem, targetType.Elem, name+".elem")
 			if err != nil {
 				return nil, err
 			}
-			indexValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(i), 0)
-			destPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, allocPtr, llvmValueSlicePtr([]C.LLVMValueRef{indexValue}), 1, cStringFree(name+".dst.ptr"))
-			C.LLVMBuildStore(s.builder, clonedElem, destPtr)
+			indexValue := llvmConstInt(usizeLLVMType, llvmIRUnsignedLongLong(i), 0)
+			destPtr := llvmBuildGEP2(s.builder, elemLLVMType, allocPtr, llvmValueSlicePtr([]llvmIRValueRef{indexValue}), 1, cStringFree(name+".dst.ptr"))
+			llvmBuildStore(s.builder, clonedElem, destPtr)
 		}
-		materialized := C.LLVMGetUndef(llvmResultType)
-		materialized = C.LLVMBuildInsertValue(s.builder, materialized, allocPtr, 0, cStringFree(name+".items"))
-		materialized = C.LLVMBuildInsertValue(s.builder, materialized, countConst, 1, cStringFree(name+".count"))
-		materialized = C.LLVMBuildInsertValue(s.builder, materialized, countConst, 2, cStringFree(name+".capacity"))
+		materialized := llvmGetUndef(llvmResultType)
+		materialized = llvmBuildInsertValue(s.builder, materialized, allocPtr, 0, cStringFree(name+".items"))
+		materialized = llvmBuildInsertValue(s.builder, materialized, countConst, 1, cStringFree(name+".count"))
+		materialized = llvmBuildInsertValue(s.builder, materialized, countConst, 2, cStringFree(name+".capacity"))
 		return materialized, nil
 	default:
 		return nil, fmt.Errorf("clone cannot materialize %s into %s", sourceType.String(), targetType.String())
 	}
 }
 
-func (s *functionState) emitCloneOptionalValue(sourceValue C.LLVMValueRef, sourceType semantic.Type, targetType *semantic.OptionalType, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitCloneOptionalValue(sourceValue llvmIRValueRef, sourceType semantic.Type, targetType *semantic.OptionalType, name string) (llvmIRValueRef, error) {
 	sourceOptional, ok := sourceType.(*semantic.OptionalType)
 	if !ok || sourceOptional == nil {
 		return nil, fmt.Errorf("clone optional expects optional source")
@@ -306,12 +300,12 @@ func (s *functionState) emitCloneOptionalValue(sourceValue C.LLVMValueRef, sourc
 	if err != nil {
 		return nil, err
 	}
-	presentBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".present"))
-	absentBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".absent"))
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".merge"))
-	C.LLVMBuildCondBr(s.builder, presentValue, presentBB, absentBB)
+	presentBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".present"))
+	absentBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".absent"))
+	mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".merge"))
+	llvmBuildCondBr(s.builder, presentValue, presentBB, absentBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, presentBB)
+	llvmPositionBuilderAtEnd(s.builder, presentBB)
 	payloadValue, err := s.extractOptionalPayload(sourceValue, sourceOptional)
 	if err != nil {
 		return nil, err
@@ -324,28 +318,28 @@ func (s *functionState) emitCloneOptionalValue(sourceValue C.LLVMValueRef, sourc
 	if err != nil {
 		return nil, err
 	}
-	presentEnd := C.LLVMGetInsertBlock(s.builder)
-	C.LLVMBuildBr(s.builder, mergeBB)
+	presentEnd := llvmGetInsertBlock(s.builder)
+	llvmBuildBr(s.builder, mergeBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, absentBB)
+	llvmPositionBuilderAtEnd(s.builder, absentBB)
 	noneValue, err := s.buildOptionalNone(targetType)
 	if err != nil {
 		return nil, err
 	}
-	absentEnd := C.LLVMGetInsertBlock(s.builder)
-	C.LLVMBuildBr(s.builder, mergeBB)
+	absentEnd := llvmGetInsertBlock(s.builder)
+	llvmBuildBr(s.builder, mergeBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	llvmPositionBuilderAtEnd(s.builder, mergeBB)
 	optionalLLVMType, err := s.g.lowerType(targetType)
 	if err != nil {
 		return nil, err
 	}
-	phi := C.LLVMBuildPhi(s.builder, optionalLLVMType, cStringFree(name+".result"))
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr([]C.LLVMValueRef{someValue, noneValue}), llvmBlockSlicePtr([]C.LLVMBasicBlockRef{presentEnd, absentEnd}), 2)
+	phi := llvmBuildPhi(s.builder, optionalLLVMType, cStringFree(name+".result"))
+	llvmAddIncoming(phi, llvmValueSlicePtr([]llvmIRValueRef{someValue, noneValue}), llvmBlockSlicePtr([]llvmIRBlockRef{presentEnd, absentEnd}), 2)
 	return phi, nil
 }
 
-func (s *functionState) emitCloneErrorUnionValue(sourceValue C.LLVMValueRef, sourceType semantic.Type, targetType *semantic.ErrorUnionType, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitCloneErrorUnionValue(sourceValue llvmIRValueRef, sourceType semantic.Type, targetType *semantic.ErrorUnionType, name string) (llvmIRValueRef, error) {
 	sourceUnion, ok := sourceType.(*semantic.ErrorUnionType)
 	if !ok || sourceUnion == nil {
 		return nil, fmt.Errorf("clone error union expects error-union source")
@@ -358,14 +352,14 @@ func (s *functionState) emitCloneErrorUnionValue(sourceValue C.LLVMValueRef, sou
 	if err != nil {
 		return nil, err
 	}
-	zeroCode := C.LLVMConstInt(codeLLVMType, 0, 0)
-	success := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), errorCode, zeroCode, cStringFree(name+".ok"))
-	successBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".success"))
-	failureBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".failure"))
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".merge"))
-	C.LLVMBuildCondBr(s.builder, success, successBB, failureBB)
+	zeroCode := llvmConstInt(codeLLVMType, 0, 0)
+	success := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), errorCode, zeroCode, cStringFree(name+".ok"))
+	successBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".success"))
+	failureBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".failure"))
+	mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".merge"))
+	llvmBuildCondBr(s.builder, success, successBB, failureBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, successBB)
+	llvmPositionBuilderAtEnd(s.builder, successBB)
 	payloadValue, err := s.extractErrorUnionPayload(sourceValue, sourceUnion)
 	if err != nil {
 		return nil, err
@@ -378,23 +372,23 @@ func (s *functionState) emitCloneErrorUnionValue(sourceValue C.LLVMValueRef, sou
 	if err != nil {
 		return nil, err
 	}
-	successEnd := C.LLVMGetInsertBlock(s.builder)
-	C.LLVMBuildBr(s.builder, mergeBB)
+	successEnd := llvmGetInsertBlock(s.builder)
+	llvmBuildBr(s.builder, mergeBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, failureBB)
+	llvmPositionBuilderAtEnd(s.builder, failureBB)
 	failureValue, err := s.buildErrorUnionFailure(targetType, errorCode)
 	if err != nil {
 		return nil, err
 	}
-	failureEnd := C.LLVMGetInsertBlock(s.builder)
-	C.LLVMBuildBr(s.builder, mergeBB)
+	failureEnd := llvmGetInsertBlock(s.builder)
+	llvmBuildBr(s.builder, mergeBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	llvmPositionBuilderAtEnd(s.builder, mergeBB)
 	unionLLVMType, err := s.g.lowerType(targetType)
 	if err != nil {
 		return nil, err
 	}
-	phi := C.LLVMBuildPhi(s.builder, unionLLVMType, cStringFree(name+".result"))
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr([]C.LLVMValueRef{successValue, failureValue}), llvmBlockSlicePtr([]C.LLVMBasicBlockRef{successEnd, failureEnd}), 2)
+	phi := llvmBuildPhi(s.builder, unionLLVMType, cStringFree(name+".result"))
+	llvmAddIncoming(phi, llvmValueSlicePtr([]llvmIRValueRef{successValue, failureValue}), llvmBlockSlicePtr([]llvmIRBlockRef{successEnd, failureEnd}), 2)
 	return phi, nil
 }

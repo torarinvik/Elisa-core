@@ -2,12 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -26,7 +20,7 @@ import (
 //
 // The stores are the submitting scope's own (its implicit parameter, or its active region store):
 // the same values a direct call `worker(arg)` here would pass.
-func (s *functionState) emitStoreCapturingSubmitCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitStoreCapturingSubmitCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if expr == nil || callIdentName(expr) != "pool_submit1" || len(expr.Args) != 3 {
 		return nil, nil, false, nil
 	}
@@ -83,7 +77,7 @@ func (s *functionState) emitStoreCapturingSubmitCall(expr *ast.CallExpr) (C.LLVM
 		if _, exists := s.g.structTypes[capDecl.Name]; exists {
 			return nil, nil, true, errPartitionDeclined
 		}
-		if C.LLVMGetTypeByName2(s.g.context, cStringFree(capDecl.Name)) != nil {
+		if llvmGetTypeByName2(s.g.context, cStringFree(capDecl.Name)) != nil {
 			return nil, nil, true, errPartitionDeclined
 		}
 	}
@@ -106,7 +100,7 @@ func (s *functionState) emitStoreCapturingSubmitCall(expr *ast.CallExpr) (C.LLVM
 	s.g.functions[thunkName] = thunkFn
 	s.g.setDefinedFunctionLinkage(thunkName, thunkFn, thunkType)
 	if partitionExperiment {
-		C.LLVMSetLinkage(thunkFn, C.LLVMPrivateLinkage)
+		llvmSetLinkage(thunkFn, llvmPrivateLinkage)
 		if s.g.partLocalHelpers == nil {
 			s.g.partLocalHelpers = make(map[string]bool)
 		}
@@ -168,8 +162,8 @@ func (s *functionState) emitStoreCapturingSubmitCall(expr *ast.CallExpr) (C.LLVM
 	if err != nil {
 		return nil, nil, true, err
 	}
-	capValue := C.LLVMGetUndef(capLLVMType)
-	capValue = C.LLVMBuildInsertValue(s.builder, capValue, argValue, 0, cStringFree("submit.capture.arg"))
+	capValue := llvmGetUndef(capLLVMType)
+	capValue = llvmBuildInsertValue(s.builder, capValue, argValue, 0, cStringFree("submit.capture.arg"))
 	for k, name := range names {
 		storeType := fields[storeFields[k]].Type
 		// A scope that carries the store itself passes its own parameter; any other scope
@@ -188,9 +182,9 @@ func (s *functionState) emitStoreCapturingSubmitCall(expr *ast.CallExpr) (C.LLVM
 		if err != nil {
 			return nil, nil, true, err
 		}
-		capValue = C.LLVMBuildInsertValue(s.builder, capValue, storeValue, C.uint(k+1), cStringFree("submit.capture.store"))
+		capValue = llvmBuildInsertValue(s.builder, capValue, storeValue, llvmIRUnsigned(k+1), cStringFree("submit.capture.store"))
 	}
-	task := s.buildCall(submitLLVMType, submit, []C.LLVMValueRef{poolValue, thunkFn, capValue}, "submit.capture")
+	task := s.buildCall(submitLLVMType, submit, []llvmIRValueRef{poolValue, thunkFn, capValue}, "submit.capture")
 	return task, submitType.Return, true, nil
 }
 

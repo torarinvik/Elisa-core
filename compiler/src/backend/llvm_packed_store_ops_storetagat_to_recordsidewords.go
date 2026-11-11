@@ -2,11 +2,6 @@
 
 package backend
 
-/*
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/semantic"
 	"fmt"
@@ -16,7 +11,7 @@ import (
 // index). The record holds the full rowType {tag, common, payload}; all field byte offsets are
 // rowType-relative (packedEnumVariantPayloadFieldByteOffset uses abiOffsetOfLLVMElement(rowType,...)),
 // so reads are direct loads at record+offset, consistent with the constructor's record-based writes.
-func (ops *packedStoreOps) aosRecordPtr(handleValue C.LLVMValueRef, enumType *semantic.EnumType, name string) (C.LLVMValueRef, error) {
+func (ops *packedStoreOps) aosRecordPtr(handleValue llvmIRValueRef, enumType *semantic.EnumType, name string) (llvmIRValueRef, error) {
 	// docs/82 `handle: ptr`: the handle is the record address carried as a uintptr-width
 	// integer — handle-to-record is a bare inttoptr, no store state and no helper call.
 	if enumType != nil && enumType.HandleIsPointer() {
@@ -24,7 +19,7 @@ func (ops *packedStoreOps) aosRecordPtr(handleValue C.LLVMValueRef, enumType *se
 		if err != nil {
 			return nil, err
 		}
-		return C.LLVMBuildIntToPtr(ops.s.builder, handleValue, recordPtrType, cStringFree(name+".record.ptr")), nil
+		return llvmBuildIntToPtr(ops.s.builder, handleValue, recordPtrType, cStringFree(name+".record.ptr")), nil
 	}
 	stateValue, err := ops.stateValue(name + ".state")
 	if err != nil {
@@ -51,9 +46,9 @@ func (ops *packedStoreOps) aosRecordPtr(handleValue C.LLVMValueRef, enumType *se
 	if err != nil {
 		return nil, err
 	}
-	return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{stateValue, idx}, name+".record"), nil
+	return ops.s.buildCall(llvmFnType, callee, []llvmIRValueRef{stateValue, idx}, name+".record"), nil
 }
-func (ops *packedStoreOps) storeTagAt(handleValue C.LLVMValueRef, enumType *semantic.EnumType, name string) (C.LLVMValueRef, error) {
+func (ops *packedStoreOps) storeTagAt(handleValue llvmIRValueRef, enumType *semantic.EnumType, name string) (llvmIRValueRef, error) {
 	if enumType == nil || !enumType.Packed {
 		return nil, fmt.Errorf("missing packed enum tag metadata")
 	}
@@ -81,20 +76,20 @@ func (ops *packedStoreOps) storeTagAt(handleValue C.LLVMValueRef, enumType *sema
 		}
 		if ops.canCacheDenseHandleReads(enumType) {
 			if ops.s.packedDenseTagReads == nil {
-				ops.s.packedDenseTagReads = map[packedDenseTagReadCacheKey]C.LLVMValueRef{}
+				ops.s.packedDenseTagReads = map[packedDenseTagReadCacheKey]llvmIRValueRef{}
 			}
 			key := packedDenseTagReadCacheKey{block: ops.currentBlock(), storeType: ops.storeType, state: stateValue, handle: ops.canonicalizeDenseHandleKey(coercedHandle)}
 			if cached, ok := ops.s.packedDenseTagReads[key]; ok && cached != nil {
 				return cached, nil
 			}
-			var tagValue C.LLVMValueRef
+			var tagValue llvmIRValueRef
 			if ops.canUseOptimizedIndexSOADirectMetadataRead(enumType) {
 				tagValue, err = ops.loadIndexSOATagDirect(stateValue, coercedHandle, name+".direct")
 				if err != nil {
 					return nil, err
 				}
 			} else {
-				tagValue = ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{stateValue, coercedHandle}, name)
+				tagValue = ops.s.buildCall(llvmFnType, callee, []llvmIRValueRef{stateValue, coercedHandle}, name)
 			}
 			ops.s.packedDenseTagReads[key] = tagValue
 			return tagValue, nil
@@ -102,7 +97,7 @@ func (ops *packedStoreOps) storeTagAt(handleValue C.LLVMValueRef, enumType *sema
 		if ops.canUseOptimizedIndexSOADirectMetadataRead(enumType) {
 			return ops.loadIndexSOATagDirect(stateValue, coercedHandle, name+".direct")
 		}
-		return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{stateValue, coercedHandle}, name), nil
+		return ops.s.buildCall(llvmFnType, callee, []llvmIRValueRef{stateValue, coercedHandle}, name), nil
 	case packedEnumABIVariantSparse:
 		stateValue, err := ops.stateValue(name + ".state")
 		if err != nil {
@@ -125,17 +120,17 @@ func (ops *packedStoreOps) storeTagAt(handleValue C.LLVMValueRef, enumType *sema
 		}
 		if ops.canCacheDenseHandleReads(enumType) {
 			if ops.s.packedVariantSparseTagReads == nil {
-				ops.s.packedVariantSparseTagReads = map[packedVariantSparseTagReadCacheKey]C.LLVMValueRef{}
+				ops.s.packedVariantSparseTagReads = map[packedVariantSparseTagReadCacheKey]llvmIRValueRef{}
 			}
 			key := packedVariantSparseTagReadCacheKey{block: ops.currentBlock(), storeType: ops.storeType, state: stateValue, handle: ops.canonicalizeDenseHandleKey(coercedHandle)}
 			if cached, ok := ops.s.packedVariantSparseTagReads[key]; ok && cached != nil {
 				return cached, nil
 			}
-			tagValue := ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{stateValue, coercedHandle}, name)
+			tagValue := ops.s.buildCall(llvmFnType, callee, []llvmIRValueRef{stateValue, coercedHandle}, name)
 			ops.s.packedVariantSparseTagReads[key] = tagValue
 			return tagValue, nil
 		}
-		return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{stateValue, coercedHandle}, name), nil
+		return ops.s.buildCall(llvmFnType, callee, []llvmIRValueRef{stateValue, coercedHandle}, name), nil
 	case packedEnumABIAoS:
 		// docs/76 Slice 2: the tag is rowType field 0 → byte offset 0 in the record.
 		recordPtr, err := ops.aosRecordPtr(handleValue, enumType, name+".tag")
@@ -146,12 +141,12 @@ func (ops *packedStoreOps) storeTagAt(handleValue C.LLVMValueRef, enumType *sema
 		if err != nil {
 			return nil, err
 		}
-		return C.LLVMBuildLoad2(ops.s.builder, tagLLVM, recordPtr, cStringFree(name)), nil
+		return llvmBuildLoad2(ops.s.builder, tagLLVM, recordPtr, cStringFree(name)), nil
 	default:
 		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", ops.s.g.packedModeForEnum(enumType))
 	}
 }
-func (ops *packedStoreOps) loadPayloadWordAtOrigin(handleValue C.LLVMValueRef, enumType *semantic.EnumType, wordOffset C.LLVMValueRef, origin packedReadOriginKey, _ string) (C.LLVMValueRef, error) {
+func (ops *packedStoreOps) loadPayloadWordAtOrigin(handleValue llvmIRValueRef, enumType *semantic.EnumType, wordOffset llvmIRValueRef, origin packedReadOriginKey, _ string) (llvmIRValueRef, error) {
 	if enumType == nil || !enumType.Packed {
 		return nil, fmt.Errorf("missing packed enum payload metadata")
 	}
@@ -190,7 +185,7 @@ func (ops *packedStoreOps) loadPayloadWordAtOrigin(handleValue C.LLVMValueRef, e
 			if prefixWordOffset < prefixWordCount {
 				if ops.canCacheDenseHandleReads(enumType) {
 					if ops.s.packedDenseWordReads == nil {
-						ops.s.packedDenseWordReads = map[packedDenseWordReadCacheKey]C.LLVMValueRef{}
+						ops.s.packedDenseWordReads = map[packedDenseWordReadCacheKey]llvmIRValueRef{}
 					}
 					originKey, cacheHandle := ops.denseReadCacheIdentity(origin, coercedHandle)
 					key := packedDenseWordReadCacheKey{block: ops.cacheKeyBlock(), storeType: ops.storeType, state: ops.cacheKeyStoreSSA(originKey, stateValue), origin: originKey, handle: cacheHandle, offset: wordOffset}
@@ -209,18 +204,18 @@ func (ops *packedStoreOps) loadPayloadWordAtOrigin(handleValue C.LLVMValueRef, e
 		}
 		if ops.canCacheDenseHandleReads(enumType) {
 			if ops.s.packedDenseWordReads == nil {
-				ops.s.packedDenseWordReads = map[packedDenseWordReadCacheKey]C.LLVMValueRef{}
+				ops.s.packedDenseWordReads = map[packedDenseWordReadCacheKey]llvmIRValueRef{}
 			}
 			originKey, cacheHandle := ops.denseReadCacheIdentity(origin, coercedHandle)
 			key := packedDenseWordReadCacheKey{block: ops.cacheKeyBlock(), storeType: ops.storeType, state: ops.cacheKeyStoreSSA(originKey, stateValue), origin: originKey, handle: cacheHandle, offset: wordOffset}
 			if cached, ok := ops.s.packedDenseWordReads[key]; ok && cached != nil {
 				return cached, nil
 			}
-			wordValue := ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, coercedHandle, stateValue, wordOffset}, "")
+			wordValue := ops.s.buildCall(llvmFnType, callee, []llvmIRValueRef{arenaValue, coercedHandle, stateValue, wordOffset}, "")
 			ops.s.packedDenseWordReads[key] = wordValue
 			return wordValue, nil
 		}
-		return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, coercedHandle, stateValue, wordOffset}, ""), nil
+		return ops.s.buildCall(llvmFnType, callee, []llvmIRValueRef{arenaValue, coercedHandle, stateValue, wordOffset}, ""), nil
 	case packedEnumABIVariantSparse:
 		stateValue, err := ops.stateValue("packed.state")
 		if err != nil {
@@ -244,17 +239,17 @@ func (ops *packedStoreOps) loadPayloadWordAtOrigin(handleValue C.LLVMValueRef, e
 		}
 		if ops.canCacheDenseHandleReads(enumType) {
 			if ops.s.packedVariantSparseWordReads == nil {
-				ops.s.packedVariantSparseWordReads = map[packedVariantSparseWordReadCacheKey]C.LLVMValueRef{}
+				ops.s.packedVariantSparseWordReads = map[packedVariantSparseWordReadCacheKey]llvmIRValueRef{}
 			}
 			key := packedVariantSparseWordReadCacheKey{block: ops.currentBlock(), storeType: ops.storeType, state: stateValue, handle: ops.canonicalizeDenseHandleKey(coercedHandle), offset: wordOffset}
 			if cached, ok := ops.s.packedVariantSparseWordReads[key]; ok && cached != nil {
 				return cached, nil
 			}
-			wordValue := ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{coercedHandle, stateValue, wordOffset}, "")
+			wordValue := ops.s.buildCall(llvmFnType, callee, []llvmIRValueRef{coercedHandle, stateValue, wordOffset}, "")
 			ops.s.packedVariantSparseWordReads[key] = wordValue
 			return wordValue, nil
 		}
-		return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{coercedHandle, stateValue, wordOffset}, ""), nil
+		return ops.s.buildCall(llvmFnType, callee, []llvmIRValueRef{coercedHandle, stateValue, wordOffset}, ""), nil
 	case packedEnumABIAoS:
 		// docs/76 Slice 2: read the uintptr word at record + wordOffset*wordBytes. wordOffset is
 		// rowType-relative (the field byte offset / word), so this covers both common and payload words.
@@ -267,13 +262,13 @@ func (ops *packedStoreOps) loadPayloadWordAtOrigin(handleValue C.LLVMValueRef, e
 			return nil, err
 		}
 		wordBytes := ops.s.g.payloadSlotBytes(enumType)
-		byteOffset := C.LLVMBuildMul(ops.s.builder, wordOffset, C.LLVMConstInt(usizeLLVM, C.ulonglong(wordBytes), 0), cStringFree("packed.aos.byteoff"))
+		byteOffset := llvmBuildMul(ops.s.builder, wordOffset, llvmConstInt(usizeLLVM, llvmIRUnsignedLongLong(wordBytes), 0), cStringFree("packed.aos.byteoff"))
 		i8LLVM, err := ops.s.g.lowerBuiltin("u8")
 		if err != nil {
 			return nil, err
 		}
-		indices := []C.LLVMValueRef{byteOffset}
-		wordPtr := C.LLVMBuildGEP2(ops.s.builder, i8LLVM, recordPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("packed.aos.word.ptr"))
+		indices := []llvmIRValueRef{byteOffset}
+		wordPtr := llvmBuildGEP2(ops.s.builder, i8LLVM, recordPtr, llvmValueSlicePtr(indices), llvmIRUnsigned(len(indices)), cStringFree("packed.aos.word.ptr"))
 		uintptrLLVM, err := ops.s.g.lowerType(uintptrType)
 		if err != nil {
 			return nil, err
@@ -286,9 +281,9 @@ func (ops *packedStoreOps) loadPayloadWordAtOrigin(handleValue C.LLVMValueRef, e
 		if err != nil {
 			return nil, err
 		}
-		wordValue := C.LLVMBuildLoad2(ops.s.builder, slotLLVM, wordPtr, cStringFree("packed.aos.word"))
+		wordValue := llvmBuildLoad2(ops.s.builder, slotLLVM, wordPtr, cStringFree("packed.aos.word"))
 		if slotLLVM != uintptrLLVM {
-			wordValue = C.LLVMBuildZExt(ops.s.builder, wordValue, uintptrLLVM, cStringFree("packed.aos.word.zext"))
+			wordValue = llvmBuildZExt(ops.s.builder, wordValue, uintptrLLVM, cStringFree("packed.aos.word.zext"))
 		}
 		return wordValue, nil
 	default:
@@ -315,10 +310,10 @@ func (ops *packedStoreOps) loadPayloadWordAtOrigin(handleValue C.LLVMValueRef, e
 		if err != nil {
 			return nil, err
 		}
-		return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, coercedHandle, stateValue, wordOffset}, ""), nil
+		return ops.s.buildCall(llvmFnType, callee, []llvmIRValueRef{arenaValue, coercedHandle, stateValue, wordOffset}, ""), nil
 	}
 }
-func (ops *packedStoreOps) loadPayloadWord(handleValue C.LLVMValueRef, enumType *semantic.EnumType, wordOffset C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+func (ops *packedStoreOps) loadPayloadWord(handleValue llvmIRValueRef, enumType *semantic.EnumType, wordOffset llvmIRValueRef, name string) (llvmIRValueRef, error) {
 	return ops.loadPayloadWordAtOrigin(handleValue, enumType, wordOffset, packedReadOriginKey{}, name)
 }
 func (ops *packedStoreOps) canDirectWordRead() bool {
@@ -331,14 +326,14 @@ func (ops *packedStoreOps) canDirectWordRead() bool {
 func (ops *packedStoreOps) canDirectTagRead() bool {
 	return ops.canDirectWordRead()
 }
-func (ops *packedStoreOps) loadPayloadWordsAsTypes(handleValue C.LLVMValueRef, enumType *semantic.EnumType, wordOffsets []C.LLVMValueRef, types []semantic.Type, namePrefix string) ([]C.LLVMValueRef, bool, error) {
+func (ops *packedStoreOps) loadPayloadWordsAsTypes(handleValue llvmIRValueRef, enumType *semantic.EnumType, wordOffsets []llvmIRValueRef, types []semantic.Type, namePrefix string) ([]llvmIRValueRef, bool, error) {
 	if !ops.canDirectWordRead() || enumType == nil || !enumType.Packed {
 		return nil, false, nil
 	}
 	if len(wordOffsets) != len(types) {
 		return nil, false, fmt.Errorf("packed payload word/type arity mismatch")
 	}
-	values := make([]C.LLVMValueRef, 0, len(types))
+	values := make([]llvmIRValueRef, 0, len(types))
 	uintptrType := ops.s.g.namedType("uintptr")
 	for i, payloadType := range types {
 		wordValue, err := ops.loadPayloadWord(handleValue, enumType, wordOffsets[i], namePrefix)
@@ -353,7 +348,7 @@ func (ops *packedStoreOps) loadPayloadWordsAsTypes(handleValue C.LLVMValueRef, e
 	}
 	return values, true, nil
 }
-func (ops *packedStoreOps) loadTailView(handleValue C.LLVMValueRef, enumType *semantic.EnumType, variant *semantic.EnumVariant, payloadIndex int, name string) (C.LLVMValueRef, bool, error) {
+func (ops *packedStoreOps) loadTailView(handleValue llvmIRValueRef, enumType *semantic.EnumType, variant *semantic.EnumVariant, payloadIndex int, name string) (llvmIRValueRef, bool, error) {
 	if ops == nil || enumType == nil || !enumType.Packed || variant == nil {
 		return nil, false, nil
 	}
@@ -387,31 +382,31 @@ func (ops *packedStoreOps) loadTailView(handleValue C.LLVMValueRef, enumType *se
 	if err != nil {
 		return nil, false, err
 	}
-	i32Type := C.LLVMInt32TypeInContext(ops.s.g.context)
-	zeroIndex := C.LLVMConstInt(i32Type, 0, 0)
-	payloadFieldIndexValue := C.LLVMConstInt(i32Type, C.ulonglong(payloadFieldIndex), 0)
-	nullPtr := C.LLVMConstNull(C.LLVMPointerTypeInContext(ops.s.g.context, 0))
-	payloadIndices := []C.LLVMValueRef{zeroIndex, payloadFieldIndexValue}
-	payloadPtr := C.LLVMBuildGEP2(ops.s.builder, rowType, nullPtr, llvmValueSlicePtr(payloadIndices), C.unsigned(len(payloadIndices)), cStringFree(name+".payload.word.ptr"))
-	payloadOffsetBytes := C.LLVMBuildPtrToInt(ops.s.builder, payloadPtr, usizeLLVMType, cStringFree(name+".payload.word.bytes"))
-	wordBytesValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(wordBytes), 0)
-	baseWordOffset := C.LLVMBuildUDiv(ops.s.builder, payloadOffsetBytes, wordBytesValue, cStringFree(name+".payload.word.offset"))
+	i32Type := llvmInt32TypeInContext(ops.s.g.context)
+	zeroIndex := llvmConstInt(i32Type, 0, 0)
+	payloadFieldIndexValue := llvmConstInt(i32Type, llvmIRUnsignedLongLong(payloadFieldIndex), 0)
+	nullPtr := llvmConstNull(llvmPointerTypeInContext(ops.s.g.context, 0))
+	payloadIndices := []llvmIRValueRef{zeroIndex, payloadFieldIndexValue}
+	payloadPtr := llvmBuildGEP2(ops.s.builder, rowType, nullPtr, llvmValueSlicePtr(payloadIndices), llvmIRUnsigned(len(payloadIndices)), cStringFree(name+".payload.word.ptr"))
+	payloadOffsetBytes := llvmBuildPtrToInt(ops.s.builder, payloadPtr, usizeLLVMType, cStringFree(name+".payload.word.bytes"))
+	wordBytesValue := llvmConstInt(usizeLLVMType, llvmIRUnsignedLongLong(wordBytes), 0)
+	baseWordOffset := llvmBuildUDiv(ops.s.builder, payloadOffsetBytes, wordBytesValue, cStringFree(name+".payload.word.offset"))
 	payloadType, err := ops.s.g.lowerEnumVariantPayloadType(variant)
 	if err != nil {
 		return nil, false, err
 	}
-	fieldIndexValue := C.LLVMConstInt(i32Type, C.ulonglong(payloadIndex), 0)
-	fieldIndices := []C.LLVMValueRef{zeroIndex, fieldIndexValue}
-	fieldPtr := C.LLVMBuildGEP2(ops.s.builder, payloadType, nullPtr, llvmValueSlicePtr(fieldIndices), C.unsigned(len(fieldIndices)), cStringFree(name+".field.word.ptr"))
-	fieldOffsetBytes := C.LLVMBuildPtrToInt(ops.s.builder, fieldPtr, usizeLLVMType, cStringFree(name+".field.word.bytes"))
-	fieldWordOffset := C.LLVMBuildUDiv(ops.s.builder, fieldOffsetBytes, wordBytesValue, cStringFree(name+".field.word.offset"))
-	viewBaseWordOffset := C.LLVMBuildAdd(ops.s.builder, baseWordOffset, fieldWordOffset, cStringFree(name+".field.word.base"))
-	oneWord := C.LLVMConstInt(usizeLLVMType, 1, 0)
+	fieldIndexValue := llvmConstInt(i32Type, llvmIRUnsignedLongLong(payloadIndex), 0)
+	fieldIndices := []llvmIRValueRef{zeroIndex, fieldIndexValue}
+	fieldPtr := llvmBuildGEP2(ops.s.builder, payloadType, nullPtr, llvmValueSlicePtr(fieldIndices), llvmIRUnsigned(len(fieldIndices)), cStringFree(name+".field.word.ptr"))
+	fieldOffsetBytes := llvmBuildPtrToInt(ops.s.builder, fieldPtr, usizeLLVMType, cStringFree(name+".field.word.bytes"))
+	fieldWordOffset := llvmBuildUDiv(ops.s.builder, fieldOffsetBytes, wordBytesValue, cStringFree(name+".field.word.offset"))
+	viewBaseWordOffset := llvmBuildAdd(ops.s.builder, baseWordOffset, fieldWordOffset, cStringFree(name+".field.word.base"))
+	oneWord := llvmConstInt(usizeLLVMType, 1, 0)
 	dataWord, err := ops.loadPayloadWord(handleValue, enumType, viewBaseWordOffset, name+".data.word")
 	if err != nil {
 		return nil, false, err
 	}
-	lenWordOffset := C.LLVMBuildAdd(ops.s.builder, viewBaseWordOffset, oneWord, cStringFree(name+".len.word.offset"))
+	lenWordOffset := llvmBuildAdd(ops.s.builder, viewBaseWordOffset, oneWord, cStringFree(name+".len.word.offset"))
 	lenWord, err := ops.loadPayloadWord(handleValue, enumType, lenWordOffset, name+".len.word")
 	if err != nil {
 		return nil, false, err
@@ -429,12 +424,12 @@ func (ops *packedStoreOps) loadTailView(handleValue C.LLVMValueRef, enumType *se
 	if err != nil {
 		return nil, false, err
 	}
-	viewValue := C.LLVMGetUndef(viewLLVMType)
-	viewValue = C.LLVMBuildInsertValue(ops.s.builder, viewValue, dataValue, 0, cStringFree(name+".data"))
-	viewValue = C.LLVMBuildInsertValue(ops.s.builder, viewValue, lenValue, 1, cStringFree(name+".len"))
+	viewValue := llvmGetUndef(viewLLVMType)
+	viewValue = llvmBuildInsertValue(ops.s.builder, viewValue, dataValue, 0, cStringFree(name+".data"))
+	viewValue = llvmBuildInsertValue(ops.s.builder, viewValue, lenValue, 1, cStringFree(name+".len"))
 	return viewValue, true, nil
 }
-func (ops *packedStoreOps) storeSlice(startValue C.LLVMValueRef, endValue C.LLVMValueRef, resultType semantic.Type, name string) (C.LLVMValueRef, semantic.Type, error) {
+func (ops *packedStoreOps) storeSlice(startValue llvmIRValueRef, endValue llvmIRValueRef, resultType semantic.Type, name string) (llvmIRValueRef, semantic.Type, error) {
 	stateValue, err := ops.stateValue(name + ".state")
 	if err != nil {
 		return nil, nil, err
@@ -456,6 +451,6 @@ func (ops *packedStoreOps) storeSlice(startValue C.LLVMValueRef, endValue C.LLVM
 	if err != nil {
 		return nil, nil, err
 	}
-	value := ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{stateValue, startValue, endValue}, name)
+	value := ops.s.buildCall(llvmFnType, callee, []llvmIRValueRef{stateValue, startValue, endValue}, name)
 	return value, resultType, nil
 }

@@ -2,12 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -20,14 +14,14 @@ import (
 // nested field like `MatchArm.body: darray[Stmt]` keeps pointing at the builder's freed region
 // (the self-host next_token use-after-free). sview/view/handle fields are borrows and are skipped.
 // `base` points at the freshly-copied element array (count elements) in the store arena.
-func (s *functionState) emitDeepAdoptElementContainers(base, count C.LLVMValueRef, elemType semantic.Type, arenaValue C.LLVMValueRef, allocLLVMType C.LLVMTypeRef, allocCallee C.LLVMValueRef) error {
+func (s *functionState) emitDeepAdoptElementContainers(base, count llvmIRValueRef, elemType semantic.Type, arenaValue llvmIRValueRef, allocLLVMType llvmIRTypeRef, allocCallee llvmIRValueRef) error {
 	st, ok := elemType.(*semantic.StructType)
 	if !ok || st == nil || st.Decl == nil {
 		return nil
 	}
 	type ownedField struct {
 		index    int
-		darrayLL C.LLVMTypeRef
+		darrayLL llvmIRTypeRef
 		elemSize uint64
 		nested   semantic.Type
 	}
@@ -63,50 +57,50 @@ func (s *functionState) emitDeepAdoptElementContainers(base, count C.LLVMValueRe
 	if err != nil {
 		return err
 	}
-	ptrLL := C.LLVMPointerTypeInContext(s.g.context, 0)
-	iPtr := C.LLVMBuildAlloca(s.builder, usizeLL, cStringFree("adopt.deep.i"))
-	C.LLVMBuildStore(s.builder, C.LLVMConstInt(usizeLL, 0, 0), iPtr)
-	headerBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("adopt.deep.header"))
-	bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("adopt.deep.body"))
-	exitBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("adopt.deep.exit"))
-	C.LLVMBuildBr(s.builder, headerBB)
-	C.LLVMPositionBuilderAtEnd(s.builder, headerBB)
-	iVal := C.LLVMBuildLoad2(s.builder, usizeLL, iPtr, cStringFree("adopt.deep.i.load"))
-	cond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), iVal, count, cStringFree("adopt.deep.cond"))
-	C.LLVMBuildCondBr(s.builder, cond, bodyBB, exitBB)
-	C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
-	elemIndices := []C.LLVMValueRef{iVal}
-	elemPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, base, llvmValueSlicePtr(elemIndices), C.unsigned(len(elemIndices)), cStringFree("adopt.deep.elem"))
+	ptrLL := llvmPointerTypeInContext(s.g.context, 0)
+	iPtr := llvmBuildAlloca(s.builder, usizeLL, cStringFree("adopt.deep.i"))
+	llvmBuildStore(s.builder, llvmConstInt(usizeLL, 0, 0), iPtr)
+	headerBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("adopt.deep.header"))
+	bodyBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("adopt.deep.body"))
+	exitBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("adopt.deep.exit"))
+	llvmBuildBr(s.builder, headerBB)
+	llvmPositionBuilderAtEnd(s.builder, headerBB)
+	iVal := llvmBuildLoad2(s.builder, usizeLL, iPtr, cStringFree("adopt.deep.i.load"))
+	cond := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntULT), iVal, count, cStringFree("adopt.deep.cond"))
+	llvmBuildCondBr(s.builder, cond, bodyBB, exitBB)
+	llvmPositionBuilderAtEnd(s.builder, bodyBB)
+	elemIndices := []llvmIRValueRef{iVal}
+	elemPtr := llvmBuildGEP2(s.builder, elemLLVMType, base, llvmValueSlicePtr(elemIndices), llvmIRUnsigned(len(elemIndices)), cStringFree("adopt.deep.elem"))
 	for _, of := range owned {
-		fieldPtr := C.LLVMBuildStructGEP2(s.builder, elemLLVMType, elemPtr, C.unsigned(of.index), cStringFree("adopt.deep.field"))
-		dataPtr := C.LLVMBuildStructGEP2(s.builder, of.darrayLL, fieldPtr, 0, cStringFree("adopt.deep.fdata.ptr"))
-		countPtr := C.LLVMBuildStructGEP2(s.builder, of.darrayLL, fieldPtr, 1, cStringFree("adopt.deep.fcount.ptr"))
-		capPtr := C.LLVMBuildStructGEP2(s.builder, of.darrayLL, fieldPtr, 2, cStringFree("adopt.deep.fcap.ptr"))
-		fdata := C.LLVMBuildLoad2(s.builder, ptrLL, dataPtr, cStringFree("adopt.deep.fdata"))
-		fcount := C.LLVMBuildLoad2(s.builder, usizeLL, countPtr, cStringFree("adopt.deep.fcount"))
+		fieldPtr := llvmBuildStructGEP2(s.builder, elemLLVMType, elemPtr, llvmIRUnsigned(of.index), cStringFree("adopt.deep.field"))
+		dataPtr := llvmBuildStructGEP2(s.builder, of.darrayLL, fieldPtr, 0, cStringFree("adopt.deep.fdata.ptr"))
+		countPtr := llvmBuildStructGEP2(s.builder, of.darrayLL, fieldPtr, 1, cStringFree("adopt.deep.fcount.ptr"))
+		capPtr := llvmBuildStructGEP2(s.builder, of.darrayLL, fieldPtr, 2, cStringFree("adopt.deep.fcap.ptr"))
+		fdata := llvmBuildLoad2(s.builder, ptrLL, dataPtr, cStringFree("adopt.deep.fdata"))
+		fcount := llvmBuildLoad2(s.builder, usizeLL, countPtr, cStringFree("adopt.deep.fcount"))
 		fbytes, err := s.emitCheckedElemByteCount(fcount, of.elemSize, "adopt.deep.field")
 		if err != nil {
 			return err
 		}
-		fnew := s.buildCall(allocLLVMType, allocCallee, []C.LLVMValueRef{arenaValue, fbytes}, "adopt.deep.falloc")
+		fnew := s.buildCall(allocLLVMType, allocCallee, []llvmIRValueRef{arenaValue, fbytes}, "adopt.deep.falloc")
 		if err := s.emitPackedEnumTailMemcpy(fnew, fdata, fbytes); err != nil {
 			return err
 		}
-		C.LLVMBuildStore(s.builder, fnew, dataPtr)
-		C.LLVMBuildStore(s.builder, fcount, capPtr)
+		llvmBuildStore(s.builder, fnew, dataPtr)
+		llvmBuildStore(s.builder, fcount, capPtr)
 		// Recurse: a field whose elements are themselves structs with owned containers.
 		if err := s.emitDeepAdoptElementContainers(fnew, fcount, of.nested, arenaValue, allocLLVMType, allocCallee); err != nil {
 			return err
 		}
 	}
-	iNext := C.LLVMBuildAdd(s.builder, iVal, C.LLVMConstInt(usizeLL, 1, 0), cStringFree("adopt.deep.i.next"))
-	C.LLVMBuildStore(s.builder, iNext, iPtr)
-	C.LLVMBuildBr(s.builder, headerBB)
-	C.LLVMPositionBuilderAtEnd(s.builder, exitBB)
+	iNext := llvmBuildAdd(s.builder, iVal, llvmConstInt(usizeLL, 1, 0), cStringFree("adopt.deep.i.next"))
+	llvmBuildStore(s.builder, iNext, iPtr)
+	llvmBuildBr(s.builder, headerBB)
+	llvmPositionBuilderAtEnd(s.builder, exitBB)
 	return nil
 }
 
-func (s *functionState) emitPackedEnumTailPayloadValue(plan *packedEnumTailPayloadPlan, tailDataPtr C.LLVMValueRef) (C.LLVMValueRef, error) {
+func (s *functionState) emitPackedEnumTailPayloadValue(plan *packedEnumTailPayloadPlan, tailDataPtr llvmIRValueRef) (llvmIRValueRef, error) {
 	if plan == nil || plan.viewType == nil {
 		return nil, fmt.Errorf("missing packed enum tail payload plan")
 	}
@@ -129,22 +123,22 @@ func (s *functionState) emitPackedEnumTailPayloadValue(plan *packedEnumTailPaylo
 			if err != nil {
 				return nil, err
 			}
-			indexValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(i), 0)
-			indices := []C.LLVMValueRef{indexValue}
-			elemPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, tailDataPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("packed.tail.elem.ptr"))
-			C.LLVMBuildStore(s.builder, elemValue, elemPtr)
+			indexValue := llvmConstInt(usizeLLVMType, llvmIRUnsignedLongLong(i), 0)
+			indices := []llvmIRValueRef{indexValue}
+			elemPtr := llvmBuildGEP2(s.builder, elemLLVMType, tailDataPtr, llvmValueSlicePtr(indices), llvmIRUnsigned(len(indices)), cStringFree("packed.tail.elem.ptr"))
+			llvmBuildStore(s.builder, elemValue, elemPtr)
 		}
 	} else {
 		if err := s.emitPackedEnumTailMemcpy(tailDataPtr, plan.sourceData, plan.byteCount); err != nil {
 			return nil, err
 		}
 	}
-	viewValue := C.LLVMGetUndef(viewLLVMType)
-	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, tailDataPtr, 0, cStringFree("packed.tail.view.data"))
-	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, plan.lenValue, 1, cStringFree("packed.tail.view.len"))
+	viewValue := llvmGetUndef(viewLLVMType)
+	viewValue = llvmBuildInsertValue(s.builder, viewValue, tailDataPtr, 0, cStringFree("packed.tail.view.data"))
+	viewValue = llvmBuildInsertValue(s.builder, viewValue, plan.lenValue, 1, cStringFree("packed.tail.view.len"))
 	return viewValue, nil
 }
-func (s *functionState) emitPackedEnumTailMemcpy(dstData C.LLVMValueRef, srcData C.LLVMValueRef, byteCount C.LLVMValueRef) error {
+func (s *functionState) emitPackedEnumTailMemcpy(dstData llvmIRValueRef, srcData llvmIRValueRef, byteCount llvmIRValueRef) error {
 	voidType := s.g.namedType("void")
 	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	usizeType := s.g.namedType("usize")
@@ -159,12 +153,12 @@ func (s *functionState) emitPackedEnumTailMemcpy(dstData C.LLVMValueRef, srcData
 	if err != nil {
 		return err
 	}
-	memcpyCall := s.buildCall(memcpyLLVMType, memcpyCallee, []C.LLVMValueRef{dstData, srcData, byteCount}, "packed.tail.memcpy")
-	s.addCallSiteEnumAttribute(memcpyCall, C.uint(1), "noalias")
-	s.addCallSiteEnumAttribute(memcpyCall, C.uint(2), "noalias")
+	memcpyCall := s.buildCall(memcpyLLVMType, memcpyCallee, []llvmIRValueRef{dstData, srcData, byteCount}, "packed.tail.memcpy")
+	s.addCallSiteEnumAttribute(memcpyCall, llvmIRUnsigned(1), "noalias")
+	s.addCallSiteEnumAttribute(memcpyCall, llvmIRUnsigned(2), "noalias")
 	return nil
 }
-func (s *functionState) emitPackedEnumStorageAlloc(storeValue C.LLVMValueRef, enumType *semantic.EnumType, tailPlan *packedEnumTailPayloadPlan, fixedTagValue C.LLVMValueRef) (C.LLVMValueRef, C.LLVMValueRef, C.LLVMValueRef, error) {
+func (s *functionState) emitPackedEnumStorageAlloc(storeValue llvmIRValueRef, enumType *semantic.EnumType, tailPlan *packedEnumTailPayloadPlan, fixedTagValue llvmIRValueRef) (llvmIRValueRef, llvmIRValueRef, llvmIRValueRef, error) {
 	if enumType == nil || !enumType.Packed {
 		return nil, nil, nil, fmt.Errorf("missing packed enum storage metadata")
 	}
@@ -179,7 +173,7 @@ func (s *functionState) emitPackedEnumStorageAlloc(storeValue C.LLVMValueRef, en
 	}
 	totalSizeValue := rowSizeValue
 	if tailPlan != nil {
-		totalSizeValue = C.LLVMBuildAdd(s.builder, rowSizeValue, tailPlan.byteCount, cStringFree("packed.alloc.bytes"))
+		totalSizeValue = llvmBuildAdd(s.builder, rowSizeValue, tailPlan.byteCount, cStringFree("packed.alloc.bytes"))
 	}
 	return ops.allocateStorage(enumType, totalSizeValue, tailPlan != nil, fixedTagValue, "packed.alloc.store")
 }

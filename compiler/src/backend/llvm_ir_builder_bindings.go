@@ -2,12 +2,27 @@
 
 package backend
 
-// #include <llvm-c/Core.h>
+/*
+#include <llvm-c/Core.h>
+
+// These calls synchronously consume pointer arrays and copy their LLVM handles
+// into C++-owned operands. They retain neither the caller's array nor its name
+// buffer. The compiler installs no Go LLVM diagnostic/yield callbacks.
+// Keep this list narrow: owning-buffer and callback-registration APIs do not
+// have the same contract. Both hints are needed for Go's nonescaping wrapper.
+#cgo noescape LLVMAddIncoming
+#cgo nocallback LLVMAddIncoming
+#cgo noescape LLVMBuildGEP2
+#cgo nocallback LLVMBuildGEP2
+*/
 import "C"
 
 // Keep LLVM handle identity while letting emitters that only use these operations
 // compile as ordinary Go. Cgo processes the shared binding rather than each user.
 type llvmIRValueRef = C.LLVMValueRef
+
+// llvmValueRef is the value handle shared by the backend emitters.
+type llvmValueRef = llvmIRValueRef
 type llvmIRTypeRef = C.LLVMTypeRef
 type llvmIRBlockRef = C.LLVMBasicBlockRef
 type llvmIRBuilderRef = C.LLVMBuilderRef
@@ -134,6 +149,10 @@ const (
 	llvmIntEQ  = C.LLVMIntEQ
 	llvmIntNE  = C.LLVMIntNE
 	llvmIntULT = C.LLVMIntULT
+	llvmIntULE = C.LLVMIntULE
+	llvmIntUGT = C.LLVMIntUGT
+	llvmIntUGE = C.LLVMIntUGE
+	llvmIntSLE = C.LLVMIntSLE
 )
 
 func llvmBuildICmp(builder llvmIRBuilderRef, predicate llvmIRIntPredicate, left, right llvmIRValueRef, name *llvmIRChar) llvmIRValueRef {
@@ -142,4 +161,32 @@ func llvmBuildICmp(builder llvmIRBuilderRef, predicate llvmIRIntPredicate, left,
 
 func llvmBuildSelect(builder llvmIRBuilderRef, condition, yes, no llvmIRValueRef, name *llvmIRChar) llvmIRValueRef {
 	return C.LLVMBuildSelect(builder, condition, yes, no, name)
+}
+
+func llvmBuildAlloca(builder llvmIRBuilderRef, typ llvmIRTypeRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildAlloca(builder, typ, name)
+}
+
+func llvmBuildAnd(builder llvmIRBuilderRef, left, right llvmIRValueRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildAnd(builder, left, right, name)
+}
+
+func llvmBuildSub(builder llvmIRBuilderRef, left, right llvmIRValueRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildSub(builder, left, right, name)
+}
+
+func llvmBuildNot(builder llvmIRBuilderRef, value llvmIRValueRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildNot(builder, value, name)
+}
+
+func llvmBuildIntToPtr(builder llvmIRBuilderRef, value llvmIRValueRef, typ llvmIRTypeRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildIntToPtr(builder, value, typ, name)
+}
+
+func llvmBuildIntCast2(builder llvmIRBuilderRef, value llvmIRValueRef, typ llvmIRTypeRef, signed llvmIRBool, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildIntCast2(builder, value, typ, signed, name)
+}
+
+func llvmGetBasicBlockTerminator(block llvmIRBlockRef) llvmIRValueRef {
+	return C.LLVMGetBasicBlockTerminator(block)
 }

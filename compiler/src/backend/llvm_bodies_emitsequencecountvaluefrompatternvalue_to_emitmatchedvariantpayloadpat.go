@@ -2,14 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-
-void elisa_coreSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigned trueWeight, unsigned falseWeight);
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -17,7 +9,7 @@ import (
 	"strconv"
 )
 
-func (s *functionState) emitSequenceCountValueFromPatternValue(actualValue C.LLVMValueRef, actualType semantic.Type, originExpr ast.Expr, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitSequenceCountValueFromPatternValue(actualValue llvmIRValueRef, actualType semantic.Type, originExpr ast.Expr, name string) (llvmIRValueRef, error) {
 	actualType = semantic.StripAggregateStateType(actualType)
 	switch t := actualType.(type) {
 	case *semantic.ArrayType:
@@ -58,7 +50,7 @@ func (s *functionState) emitSequenceCountValueFromPatternValue(actualValue C.LLV
 		return nil, fmt.Errorf("count pattern length is not implemented for %s", actualType.String())
 	}
 }
-func (s *functionState) emitCountMatchPatternTest(pattern ast.MatchPattern, actualValue C.LLVMValueRef, actualType semantic.Type, originExpr ast.Expr, successBB C.LLVMBasicBlockRef, failureBB C.LLVMBasicBlockRef) (bool, error) {
+func (s *functionState) emitCountMatchPatternTest(pattern ast.MatchPattern, actualValue llvmIRValueRef, actualType semantic.Type, originExpr ast.Expr, successBB llvmIRBlockRef, failureBB llvmIRBlockRef) (bool, error) {
 	expected, ok, err := countMatchPatternExpectedLen(pattern)
 	if !ok || err != nil {
 		return ok, err
@@ -75,14 +67,14 @@ func (s *functionState) emitCountMatchPatternTest(pattern ast.MatchPattern, actu
 	if err != nil {
 		return true, err
 	}
-	expectedValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(expected), 0)
-	countOK := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), countValue, expectedValue, cStringFree("match.count.ok"))
-	C.LLVMBuildCondBr(s.builder, countOK, successBB, failureBB)
+	expectedValue := llvmConstInt(usizeLLVMType, llvmIRUnsignedLongLong(expected), 0)
+	countOK := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), countValue, expectedValue, cStringFree("match.count.ok"))
+	llvmBuildCondBr(s.builder, countOK, successBB, failureBB)
 	return true, nil
 }
-func (s *functionState) emitListMatchPatternTest(pattern *ast.MatchListPattern, actualValue C.LLVMValueRef, actualType semantic.Type, originExpr ast.Expr, successBB C.LLVMBasicBlockRef, failureBB C.LLVMBasicBlockRef) error {
+func (s *functionState) emitListMatchPatternTest(pattern *ast.MatchListPattern, actualValue llvmIRValueRef, actualType semantic.Type, originExpr ast.Expr, successBB llvmIRBlockRef, failureBB llvmIRBlockRef) error {
 	if pattern == nil {
-		C.LLVMBuildBr(s.builder, successBB)
+		llvmBuildBr(s.builder, successBB)
 		return nil
 	}
 	if originExpr == nil && actualValue == nil {
@@ -112,21 +104,21 @@ func (s *functionState) emitListMatchPatternTest(pattern *ast.MatchListPattern, 
 		}
 	}
 	boundRest := restPattern != nil && restPattern.Name != ""
-	expectedLen := C.LLVMConstInt(usizeLLVMType, C.ulonglong(expectedCount), 0)
-	predicate := C.LLVMIntPredicate(C.LLVMIntEQ)
+	expectedLen := llvmConstInt(usizeLLVMType, llvmIRUnsignedLongLong(expectedCount), 0)
+	predicate := llvmIRIntPredicate(llvmIntEQ)
 	if hasRest {
-		predicate = C.LLVMIntPredicate(C.LLVMIntUGE)
+		predicate = llvmIRIntPredicate(llvmIntUGE)
 	}
-	lenOK := C.LLVMBuildICmp(s.builder, predicate, countValue, expectedLen, cStringFree("match.list.len.ok"))
+	lenOK := llvmBuildICmp(s.builder, predicate, countValue, expectedLen, cStringFree("match.list.len.ok"))
 	itemsBB := successBB
 	if expectedCount != 0 || boundRest {
-		itemsBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.list.items"))
+		itemsBB = llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.list.items"))
 	}
-	C.LLVMBuildCondBr(s.builder, lenOK, itemsBB, failureBB)
+	llvmBuildCondBr(s.builder, lenOK, itemsBB, failureBB)
 	if expectedCount == 0 && !boundRest {
 		return nil
 	}
-	C.LLVMPositionBuilderAtEnd(s.builder, itemsBB)
+	llvmPositionBuilderAtEnd(s.builder, itemsBB)
 	if boundRest {
 		// docs/122 §5.3: bind the unmatched tail as a view (`[first, ...rest]`) — the
 		// whole-sequence view sliced from the fixed prefix to the runtime count, at the
@@ -137,14 +129,14 @@ func (s *functionState) emitListMatchPatternTest(pattern *ast.MatchListPattern, 
 	}
 	if expectedCount == 0 {
 		// Bound-rest-only pattern (`[...rest]`): no element tests — close the block.
-		C.LLVMBuildBr(s.builder, successBB)
+		llvmBuildBr(s.builder, successBB)
 		return nil
 	}
-	var sourceAlloca C.LLVMValueRef
+	var sourceAlloca llvmIRValueRef
 	for i := 0; i < expectedCount; i++ {
 		elem := pattern.Elems[i]
 		var indexExpr ast.Expr
-		var elemValue C.LLVMValueRef
+		var elemValue llvmIRValueRef
 		if actualValue == nil && originExpr != nil {
 			indexExpr = &ast.IndexExpr{
 				Position: elem.Pos(),
@@ -164,7 +156,7 @@ func (s *functionState) emitListMatchPatternTest(pattern *ast.MatchListPattern, 
 					return err
 				}
 			}
-			indexValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(i), 0)
+			indexValue := llvmConstInt(usizeLLVMType, llvmIRUnsignedLongLong(i), 0)
 			var err error
 			elemValue, _, err = s.emitIterLoopElementValue(nil, sourceAlloca, actualType, indexValue, "match.list")
 			if err != nil {
@@ -173,13 +165,13 @@ func (s *functionState) emitListMatchPatternTest(pattern *ast.MatchListPattern, 
 		}
 		nextSuccess := successBB
 		if i != expectedCount-1 {
-			nextSuccess = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.list.pattern.next"))
+			nextSuccess = llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.list.pattern.next"))
 		}
 		if _, _, err := s.emitMatchPatternTest(elem, elemValue, nil, elemType, nil, indexExpr, nil, nextSuccess, failureBB); err != nil {
 			return err
 		}
 		if i != expectedCount-1 {
-			C.LLVMPositionBuilderAtEnd(s.builder, nextSuccess)
+			llvmPositionBuilderAtEnd(s.builder, nextSuccess)
 		}
 	}
 	return nil
@@ -189,7 +181,7 @@ func (s *functionState) emitListMatchPatternTest(pattern *ast.MatchListPattern, 
 // the entire matched value stored under the given name. Emitted unconditionally at the
 // pattern-test site — sound because the binding is only referable from the arm body,
 // which only runs when the whole pattern (and guard) matched.
-func (s *functionState) emitPatternAsBinding(name string, actualValue C.LLVMValueRef, actualType semantic.Type, originExpr ast.Expr) error {
+func (s *functionState) emitPatternAsBinding(name string, actualValue llvmIRValueRef, actualType semantic.Type, originExpr ast.Expr) error {
 	if name == "" {
 		return nil
 	}
@@ -217,7 +209,7 @@ func (s *functionState) emitPatternAsBinding(name string, actualValue C.LLVMValu
 // emitListRestBinding materializes the docs/122 §5.3 bound list rest: a read-only view
 // over the source's tail (`[prefixLen, count)`), stored into a fresh alloca and bound
 // under the rest name. Supports darray and view sources (through one non-null ref).
-func (s *functionState) emitListRestBinding(rest *ast.MatchRestPattern, actualValue C.LLVMValueRef, actualType semantic.Type, elemType semantic.Type, originExpr ast.Expr, prefixLen int, countValue C.LLVMValueRef, usizeLLVMType C.LLVMTypeRef) error {
+func (s *functionState) emitListRestBinding(rest *ast.MatchRestPattern, actualValue llvmIRValueRef, actualType semantic.Type, elemType semantic.Type, originExpr ast.Expr, prefixLen int, countValue llvmIRValueRef, usizeLLVMType llvmIRTypeRef) error {
 	restType, ok := semantic.RestViewTypeForSequence(actualType, elemType)
 	if !ok {
 		return fmt.Errorf("rest binding requires an array, darray, or view value, got %s", actualType.String())
@@ -240,10 +232,10 @@ func (s *functionState) emitListRestBinding(rest *ast.MatchRestPattern, actualVa
 		if err != nil {
 			return err
 		}
-		baseValue = C.LLVMBuildLoad2(s.builder, innerLLVM, baseValue, cStringFree("match.rest.deref"))
+		baseValue = llvmBuildLoad2(s.builder, innerLLVM, baseValue, cStringFree("match.rest.deref"))
 		baseType = inner
 	}
-	var wholeView C.LLVMValueRef
+	var wholeView llvmIRValueRef
 	switch t := baseType.(type) {
 	case *semantic.DArrayType:
 		var err error
@@ -256,7 +248,7 @@ func (s *functionState) emitListRestBinding(rest *ast.MatchRestPattern, actualVa
 	default:
 		return fmt.Errorf("rest binding is not supported for %s values yet", actualType.String())
 	}
-	startValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(prefixLen), 0)
+	startValue := llvmConstInt(usizeLLVMType, llvmIRUnsignedLongLong(prefixLen), 0)
 	restValue, err := s.emitArenaViewSliceValue(wholeView, restType, startValue, countValue, "match.rest.view")
 	if err != nil {
 		return err
@@ -265,7 +257,7 @@ func (s *functionState) emitListRestBinding(rest *ast.MatchRestPattern, actualVa
 	if err != nil {
 		return err
 	}
-	C.LLVMBuildStore(s.builder, restValue, alloca)
+	llvmBuildStore(s.builder, restValue, alloca)
 	s.defineBinding(rest.Name, valueBinding{ptr: alloca, typ: restType})
 	return nil
 }

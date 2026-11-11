@@ -2,8 +2,6 @@
 
 package backend
 
-import "C"
-
 import (
 	"elisacore/src/semantic"
 	"fmt"

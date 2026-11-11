@@ -14,6 +14,7 @@ const (
 	llvmAvailableExternallyLinkage = C.LLVMAvailableExternallyLinkage
 	llvmPrivateLinkage             = C.LLVMPrivateLinkage
 	llvmPointerTypeKind            = C.LLVMPointerTypeKind
+	llvmIntegerTypeKind            = C.LLVMIntegerTypeKind
 )
 
 func llvmPointerTypeInContext(context llvmIRContextRef, addressSpace llvmIRUnsigned) llvmIRTypeRef {
@@ -53,4 +54,24 @@ func llvmTypeString(typ llvmIRTypeRef) string {
 	}
 	defer C.LLVMDisposeMessage(message)
 	return C.GoString(message)
+}
+
+func llvmInt8TypeInContext(context llvmIRContextRef) llvmIRTypeRef {
+	return C.LLVMInt8TypeInContext(context)
+}
+
+func llvmInt64TypeInContext(context llvmIRContextRef) llvmIRTypeRef {
+	return C.LLVMInt64TypeInContext(context)
+}
+
+func llvmGetIntTypeWidth(typ llvmIRTypeRef) llvmIRUnsigned {
+	return C.LLVMGetIntTypeWidth(typ)
+}
+
+func llvmConstPointerNull(typ llvmIRTypeRef) llvmIRValueRef {
+	return C.LLVMConstPointerNull(typ)
+}
+
+func llvmGetTypeByName2(context llvmIRContextRef, name *llvmIRChar) llvmIRTypeRef {
+	return C.LLVMGetTypeByName2(context, name)
 }
