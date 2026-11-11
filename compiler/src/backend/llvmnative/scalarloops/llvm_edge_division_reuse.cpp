@@ -1,3 +1,16 @@
+#include <llvm-c/Core.h>
+#include <llvm/Config/llvm-config.h>
+
+#if LLVM_VERSION_MAJOR >= 23
+#include <llvm/IR/CFG.h>
+#include <llvm/IR/ConstantRange.h>
+#include <llvm/IR/Constants.h>
+#include <llvm/IR/Instructions.h>
+#include <llvm/IR/Module.h>
+#include <llvm/Transforms/Utils/BasicBlockUtils.h>
+
+using namespace llvm;
+
 // Reuse a division computed by one predecessor. Translate the operands
 // through the join's PHIs and compute a new quotient only on the other edge.
 namespace {
@@ -160,16 +173,11 @@ static bool reuseEdgeDivision(BasicBlock &Join) {
 }
 } // namespace
 
-static unsigned elisacoreReuseEdgeDivisions(Module &M) {
-  if (!M.getTargetTriple().isAArch64()) return 0;
-  unsigned Changed = 0;
-  for (Function &F : M) {
-    if (BDU_SkipFunction(F, M) || F.size() > 128) continue;
-    for (BasicBlock &B : F) {
-      if (!reuseJoinedQuotient(B) && !reuseEdgeDivision(B)) continue;
-      ++Changed;
-      break;
-    }
+extern "C" bool elisacoreReuseEdgeDivisionsInFunction(LLVMValueRef Ref) {
+  auto &F = *cast<Function>(unwrap(Ref));
+  for (BasicBlock &B : F) {
+    if (reuseJoinedQuotient(B) || reuseEdgeDivision(B)) return true;
   }
-  return Changed;
+  return false;
 }
+#endif

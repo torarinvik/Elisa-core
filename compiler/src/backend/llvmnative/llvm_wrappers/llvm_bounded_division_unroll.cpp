@@ -396,7 +396,17 @@ static unsigned elisacoreFoldPowerPosition(Module &M) {
 #include "llvm_range_and.cpp"
 #include "llvm_scalar_loop_idioms.cpp"
 #include "llvm_shift_xor.cpp"
-#include "llvm_edge_division_reuse.cpp"
+extern "C" bool elisacoreReuseEdgeDivisionsInFunction(LLVMValueRef);
+
+static unsigned elisacoreReuseEdgeDivisions(Module &M) {
+  if (!M.getTargetTriple().isAArch64()) return 0;
+  unsigned Changed = 0;
+  for (Function &F : M) {
+    if (!BDU_SkipFunction(F, M) && F.size() <= 128 &&
+        elisacoreReuseEdgeDivisionsInFunction(wrap(&F))) ++Changed;
+  }
+  return Changed;
+}
 #include "llvm_factored_unsigned_division.cpp"
 #include "llvm_remainder_recurrence.cpp"
 #include "llvm_constant_paths.cpp"

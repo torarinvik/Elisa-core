@@ -1,8 +1,8 @@
 //go:build cgo
 
-// Package powerposition compiles the power-search matcher independently of the
-// other native passes so changes to it reuse the main C++ translation unit.
-package powerposition
+// Package scalarloops builds the scalar loop matchers independently of the
+// main LLVM translation unit.
+package scalarloops
 
 /*
 #cgo darwin,arm64 CXXFLAGS: -std=c++17 -I/opt/homebrew/opt/llvm/include
