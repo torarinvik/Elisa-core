@@ -87,25 +87,6 @@ var (
 	resolvedTypeNameOwnershipPlan sync.Map
 )
 
-// retainedPreBodyFunctionKeys must stay in lockstep with capturePreBody's
-// historical function key format: namespace/name plus same-name occurrence.
-func retainedPreBodyFunctionKeys(decls []scopedDecl) map[*ast.FuncDecl]string {
-	keys := make(map[*ast.FuncDecl]string)
-	occurrences := map[string]int{}
-	for _, scoped := range decls {
-		for _, declaration := range retainedWalkDecls(&ast.File{Decls: []ast.Decl{scoped.Decl}}) {
-			fn, ok := declaration.(*ast.FuncDecl)
-			if !ok {
-				continue
-			}
-			base := scoped.Namespace + "::" + fn.Name
-			keys[fn] = fmt.Sprintf("%s#%d", base, occurrences[base])
-			occurrences[base]++
-		}
-	}
-	return keys
-}
-
 func retainedPreBodyFunctionKeySet(decls []scopedDecl) map[string]bool {
 	keys := retainedPreBodyFunctionKeys(decls)
 	out := make(map[string]bool, len(keys))

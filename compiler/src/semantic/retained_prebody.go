@@ -76,37 +76,27 @@ func capturePreBody(a *Analyzer, decls []scopedDecl) *preBodyState {
 		hasProofReport: len(a.proofReport) != 0,
 		classification: map[string]string{},
 		fingerprint:    map[string]string{},
-		keyOf:          map[*ast.FuncDecl]string{},
 		prepared:       map[string]*ast.FuncDecl{},
 		diags:          append([]Diagnostic(nil), a.diagnostics...),
 		targets:        map[*ast.FuncDecl][]map[int]bool{},
 		regionIndex:    map[*ast.FuncDecl]map[int]bool{},
 	}
-	functionKeys := retainedPreBodyFunctionKeys(decls)
-	for _, scoped := range decls {
-		for _, d := range retainedWalkDecls(&ast.File{Decls: []ast.Decl{scoped.Decl}}) {
-			fn, ok := d.(*ast.FuncDecl)
-			if !ok {
-				continue
-			}
-			key := functionKeys[fn]
-			if key == "" {
-				continue
-			}
-			p.fingerprint[key] = a.preBodyFunctionFingerprint(fn)
-			p.classification[key] = a.preBodyFunctionClassification(fn)
-			p.keyOf[fn] = key
-			p.prepared[retainedLineKey(fn.Pos())+"|"+fn.Name] = fn
-			if t, ok := a.paramStoreTargets[fn]; ok {
-				p.targets[fn] = t
-			}
-			if idx, ok := a.regionParamCalleeParamIndex[fn.Name]; ok {
-				p.regionIndex[fn] = idx
-			}
+	functions := make([]*ast.FuncDecl, 0, len(decls))
+	p.keyOf = collectRetainedPreBodyFunctionKeys(decls, &functions)
+	for _, fn := range functions {
+		key := p.keyOf[fn]
+		p.fingerprint[key] = a.preBodyFunctionFingerprint(fn)
+		p.classification[key] = a.preBodyFunctionClassification(fn)
+		p.prepared[retainedLineKey(fn.Pos())+"|"+fn.Name] = fn
+		if t, ok := a.paramStoreTargets[fn]; ok {
+			p.targets[fn] = t
+		}
+		if idx, ok := a.regionParamCalleeParamIndex[fn.Name]; ok {
+			p.regionIndex[fn] = idx
 		}
 	}
 	var resolvedTypeNameLocations map[ast.TypeExpr]resolvedTypeNameLocation
-	p.resolvedTypeNames, resolvedTypeNameLocations = captureResolvedTypeNameContributions(a.resolvedTypeNames, decls, functionKeys, true)
+	p.resolvedTypeNames, resolvedTypeNameLocations = captureResolvedTypeNameContributions(a.resolvedTypeNames, decls, p.keyOf, true)
 	p.resolvedTypeNameSourceOwners = resolvedTypeNameSourceOwners(resolvedTypeNameLocations)
 	p.resolvedTypeNameRows = resolvedTypeNameBodyRows(a.resolvedTypeNames, resolvedTypeNameLocations)
 	if a.retained != nil {
