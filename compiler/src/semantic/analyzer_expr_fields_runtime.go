@@ -218,6 +218,7 @@ func valueOnlyIndexKind(t Type) (string, bool) {
 		if !view.Mutable {
 			return "read-only view index result", true
 		}
+		return "", false
 	}
 	if _, ok := t.(*CStrType); ok {
 		return "string index", true
@@ -245,6 +246,7 @@ func valueOnlyIndexKind(t Type) (string, bool) {
 		if !view.Mutable {
 			return "read-only view index result", true
 		}
+		return "", false
 	}
 	if _, ok := ref.Elem.(*CStrType); ok {
 		return "string index", true

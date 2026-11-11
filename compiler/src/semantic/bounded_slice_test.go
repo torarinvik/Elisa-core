@@ -103,3 +103,14 @@ func TestOutOfRangeConstIndexIntoBoundedSliceNotProven(t *testing.T) {
 		t.Fatalf("expected out-of-range constant index to remain gated, got:\n%s", allDiagnostics(result))
 	}
 }
+
+func TestMutableByteViewAllowsIndexedWrite(t *testing.T) {
+	analyzeFunctionAnalysisTestSourceWithOptions(t, "mutable_byte_view.elisa", `def put(data: mutable view[u8]) -> void:
+    data[0] <- 25.u8()
+
+def f() -> u8:
+    data: mutable u8[2] = zeroed
+    put(data[0:2])
+    return data[0]
+`, AnalyzeOptions{})
+}
