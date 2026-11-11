@@ -140,20 +140,115 @@ static bool foldThresholdSearch(BasicBlock &Loop, CondBrInst &Back, BasicBlock *
   for (Instruction *I : Dead) I->eraseFromParent();
   return true;
 }
+// A self-loop that shifts away low zero bits terminates after cttz(seed)
+// shifts for a nonzero seed. Match both a pre-test of bit zero and a
+// post-test of bit one paired with an exact shift.
+static bool foldTrailingZeroLoop(BasicBlock &Loop, CondBrInst &Back, BasicBlock *Exit) {
+  auto *Test = dyn_cast<ICmpInst>(Back.getCondition());
+  if (!Test || !Test->isEquality() || !Test->hasOneUse() ||
+      !scalarLoopHasConstant(Test->getOperand(1), 0) ||
+      Back.getSuccessor(Test->getPredicate() == ICmpInst::ICMP_EQ ? 0 : 1) != &Loop)
+    return false;
+  auto *Bit = scalarLoopBinOp(Test->getOperand(0), Instruction::And, Loop);
+  if (!Bit || !Bit->hasOneUse())
+    return false;
+  bool Post = scalarLoopHasConstant(Bit->getOperand(1), 2);
+  if (!Post && !scalarLoopHasConstant(Bit->getOperand(1), 1))
+    return false;
+  auto *Word = dyn_cast<PHINode>(Bit->getOperand(0));
+  if (!Word || Word->getParent() != &Loop || Word->getNumIncomingValues() != 2 ||
+      (!Word->getType()->isIntegerTy(32) && !Word->getType()->isIntegerTy(64)))
+    return false;
+  auto *Entry = Word->getIncomingBlock(Word->getIncomingBlock(0) == &Loop ? 1 : 0);
+  auto *Shift = scalarLoopBinOp(Word->getIncomingValueForBlock(&Loop), Instruction::LShr, Loop);
+  if (Entry == &Loop || !Shift || Shift->getOperand(0) != Word ||
+      !scalarLoopHasConstant(Shift->getOperand(1), 1) || Shift->isExact() != Post)
+    return false;
+
+  PHINode *Count = nullptr;
+  BinaryOperator *Increment = nullptr;
+  for (PHINode &Phi : Loop.phis()) {
+    if (&Phi == Word)
+      continue;
+    if (Count || Phi.getType() != Word->getType() || Phi.getNumIncomingValues() != 2 ||
+        !scalarLoopHasConstant(Phi.getIncomingValueForBlock(Entry), 0))
+      return false;
+    Count = &Phi;
+    Increment = scalarLoopBinOp(Phi.getIncomingValueForBlock(&Loop), Instruction::Add, Loop);
+    if (!Increment || Increment->getOperand(0) != Count ||
+        !scalarLoopHasConstant(Increment->getOperand(1), 1))
+      return false;
+  }
+  for (Instruction &I : Loop)
+    if ((&I != Word && &I != Shift && &I != Bit && &I != Test &&
+         &I != Count && &I != Increment && &I != &Back) ||
+        I.hasMetadataOtherThanDebugLoc())
+      return false;
+
+  Value *Seed = Word->getIncomingValueForBlock(Entry);
+  AssumptionCache AC(*Loop.getParent());
+  LazyValueInfo LVI(Loop.getParent(), &AC);
+  ConstantRange Range = LVI.getConstantRange(Seed, Entry->getTerminator(), false)
+                            .intersectWith(LVI.getConstantRangeOnEdge(Seed, Entry, &Loop));
+  if (Range.isEmptySet() || Range.contains(APInt::getZero(Word->getType()->getIntegerBitWidth())))
+    return false;
+
+  IRBuilder<> B(&Back);
+  auto *Type = cast<IntegerType>(Word->getType());
+  Value *Stable = B.CreateFreeze(Seed, "trailing.zero.seed");
+  Value *Zeros = B.CreateIntrinsic(Intrinsic::cttz, {Type}, {Stable, B.getTrue()});
+  Value *One = ConstantInt::get(Type, 1);
+  Value *Before = Zeros;
+  if (Post) {
+    // An odd seed can exit after one iteration with a defined count, even
+    // though its exact shift is poison. Keep that iteration in the count.
+    Value *AtLeastOne = B.CreateIntrinsic(Intrinsic::umax, {Type}, {Zeros, One});
+    Before = B.CreateSub(AtLeastOne, One);
+  }
+  Value *Current = B.CreateLShr(Stable, Before, "trailing.zero.word");
+  Value *Next = B.CreateLShr(Current, One);
+  Value *NextCount = Count ? B.CreateAdd(Before, One) : nullptr;
+  B.CreateBr(Exit);
+  Back.eraseFromParent();
+  Test->eraseFromParent();
+  Bit->eraseFromParent();
+  Word->removeIncomingValue(&Loop, false);
+  Word->replaceAllUsesWith(Current);
+  Shift->replaceAllUsesWith(Next);
+  Shift->eraseFromParent();
+  Word->eraseFromParent();
+  if (Count) {
+    Count->removeIncomingValue(&Loop, false);
+    Count->replaceAllUsesWith(Before);
+    Increment->replaceAllUsesWith(NextCount);
+    Increment->eraseFromParent();
+    Count->eraseFromParent();
+  }
+  return true;
+}
+
 } // namespace
 
 static unsigned elisacoreFoldScalarLoopIdioms(Module &M) {
   if (!M.getTargetTriple().isAArch64()) return 0;
   unsigned Changed = 0;
   for (Function &F : M) {
-    if (F.size() > 16 || BDU_SkipFunction(F, M)) continue;
+    if (F.size() > 48 || BDU_SkipFunction(F, M)) continue;
     for (BasicBlock &Loop : F) {
-      if ((Loop.size() != 7 && Loop.size() != 11) || Loop.hasAddressTaken()) continue;
+      if ((Loop.size() != 5 && Loop.size() != 7 && Loop.size() != 11) || Loop.hasAddressTaken()) continue;
       auto *Back = dyn_cast<CondBrInst>(Loop.getTerminator());
       BasicBlock *Exit = Back ? scalarLoopExit(*Back, Loop) : nullptr;
       if (!Exit) continue;
-      Changed += Loop.size() == 7 ? foldCarryAddition(Loop, *Back, Exit)
-                                  : foldThresholdSearch(Loop, *Back, Exit);
+      if (Loop.size() <= 7 && foldTrailingZeroLoop(Loop, *Back, Exit)) {
+        ++Changed;
+        continue;
+      }
+      if (F.size() > 16)
+        continue;
+      if (Loop.size() == 7)
+        Changed += foldCarryAddition(Loop, *Back, Exit);
+      else if (Loop.size() == 11)
+        Changed += foldThresholdSearch(Loop, *Back, Exit);
     }
   }
   return Changed;
