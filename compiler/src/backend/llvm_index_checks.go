@@ -2,28 +2,6 @@
 
 package backend
 
-/*
-#include <string.h>
-#include <llvm-c/Core.h>
-#include <llvm-c/TargetMachine.h>
-
-// Attaches !prof branch_weights {likely, unlikely} to a conditional branch.
-static void elisacoreSetLikelyBranchWeights(LLVMContextRef ctx, LLVMValueRef br, unsigned likely, unsigned unlikely) {
-	LLVMTypeRef i32 = LLVMInt32TypeInContext(ctx);
-	LLVMMetadataRef ops[3];
-	ops[0] = LLVMMDStringInContext2(ctx, "branch_weights", strlen("branch_weights"));
-	ops[1] = LLVMValueAsMetadata(LLVMConstInt(i32, likely, 0));
-	ops[2] = LLVMValueAsMetadata(LLVMConstInt(i32, unlikely, 0));
-	LLVMMetadataRef node = LLVMMDNodeInContext2(ctx, ops, 3);
-	unsigned kind = LLVMGetMDKindIDInContext(ctx, "prof", strlen("prof"));
-	LLVMSetMetadata(br, kind, LLVMMetadataAsValue(ctx, node));
-}
-
-unsigned elisacoreValidatedIndexBounds(LLVMModuleRef);
-unsigned elisacoreOptimizeIndexBounds(LLVMModuleRef, LLVMTargetMachineRef);
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -219,7 +197,7 @@ func (s *functionState) collectIndexMergeGroups(expr ast.Expr) []*indexMergeGrou
 
 // emitExprWithMergedIndexChecks applies consecutive-index check merging to a pure expression with
 // at least one index group. handled=false leaves emission to the ordinary path.
-func (s *functionState) emitExprWithMergedIndexChecks(expr ast.Expr, expected semantic.Type) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitExprWithMergedIndexChecks(expr ast.Expr, expected semantic.Type) (llvmIRValueRef, semantic.Type, bool, error) {
 	if s == nil || s.g == nil || s.g.result == nil || s.builder == nil || s.fnValue == nil || s.indexMergeDepth > 0 || s.g.forceBoundsCheck {
 		return nil, nil, false, nil
 	}
@@ -242,11 +220,11 @@ func (s *functionState) emitExprWithMergedIndexChecks(expr ast.Expr, expected se
 	if err != nil {
 		return nil, nil, true, err
 	}
-	var allOK C.LLVMValueRef
+	var allOK llvmIRValueRef
 	for _, g := range groups {
 		objType := s.exprType(g.object)
 		container := indexMergeContainerType(objType)
-		var containerPtr C.LLVMValueRef
+		var containerPtr llvmIRValueRef
 		if _, isRef := objType.(*semantic.RefType); isRef {
 			containerPtr, _, err = s.emitExpr(g.object, nil)
 		} else {
@@ -263,25 +241,25 @@ func (s *functionState) emitExprWithMergedIndexChecks(expr ast.Expr, expected se
 		if err != nil {
 			return nil, nil, true, err
 		}
-		k := C.LLVMConstInt(usizeLLVM, C.ulonglong(g.maxOff), 0)
+		k := llvmConstInt(usizeLLVM, llvmIRUnsignedLongLong(g.maxOff), 0)
 		// base + c < count for every c in 0..K  <=>  K < count and base < count - K (no overflow).
-		roomy := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntUGT), count, k, cStringFree("merge.room"))
-		limit := C.LLVMBuildSub(s.builder, count, k, cStringFree("merge.limit"))
-		inRange := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), base, limit, cStringFree("merge.in_range"))
-		ok := C.LLVMBuildAnd(s.builder, roomy, inRange, cStringFree("merge.ok"))
+		roomy := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntUGT), count, k, cStringFree("merge.room"))
+		limit := llvmBuildSub(s.builder, count, k, cStringFree("merge.limit"))
+		inRange := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntULT), base, limit, cStringFree("merge.in_range"))
+		ok := llvmBuildAnd(s.builder, roomy, inRange, cStringFree("merge.ok"))
 		if allOK == nil {
 			allOK = ok
 		} else {
-			allOK = C.LLVMBuildAnd(s.builder, allOK, ok, cStringFree("merge.ok"))
+			allOK = llvmBuildAnd(s.builder, allOK, ok, cStringFree("merge.ok"))
 		}
 	}
-	fastBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("merge.fast"))
-	slowBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("merge.slow"))
-	joinBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("merge.join"))
-	br := C.LLVMBuildCondBr(s.builder, allOK, fastBB, slowBB)
-	C.elisacoreSetLikelyBranchWeights(s.g.context, br, 2000, 1)
+	fastBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("merge.fast"))
+	slowBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("merge.slow"))
+	joinBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("merge.join"))
+	br := llvmBuildCondBr(s.builder, allOK, fastBB, slowBB)
+	llvmSetLikelyBranchWeights(s.g.context, br, 2000, 1)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, fastBB)
+	llvmPositionBuilderAtEnd(s.builder, fastBB)
 	prevGuarded := s.mergedIndexGuarded
 	s.mergedIndexGuarded = map[*ast.IndexExpr]bool{}
 	for _, g := range groups {
@@ -294,29 +272,29 @@ func (s *functionState) emitExprWithMergedIndexChecks(expr ast.Expr, expected se
 	if err != nil {
 		return nil, nil, true, err
 	}
-	fastEnd := C.LLVMGetInsertBlock(s.builder)
-	C.LLVMBuildBr(s.builder, joinBB)
+	fastEnd := llvmGetInsertBlock(s.builder)
+	llvmBuildBr(s.builder, joinBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, slowBB)
+	llvmPositionBuilderAtEnd(s.builder, slowBB)
 	slowValue, _, err := s.emitExpr(expr, expected)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	slowEnd := C.LLVMGetInsertBlock(s.builder)
-	C.LLVMBuildBr(s.builder, joinBB)
+	slowEnd := llvmGetInsertBlock(s.builder)
+	llvmBuildBr(s.builder, joinBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, joinBB)
+	llvmPositionBuilderAtEnd(s.builder, joinBB)
 	if fastValue == nil || slowValue == nil {
 		return fastValue, fastType, true, nil
 	}
-	valueType := C.LLVMTypeOf(fastValue)
-	if C.LLVMGetTypeKind(valueType) == C.LLVMVoidTypeKind || C.LLVMTypeOf(slowValue) != valueType {
+	valueType := llvmTypeOf(fastValue)
+	if llvmGetTypeKind(valueType) == llvmVoidTypeKind || llvmTypeOf(slowValue) != valueType {
 		return nil, nil, true, errIndexMergeShape
 	}
-	phi := C.LLVMBuildPhi(s.builder, valueType, cStringFree("merge.value"))
-	incomingValues := []C.LLVMValueRef{fastValue, slowValue}
-	incomingBlocks := []C.LLVMBasicBlockRef{fastEnd, slowEnd}
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), &incomingBlocks[0], 2)
+	phi := llvmBuildPhi(s.builder, valueType, cStringFree("merge.value"))
+	incomingValues := []llvmIRValueRef{fastValue, slowValue}
+	incomingBlocks := []llvmIRBlockRef{fastEnd, slowEnd}
+	llvmAddIncoming(phi, llvmValueSlicePtr(incomingValues), &incomingBlocks[0], 2)
 	return phi, fastType, true, nil
 }
 
@@ -329,8 +307,8 @@ func (indexMergeShapeError) Error() string {
 var errIndexMergeShape error = indexMergeShapeError{}
 
 func proveIndexBounds(g *llvmGenerator) int {
-	return int(C.elisacoreValidatedIndexBounds(g.module))
+	return int(llvmValidatedIndexBounds(g.module))
 }
 func optimizeIndexBounds(g *llvmGenerator) int {
-	return int(C.elisacoreOptimizeIndexBounds(g.module, g.targetMachine))
+	return int(llvmOptimizeIndexBounds(g.module, g.targetMachine))
 }

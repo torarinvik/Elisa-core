@@ -2,46 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-
-// Create a type attribute (e.g. "byval"/"sret") for the given type.
-static LLVMAttributeRef elisacoreCreateTypeAttr(LLVMContextRef ctx, const char *name, size_t nameLen, LLVMTypeRef ty) {
-	unsigned kind = LLVMGetEnumAttributeKindForName(name, nameLen);
-	if (kind == 0) {
-		return NULL;
-	}
-	return LLVMCreateTypeAttribute(ctx, kind, ty);
-}
-
-static void elisacoreAddFuncTypeAttr(LLVMValueRef fn, unsigned index, LLVMContextRef ctx, const char *name, size_t nameLen, LLVMTypeRef ty) {
-	LLVMAttributeRef attr = elisacoreCreateTypeAttr(ctx, name, nameLen, ty);
-	if (attr != NULL) {
-		LLVMAddAttributeAtIndex(fn, index, attr);
-	}
-}
-
-static void elisacoreAddCallTypeAttr(LLVMValueRef call, unsigned index, LLVMContextRef ctx, const char *name, size_t nameLen, LLVMTypeRef ty) {
-	LLVMAttributeRef attr = elisacoreCreateTypeAttr(ctx, name, nameLen, ty);
-	if (attr != NULL) {
-		LLVMAddCallSiteAttribute(call, index, attr);
-	}
-}
-
-// Add a value-less enum attribute (e.g. "noalias") to a function at the given
-// attribute index.
-static void elisacoreAddFuncEnumAttr(LLVMValueRef fn, unsigned index, LLVMContextRef ctx, const char *name, size_t nameLen) {
-	unsigned kind = LLVMGetEnumAttributeKindForName(name, nameLen);
-	if (kind == 0) {
-		return;
-	}
-	LLVMAttributeRef attr = LLVMCreateEnumAttribute(ctx, kind, 0);
-	LLVMAddAttributeAtIndex(fn, index, attr);
-}
-*/
-import "C"
-
 import (
 	"runtime"
 	"strings"
@@ -136,7 +96,7 @@ func (g *llvmGenerator) aggregateIsMemoryClassABI(t semantic.Type, cabi bool) bo
 type funcAbiLayout struct {
 	errorUnionOut bool
 	sret          bool
-	sretType      C.LLVMTypeRef
+	sretType      llvmIRTypeRef
 }
 
 func (l funcAbiLayout) paramBase() int {
@@ -181,7 +141,7 @@ func (g *llvmGenerator) computeFuncAbiLayout(fn *semantic.FuncType) (funcAbiLayo
 
 // applyAggregateAbiAttrs adds the sret/byval type attributes implied by the
 // function type to a freshly-created LLVM function value.
-func (g *llvmGenerator) applyAggregateAbiAttrs(fn C.LLVMValueRef, fnType *semantic.FuncType) {
+func (g *llvmGenerator) applyAggregateAbiAttrs(fn llvmIRValueRef, fnType *semantic.FuncType) {
 	if fn == nil || fnType == nil {
 		return
 	}
@@ -191,7 +151,7 @@ func (g *llvmGenerator) applyAggregateAbiAttrs(fn C.LLVMValueRef, fnType *semant
 	}
 	if layout.sret {
 		// sret attribute index = sretParamPos + 1.
-		g.addFuncTypeAttr(fn, C.uint(layout.sretParamPos()+1), "sret", layout.sretType)
+		g.addFuncTypeAttr(fn, llvmIRUnsigned(layout.sretParamPos()+1), "sret", layout.sretType)
 	}
 	// noalias on the eligible mutable-ref subset is independent of the byval ABI
 	// lowering below, so apply it first (it must hold on arm64, where byval is skipped).
@@ -220,11 +180,11 @@ func (g *llvmGenerator) applyAggregateAbiAttrs(fn C.LLVMValueRef, fnType *semant
 // pointers to (memcpy-filled) stack temporaries, so they can be passed byval.
 // Returns the (possibly rewritten) args and a map of arg-index -> aggregate
 // LLVM type for the args that became byval pointers.
-func (s *functionState) convertByvalArgs(funcType *semantic.FuncType, args []C.LLVMValueRef) ([]C.LLVMValueRef, map[int]C.LLVMTypeRef, error) {
-	out := make([]C.LLVMValueRef, len(args))
+func (s *functionState) convertByvalArgs(funcType *semantic.FuncType, args []llvmIRValueRef) ([]llvmIRValueRef, map[int]llvmIRTypeRef, error) {
+	out := make([]llvmIRValueRef, len(args))
 	copy(out, args)
 	cabi := funcTypeIsCABI(funcType)
-	var byval map[int]C.LLVMTypeRef
+	var byval map[int]llvmIRTypeRef
 	for i := 0; i < len(funcType.Params) && i < len(args); i++ {
 		if !s.g.aggregateIsMemoryClassABI(funcType.Params[i], cabi) {
 			continue
@@ -242,7 +202,7 @@ func (s *functionState) convertByvalArgs(funcType *semantic.FuncType, args []C.L
 		}
 		out[i] = tmp
 		if byval == nil {
-			byval = map[int]C.LLVMTypeRef{}
+			byval = map[int]llvmIRTypeRef{}
 		}
 		byval[i] = ty
 	}
@@ -260,21 +220,21 @@ func semanticTypeIsAggregate(t semantic.Type) bool {
 }
 
 // LLVM attribute index helpers: index 0 is the return value, params are 1-based.
-func llvmParamAttrIndex(llvmParamPos int) C.uint {
-	return C.uint(llvmParamPos + 1)
+func llvmParamAttrIndex(llvmParamPos int) llvmIRUnsigned {
+	return llvmIRUnsigned(llvmParamPos + 1)
 }
 
-func (g *llvmGenerator) addFuncByvalAttr(fn C.LLVMValueRef, llvmParamPos int, ty C.LLVMTypeRef) {
+func (g *llvmGenerator) addFuncByvalAttr(fn llvmIRValueRef, llvmParamPos int, ty llvmIRTypeRef) {
 	g.addFuncTypeAttr(fn, llvmParamAttrIndex(llvmParamPos), "byval", ty)
 }
 
-func (g *llvmGenerator) addFuncEnumAttr(fn C.LLVMValueRef, llvmParamPos int, name string) {
+func (g *llvmGenerator) addFuncEnumAttr(fn llvmIRValueRef, llvmParamPos int, name string) {
 	if fn == nil {
 		return
 	}
-	nameC := C.CString(name)
-	defer C.free(unsafe.Pointer(nameC))
-	C.elisacoreAddFuncEnumAttr(fn, llvmParamAttrIndex(llvmParamPos), g.context, nameC, C.size_t(len(name)))
+	nameC := llvmCString(name)
+	defer llvmFree(unsafe.Pointer(nameC))
+	llvmAddFuncEnumAttr(fn, llvmParamAttrIndex(llvmParamPos), g.context, nameC, llvmIRSize(len(name)))
 }
 
 // pointeeEligibleForNoalias reports whether a `mutable T&` parameter whose pointee
@@ -304,7 +264,7 @@ func pointeeEligibleForNoalias(elem semantic.Type) bool {
 // same darray across nested calls. This is OFF by default: a
 // noalias miscompile is silent, so it stays an explicit opt-in pending empirical
 // validation before it can become a default.
-func (g *llvmGenerator) applyMutableRefNoaliasAttrs(fn C.LLVMValueRef, fnType *semantic.FuncType, base int) {
+func (g *llvmGenerator) applyMutableRefNoaliasAttrs(fn llvmIRValueRef, fnType *semantic.FuncType, base int) {
 	if fn == nil || fnType == nil || !g.noaliasMutableRefs {
 		return
 	}
@@ -325,33 +285,33 @@ func (g *llvmGenerator) applyMutableRefNoaliasAttrs(fn C.LLVMValueRef, fnType *s
 	}
 }
 
-func (g *llvmGenerator) addFuncSretAttr(fn C.LLVMValueRef, ty C.LLVMTypeRef) {
+func (g *llvmGenerator) addFuncSretAttr(fn llvmIRValueRef, ty llvmIRTypeRef) {
 	// sret applies to the (prepended) first parameter, attribute index 1.
 	g.addFuncTypeAttr(fn, 1, "sret", ty)
 }
 
-func (g *llvmGenerator) addFuncTypeAttr(fn C.LLVMValueRef, index C.uint, name string, ty C.LLVMTypeRef) {
+func (g *llvmGenerator) addFuncTypeAttr(fn llvmIRValueRef, index llvmIRUnsigned, name string, ty llvmIRTypeRef) {
 	if fn == nil || ty == nil {
 		return
 	}
-	nameC := C.CString(name)
-	defer C.free(unsafe.Pointer(nameC))
-	C.elisacoreAddFuncTypeAttr(fn, index, g.context, nameC, C.size_t(len(name)), ty)
+	nameC := llvmCString(name)
+	defer llvmFree(unsafe.Pointer(nameC))
+	llvmAddFuncTypeAttr(fn, index, g.context, nameC, llvmIRSize(len(name)), ty)
 }
 
-func (s *functionState) addCallByvalAttr(call C.LLVMValueRef, llvmParamPos int, ty C.LLVMTypeRef) {
+func (s *functionState) addCallByvalAttr(call llvmIRValueRef, llvmParamPos int, ty llvmIRTypeRef) {
 	s.addCallTypeAttr(call, llvmParamAttrIndex(llvmParamPos), "byval", ty)
 }
 
-func (s *functionState) addCallSretAttr(call C.LLVMValueRef, ty C.LLVMTypeRef) {
+func (s *functionState) addCallSretAttr(call llvmIRValueRef, ty llvmIRTypeRef) {
 	s.addCallTypeAttr(call, 1, "sret", ty)
 }
 
-func (s *functionState) addCallTypeAttr(call C.LLVMValueRef, index C.uint, name string, ty C.LLVMTypeRef) {
+func (s *functionState) addCallTypeAttr(call llvmIRValueRef, index llvmIRUnsigned, name string, ty llvmIRTypeRef) {
 	if call == nil || ty == nil || s == nil || s.g == nil {
 		return
 	}
-	nameC := C.CString(name)
-	defer C.free(unsafe.Pointer(nameC))
-	C.elisacoreAddCallTypeAttr(call, index, s.g.context, nameC, C.size_t(len(name)), ty)
+	nameC := llvmCString(name)
+	defer llvmFree(unsafe.Pointer(nameC))
+	llvmAddCallTypeAttr(call, index, s.g.context, nameC, llvmIRSize(len(name)), ty)
 }

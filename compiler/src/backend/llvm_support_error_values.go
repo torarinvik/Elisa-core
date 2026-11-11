@@ -2,13 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-
-*/
-import "C"
-
 import (
 	"elisacore/src/lexer"
 	"elisacore/src/semantic"
@@ -30,7 +23,7 @@ func errorSetPayloadBaseIndex(set *semantic.ErrorSetType, tag string) int {
 	return base
 }
 
-func (s *functionState) remapErrorCode(value C.LLVMValueRef, actual *semantic.ErrorSetType, expected *semantic.ErrorSetType) (C.LLVMValueRef, error) {
+func (s *functionState) remapErrorCode(value llvmIRValueRef, actual *semantic.ErrorSetType, expected *semantic.ErrorSetType) (llvmIRValueRef, error) {
 	if actual == nil || expected == nil {
 		return nil, fmt.Errorf("missing error set for code remap")
 	}
@@ -48,7 +41,7 @@ func (s *functionState) remapErrorCode(value C.LLVMValueRef, actual *semantic.Er
 	// value for a payloadless set.
 	sourceCode := value
 	if actual.HasPayloads() {
-		sourceCode = C.LLVMBuildExtractValue(s.builder, value, 0, cStringFree("errmap.srccode"))
+		sourceCode = llvmBuildExtractValue(s.builder, value, 0, cStringFree("errmap.srccode"))
 	}
 	mapped, err := s.errorCodeConstant(0)
 	if err != nil {
@@ -76,12 +69,12 @@ func (s *functionState) remapErrorCode(value C.LLVMValueRef, actual *semantic.Er
 			return nil, err
 		}
 		tagID := sanitizeIdentifier(tag)
-		cmp := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), sourceCode, actualConst, cStringFree("errmap_is_"+tagID))
-		mask := C.LLVMBuildZExt(s.builder, cmp, errorCodeType, cStringFree("errmap_mask_"+tagID))
-		negMask := C.LLVMBuildSub(s.builder, C.LLVMConstNull(errorCodeType), mask, cStringFree("errmap_negmask_"+tagID))
-		diff := C.LLVMBuildXor(s.builder, mapped, expectedConst, cStringFree("errmap_diff_"+tagID))
-		maskedDiff := C.LLVMBuildAnd(s.builder, diff, negMask, cStringFree("errmap_masked_"+tagID))
-		mapped = C.LLVMBuildXor(s.builder, mapped, maskedDiff, cStringFree("errmap_"+tagID))
+		cmp := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), sourceCode, actualConst, cStringFree("errmap_is_"+tagID))
+		mask := llvmBuildZExt(s.builder, cmp, errorCodeType, cStringFree("errmap_mask_"+tagID))
+		negMask := llvmBuildSub(s.builder, llvmConstNull(errorCodeType), mask, cStringFree("errmap_negmask_"+tagID))
+		diff := llvmBuildXor(s.builder, mapped, expectedConst, cStringFree("errmap_diff_"+tagID))
+		maskedDiff := llvmBuildAnd(s.builder, diff, negMask, cStringFree("errmap_masked_"+tagID))
+		mapped = llvmBuildXor(s.builder, mapped, maskedDiff, cStringFree("errmap_"+tagID))
 	}
 	if !expected.HasPayloads() {
 		return mapped, nil
@@ -94,8 +87,8 @@ func (s *functionState) remapErrorCode(value C.LLVMValueRef, actual *semantic.Er
 	if err != nil {
 		return nil, err
 	}
-	destVal := C.LLVMGetUndef(destType)
-	destVal = C.LLVMBuildInsertValue(s.builder, destVal, mapped, 0, cStringFree("errmap.code"))
+	destVal := llvmGetUndef(destType)
+	destVal = llvmBuildInsertValue(s.builder, destVal, mapped, 0, cStringFree("errmap.code"))
 	if actual.HasPayloads() {
 		srcFieldIdx := 1
 		for _, tag := range actual.Tags {
@@ -105,30 +98,30 @@ func (s *functionState) remapErrorCode(value C.LLVMValueRef, actual *semantic.Er
 			}
 			destBase := errorSetPayloadBaseIndex(expected, mappedTag)
 			for k := range actual.PayloadForTag(tag) {
-				fieldVal := C.LLVMBuildExtractValue(s.builder, value, C.unsigned(srcFieldIdx), cStringFree("errmap.srcpayload"))
-				destVal = C.LLVMBuildInsertValue(s.builder, destVal, fieldVal, C.unsigned(destBase+k), cStringFree("errmap.dstpayload"))
+				fieldVal := llvmBuildExtractValue(s.builder, value, llvmIRUnsigned(srcFieldIdx), cStringFree("errmap.srcpayload"))
+				destVal = llvmBuildInsertValue(s.builder, destVal, fieldVal, llvmIRUnsigned(destBase+k), cStringFree("errmap.dstpayload"))
 				srcFieldIdx++
 			}
 		}
 	}
 	return destVal, nil
 }
-func (s *functionState) buildErrorUnionSuccess(unionType *semantic.ErrorUnionType, payload C.LLVMValueRef) (C.LLVMValueRef, error) {
+func (s *functionState) buildErrorUnionSuccess(unionType *semantic.ErrorUnionType, payload llvmIRValueRef) (llvmIRValueRef, error) {
 	zeroCode, err := s.errorCodeConstant(0)
 	if err != nil {
 		return nil, err
 	}
 	return s.buildErrorUnionValue(unionType, zeroCode, payload)
 }
-func (s *functionState) buildOptionalSome(optionalType *semantic.OptionalType, payload C.LLVMValueRef) (C.LLVMValueRef, error) {
+func (s *functionState) buildOptionalSome(optionalType *semantic.OptionalType, payload llvmIRValueRef) (llvmIRValueRef, error) {
 	presentType, err := s.g.lowerBuiltin("bool")
 	if err != nil {
 		return nil, err
 	}
-	present := C.LLVMConstInt(presentType, 1, 0)
+	present := llvmConstInt(presentType, 1, 0)
 	return s.buildOptionalValue(optionalType, present, payload)
 }
-func (s *functionState) buildOptionalNone(optionalType *semantic.OptionalType) (C.LLVMValueRef, error) {
+func (s *functionState) buildOptionalNone(optionalType *semantic.OptionalType) (llvmIRValueRef, error) {
 	if optionalType == nil {
 		return nil, fmt.Errorf("missing optional type")
 	}
@@ -140,10 +133,10 @@ func (s *functionState) buildOptionalNone(optionalType *semantic.OptionalType) (
 	if err != nil {
 		return nil, err
 	}
-	present := C.LLVMConstInt(presentType, 0, 0)
+	present := llvmConstInt(presentType, 0, 0)
 	return s.buildOptionalValue(optionalType, present, payload)
 }
-func (s *functionState) buildOptionalValue(optionalType *semantic.OptionalType, present C.LLVMValueRef, payload C.LLVMValueRef) (C.LLVMValueRef, error) {
+func (s *functionState) buildOptionalValue(optionalType *semantic.OptionalType, present llvmIRValueRef, payload llvmIRValueRef) (llvmIRValueRef, error) {
 	if optionalType == nil {
 		return nil, fmt.Errorf("missing optional type")
 	}
@@ -151,9 +144,9 @@ func (s *functionState) buildOptionalValue(optionalType *semantic.OptionalType, 
 	if err != nil {
 		return nil, err
 	}
-	value := C.LLVMGetUndef(llvmType)
-	value = C.LLVMBuildInsertValue(s.builder, value, present, 0, cStringFree("optional.present"))
-	value = C.LLVMBuildInsertValue(s.builder, value, payload, 1, cStringFree("optional.value"))
+	value := llvmGetUndef(llvmType)
+	value = llvmBuildInsertValue(s.builder, value, present, 0, cStringFree("optional.present"))
+	value = llvmBuildInsertValue(s.builder, value, payload, 1, cStringFree("optional.value"))
 	return value, nil
 }
 
@@ -162,7 +155,7 @@ func (s *functionState) buildOptionalValue(optionalType *semantic.OptionalType, 
 // {code, payloads...} struct, so the code is inserted at field 0 (payload fields are
 // undef — never read on a void union, whose only datum is which tag fired). If the
 // value is already the struct (e.g. a `raise` built it), it is returned unchanged.
-func (s *functionState) wrapVoidErrorUnionCode(errorSet *semantic.ErrorSetType, errorCode C.LLVMValueRef) (C.LLVMValueRef, error) {
+func (s *functionState) wrapVoidErrorUnionCode(errorSet *semantic.ErrorSetType, errorCode llvmIRValueRef) (llvmIRValueRef, error) {
 	if errorSet == nil || !errorSet.HasPayloads() {
 		return errorCode, nil
 	}
@@ -170,15 +163,15 @@ func (s *functionState) wrapVoidErrorUnionCode(errorSet *semantic.ErrorSetType, 
 	if err != nil {
 		return nil, err
 	}
-	if C.LLVMTypeOf(errorCode) == errorType {
+	if llvmTypeOf(errorCode) == errorType {
 		return errorCode, nil
 	}
-	setValue := C.LLVMGetUndef(errorType)
-	setValue = C.LLVMBuildInsertValue(s.builder, setValue, errorCode, 0, cStringFree("errset.code"))
+	setValue := llvmGetUndef(errorType)
+	setValue = llvmBuildInsertValue(s.builder, setValue, errorCode, 0, cStringFree("errset.code"))
 	return setValue, nil
 }
 
-func (s *functionState) buildErrorUnionFailure(unionType *semantic.ErrorUnionType, errorCode C.LLVMValueRef) (C.LLVMValueRef, error) {
+func (s *functionState) buildErrorUnionFailure(unionType *semantic.ErrorUnionType, errorCode llvmIRValueRef) (llvmIRValueRef, error) {
 	if unionType == nil {
 		return nil, fmt.Errorf("missing error union type")
 	}
@@ -196,26 +189,26 @@ func (s *functionState) buildErrorUnionFailure(unionType *semantic.ErrorUnionTyp
 // module-level zero object instead of allocating a full payload-sized stack temporary at
 // every propagation site.  The split return ABI may still copy this zero to the caller's
 // already-zeroed out slot, which is harmless and keeps the representation total.
-func (s *functionState) errorUnionZeroPayloadGlobal(payloadType semantic.Type) (C.LLVMValueRef, error) {
+func (s *functionState) errorUnionZeroPayloadGlobal(payloadType semantic.Type) (llvmIRValueRef, error) {
 	llvmType, err := s.g.lowerType(payloadType)
 	if err != nil {
 		return nil, err
 	}
 	name := "__elisa_errzero_" + llvmTypeSymbolName(errorUnionLayoutValue(payloadType))
-	nameC := C.CString(name)
-	defer C.free(unsafe.Pointer(nameC))
-	global := C.LLVMGetNamedGlobal(s.g.module, nameC)
+	nameC := llvmCString(name)
+	defer llvmFree(unsafe.Pointer(nameC))
+	global := llvmGetNamedGlobal(s.g.module, nameC)
 	if global != nil {
 		return global, nil
 	}
-	global = C.LLVMAddGlobal(s.g.module, llvmType, nameC)
-	C.LLVMSetInitializer(global, C.LLVMConstNull(llvmType))
-	C.LLVMSetGlobalConstant(global, 1)
-	C.LLVMSetLinkage(global, C.LLVMPrivateLinkage)
+	global = llvmAddGlobal(s.g.module, llvmType, nameC)
+	llvmSetInitializer(global, llvmConstNull(llvmType))
+	llvmSetGlobalConstant(global, 1)
+	llvmSetLinkage(global, llvmPrivateLinkage)
 	return global, nil
 }
 
-func (s *functionState) buildErrorSetValue(errorSet *semantic.ErrorSetType, tag string, args []C.LLVMValueRef) (C.LLVMValueRef, error) {
+func (s *functionState) buildErrorSetValue(errorSet *semantic.ErrorSetType, tag string, args []llvmIRValueRef) (llvmIRValueRef, error) {
 	if errorSet == nil {
 		return nil, fmt.Errorf("missing error set type")
 	}
@@ -234,14 +227,14 @@ func (s *functionState) buildErrorSetValue(errorSet *semantic.ErrorSetType, tag 
 	if err != nil {
 		return nil, err
 	}
-	value := C.LLVMGetUndef(llvmType)
-	value = C.LLVMBuildInsertValue(s.builder, value, codeValue, 0, cStringFree("errset.code"))
+	value := llvmGetUndef(llvmType)
+	value = llvmBuildInsertValue(s.builder, value, codeValue, 0, cStringFree("errset.code"))
 	fieldIndex := 1
 	for _, candidate := range errorSet.Tags {
 		payload := errorSet.PayloadForTag(candidate)
 		for payloadIndex := range payload {
 			if candidate == tag && payloadIndex < len(args) {
-				value = C.LLVMBuildInsertValue(s.builder, value, args[payloadIndex], C.unsigned(fieldIndex), cStringFree("errset.payload"))
+				value = llvmBuildInsertValue(s.builder, value, args[payloadIndex], llvmIRUnsigned(fieldIndex), cStringFree("errset.payload"))
 			}
 			fieldIndex++
 		}
@@ -249,28 +242,28 @@ func (s *functionState) buildErrorSetValue(errorSet *semantic.ErrorSetType, tag 
 	return value, nil
 }
 
-func (s *functionState) extractErrorSetCode(value C.LLVMValueRef, errorSet *semantic.ErrorSetType) (C.LLVMValueRef, error) {
+func (s *functionState) extractErrorSetCode(value llvmIRValueRef, errorSet *semantic.ErrorSetType) (llvmIRValueRef, error) {
 	if errorSet == nil {
 		return nil, fmt.Errorf("missing error set type")
 	}
 	if !errorSet.HasPayloads() {
 		return value, nil
 	}
-	return C.LLVMBuildExtractValue(s.builder, value, 0, cStringFree("errset.code")), nil
+	return llvmBuildExtractValue(s.builder, value, 0, cStringFree("errset.code")), nil
 }
 
-func (s *functionState) extractErrorSetPayloadValues(value C.LLVMValueRef, errorSet *semantic.ErrorSetType, tag string) ([]C.LLVMValueRef, error) {
+func (s *functionState) extractErrorSetPayloadValues(value llvmIRValueRef, errorSet *semantic.ErrorSetType, tag string) ([]llvmIRValueRef, error) {
 	if errorSet == nil {
 		return nil, fmt.Errorf("missing error set type")
 	}
 	payloadTypes := errorSet.PayloadForTag(tag)
-	values := make([]C.LLVMValueRef, 0, len(payloadTypes))
+	values := make([]llvmIRValueRef, 0, len(payloadTypes))
 	fieldIndex := 1
 	for _, candidate := range errorSet.Tags {
 		payload := errorSet.PayloadForTag(candidate)
 		for range payload {
 			if candidate == tag {
-				values = append(values, C.LLVMBuildExtractValue(s.builder, value, C.unsigned(fieldIndex), cStringFree("errset.payload")))
+				values = append(values, llvmBuildExtractValue(s.builder, value, llvmIRUnsigned(fieldIndex), cStringFree("errset.payload")))
 				if len(values) == len(payloadTypes) {
 					return values, nil
 				}
@@ -284,7 +277,7 @@ func (s *functionState) extractErrorSetPayloadValues(value C.LLVMValueRef, error
 	return values, nil
 }
 
-func (s *functionState) buildErrorUnionValue(unionType *semantic.ErrorUnionType, errorCode C.LLVMValueRef, payload C.LLVMValueRef) (C.LLVMValueRef, error) {
+func (s *functionState) buildErrorUnionValue(unionType *semantic.ErrorUnionType, errorCode llvmIRValueRef, payload llvmIRValueRef) (llvmIRValueRef, error) {
 	if unionType == nil {
 		return nil, fmt.Errorf("missing error union type")
 	}
@@ -304,7 +297,7 @@ func (s *functionState) buildErrorUnionValue(unionType *semantic.ErrorUnionType,
 	return s.buildErrorUnionValueFromPointer(unionType, errorCode, payloadSlot)
 }
 
-func (s *functionState) buildErrorUnionValueFromPointer(unionType *semantic.ErrorUnionType, errorCode C.LLVMValueRef, payloadPtr C.LLVMValueRef) (C.LLVMValueRef, error) {
+func (s *functionState) buildErrorUnionValueFromPointer(unionType *semantic.ErrorUnionType, errorCode llvmIRValueRef, payloadPtr llvmIRValueRef) (llvmIRValueRef, error) {
 	if unionType == nil || isVoidType(unionType.Value) || payloadPtr == nil {
 		return nil, fmt.Errorf("missing value-carrying error union pointer")
 	}
@@ -316,20 +309,20 @@ func (s *functionState) buildErrorUnionValueFromPointer(unionType *semantic.Erro
 	if err != nil {
 		return nil, err
 	}
-	if C.LLVMTypeOf(errorCode) != errorType {
+	if llvmTypeOf(errorCode) != errorType {
 		if !unionType.Errors.HasPayloads() {
 			return nil, fmt.Errorf("error union code type mismatch")
 		}
-		errorSetValue := C.LLVMGetUndef(errorType)
-		errorSetValue = C.LLVMBuildInsertValue(s.builder, errorSetValue, errorCode, 0, cStringFree("errset.code"))
+		errorSetValue := llvmGetUndef(errorType)
+		errorSetValue = llvmBuildInsertValue(s.builder, errorSetValue, errorCode, 0, cStringFree("errset.code"))
 		errorCode = errorSetValue
 	}
-	value := C.LLVMGetUndef(llvmType)
-	value = C.LLVMBuildInsertValue(s.builder, value, errorCode, 0, cStringFree("errunion.err"))
-	value = C.LLVMBuildInsertValue(s.builder, value, payloadPtr, 1, cStringFree("errunion.value.ptr"))
+	value := llvmGetUndef(llvmType)
+	value = llvmBuildInsertValue(s.builder, value, errorCode, 0, cStringFree("errunion.err"))
+	value = llvmBuildInsertValue(s.builder, value, payloadPtr, 1, cStringFree("errunion.value.ptr"))
 	return value, nil
 }
-func (s *functionState) extractErrorUnionCode(value C.LLVMValueRef, unionType *semantic.ErrorUnionType) (C.LLVMValueRef, error) {
+func (s *functionState) extractErrorUnionCode(value llvmIRValueRef, unionType *semantic.ErrorUnionType) (llvmIRValueRef, error) {
 	if unionType == nil {
 		return nil, fmt.Errorf("missing error union type")
 	}
@@ -338,35 +331,35 @@ func (s *functionState) extractErrorUnionCode(value C.LLVMValueRef, unionType *s
 		// struct); callers extract the scalar code from it via extractErrorSetCode.
 		return value, nil
 	}
-	return C.LLVMBuildExtractValue(s.builder, value, 0, cStringFree("errunion.code")), nil
+	return llvmBuildExtractValue(s.builder, value, 0, cStringFree("errunion.code")), nil
 }
-func (s *functionState) extractErrorUnionPayload(value C.LLVMValueRef, unionType *semantic.ErrorUnionType) (C.LLVMValueRef, error) {
+func (s *functionState) extractErrorUnionPayload(value llvmIRValueRef, unionType *semantic.ErrorUnionType) (llvmIRValueRef, error) {
 	if unionType == nil || isVoidType(unionType.Value) {
 		return nil, fmt.Errorf("error union has no payload")
 	}
-	payloadPtr := C.LLVMBuildExtractValue(s.builder, value, 1, cStringFree("errunion.payload.ptr"))
+	payloadPtr := llvmBuildExtractValue(s.builder, value, 1, cStringFree("errunion.payload.ptr"))
 	return s.loadValue(payloadPtr, unionType.Value, "errunion.payload")
 }
-func (s *functionState) extractOptionalPresent(value C.LLVMValueRef, optionalType *semantic.OptionalType) (C.LLVMValueRef, error) {
+func (s *functionState) extractOptionalPresent(value llvmIRValueRef, optionalType *semantic.OptionalType) (llvmIRValueRef, error) {
 	if optionalType == nil {
 		return nil, fmt.Errorf("missing optional type")
 	}
-	return C.LLVMBuildExtractValue(s.builder, value, 0, cStringFree("optional.present")), nil
+	return llvmBuildExtractValue(s.builder, value, 0, cStringFree("optional.present")), nil
 }
-func (s *functionState) extractOptionalPayload(value C.LLVMValueRef, optionalType *semantic.OptionalType) (C.LLVMValueRef, error) {
+func (s *functionState) extractOptionalPayload(value llvmIRValueRef, optionalType *semantic.OptionalType) (llvmIRValueRef, error) {
 	if optionalType == nil || optionalType.Value == nil {
 		return nil, fmt.Errorf("optional has no payload")
 	}
-	return C.LLVMBuildExtractValue(s.builder, value, 1, cStringFree("optional.payload")), nil
+	return llvmBuildExtractValue(s.builder, value, 1, cStringFree("optional.payload")), nil
 }
-func (s *functionState) errorCodeConstant(code uint32) (C.LLVMValueRef, error) {
+func (s *functionState) errorCodeConstant(code uint32) (llvmIRValueRef, error) {
 	llvmType, err := s.g.lowerBuiltin("u32")
 	if err != nil {
 		return nil, err
 	}
-	return C.LLVMConstInt(llvmType, C.ulonglong(code), 0), nil
+	return llvmConstInt(llvmType, llvmIRUnsignedLongLong(code), 0), nil
 }
-func (s *functionState) coerceNumericValue(value C.LLVMValueRef, actual semantic.Type, expected semantic.Type) (C.LLVMValueRef, error) {
+func (s *functionState) coerceNumericValue(value llvmIRValueRef, actual semantic.Type, expected semantic.Type) (llvmIRValueRef, error) {
 	actual = numericCastType(actual)
 	expected = numericCastType(expected)
 	actualBits := integerBitWidth(actual, s.g.wordBits)
@@ -381,32 +374,32 @@ func (s *functionState) coerceNumericValue(value C.LLVMValueRef, actual semantic
 			case actualBits == expectedBits:
 				return value, nil
 			case actualBits < expectedBits:
-				return C.LLVMBuildFPExt(s.builder, value, expectedLLVM, cStringFree("fpext")), nil
+				return llvmBuildFPExt(s.builder, value, expectedLLVM, cStringFree("fpext")), nil
 			default:
-				return C.LLVMBuildFPTrunc(s.builder, value, expectedLLVM, cStringFree("fptrunc")), nil
+				return llvmBuildFPTrunc(s.builder, value, expectedLLVM, cStringFree("fptrunc")), nil
 			}
 		}
 		if isSignedIntegerType(expected) {
-			return C.LLVMBuildFPToSI(s.builder, value, expectedLLVM, cStringFree("fptosi")), nil
+			return llvmBuildFPToSI(s.builder, value, expectedLLVM, cStringFree("fptosi")), nil
 		}
-		return C.LLVMBuildFPToUI(s.builder, value, expectedLLVM, cStringFree("fptoui")), nil
+		return llvmBuildFPToUI(s.builder, value, expectedLLVM, cStringFree("fptoui")), nil
 	}
 	if isFloatType(expected) {
 		if isSignedIntegerType(actual) {
-			return C.LLVMBuildSIToFP(s.builder, value, expectedLLVM, cStringFree("sitofp")), nil
+			return llvmBuildSIToFP(s.builder, value, expectedLLVM, cStringFree("sitofp")), nil
 		}
-		return C.LLVMBuildUIToFP(s.builder, value, expectedLLVM, cStringFree("uitofp")), nil
+		return llvmBuildUIToFP(s.builder, value, expectedLLVM, cStringFree("uitofp")), nil
 	}
 	switch {
 	case actualBits == expectedBits:
 		return value, nil
 	case actualBits < expectedBits:
 		if isSignedIntegerType(actual) {
-			return C.LLVMBuildSExt(s.builder, value, expectedLLVM, cStringFree("sext")), nil
+			return llvmBuildSExt(s.builder, value, expectedLLVM, cStringFree("sext")), nil
 		}
-		return C.LLVMBuildZExt(s.builder, value, expectedLLVM, cStringFree("zext")), nil
+		return llvmBuildZExt(s.builder, value, expectedLLVM, cStringFree("zext")), nil
 	default:
-		return C.LLVMBuildTrunc(s.builder, value, expectedLLVM, cStringFree("trunc")), nil
+		return llvmBuildTrunc(s.builder, value, expectedLLVM, cStringFree("trunc")), nil
 	}
 }
 func (s *functionState) binaryOperandType(op lexer.TokenKind, left semantic.Type, right semantic.Type) semantic.Type {
@@ -451,49 +444,49 @@ func backendValueContextOperandType(t semantic.Type) semantic.Type {
 	}
 	return t
 }
-func (s *functionState) emitAugmentedValue(op lexer.TokenKind, left C.LLVMValueRef, right C.LLVMValueRef, t semantic.Type) (C.LLVMValueRef, error) {
+func (s *functionState) emitAugmentedValue(op lexer.TokenKind, left llvmIRValueRef, right llvmIRValueRef, t semantic.Type) (llvmIRValueRef, error) {
 	switch op {
 	case lexer.TOKEN_PLUSEQ:
 		if isFloatType(t) {
-			return C.LLVMBuildFAdd(s.builder, left, right, cStringFree("pluseq")), nil
+			return llvmBuildFAdd(s.builder, left, right, cStringFree("pluseq")), nil
 		}
-		return C.LLVMBuildAdd(s.builder, left, right, cStringFree("pluseq")), nil
+		return llvmBuildAdd(s.builder, left, right, cStringFree("pluseq")), nil
 	case lexer.TOKEN_MINUSEQ:
 		if isFloatType(t) {
-			return C.LLVMBuildFSub(s.builder, left, right, cStringFree("minuseq")), nil
+			return llvmBuildFSub(s.builder, left, right, cStringFree("minuseq")), nil
 		}
-		return C.LLVMBuildSub(s.builder, left, right, cStringFree("minuseq")), nil
+		return llvmBuildSub(s.builder, left, right, cStringFree("minuseq")), nil
 	case lexer.TOKEN_STAREQ:
 		if isFloatType(t) {
-			return C.LLVMBuildFMul(s.builder, left, right, cStringFree("stareq")), nil
+			return llvmBuildFMul(s.builder, left, right, cStringFree("stareq")), nil
 		}
-		return C.LLVMBuildMul(s.builder, left, right, cStringFree("stareq")), nil
+		return llvmBuildMul(s.builder, left, right, cStringFree("stareq")), nil
 	case lexer.TOKEN_SLASHEQ:
 		if isFloatType(t) {
-			return C.LLVMBuildFDiv(s.builder, left, right, cStringFree("slasheq")), nil
+			return llvmBuildFDiv(s.builder, left, right, cStringFree("slasheq")), nil
 		}
 		if isSignedIntegerType(t) {
-			return C.LLVMBuildSDiv(s.builder, left, right, cStringFree("slasheq")), nil
+			return llvmBuildSDiv(s.builder, left, right, cStringFree("slasheq")), nil
 		}
-		return C.LLVMBuildUDiv(s.builder, left, right, cStringFree("slasheq")), nil
+		return llvmBuildUDiv(s.builder, left, right, cStringFree("slasheq")), nil
 	case lexer.TOKEN_PERCENTEQ:
 		if isSignedIntegerType(t) {
-			return C.LLVMBuildSRem(s.builder, left, right, cStringFree("percenteq")), nil
+			return llvmBuildSRem(s.builder, left, right, cStringFree("percenteq")), nil
 		}
-		return C.LLVMBuildURem(s.builder, left, right, cStringFree("percenteq")), nil
+		return llvmBuildURem(s.builder, left, right, cStringFree("percenteq")), nil
 	case lexer.TOKEN_CARETEQ:
-		return C.LLVMBuildXor(s.builder, left, right, cStringFree("careteq")), nil
+		return llvmBuildXor(s.builder, left, right, cStringFree("careteq")), nil
 	case lexer.TOKEN_PIPEEQ:
-		return C.LLVMBuildOr(s.builder, left, right, cStringFree("pipeeq")), nil
+		return llvmBuildOr(s.builder, left, right, cStringFree("pipeeq")), nil
 	case lexer.TOKEN_AMPEQ:
-		return C.LLVMBuildAnd(s.builder, left, right, cStringFree("ampeq")), nil
+		return llvmBuildAnd(s.builder, left, right, cStringFree("ampeq")), nil
 	case lexer.TOKEN_LSHIFTEQ:
-		return C.LLVMBuildShl(s.builder, left, right, cStringFree("lshifteq")), nil
+		return llvmBuildShl(s.builder, left, right, cStringFree("lshifteq")), nil
 	case lexer.TOKEN_RSHIFTEQ:
 		if isSignedIntegerType(t) {
-			return C.LLVMBuildAShr(s.builder, left, right, cStringFree("rshifteq")), nil
+			return llvmBuildAShr(s.builder, left, right, cStringFree("rshifteq")), nil
 		}
-		return C.LLVMBuildLShr(s.builder, left, right, cStringFree("rshifteq")), nil
+		return llvmBuildLShr(s.builder, left, right, cStringFree("rshifteq")), nil
 	default:
 		return nil, fmt.Errorf("unsupported augmented assignment operator %s", lexer.TokenName(op))
 	}

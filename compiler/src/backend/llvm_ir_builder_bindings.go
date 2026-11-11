@@ -37,6 +37,45 @@ static int elisacoreValueIsTriviallyValidPtr(LLVMValueRef v) {
 	}
 	return 0;
 }
+
+// Allow FP contraction (a*b+c -> fma) on a floating-point instruction, matching clang's default
+// -ffp-contract=on. Only the AllowContract flag is set; no reassociation / no-nan / no-inf, so this
+// does not change value semantics beyond the single-rounding fused multiply-add the C ABI permits.
+static void elisacoreSetFPContract(LLVMValueRef v) {
+	if (v != NULL && LLVMCanValueUseFastMathFlags(v)) {
+		LLVMSetFastMathFlags(v, LLVMFastMathAllowContract);
+	}
+}
+
+// Allow contraction AND reciprocal (a/b -> a * (1/b)) on a floating-point instruction, matching
+// clang's -ffp-contract=fast -freciprocal-math. For a loop-invariant divisor this lets LICM hoist
+// the single reciprocal out of the loop, turning a per-iteration fdiv (slow, poorly pipelined) into
+// a multiply. This relaxes division rounding by up to ~1 ulp, the same relaxed-FP tier as contract.
+static void elisacoreSetFPContractReciprocal(LLVMValueRef v) {
+	if (v != NULL && LLVMCanValueUseFastMathFlags(v)) {
+		LLVMSetFastMathFlags(v, LLVMFastMathAllowContract | LLVMFastMathAllowReciprocal);
+	}
+}
+
+// Allow reassociation + contraction on an FP instruction, WITHOUT nnan/ninf/nsz. This is the
+// "defined tree-order reduction" tier: it lets the vectorizer re-bracket a reduction into parallel
+// partial sums (SIMD tree reduction) while leaving NaN/Inf/signed-zero behaviour at IEEE. Used on a
+// comprehension fold's accumulator update — a fold's reduction order is defined as a tree, not strict
+// left-to-right, so this reassociation is the defined semantics, not an unsafe opt-in (docs/79).
+static void elisacoreSetFPReassoc(LLVMValueRef v) {
+	if (v != NULL && LLVMCanValueUseFastMathFlags(v)) {
+		LLVMSetFastMathFlags(v, LLVMFastMathAllowReassoc | LLVMFastMathAllowContract);
+	}
+}
+
+// Set ALL fast-math flags (reassoc, nnan, ninf, nsz, arcp, contract) on an FP instruction, matching
+// clang -ffast-math. Enables FP reassociation -> auto-vectorization of reduction/elementwise loops.
+// Used only inside functions annotated @fast_math (opt-in; reorders FP, results may differ).
+static void elisacoreSetFPFast(LLVMValueRef v) {
+	if (v != NULL && LLVMCanValueUseFastMathFlags(v)) {
+		LLVMSetFastMathFlags(v, LLVMFastMathAll);
+	}
+}
 */
 import "C"
 
@@ -385,4 +424,44 @@ func llvmValueIsTriviallyValidPtr(value llvmIRValueRef) C.int {
 
 func llvmBuildNUWMul(builder llvmIRBuilderRef, left, right llvmIRValueRef, name *llvmIRChar) llvmIRValueRef {
 	return C.LLVMBuildNUWMul(builder, left, right, name)
+}
+
+func llvmSetFPContract(value llvmIRValueRef) {
+	C.elisacoreSetFPContract(value)
+}
+
+func llvmSetFPContractReciprocal(value llvmIRValueRef) {
+	C.elisacoreSetFPContractReciprocal(value)
+}
+
+func llvmSetFPFast(value llvmIRValueRef) {
+	C.elisacoreSetFPFast(value)
+}
+
+func llvmSetFPReassoc(value llvmIRValueRef) {
+	C.elisacoreSetFPReassoc(value)
+}
+
+func llvmBuildFPExt(builder llvmIRBuilderRef, value llvmIRValueRef, typ llvmIRTypeRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildFPExt(builder, value, typ, name)
+}
+
+func llvmBuildFPToSI(builder llvmIRBuilderRef, value llvmIRValueRef, typ llvmIRTypeRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildFPToSI(builder, value, typ, name)
+}
+
+func llvmBuildFPToUI(builder llvmIRBuilderRef, value llvmIRValueRef, typ llvmIRTypeRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildFPToUI(builder, value, typ, name)
+}
+
+func llvmBuildFPTrunc(builder llvmIRBuilderRef, value llvmIRValueRef, typ llvmIRTypeRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildFPTrunc(builder, value, typ, name)
+}
+
+func llvmBuildSIToFP(builder llvmIRBuilderRef, value llvmIRValueRef, typ llvmIRTypeRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildSIToFP(builder, value, typ, name)
+}
+
+func llvmBuildUIToFP(builder llvmIRBuilderRef, value llvmIRValueRef, typ llvmIRTypeRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildUIToFP(builder, value, typ, name)
 }

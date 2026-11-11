@@ -4,6 +4,7 @@ package backend
 
 /*
 #include <stdlib.h>
+#include <string.h>
 #include <llvm-c/Core.h>
 
 static int elisacoreConstIntGetZExtValue(LLVMValueRef Value, unsigned long long* Out) {
@@ -99,6 +100,75 @@ static void elisacoreAlignPackedRecordAccesses(LLVMModuleRef module) {
    }
   }
  }
+}
+
+// 1 when fnType is `void(i32)` (want_int_param) or `void()`, non-variadic.
+static int elisacoreLibcNoreturnSignature(LLVMTypeRef fnType, int want_int_param) {
+	if (LLVMIsFunctionVarArg(fnType)) {
+		return 0;
+	}
+	if (LLVMGetTypeKind(LLVMGetReturnType(fnType)) != LLVMVoidTypeKind) {
+		return 0;
+	}
+	unsigned n = LLVMCountParamTypes(fnType);
+	if (!want_int_param) {
+		return n == 0;
+	}
+	if (n != 1) {
+		return 0;
+	}
+	LLVMTypeRef param;
+	LLVMGetParamTypes(fnType, &param);
+	return LLVMGetTypeKind(param) == LLVMIntegerTypeKind && LLVMGetIntTypeWidth(param) == 32;
+}
+
+static void elisacoreAddNoreturnAttr(LLVMContextRef ctx, LLVMValueRef fn) {
+	unsigned kind = LLVMGetEnumAttributeKindForName("noreturn", strlen("noreturn"));
+	if (kind != 0) {
+		LLVMAddAttributeAtIndex(fn, LLVMAttributeFunctionIndex, LLVMCreateEnumAttribute(ctx, kind, 0));
+	}
+}
+
+static void elisacorePanicReportAddEnumAttr(LLVMContextRef ctx, LLVMValueRef fn, const char *name, uint64_t value) {
+	unsigned kind = LLVMGetEnumAttributeKindForName(name, strlen(name));
+	if (kind == 0) {
+		return;
+	}
+	LLVMAddAttributeAtIndex(fn, LLVMAttributeFunctionIndex, LLVMCreateEnumAttribute(ctx, kind, value));
+}
+
+// Create a type attribute (e.g. "byval"/"sret") for the given type.
+static LLVMAttributeRef elisacoreCreateTypeAttr(LLVMContextRef ctx, const char *name, size_t nameLen, LLVMTypeRef ty) {
+	unsigned kind = LLVMGetEnumAttributeKindForName(name, nameLen);
+	if (kind == 0) {
+		return NULL;
+	}
+	return LLVMCreateTypeAttribute(ctx, kind, ty);
+}
+
+static void elisacoreAddFuncTypeAttr(LLVMValueRef fn, unsigned index, LLVMContextRef ctx, const char *name, size_t nameLen, LLVMTypeRef ty) {
+	LLVMAttributeRef attr = elisacoreCreateTypeAttr(ctx, name, nameLen, ty);
+	if (attr != NULL) {
+		LLVMAddAttributeAtIndex(fn, index, attr);
+	}
+}
+
+static void elisacoreAddCallTypeAttr(LLVMValueRef call, unsigned index, LLVMContextRef ctx, const char *name, size_t nameLen, LLVMTypeRef ty) {
+	LLVMAttributeRef attr = elisacoreCreateTypeAttr(ctx, name, nameLen, ty);
+	if (attr != NULL) {
+		LLVMAddCallSiteAttribute(call, index, attr);
+	}
+}
+
+// Add a value-less enum attribute (e.g. "noalias") to a function at the given
+// attribute index.
+static void elisacoreAddFuncEnumAttr(LLVMValueRef fn, unsigned index, LLVMContextRef ctx, const char *name, size_t nameLen) {
+	unsigned kind = LLVMGetEnumAttributeKindForName(name, nameLen);
+	if (kind == 0) {
+		return;
+	}
+	LLVMAttributeRef attr = LLVMCreateEnumAttribute(ctx, kind, 0);
+	LLVMAddAttributeAtIndex(fn, index, attr);
 }
 */
 import "C"
@@ -381,4 +451,36 @@ func llvmInt128TypeInContext(context llvmIRContextRef) llvmIRTypeRef {
 
 func llvmIntrinsicGetType(context llvmIRContextRef, id llvmIRUnsigned, types *llvmIRTypeRef, count llvmIRSize) llvmIRTypeRef {
 	return C.LLVMIntrinsicGetType(context, id, types, count)
+}
+
+func llvmAddNoreturnAttr(context llvmIRContextRef, function llvmIRValueRef) {
+	C.elisacoreAddNoreturnAttr(context, function)
+}
+
+func llvmLibcNoreturnSignature(typ llvmIRTypeRef, wantIntParam llvmIRInt) llvmIRInt {
+	return C.elisacoreLibcNoreturnSignature(typ, wantIntParam)
+}
+
+func llvmPanicReportAddEnumAttr(context llvmIRContextRef, function llvmIRValueRef, name *llvmIRChar, value llvmIRUint64) {
+	C.elisacorePanicReportAddEnumAttr(context, function, name, value)
+}
+
+func llvmAddFuncTypeAttr(value llvmIRValueRef, index llvmIRUnsigned, context llvmIRContextRef, name *llvmIRChar, nameLen llvmIRSize, typ llvmIRTypeRef) {
+	C.elisacoreAddFuncTypeAttr(value, index, context, name, nameLen, typ)
+}
+
+func llvmAddCallTypeAttr(value llvmIRValueRef, index llvmIRUnsigned, context llvmIRContextRef, name *llvmIRChar, nameLen llvmIRSize, typ llvmIRTypeRef) {
+	C.elisacoreAddCallTypeAttr(value, index, context, name, nameLen, typ)
+}
+
+func llvmAddFuncEnumAttr(value llvmIRValueRef, index llvmIRUnsigned, context llvmIRContextRef, name *llvmIRChar, nameLen llvmIRSize) {
+	C.elisacoreAddFuncEnumAttr(value, index, context, name, nameLen)
+}
+
+type llvmIRInt = C.int
+
+const llvmVoidTypeKind = C.LLVMVoidTypeKind
+
+func llvmGetNamedGlobal(module llvmIRModuleRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMGetNamedGlobal(module, name)
 }
