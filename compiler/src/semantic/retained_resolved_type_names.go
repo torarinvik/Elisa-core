@@ -110,7 +110,7 @@ func captureResolvedTypeNameContributions(rows map[ast.TypeExpr]string, decls []
 	}
 	locations = make(map[ast.TypeExpr]resolvedTypeNameLocation, len(rows))
 	ambiguous := map[ast.TypeExpr]bool{}
-	active := map[resolvedTypeNamePointer]bool{}
+	active := map[any]bool{}
 	work := 0
 	defer func() { certificate.walkWork = work }()
 
@@ -166,11 +166,11 @@ func captureResolvedTypeNameContributions(rows map[ast.TypeExpr]string, decls []
 			if skipNestedFunctions && typ == reflect.TypeOf((*ast.FuncDecl)(nil)) {
 				return nil
 			}
-			ptr := resolvedTypeNamePointer{typ: typ, ptr: value.Pointer()}
-			if active[ptr] {
+			// The boxed AST pointer already carries its concrete type and identity.
+			if active[node] {
 				return fmt.Errorf("cyclic AST ownership graph")
 			}
-			active[ptr] = true
+			active[node] = true
 			if expr, ok := node.(ast.TypeExpr); ok {
 				pathText = appendResolvedTypeNamePath(pathText[:0], path)
 				location := locations[expr]
@@ -188,7 +188,7 @@ func captureResolvedTypeNameContributions(rows map[ast.TypeExpr]string, decls []
 				locations[expr] = location
 			}
 			err := walk(value.Elem(), owner, region, path, skipNestedFunctions, depth+1)
-			delete(active, ptr)
+			delete(active, node)
 			return err
 		case reflect.Struct:
 			typ := value.Type()
