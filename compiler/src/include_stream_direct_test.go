@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"elisacore/src/lexer"
+	"elisacore/src/parser"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -84,5 +86,32 @@ func TestDirectIncludeKeepsMissingFilePathError(t *testing.T) {
 	_, err := readSourceWithIncludes(root, map[string]bool{})
 	if !os.IsNotExist(err) {
 		t.Fatalf("missing direct include should retain filesystem error, got %v", err)
+	}
+}
+
+// Opt in to parse-only measurements of a real expanded project. Tokenization
+// and include I/O are excluded equally, matching the request-local token cache.
+func BenchmarkParseExternalIncludes(b *testing.B) {
+	filename := os.Getenv("ELISA_INCLUDE_BENCH_SOURCE")
+	if filename == "" {
+		b.Skip("ELISA_INCLUDE_BENCH_SOURCE is unset")
+	}
+	source, err := readSourceWithIncludes(filename, map[string]bool{})
+	if err != nil {
+		b.Fatal(err)
+	}
+	l := lexer.New(filename, source)
+	tokens := l.Tokenize()
+	if len(l.Errors()) != 0 {
+		b.Fatal(l.Errors())
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		p := parser.NewWithBorrowedTokens(tokens)
+		p.ParseFile(filename)
+		if len(p.Errors()) != 0 {
+			b.Fatal(p.Errors())
+		}
 	}
 }
