@@ -120,6 +120,7 @@ import "C"
 
 import (
 	"elisacore/src/backend/llvmnative"
+	"elisacore/src/backend/llvmnative/memoryfills"
 	// Link scalar loop matchers used by the bounded division pass.
 	"elisacore/src/backend/llvmnative/scalarloops"
 	"elisacore/src/backend/llvmnative/stackviews"
@@ -441,7 +442,7 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 			return fmt.Errorf("short-trip specialization cleanup failed")
 		}
 		C.elisacoreElideArrayRoundTrips(g.module)
-		C.elisacoreExpandSmallZeroFills(g.module)
+		memoryfills.ExpandConstantByteFills(unsafe.Pointer(g.module))
 		if packPrivateBoolArrays(g) == 2 {
 			return fmt.Errorf("private Boolean array packing cleanup failed")
 		}

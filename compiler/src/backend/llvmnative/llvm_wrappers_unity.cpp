@@ -182,9 +182,9 @@ namespace wrap_llvm_selective_scheduler {
 namespace wrap_llvm_short_trip {
 #include "llvm_wrappers/llvm_short_trip.cpp"
 }  // namespace wrap_llvm_short_trip
-namespace wrap_llvm_small_zero {
-#include "llvm_wrappers/llvm_small_zero.cpp"
-}  // namespace wrap_llvm_small_zero
+namespace wrap_llvm_guarded_reductions {
+#include "llvm_wrappers/llvm_guarded_reductions.cpp"
+}  // namespace wrap_llvm_guarded_reductions
 namespace wrap_llvm_special_epilogue {
 #include "llvm_wrappers/llvm_special_epilogue.cpp"
 }  // namespace wrap_llvm_special_epilogue

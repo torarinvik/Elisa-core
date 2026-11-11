@@ -40,6 +40,7 @@ static void elisacoreDisposeLLVMErrorMessage(char *ErrMsg) {
 import "C"
 
 import (
+	"elisacore/src/backend/llvmnative/memoryfills"
 	"elisacore/src/semantic"
 	"fmt"
 	"strings"
@@ -300,7 +301,7 @@ func machineCodegenMode(level OptimizationLevel) int {
 }
 
 func expandSmallZeroFills(module C.LLVMModuleRef) int {
-	return int(C.elisacoreExpandSmallZeroFills(module))
+	return memoryfills.ExpandConstantByteFills(unsafe.Pointer(module))
 }
 
 func elideScratchPrefixInitializers(module C.LLVMModuleRef) int {
