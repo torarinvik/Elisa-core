@@ -159,25 +159,36 @@ static bool foldSmallIntegerDomain(CondBrInst &Entry, ICmpInst &Test,
   if (Limit * (Width / 8) > MaxTableBytes) return false;
 
   Module &M = *F.getParent();
-  auto *Storage = IntegerType::get(M.getContext(), Width);
-  SmallVector<Constant *, 64> Packed;
-  for (ConstantInt *Result : Results) {
-    const APInt &Value = Result->getValue();
-    Packed.push_back(ConstantInt::get(Storage, Signed ? Value.sextOrTrunc(Width)
-                                                      : Value.zextOrTrunc(Width)));
-  }
-  auto *TableType = ArrayType::get(Storage, Packed.size());
-  auto *Table = new GlobalVariable(M, TableType, true, GlobalValue::PrivateLinkage,
-                                   ConstantArray::get(TableType, Packed), "integer.path.results");
-  Table->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
   IRBuilder<> Guard(&Test);
   Value *Stable = Guard.CreateFreeze(Key);
   Test.setOperand(0, Stable);
   BasicBlock *Lookup = BasicBlock::Create(M.getContext(), "integer.path.lookup", &F);
   IRBuilder<> B(Lookup);
   Value *Index = B.CreateSub(Stable, ConstantInt::get(M.getContext(), Lower));
-  Value *Address = B.CreateInBoundsGEP(TableType, Table, {B.getInt64(0), Index});
-  B.CreateRet(B.CreateIntCast(B.CreateLoad(Storage, Address), ReturnType, Signed));
+  Value *Result;
+  if (!Signed && Bits == 1 && Limit <= 64) {
+    // The accepted edge bounds Index, including the full 64-entry case.
+    // Store Boolean results in one register and extract the indexed bit.
+    uint64_t Mask = 0;
+    for (unsigned I = 0; I < Limit; ++I)
+      if (Results[I]->isOne()) Mask |= uint64_t{1} << I;
+    Result = B.CreateAnd(B.CreateLShr(B.getInt64(Mask), Index), B.getInt64(1));
+  } else {
+    auto *Storage = IntegerType::get(M.getContext(), Width);
+    SmallVector<Constant *, 64> Packed;
+    for (ConstantInt *EntryResult : Results) {
+      const APInt &Value = EntryResult->getValue();
+      Packed.push_back(ConstantInt::get(Storage, Signed ? Value.sextOrTrunc(Width)
+                                                        : Value.zextOrTrunc(Width)));
+    }
+    auto *TableType = ArrayType::get(Storage, Packed.size());
+    auto *Table = new GlobalVariable(M, TableType, true, GlobalValue::PrivateLinkage,
+                                     ConstantArray::get(TableType, Packed), "integer.path.results");
+    Table->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
+    Value *Address = B.CreateInBoundsGEP(TableType, Table, {B.getInt64(0), Index});
+    Result = B.CreateLoad(Storage, Address);
+  }
+  B.CreateRet(B.CreateIntCast(Result, ReturnType, Signed));
   Entry.setSuccessor(Accepted, Lookup);
   Start->removePredecessor(Entry.getParent());
   removeUnreachableBlocks(F);

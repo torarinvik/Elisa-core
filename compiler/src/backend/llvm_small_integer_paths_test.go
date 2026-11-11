@@ -47,6 +47,8 @@ invalid:
 		{"observable operation", strings.Replace(source, "  %next = add", "  call void @observe(i64 %updated)\n  %next = add", 1), false, ""},
 		{"narrow unsigned results", strings.Replace(strings.Replace(source, "mul i64 %product", "add i64 %product", 1), "%input, 16", "%input, 22", 1), true, "zext i8"},
 		{"narrow signed results", strings.Replace(source, "mul i64 %product", "sub i64 %product", 1), true, "sext i8"},
+		{"boolean results in a register", strings.Replace(source, "ret i64 %updated",
+			"%bit = and i64 %updated, 1\n  ret i64 %bit", 1), false, "lshr i64"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			g, err := parseLLVMIRForSplitHalfTest(test.ir)
@@ -68,7 +70,7 @@ invalid:
 				t.Fatalf("unexpected constant path table:\n%s", ir)
 			}
 			if test.cast != "" && !strings.Contains(ir, test.cast) {
-				t.Fatalf("expected %s after narrow table load:\n%s", test.cast, ir)
+				t.Fatalf("expected %s in the folded lookup:\n%s", test.cast, ir)
 			}
 		})
 	}
