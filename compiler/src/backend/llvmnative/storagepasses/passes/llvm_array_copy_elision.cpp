@@ -12,6 +12,7 @@
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Analysis/ValueTracking.h>
+#include <llvm/Analysis/LoopInfo.h>
 #include <llvm/IR/Dominators.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
@@ -19,6 +20,7 @@
 #include <llvm/IR/Module.h>
 #include <llvm/Support/CBindingWrapping.h>
 using namespace llvm;
+#include "llvm_reverse_array_coverage.h"
 namespace {
 // A private block: a static alloca, or malloc of a constant size in this function.
 static std::optional<uint64_t> ACE_Size(Value *V, const DataLayout &DL) {
@@ -306,8 +308,10 @@ extern "C" unsigned elisacoreElideArrayRoundTrips(LLVMModuleRef Ref) {
     SmallVector<Instruction *, 8> Blocks;
     for (Instruction &I : F.getEntryBlock())
       if (ACE_Size(&I, M.getDataLayout())) Blocks.push_back(&I);
-    if (Blocks.size() < 2) continue;
+    if (Blocks.empty()) continue;
     DominatorTree DT(F);
+    Changed += ElisaReverseArrayCoverage::removeFills(F, M.getDataLayout(), DT);
+    if (Blocks.size() < 2) continue;
     // Eliding an inner round trip can expose the enclosing one.
     SmallPtrSet<Instruction *, 8> Erased;
     for (unsigned Round = 0; Round < 4; ++Round) {
