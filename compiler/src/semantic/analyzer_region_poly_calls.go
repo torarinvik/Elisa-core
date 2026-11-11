@@ -4,7 +4,6 @@ import (
 	"elisacore/src/ast"
 	"fmt"
 	"maps"
-	"reflect"
 	"slices"
 )
 
@@ -206,60 +205,34 @@ func (a *Analyzer) loopBodyRegionPolyReclaimable(body []ast.Stmt) bool {
 // skipped too: a lambda runs in its eventual caller's context, not this function's.
 func (a *Analyzer) bodyCallsRegionPolyOutsideRegion(stmts []ast.Stmt) bool {
 	found := false
-	var rec func(v reflect.Value)
-	rec = func(v reflect.Value) {
-		if found || !v.IsValid() || !v.CanInterface() {
-			return
+	walkPruned(stmts, func(node any) bool {
+		if found {
+			return false
 		}
-		switch v.Kind() {
-		case reflect.Pointer:
-			if v.IsNil() {
-				return
+		switch n := node.(type) {
+		case *ast.RegionStmt:
+			if len(n.Body) != 0 {
+				return false // scoped region supplies the ambient region for its body
 			}
-			switch n := v.Interface().(type) {
-			case *ast.RegionStmt:
-				if len(n.Body) != 0 {
-					return // scoped region supplies the ambient region for its body
-				}
-			case *ast.InStoreStmt:
-				return // `in <owner>:` establishes an ambient owner
-			case *ast.LambdaExpr:
-				return
-			case *ast.CallExpr:
-				if ft := a.regionPolyCalleeFuncType(n); ft != nil && ft.RegionPolymorphic {
-					found = true
-					return
-				}
-			case *ast.StructLitExpr:
-				// Pre-analysis, `Name(args)` parses as a StructLitExpr whether Name is a
-				// struct or a function — a constructor-style call of a region-polymorphic
-				// function needs an ambient region exactly like a CallExpr.
-				if n != nil && n.Name != "" {
-					if sym, _, ok := a.lookupVisibleGlobal(n.Name); ok && sym != nil {
-						if ft, isFn := sym.Type.(*FuncType); isFn && ft != nil && ft.RegionPolymorphic {
-							found = true
-							return
-						}
+		case *ast.InStoreStmt, *ast.LambdaExpr:
+			return false
+		case *ast.CallExpr:
+			if ft := a.regionPolyCalleeFuncType(n); ft != nil && ft.RegionPolymorphic {
+				found = true
+			}
+		case *ast.StructLitExpr:
+			// Before analysis, function calls written in constructor syntax
+			// can be represented as struct literals.
+			if n.Name != "" {
+				if sym, _, ok := a.lookupVisibleGlobal(n.Name); ok && sym != nil {
+					if ft, isFn := sym.Type.(*FuncType); isFn && ft != nil && ft.RegionPolymorphic {
+						found = true
 					}
 				}
 			}
-			rec(v.Elem())
-		case reflect.Interface:
-			if v.IsNil() {
-				return
-			}
-			rec(v.Elem())
-		case reflect.Struct:
-			for _, i := range syntaxWalkFields(v.Type()) {
-				rec(v.Field(i))
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				rec(v.Index(i))
-			}
 		}
-	}
-	rec(reflect.ValueOf(stmts))
+		return !found
+	})
 	return found
 }
 
