@@ -2,12 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -20,23 +14,23 @@ func llvmLocalName(name string) string {
 	return strings.ReplaceAll(name, "\x00", "$internal")
 }
 
-func (s *functionState) createEntryAllocaRaw(name string, t semantic.Type) (C.LLVMValueRef, error) {
+func (s *functionState) createEntryAllocaRaw(name string, t semantic.Type) (llvmIRValueRef, error) {
 	llvmType, err := s.g.lowerType(t)
 	if err != nil {
 		return nil, err
 	}
-	builder := C.LLVMCreateBuilderInContext(s.g.context)
-	defer C.LLVMDisposeBuilder(builder)
-	entry := C.LLVMGetEntryBasicBlock(s.fnValue)
-	first := C.LLVMGetFirstInstruction(entry)
+	builder := llvmCreateBuilderInContext(s.g.context)
+	defer llvmDisposeBuilder(builder)
+	entry := llvmGetEntryBasicBlock(s.fnValue)
+	first := llvmGetFirstInstruction(entry)
 	if first != nil {
-		C.LLVMPositionBuilderBefore(builder, first)
+		llvmPositionBuilderBefore(builder, first)
 	} else {
-		C.LLVMPositionBuilderAtEnd(builder, entry)
+		llvmPositionBuilderAtEnd(builder, entry)
 	}
 	nameC := cString(llvmLocalName(name))
-	defer C.free(unsafe.Pointer(nameC))
-	alloca := C.LLVMBuildAlloca(builder, llvmType, nameC)
+	defer llvmFree(unsafe.Pointer(nameC))
+	alloca := llvmBuildAlloca(builder, llvmType, nameC)
 	s.g.applyTypeAlignment(alloca, t)
 	return alloca, nil
 }
@@ -47,13 +41,13 @@ const largeCompilerTempHeapThresholdBytes = 64 * 1024
 // name. Large source locals are just as capable of exhausting the native stack as
 // compiler-generated workspaces (especially closed ADTs whose largest variant
 // contains fixed arrays), so every caller goes through the same size gate.
-func (s *functionState) createEntryAlloca(name string, t semantic.Type) (C.LLVMValueRef, error) {
+func (s *functionState) createEntryAlloca(name string, t semantic.Type) (llvmIRValueRef, error) {
 	return s.createTempStorage(name, t)
 }
 
 // createTempStorage keeps ordinary storage on the stack but moves very large
 // locals and compiler-generated workspaces to entry-dominating heap storage.
-func (s *functionState) createTempStorage(name string, t semantic.Type) (C.LLVMValueRef, error) {
+func (s *functionState) createTempStorage(name string, t semantic.Type) (llvmIRValueRef, error) {
 	sizeBytes, err := s.g.abiSizeOfType(t)
 	if err != nil {
 		return nil, err
@@ -77,19 +71,19 @@ func (s *functionState) createTempStorage(name string, t semantic.Type) (C.LLVMV
 	if err != nil {
 		return nil, err
 	}
-	builder := C.LLVMCreateBuilderInContext(s.g.context)
-	defer C.LLVMDisposeBuilder(builder)
-	entry := C.LLVMGetEntryBasicBlock(s.fnValue)
-	first := C.LLVMGetFirstInstruction(entry)
+	builder := llvmCreateBuilderInContext(s.g.context)
+	defer llvmDisposeBuilder(builder)
+	entry := llvmGetEntryBasicBlock(s.fnValue)
+	first := llvmGetFirstInstruction(entry)
 	if first != nil {
-		C.LLVMPositionBuilderBefore(builder, first)
+		llvmPositionBuilderBefore(builder, first)
 	} else {
-		C.LLVMPositionBuilderAtEnd(builder, entry)
+		llvmPositionBuilderAtEnd(builder, entry)
 	}
-	sizeValue := C.LLVMConstInt(llvmSizeType, C.ulonglong(sizeBytes), 0)
+	sizeValue := llvmConstInt(llvmSizeType, llvmIRUnsignedLongLong(sizeBytes), 0)
 	nameC := cString(llvmLocalName(name) + ".heap")
-	defer C.free(unsafe.Pointer(nameC))
-	ptr := C.LLVMBuildCall2(builder, llvmMallocType, callee, llvmValueSlicePtr([]C.LLVMValueRef{sizeValue}), 1, nameC)
+	defer llvmFree(unsafe.Pointer(nameC))
+	ptr := llvmBuildCall2(builder, llvmMallocType, callee, llvmValueSlicePtr([]llvmIRValueRef{sizeValue}), 1, nameC)
 	s.heapTemps = append(s.heapTemps, ptr)
 	return ptr, nil
 }
@@ -113,9 +107,9 @@ func (s *functionState) emitHeapTempCleanup() error {
 	// Void calls cannot have an LLVM result name, but LLVMBuildCall2 still
 	// requires a non-nil C string for the name argument.
 	emptyName := cString("")
-	defer C.free(unsafe.Pointer(emptyName))
+	defer llvmFree(unsafe.Pointer(emptyName))
 	for i := len(s.heapTemps) - 1; i >= 0; i-- {
-		C.LLVMBuildCall2(s.builder, llvmFreeType, callee, llvmValueSlicePtr([]C.LLVMValueRef{s.heapTemps[i]}), 1, emptyName)
+		llvmBuildCall2(s.builder, llvmFreeType, callee, llvmValueSlicePtr([]llvmIRValueRef{s.heapTemps[i]}), 1, emptyName)
 	}
 	return nil
 }
@@ -123,7 +117,7 @@ func (s *functionState) emitHeapTempCleanup() error {
 // createEntryAllocaZeroed allocas in the entry block AND stores a zero value there, so the slot is
 // initialized exactly ONCE per function call. Used for loop-reset regions: the arena is zeroed
 // before the loop, then reset (not re-created) each iteration so its blocks are reused.
-func (s *functionState) createEntryAllocaZeroed(name string, t semantic.Type) (C.LLVMValueRef, error) {
+func (s *functionState) createEntryAllocaZeroed(name string, t semantic.Type) (llvmIRValueRef, error) {
 	llvmType, err := s.g.lowerType(t)
 	if err != nil {
 		return nil, err
@@ -132,28 +126,28 @@ func (s *functionState) createEntryAllocaZeroed(name string, t semantic.Type) (C
 	if err != nil {
 		return nil, err
 	}
-	builder := C.LLVMCreateBuilderInContext(s.g.context)
-	defer C.LLVMDisposeBuilder(builder)
-	entry := C.LLVMGetEntryBasicBlock(s.fnValue)
-	first := C.LLVMGetFirstInstruction(entry)
+	builder := llvmCreateBuilderInContext(s.g.context)
+	defer llvmDisposeBuilder(builder)
+	entry := llvmGetEntryBasicBlock(s.fnValue)
+	first := llvmGetFirstInstruction(entry)
 	if first != nil {
-		C.LLVMPositionBuilderBefore(builder, first)
+		llvmPositionBuilderBefore(builder, first)
 	} else {
-		C.LLVMPositionBuilderAtEnd(builder, entry)
+		llvmPositionBuilderAtEnd(builder, entry)
 	}
 	nameC := cString(llvmLocalName(name))
-	defer C.free(unsafe.Pointer(nameC))
-	alloca := C.LLVMBuildAlloca(builder, llvmType, nameC)
+	defer llvmFree(unsafe.Pointer(nameC))
+	alloca := llvmBuildAlloca(builder, llvmType, nameC)
 	s.g.applyTypeAlignment(alloca, t)
-	C.LLVMBuildStore(builder, zero, alloca)
+	llvmBuildStore(builder, zero, alloca)
 	return alloca, nil
 }
 func (s *functionState) currentBlockTerminated() bool {
-	block := C.LLVMGetInsertBlock(s.builder)
+	block := llvmGetInsertBlock(s.builder)
 	if block == nil {
 		return true
 	}
-	return C.LLVMGetBasicBlockTerminator(block) != nil
+	return llvmGetBasicBlockTerminator(block) != nil
 }
 func (s *functionState) pushScope() {
 	var scope *codegenScope
@@ -419,13 +413,13 @@ func stackTagArgIdentName(e ast.Expr) (string, bool) {
 // annotated with that region, read the matching argument's region, and pass
 // that region's arena from the caller's region environment. Order matches the
 // hidden params appended by lowerFunctionType.
-func (s *functionState) resolveRegionArenaArgs(expr *ast.CallExpr, fn *semantic.FuncType, loweredArgs []ast.Expr, emittedArgs []C.LLVMValueRef) ([]C.LLVMValueRef, error) {
+func (s *functionState) resolveRegionArenaArgs(expr *ast.CallExpr, fn *semantic.FuncType, loweredArgs []ast.Expr, emittedArgs []llvmIRValueRef) ([]llvmIRValueRef, error) {
 	if s == nil || expr == nil || fn == nil || len(fn.RegionParams) == 0 {
 		return nil, nil
 	}
-	out := make([]C.LLVMValueRef, 0, len(fn.RegionParams))
+	out := make([]llvmIRValueRef, 0, len(fn.RegionParams))
 	for _, regionParam := range fn.RegionParams {
-		var arena C.LLVMValueRef
+		var arena llvmIRValueRef
 		for i, p := range fn.Params {
 			if matchedRegionName(p, p, regionParam) == "" && containerRegionName(p) != regionParam {
 				continue
@@ -515,17 +509,17 @@ func (s *functionState) resolveRegionArenaArgs(expr *ast.CallExpr, fn *semantic.
 	}
 	return out, nil
 }
-func (s *functionState) treeOwnerArenaRefValue(owner treeAllocOwnerBinding, name string) (C.LLVMValueRef, error) {
+func (s *functionState) treeOwnerArenaRefValue(owner treeAllocOwnerBinding, name string) (llvmIRValueRef, error) {
 	if owner.arenaRef != nil {
 		return owner.arenaRef, nil
 	}
 	if owner.arenaRefPtr != nil {
-		ptrType := C.LLVMPointerTypeInContext(s.g.context, 0)
-		return C.LLVMBuildLoad2(s.builder, ptrType, owner.arenaRefPtr, cStringFree(name)), nil
+		ptrType := llvmPointerTypeInContext(s.g.context, 0)
+		return llvmBuildLoad2(s.builder, ptrType, owner.arenaRefPtr, cStringFree(name)), nil
 	}
 	return nil, nil
 }
-func (s *functionState) bindImplicitTreeOwnerParam(name string, t semantic.Type, ptr C.LLVMValueRef, value C.LLVMValueRef) {
+func (s *functionState) bindImplicitTreeOwnerParam(name string, t semantic.Type, ptr llvmIRValueRef, value llvmIRValueRef) {
 	if s == nil || s.treeAllocOwner.arenaRef != nil || s.treeAllocOwner.arenaRefPtr != nil {
 		return
 	}

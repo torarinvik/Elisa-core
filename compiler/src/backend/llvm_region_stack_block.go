@@ -2,11 +2,6 @@
 
 package backend
 
-/*
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"strconv"
 
@@ -40,7 +35,7 @@ func stackBlockMaxElems(elemBytes uint64) int64 {
 	return int64((usable/elemBytes - 16) / 2)
 }
 
-func (s *functionState) emitStackBlockInit(arenaPtr C.LLVMValueRef, arenaType semantic.Type, bound ast.Expr, elemType semantic.Type) error {
+func (s *functionState) emitStackBlockInit(arenaPtr llvmIRValueRef, arenaType semantic.Type, bound ast.Expr, elemType semantic.Type) error {
 	if bound == nil || elemType == nil {
 		return nil
 	}
@@ -48,8 +43,8 @@ func (s *functionState) emitStackBlockInit(arenaPtr C.LLVMValueRef, arenaType se
 	if err != nil {
 		return err
 	}
-	i64 := C.LLVMInt64TypeInContext(s.g.context)
-	i1 := C.LLVMInt1TypeInContext(s.g.context)
+	i64 := llvmInt64TypeInContext(s.g.context)
+	i1 := llvmInt1TypeInContext(s.g.context)
 	// A compile-time-constant bound (e.g. a resize capped by a guard) gets a block sized to its
 	// exact worst footprint, installed unconditionally; it may exceed the default 8 KiB block.
 	if n, ok := stackBlockConstBound(bound); ok {
@@ -66,28 +61,28 @@ func (s *functionState) emitStackBlockInit(arenaPtr C.LLVMValueRef, arenaType se
 	if err != nil || !ok {
 		return err
 	}
-	fits := C.LLVMBuildICmp(s.builder, C.LLVMIntULE, value, C.LLVMConstInt(i64, C.ulonglong(maxN), 0), cStringFree("stack.block.fits"))
-	noOverflow := C.LLVMBuildNot(s.builder, overflow, cStringFree("stack.block.no.overflow"))
-	use := C.LLVMBuildAnd(s.builder, fits, noOverflow, cStringFree("stack.block.use"))
+	fits := llvmBuildICmp(s.builder, llvmIntULE, value, llvmConstInt(i64, llvmIRUnsignedLongLong(maxN), 0), cStringFree("stack.block.fits"))
+	noOverflow := llvmBuildNot(s.builder, overflow, cStringFree("stack.block.no.overflow"))
+	use := llvmBuildAnd(s.builder, fits, noOverflow, cStringFree("stack.block.use"))
 
 	block := s.createStackBlockAlloca(i64)
 
-	useBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("stack.block.init"))
-	contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("stack.block.cont"))
-	C.LLVMBuildCondBr(s.builder, use, useBB, contBB)
-	C.LLVMPositionBuilderAtEnd(s.builder, useBB)
+	useBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("stack.block.init"))
+	contBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("stack.block.cont"))
+	llvmBuildCondBr(s.builder, use, useBB, contBB)
+	llvmPositionBuilderAtEnd(s.builder, useBB)
 
 	if err := s.emitStackBlockInstall(arenaPtr, arenaType, block, stackBlockPayloadSlots); err != nil {
 		return err
 	}
-	C.LLVMBuildBr(s.builder, contBB)
-	C.LLVMPositionBuilderAtEnd(s.builder, contBB)
+	llvmBuildBr(s.builder, contBB)
+	llvmPositionBuilderAtEnd(s.builder, contBB)
 	return nil
 }
 
 // emitStackBlockInstall calls arena_init_stack_block(arena, block, payloadSlots) at the builder.
-func (s *functionState) emitStackBlockInstall(arenaPtr C.LLVMValueRef, arenaType semantic.Type, block C.LLVMValueRef, payloadSlots uint64) error {
-	i64 := C.LLVMInt64TypeInContext(s.g.context)
+func (s *functionState) emitStackBlockInstall(arenaPtr llvmIRValueRef, arenaType semantic.Type, block llvmIRValueRef, payloadSlots uint64) error {
+	i64 := llvmInt64TypeInContext(s.g.context)
 	usizeType := s.g.namedType("usize")
 	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	voidRef := s.lambdaVoidRefType()
@@ -100,7 +95,7 @@ func (s *functionState) emitStackBlockInstall(arenaPtr C.LLVMValueRef, arenaType
 	if err != nil {
 		return err
 	}
-	s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaPtr, block, C.LLVMConstInt(i64, C.ulonglong(payloadSlots), 0)}, "")
+	s.buildCall(llvmFnType, callee, []llvmIRValueRef{arenaPtr, block, llvmConstInt(i64, llvmIRUnsignedLongLong(payloadSlots), 0)}, "")
 	return nil
 }
 
@@ -154,22 +149,22 @@ func stackBlockConstPayloadSlots(n int64, elemBytes uint64) (uint64, bool) {
 
 // createStackBlockAlloca places the frame block in the entry block so it is one fixed frame
 // slot (no dynamic stack growth when the region sits inside a loop).
-func (s *functionState) createStackBlockAlloca(i64 C.LLVMTypeRef) C.LLVMValueRef {
+func (s *functionState) createStackBlockAlloca(i64 llvmIRTypeRef) llvmIRValueRef {
 	return s.createStackBlockAllocaSlots(i64, stackBlockHeaderSlots+stackBlockPayloadSlots)
 }
 
-func (s *functionState) createStackBlockAllocaSlots(i64 C.LLVMTypeRef, totalSlots uint64) C.LLVMValueRef {
-	builder := C.LLVMCreateBuilderInContext(s.g.context)
-	defer C.LLVMDisposeBuilder(builder)
-	entry := C.LLVMGetEntryBasicBlock(s.fnValue)
-	if first := C.LLVMGetFirstInstruction(entry); first != nil {
-		C.LLVMPositionBuilderBefore(builder, first)
+func (s *functionState) createStackBlockAllocaSlots(i64 llvmIRTypeRef, totalSlots uint64) llvmIRValueRef {
+	builder := llvmCreateBuilderInContext(s.g.context)
+	defer llvmDisposeBuilder(builder)
+	entry := llvmGetEntryBasicBlock(s.fnValue)
+	if first := llvmGetFirstInstruction(entry); first != nil {
+		llvmPositionBuilderBefore(builder, first)
 	} else {
-		C.LLVMPositionBuilderAtEnd(builder, entry)
+		llvmPositionBuilderAtEnd(builder, entry)
 	}
-	arrayType := C.LLVMArrayType2(i64, C.uint64_t(totalSlots))
-	alloca := C.LLVMBuildAlloca(builder, arrayType, cStringFree("stack.block"))
-	C.LLVMSetAlignment(alloca, 16)
+	arrayType := llvmArrayType2(i64, llvmIRUint64(totalSlots))
+	alloca := llvmBuildAlloca(builder, arrayType, cStringFree("stack.block"))
+	llvmSetAlignment(alloca, 16)
 	return alloca
 }
 
@@ -177,15 +172,15 @@ func (s *functionState) createStackBlockAllocaSlots(i64 C.LLVMTypeRef, totalSlot
 // signed i64 plus an overflow flag. A negative value is reported as overflow so the unsigned
 // fits-check rejects it. Integer conversions are evaluated as the identity: a narrowing
 // conversion can only make the real count smaller than this value, never larger.
-func (s *functionState) emitStackBlockBoundValue(e ast.Expr, i64, i1 C.LLVMTypeRef) (C.LLVMValueRef, C.LLVMValueRef, bool, error) {
-	noOverflow := C.LLVMConstInt(i1, 0, 0)
+func (s *functionState) emitStackBlockBoundValue(e ast.Expr, i64, i1 llvmIRTypeRef) (llvmIRValueRef, llvmIRValueRef, bool, error) {
+	noOverflow := llvmConstInt(i1, 0, 0)
 	switch b := e.(type) {
 	case *ast.IntLit:
 		v, err := strconv.ParseInt(b.Value, 0, 64)
 		if err != nil || v < 0 {
 			return nil, nil, false, nil
 		}
-		return C.LLVMConstInt(i64, C.ulonglong(v), 0), noOverflow, true, nil
+		return llvmConstInt(i64, llvmIRUnsignedLongLong(v), 0), noOverflow, true, nil
 	case *ast.Ident:
 		binding, ok := s.lookupBinding(b.Name)
 		if !ok || binding.ptr == nil {
@@ -195,24 +190,24 @@ func (s *functionState) emitStackBlockBoundValue(e ast.Expr, i64, i1 C.LLVMTypeR
 		if err != nil {
 			return nil, nil, false, err
 		}
-		rawType := C.LLVMTypeOf(raw)
-		if C.LLVMGetTypeKind(rawType) != C.LLVMIntegerTypeKind {
+		rawType := llvmTypeOf(raw)
+		if llvmGetTypeKind(rawType) != llvmIntegerTypeKind {
 			return nil, nil, false, nil
 		}
-		width := C.LLVMGetIntTypeWidth(rawType)
+		width := llvmGetIntTypeWidth(rawType)
 		signed := isSignedIntegerType(binding.typ)
 		switch {
 		case width > 64:
 			return nil, nil, false, nil
 		case width == 64:
-			neg := C.LLVMBuildICmp(s.builder, C.LLVMIntSLT, raw, C.LLVMConstInt(i64, 0, 0), cStringFree("stack.block.neg"))
+			neg := llvmBuildICmp(s.builder, llvmIntSLT, raw, llvmConstInt(i64, 0, 0), cStringFree("stack.block.neg"))
 			return raw, neg, true, nil
 		case signed:
-			v := C.LLVMBuildSExt(s.builder, raw, i64, cStringFree("stack.block.sext"))
-			neg := C.LLVMBuildICmp(s.builder, C.LLVMIntSLT, v, C.LLVMConstInt(i64, 0, 0), cStringFree("stack.block.neg"))
+			v := llvmBuildSExt(s.builder, raw, i64, cStringFree("stack.block.sext"))
+			neg := llvmBuildICmp(s.builder, llvmIntSLT, v, llvmConstInt(i64, 0, 0), cStringFree("stack.block.neg"))
 			return v, neg, true, nil
 		default:
-			return C.LLVMBuildZExt(s.builder, raw, i64, cStringFree("stack.block.zext")), noOverflow, true, nil
+			return llvmBuildZExt(s.builder, raw, i64, cStringFree("stack.block.zext")), noOverflow, true, nil
 		}
 	case *ast.ParenExpr:
 		return s.emitStackBlockBoundValue(b.Inner, i64, i1)
@@ -248,12 +243,12 @@ func (s *functionState) emitStackBlockBoundValue(e ast.Expr, i64, i1 C.LLVMTypeR
 		if err != nil {
 			return nil, nil, false, err
 		}
-		call := C.LLVMBuildCall2(s.builder, C.LLVMGlobalGetValueType(fn), fn, llvmValueSlicePtr([]C.LLVMValueRef{l, r}), 2, cStringFree("stack.block.op"))
-		v := C.LLVMBuildExtractValue(s.builder, call, 0, cStringFree("stack.block.op.value"))
-		o := C.LLVMBuildExtractValue(s.builder, call, 1, cStringFree("stack.block.op.overflow"))
-		o = C.LLVMBuildOr(s.builder, o, C.LLVMBuildOr(s.builder, lo, ro, cStringFree("stack.block.ovf.in")), cStringFree("stack.block.ovf"))
-		neg := C.LLVMBuildICmp(s.builder, C.LLVMIntSLT, v, C.LLVMConstInt(i64, 0, 0), cStringFree("stack.block.neg"))
-		return v, C.LLVMBuildOr(s.builder, o, neg, cStringFree("stack.block.bad")), true, nil
+		call := llvmBuildCall2(s.builder, llvmGlobalGetValueType(fn), fn, llvmValueSlicePtr([]llvmIRValueRef{l, r}), 2, cStringFree("stack.block.op"))
+		v := llvmBuildExtractValue(s.builder, call, 0, cStringFree("stack.block.op.value"))
+		o := llvmBuildExtractValue(s.builder, call, 1, cStringFree("stack.block.op.overflow"))
+		o = llvmBuildOr(s.builder, o, llvmBuildOr(s.builder, lo, ro, cStringFree("stack.block.ovf.in")), cStringFree("stack.block.ovf"))
+		neg := llvmBuildICmp(s.builder, llvmIntSLT, v, llvmConstInt(i64, 0, 0), cStringFree("stack.block.neg"))
+		return v, llvmBuildOr(s.builder, o, neg, cStringFree("stack.block.bad")), true, nil
 	}
 	return nil, nil, false, nil
 }

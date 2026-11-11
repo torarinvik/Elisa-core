@@ -240,3 +240,39 @@ func llvmGetSuccessor(term llvmIRValueRef, index llvmIRUnsigned) llvmIRBlockRef 
 func llvmSetBranchWeights(branch llvmIRValueRef, context llvmIRContextRef, trueWeight, falseWeight llvmIRUnsigned) {
 	C.elisa_coreSetBranchWeights(branch, context, trueWeight, falseWeight)
 }
+
+func llvmCreateBuilderInContext(context llvmIRContextRef) llvmIRBuilderRef {
+	return C.LLVMCreateBuilderInContext(context)
+}
+
+func llvmDisposeBuilder(builder llvmIRBuilderRef) {
+	C.LLVMDisposeBuilder(builder)
+}
+
+func llvmGetEntryBasicBlock(function llvmIRValueRef) llvmIRBlockRef {
+	return C.LLVMGetEntryBasicBlock(function)
+}
+
+func llvmGetFirstInstruction(block llvmIRBlockRef) llvmIRValueRef {
+	return C.LLVMGetFirstInstruction(block)
+}
+
+func llvmGetLastInstruction(block llvmIRBlockRef) llvmIRValueRef {
+	return C.LLVMGetLastInstruction(block)
+}
+
+func llvmGetNextInstruction(instruction llvmIRValueRef) llvmIRValueRef {
+	return C.LLVMGetNextInstruction(instruction)
+}
+
+func llvmGetInstructionParent(instruction llvmIRValueRef) llvmIRBlockRef {
+	return C.LLVMGetInstructionParent(instruction)
+}
+
+func llvmPositionBuilderBefore(builder llvmIRBuilderRef, instruction llvmIRValueRef) {
+	C.LLVMPositionBuilderBefore(builder, instruction)
+}
+
+func llvmBuildSExt(builder llvmIRBuilderRef, value llvmIRValueRef, typ llvmIRTypeRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildSExt(builder, value, typ, name)
+}

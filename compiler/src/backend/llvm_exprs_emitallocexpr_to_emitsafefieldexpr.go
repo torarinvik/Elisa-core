@@ -2,12 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -37,7 +31,7 @@ func (s *functionState) isUnboundImplicitPackedStoreIdent(n *ast.Ident) bool {
 // than the current one. Letting it fall through to getOrCreateRegionPackedStore would mint a fresh
 // EMPTY store (and clobber the binding), making every handle read in the callee undefined — the
 // compile-clean-but-segfaulting storeless cross-function match.
-func (s *functionState) emitImplicitPackedStoreIdent(n *ast.Ident, actualType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitImplicitPackedStoreIdent(n *ast.Ident, actualType semantic.Type) (llvmIRValueRef, semantic.Type, error) {
 	enumType := s.resolveImplicitPackedStoreEnum(n, actualType)
 	if enumType == nil {
 		return nil, nil, fmt.Errorf("cannot resolve enum for implicit packed store %q", n.Name)
@@ -72,7 +66,7 @@ func (s *functionState) resolveImplicitPackedStoreEnum(n *ast.Ident, actualType 
 	return nil
 }
 
-func (s *functionState) emitAllocExpr(expr *ast.AllocExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitAllocExpr(expr *ast.AllocExpr) (llvmIRValueRef, semantic.Type, error) {
 	if expr.AutoRegion {
 		if s.isAutoRegionPackedConstructor(expr.Value) {
 			return s.emitAutoRegionPackedAllocExpr(expr)
@@ -116,7 +110,7 @@ func (s *functionState) autoRegionBinding() valueBinding {
 
 // emitRegionStructAlloc lowers a plain-struct allocation into a region's arena (arena_alloc(size)
 // then store the constructed value). Shared by new[region] and new[auto].
-func (s *functionState) emitRegionStructAlloc(expr *ast.AllocExpr, binding valueBinding) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitRegionStructAlloc(expr *ast.AllocExpr, binding valueBinding) (llvmIRValueRef, semantic.Type, error) {
 	if binding.ptr == nil {
 		return nil, nil, fmt.Errorf("new[auto] has no active inferred region arena during LLVM lowering")
 	}
@@ -140,7 +134,7 @@ func (s *functionState) emitRegionStructAlloc(expr *ast.AllocExpr, binding value
 	if err != nil {
 		return nil, nil, err
 	}
-	sizeValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(sizeBytes), 0)
+	sizeValue := llvmConstInt(usizeLLVMType, llvmIRUnsignedLongLong(sizeBytes), 0)
 	arenaRefType := &semantic.RefType{Elem: binding.typ, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	voidType := s.g.namedType("void")
 	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
@@ -155,8 +149,8 @@ func (s *functionState) emitRegionStructAlloc(expr *ast.AllocExpr, binding value
 	if err != nil {
 		return nil, nil, err
 	}
-	allocPtr := s.buildCall(allocLLVMType, allocCallee, []C.LLVMValueRef{binding.ptr, sizeValue}, "region.alloc")
-	C.LLVMBuildStore(s.builder, value, allocPtr)
+	allocPtr := s.buildCall(allocLLVMType, allocCallee, []llvmIRValueRef{binding.ptr, sizeValue}, "region.alloc")
+	llvmBuildStore(s.builder, value, allocPtr)
 	return allocPtr, s.exprType(expr), nil
 }
 
@@ -180,7 +174,7 @@ func (s *functionState) isAutoRegionPackedConstructor(value ast.Expr) bool {
 // lifetime = the region), then push the node row into it. The first new[auto] for an enum in a
 // region creates the store; the rest reuse it, so all nodes share one store and their u32 handles
 // stay mutually valid.
-func (s *functionState) emitAutoRegionPackedAllocExpr(expr *ast.AllocExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitAutoRegionPackedAllocExpr(expr *ast.AllocExpr) (llvmIRValueRef, semantic.Type, error) {
 	switch n := expr.Value.(type) {
 	case *ast.FieldExpr:
 		enumType, variant, ok := s.enumConstructorInfoFromField(n)
@@ -240,14 +234,14 @@ func (s *functionState) getOrCreateRegionPackedStore(enumType *semantic.EnumType
 	if regionKey == nil {
 		return packedStoreBinding{}, fmt.Errorf("new[auto] packed allocation has no active inferred region arena (in %s)", s.fnType.Name)
 	}
-	savedBlock := C.LLVMGetInsertBlock(s.builder)
+	savedBlock := llvmGetInsertBlock(s.builder)
 	hoisted := s.treeAllocOwner.storeAnchorBlock != nil
 	if hoisted {
 		s.positionAfterStoreAnchor(s.treeAllocOwner.storeAnchorBlock, s.treeAllocOwner.storeAnchorInstr)
 	}
 	restore := func() {
 		if hoisted && savedBlock != nil {
-			C.LLVMPositionBuilderAtEnd(s.builder, savedBlock)
+			llvmPositionBuilderAtEnd(s.builder, savedBlock)
 		}
 	}
 	arenaPtr := s.treeAllocOwner.arenaRef
@@ -282,34 +276,34 @@ func (s *functionState) getOrCreateRegionPackedStore(enumType *semantic.EnumType
 
 // positionAfterStoreAnchor positions the builder immediately after the captured anchor
 // instruction (or at the block start when the anchor block was empty at capture time).
-func (s *functionState) positionAfterStoreAnchor(block C.LLVMBasicBlockRef, instr C.LLVMValueRef) {
+func (s *functionState) positionAfterStoreAnchor(block llvmIRBlockRef, instr llvmIRValueRef) {
 	if instr != nil {
-		if next := C.LLVMGetNextInstruction(instr); next != nil {
-			C.LLVMPositionBuilderBefore(s.builder, next)
+		if next := llvmGetNextInstruction(instr); next != nil {
+			llvmPositionBuilderBefore(s.builder, next)
 			return
 		}
-		C.LLVMPositionBuilderAtEnd(s.builder, C.LLVMGetInstructionParent(instr))
+		llvmPositionBuilderAtEnd(s.builder, llvmGetInstructionParent(instr))
 		return
 	}
-	if first := C.LLVMGetFirstInstruction(block); first != nil {
-		C.LLVMPositionBuilderBefore(s.builder, first)
+	if first := llvmGetFirstInstruction(block); first != nil {
+		llvmPositionBuilderBefore(s.builder, first)
 		return
 	}
-	C.LLVMPositionBuilderAtEnd(s.builder, block)
+	llvmPositionBuilderAtEnd(s.builder, block)
 }
 
 // captureStoreAnchor snapshots the builder's current position as a (block, last-instruction)
 // pair for treeAllocOwnerBinding.storeAnchor*. Called right after an owner's arena is
 // initialized, so implicit packed stores hoisted there see a fully-initialized arena.
-func (s *functionState) captureStoreAnchor() (C.LLVMBasicBlockRef, C.LLVMValueRef) {
-	block := C.LLVMGetInsertBlock(s.builder)
+func (s *functionState) captureStoreAnchor() (llvmIRBlockRef, llvmIRValueRef) {
+	block := llvmGetInsertBlock(s.builder)
 	if block == nil {
 		return nil, nil
 	}
-	return block, C.LLVMGetLastInstruction(block)
+	return block, llvmGetLastInstruction(block)
 }
 
-func (s *functionState) emitScopedPackedAllocExpr(expr *ast.AllocExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitScopedPackedAllocExpr(expr *ast.AllocExpr) (llvmIRValueRef, semantic.Type, error) {
 	switch n := expr.Value.(type) {
 	case *ast.FieldExpr:
 		enumType, variant, ok := s.enumConstructorInfoFromField(n)
@@ -335,7 +329,7 @@ func (s *functionState) emitScopedPackedAllocExpr(expr *ast.AllocExpr) (C.LLVMVa
 		return nil, nil, fmt.Errorf("new without [...] expects a packed enum constructor inside an in-store block")
 	}
 }
-func (s *functionState) emitPackedAllocExpr(expr *ast.AllocExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitPackedAllocExpr(expr *ast.AllocExpr) (llvmIRValueRef, semantic.Type, error) {
 	storeValue, _, err := s.emitExpr(expr.Owner, nil)
 	if err != nil {
 		return nil, nil, err
