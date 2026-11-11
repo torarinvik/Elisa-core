@@ -250,14 +250,17 @@ func (a *Analyzer) walkParamStores(body []ast.Stmt, pidx map[string]int, out map
 						}
 					}
 				}
-				// Relayed store through a resolved callee.
+				// A callee summary can add a store only when one of the
+				// explicit arguments borrows from a caller parameter.
+				// Nested calls still get visited through the children below.
+				if pidx != nil && !callHasStoreSource(n, pidx) {
+					break
+				}
 				if callee, ok := a.resolveCalleeFuncDecl(n); ok && callee != nil {
 					if observe != nil {
 						observe(callee)
 					}
-					if ctargets, ok := out[callee]; ok {
-						a.relayParamStores(n, ctargets, add, global)
-					}
+					a.relayParamStores(n, out[callee], add, global)
 				}
 			case *ast.AssignStmt:
 				if src, ok := aliasSourceName(n.Value); ok {
@@ -290,6 +293,17 @@ func (a *Analyzer) walkParamStores(body []ast.Stmt, pidx map[string]int, out map
 		}
 	}
 	list(body, nil)
+}
+
+func callHasStoreSource(call *ast.CallExpr, params map[string]int) bool {
+	for _, arg := range call.Args {
+		if name, aliases := aliasSourceName(arg); aliases {
+			if _, isParam := params[name]; isParam {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // relayParamStores propagates a callee's param→param store relationships back to the caller's params:

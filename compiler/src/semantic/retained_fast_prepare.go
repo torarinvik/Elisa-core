@@ -285,12 +285,10 @@ func (r *RetainedAnalysis) localFactDigest(a *Analyzer, live, fn *ast.FuncDecl, 
 				paramStoresBodyLocal(fn, p.Name), paramContainerIsGrown(fn.Body, p.Name), paramReturnedBare(fn.Body, p.Name))
 			fmt.Fprintf(&b, "fwd=%v,%v;", forwardTargetNames(fwd.direct[p.Name]), forwardTargetNames(fwd.fields[p.Name]))
 		}
-		pidx := map[string]int{}
-		for i, p := range fn.Params {
-			pidx[p.Name] = i
-		}
 		var stores []string
-		a.walkParamStores(fn.Body, pidx, a.paramStoreTargets,
+		// The digest records all resolved calls, including those that cannot
+		// relay a store from one of this function's parameters.
+		a.walkParamStores(fn.Body, nil, a.paramStoreTargets,
 			func(src, tgt string) { stores = append(stores, src+">"+tgt) },
 			func(src string) { stores = append(stores, src+">*") },
 			func(c *ast.FuncDecl) { stores = append(stores, "@"+c.Name) })

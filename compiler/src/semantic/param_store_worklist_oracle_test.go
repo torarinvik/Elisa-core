@@ -78,7 +78,7 @@ func (a *Analyzer) computeParamStoreTargetsFixedPoint(funcs []*ast.FuncDecl) map
 				markTarget(srcName, storeTargetGlobal)
 			}
 			markGlobal := func(srcName string) { markTarget(srcName, storeTargetGlobal) }
-			a.walkParamStores(fn.Body, pidx, out, addStore, markGlobal, nil)
+			a.walkParamStores(fn.Body, nil, out, addStore, markGlobal, nil)
 		}
 		if !changed {
 			break
