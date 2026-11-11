@@ -72,24 +72,14 @@ type MoveExpr struct {
 	Operand  Expr
 }
 type CallExpr struct {
-	Position     lexer.Pos
-	Func         Expr
-	SafeReceiver Expr
-	// FStringLowering marks the parser-created call that implements an f-string.
-	// Unlike spelling alone, this identity cannot be forged by an ordinary source call.
-	FStringLowering bool
-	HasArgForward   bool
-	ArgForwardPos   lexer.Pos
-	Args            []Expr
-	ArgNames        []string
-	ArgShorthand    []bool
-	ArgItemOrder    []CallArgItem
-	Safe            bool
-	// SafeConcurrencySugar marks a call node that the parser synthesized from a
-	// safe concurrency construct (e.g. `submit`/`pool` scope lowering to a
-	// `pool_submit1` call). User code never wrote the raw primitive, so the
-	// raw-concurrency-surface-removed diagnostic must not fire on it.
-	SafeConcurrencySugar bool
+	Position      lexer.Pos
+	Func          Expr
+	SafeReceiver  Expr
+	ArgForwardPos lexer.Pos
+	Args          []Expr
+	ArgNames      []string
+	ArgShorthand  []bool
+	ArgItemOrder  []CallArgItem
 	// LmutRebindClaims records rebind targets that name a threaded lmut argument of
 	// this call (docs/120 §3): `rebind ch, lexer = lexer.advance_char()` claims the
 	// `lexer` thread. The parser drops a claimed target from the value bind (the
@@ -100,6 +90,22 @@ type CallExpr struct {
 	// syntactic target-vs-argument matching sound: a wrong guess cannot misbind, it
 	// can only be rejected.
 	LmutRebindClaims []LmutRebindClaim
+
+	ResolvedArgs         []Expr
+	ResolvedCommonArgs   map[string]Expr
+	ResolvedImplicitArgs []Expr
+
+	// Keep flags together to avoid alignment padding between syntax fields.
+	// FStringLowering marks the parser-created call that implements an f-string.
+	// Unlike spelling alone, this identity cannot be forged by an ordinary source call.
+	FStringLowering bool
+	HasArgForward   bool
+	Safe            bool
+	// SafeConcurrencySugar marks a call node that the parser synthesized from a
+	// safe concurrency construct (e.g. `submit`/`pool` scope lowering to a
+	// `pool_submit1` call). User code never wrote the raw primitive, so the
+	// raw-concurrency-surface-removed diagnostic must not fire on it.
+	SafeConcurrencySugar bool
 	// LmutThreadEffect marks a mutating call the parser hoisted out of a docs/120 §6
 	// thread slot (`parser.advance()` from `parser <- parser.advance()`). Its effect is
 	// part of the visible multi-place manifest, so the §7 strict tier treats it as a
@@ -108,10 +114,7 @@ type CallExpr struct {
 	LmutThreadEffect bool
 
 	ResolvedArgsValid         bool
-	ResolvedArgs              []Expr
-	ResolvedCommonArgs        map[string]Expr
 	ResolvedImplicitArgsValid bool
-	ResolvedImplicitArgs      []Expr
 }
 type FieldExpr struct {
 	Position lexer.Pos
