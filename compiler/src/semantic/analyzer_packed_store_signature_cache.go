@@ -6,7 +6,7 @@ import "maps"
 // type walk shares depth and first-witness state across roots, so only reuse
 // an exact ordered sequence. Keep larger signatures on the ordinary path.
 // The caller supplies an empty output map.
-func collectPackedStoreSignature(ft *FuncType, out map[string]*EnumType, fieldOrders map[*StructType][]string, emptyRoots map[Type]bool, signatures map[[2]Type]map[string]*EnumType) {
+func collectPackedStoreSignature(ft *FuncType, out map[string]*EnumType, fieldRoots map[*StructType][]Type, emptyRoots map[Type]bool, signatures map[[2]Type]map[string]*EnumType) {
 	var key [2]Type
 	count := 0
 	explicit := min(funcTypeExplicitParamCount(ft), len(ft.Params))
@@ -21,7 +21,7 @@ func collectPackedStoreSignature(ft *FuncType, out map[string]*EnumType, fieldOr
 		}
 		if count == len(key) {
 			// Continue in signature order without rescanning the prefix.
-			walk := packedTypeWalk{fieldOrders: fieldOrders}
+			walk := packedTypeWalk{fieldRoots: fieldRoots}
 			for _, prior := range key {
 				walk.collectSignatureRoot(prior, out, emptyRoots)
 			}
@@ -45,7 +45,7 @@ func collectPackedStoreSignature(ft *FuncType, out map[string]*EnumType, fieldOr
 		maps.Copy(out, cached)
 		return
 	}
-	walk := packedTypeWalk{fieldOrders: fieldOrders}
+	walk := packedTypeWalk{fieldRoots: fieldRoots}
 	for _, root := range key[:count] {
 		walk.collectSignatureRoot(root, out, emptyRoots)
 	}

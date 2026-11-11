@@ -62,7 +62,7 @@ func (a *Analyzer) computeTransitiveStoreNeeds(funcs []*ast.FuncDecl, regionBack
 	// The value names the function that constructs the nodes (the diagnostic's witness).
 	builds := map[*FuncType]map[string]string{}
 	// All signatures in this pass read the same declaration shapes.
-	fieldOrders := map[*StructType][]string{}
+	fieldRoots := map[*StructType][]Type{}
 	emptyTypeRoots := make(map[Type]bool)
 	packedSignatures := make(map[[2]Type]map[string]*EnumType)
 	bareVariantNames := a.packedStoreBareVariantNames()
@@ -76,7 +76,7 @@ func (a *Analyzer) computeTransitiveStoreNeeds(funcs []*ast.FuncDecl, regionBack
 		if _, seen := callees[ft]; !seen {
 			callees[ft] = map[*FuncType]bool{}
 			order = append(order, ft)
-			collectPackedStoreSignature(ft, sig, fieldOrders, emptyTypeRoots, packedSignatures)
+			collectPackedStoreSignature(ft, sig, fieldRoots, emptyTypeRoots, packedSignatures)
 			for name, et := range sig {
 				// Pointer handles are self-contained for reads. Construction
 				// can still require a store, which is recorded below.
@@ -356,12 +356,12 @@ func collectPackedEnumsInSignature(ft *FuncType, includeReturn bool, out map[str
 }
 
 type packedTypeWalk struct {
-	seen        map[Type]int
-	fieldOrders map[*StructType][]string
+	seen       map[Type]int
+	fieldRoots map[*StructType][]Type
 }
 
-func collectPackedEnumsInSignatureWithOrder(ft *FuncType, includeReturn bool, out map[string]*EnumType, fieldOrders map[*StructType][]string, emptyTypeRoots map[Type]bool) {
-	walk := packedTypeWalk{fieldOrders: fieldOrders}
+func collectPackedEnumsInSignatureWithOrder(ft *FuncType, includeReturn bool, out map[string]*EnumType, fieldRoots map[*StructType][]Type, emptyTypeRoots map[Type]bool) {
+	walk := packedTypeWalk{fieldRoots: fieldRoots}
 	explicitCount := min(funcTypeExplicitParamCount(ft), len(ft.Params))
 	for i := 0; i < explicitCount; i++ {
 		walk.collectSignatureRoot(ft.Params[i], out, emptyTypeRoots)
@@ -492,16 +492,25 @@ func (walk packedTypeWalk) collect(t Type, out map[string]*EnumType, depth int) 
 		}
 	case *StructType:
 		if tt != nil {
-			// Preserve declaration order so the depth limit cuts the same payloads every run.
-			names, cached := walk.fieldOrders[tt]
-			if !cached {
-				names = orderedStructFieldNames(tt)
-				if walk.fieldOrders != nil {
-					walk.fieldOrders[tt] = names
+			// Preserve field order for first-witness selection. Signature
+			// collection shares a cache while declaration shapes are fixed.
+			if walk.fieldRoots == nil {
+				for _, name := range orderedStructFieldNames(tt) {
+					walk.collect(tt.Fields[name].Type, out, depth+1)
 				}
+				return
 			}
-			for _, name := range names {
-				walk.collect(tt.Fields[name].Type, out, depth+1)
+			roots, cached := walk.fieldRoots[tt]
+			if !cached {
+				for _, name := range orderedStructFieldNames(tt) {
+					if root := packedStoreSignatureRoot(tt.Fields[name].Type); root != nil {
+						roots = append(roots, root)
+					}
+				}
+				walk.fieldRoots[tt] = roots
+			}
+			for _, root := range roots {
+				walk.collect(root, out, depth+1)
 			}
 		}
 	case *TupleType:
