@@ -276,3 +276,23 @@ func llvmPositionBuilderBefore(builder llvmIRBuilderRef, instruction llvmIRValue
 func llvmBuildSExt(builder llvmIRBuilderRef, value llvmIRValueRef, typ llvmIRTypeRef, name *llvmIRChar) llvmIRValueRef {
 	return C.LLVMBuildSExt(builder, value, typ, name)
 }
+
+const (
+	llvmRealOGE = C.LLVMRealOGE
+	llvmRealOGT = C.LLVMRealOGT
+	llvmRealOLE = C.LLVMRealOLE
+	llvmRealOLT = C.LLVMRealOLT
+	llvmRealUNE = C.LLVMRealUNE
+)
+
+func llvmBuildFNeg(builder llvmIRBuilderRef, value llvmIRValueRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildFNeg(builder, value, name)
+}
+
+func llvmBuildVAArg(builder llvmIRBuilderRef, list llvmIRValueRef, typ llvmIRTypeRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildVAArg(builder, list, typ, name)
+}
+
+func llvmBuildIsNull(builder llvmIRBuilderRef, value llvmIRValueRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildIsNull(builder, value, name)
+}

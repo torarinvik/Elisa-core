@@ -2,13 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-#include <llvm-c/Target.h>
-*/
-import "C"
-
 import (
 	"fmt"
 	"unsafe"
@@ -43,9 +36,9 @@ func (g *llvmGenerator) emitExportedGlobal(exported *semantic.ExportedGlobal) er
 		return err
 	}
 	nameC := cString(exported.PublicName)
-	defer C.free(unsafe.Pointer(nameC))
-	alias := C.LLVMAddAlias2(g.module, llvmType, 0, target, nameC)
-	C.LLVMSetLinkage(alias, C.LLVMExternalLinkage)
+	defer llvmFree(unsafe.Pointer(nameC))
+	alias := llvmAddAlias2(g.module, llvmType, 0, target, nameC)
+	llvmSetLinkage(alias, llvmExternalLinkage)
 	g.globals[exported.PublicName] = alias
 	return nil
 }
@@ -68,7 +61,7 @@ func (g *llvmGenerator) emitExportedFunction(exported *semantic.ExportedFunc) er
 	}
 
 	var (
-		targetValue C.LLVMValueRef
+		targetValue llvmIRValueRef
 		targetType  *semantic.FuncType
 	)
 	if exported.TargetGenericDecl != nil && len(exported.TargetBindings) > 0 {
@@ -84,18 +77,18 @@ func (g *llvmGenerator) emitExportedFunction(exported *semantic.ExportedFunc) er
 		}
 	}
 
-	var fnValue C.LLVMValueRef
+	var fnValue llvmIRValueRef
 	if g.isSameNameExport(exported) {
 		if !g.sameNameExportNeedsWrapper(exported) {
 			return nil
 		}
 		nameC := cString(exportSymbol)
-		defer C.free(unsafe.Pointer(nameC))
-		if existing := C.LLVMGetNamedFunction(g.module, nameC); existing != nil {
+		defer llvmFree(unsafe.Pointer(nameC))
+		if existing := llvmGetNamedFunction(g.module, nameC); existing != nil {
 			return nil
 		}
-		fnValue = C.LLVMAddFunction(g.module, nameC, fnType)
-		C.LLVMSetLinkage(fnValue, C.LLVMExternalLinkage)
+		fnValue = llvmAddFunction(g.module, nameC, fnType)
+		llvmSetLinkage(fnValue, llvmExternalLinkage)
 	} else {
 		fnValue, err = g.ensureExportFunctionDeclared(exportSymbol, fnType)
 		if err != nil {
@@ -105,17 +98,17 @@ func (g *llvmGenerator) emitExportedFunction(exported *semantic.ExportedFunc) er
 	g.cAbiApplyAttrs(fnValue, abi)
 	g.applyFunctionNoRecurseAttributes(fnValue, targetType)
 	g.applyFunctionTemperatureAttributes(fnValue, targetType)
-	if C.LLVMCountBasicBlocks(fnValue) != 0 {
+	if llvmCountBasicBlocks(fnValue) != 0 {
 		return nil
 	}
 	if len(targetType.ImplicitParamNames) != 0 {
 		return fmt.Errorf("export wrapper %s has unsupported implicit parameters", exported.PublicName)
 	}
 
-	builder := C.LLVMCreateBuilderInContext(g.context)
-	defer C.LLVMDisposeBuilder(builder)
-	entry := C.LLVMAppendBasicBlockInContext(g.context, fnValue, cStringFree("entry"))
-	C.LLVMPositionBuilderAtEnd(builder, entry)
+	builder := llvmCreateBuilderInContext(g.context)
+	defer llvmDisposeBuilder(builder)
+	entry := llvmAppendBasicBlockInContext(g.context, fnValue, cStringFree("entry"))
+	llvmPositionBuilderAtEnd(builder, entry)
 	llvmTargetType, err := g.lowerFunctionType(targetType)
 	if err != nil {
 		return err
@@ -123,38 +116,38 @@ func (g *llvmGenerator) emitExportedFunction(exported *semantic.ExportedFunc) er
 
 	// Unpack each parameter from its ABI form into the value the implementation takes.
 	pos := 0
-	var sretPtr C.LLVMValueRef
+	var sretPtr llvmIRValueRef
 	if abi.ret.sret {
-		sretPtr = C.LLVMGetParam(fnValue, 0)
+		sretPtr = llvmGetParam(fnValue, 0)
 		pos = 1
 	}
-	args := make([]C.LLVMValueRef, 0, len(exported.Signature.Params))
+	args := make([]llvmIRValueRef, 0, len(exported.Signature.Params))
 	for i, plan := range abi.args {
 		name := fmt.Sprintf("export.arg.%d", i)
 		if !plan.direct {
-			ptr := C.LLVMGetParam(fnValue, C.unsigned(pos))
+			ptr := llvmGetParam(fnValue, llvmIRUnsigned(pos))
 			pos++
-			args = append(args, C.LLVMBuildLoad2(builder, plan.llvmType, ptr, cStringFree(name)))
+			args = append(args, llvmBuildLoad2(builder, plan.llvmType, ptr, cStringFree(name)))
 			continue
 		}
 		if !plan.aggregate {
-			args = append(args, C.LLVMGetParam(fnValue, C.unsigned(pos)))
+			args = append(args, llvmGetParam(fnValue, llvmIRUnsigned(pos)))
 			pos++
 			continue
 		}
-		bytes := uint64(C.LLVMABISizeOfType(g.targetData, plan.llvmType))
+		bytes := uint64(llvmABISizeOfType(g.targetData, plan.llvmType))
 		for j, part := range plan.parts {
-			if end := plan.partOffsets[j] + uint64(C.LLVMABISizeOfType(g.targetData, part)); end > bytes {
+			if end := plan.partOffsets[j] + uint64(llvmABISizeOfType(g.targetData, part)); end > bytes {
 				bytes = end
 			}
 		}
 		slot := g.cAbiSlot(builder, bytes, name+".slot")
 		for j, part := range plan.parts {
 			_ = part
-			C.LLVMBuildStore(builder, C.LLVMGetParam(fnValue, C.unsigned(pos)), g.cAbiPtrAt(builder, slot, plan.partOffsets[j], name+".part"))
+			llvmBuildStore(builder, llvmGetParam(fnValue, llvmIRUnsigned(pos)), g.cAbiPtrAt(builder, slot, plan.partOffsets[j], name+".part"))
 			pos++
 		}
-		args = append(args, C.LLVMBuildLoad2(builder, plan.llvmType, slot, cStringFree(name)))
+		args = append(args, llvmBuildLoad2(builder, plan.llvmType, slot, cStringFree(name)))
 	}
 
 	callName := ""
@@ -162,33 +155,33 @@ func (g *llvmGenerator) emitExportedFunction(exported *semantic.ExportedFunc) er
 		callName = "export.call"
 	}
 	callNameC := cString(callName)
-	defer C.free(unsafe.Pointer(callNameC))
-	var call C.LLVMValueRef
-	var targetResult C.LLVMValueRef
+	defer llvmFree(unsafe.Pointer(callNameC))
+	var call llvmIRValueRef
+	var targetResult llvmIRValueRef
 	if retUnion, ok := nonVoidErrorUnion(targetType.Return); ok {
 		resultLLVMType, err := g.lowerType(retUnion.Value)
 		if err != nil {
 			return err
 		}
-		resultSlot := C.LLVMBuildAlloca(builder, resultLLVMType, cStringFree("export.ret.slot"))
-		C.LLVMBuildStore(builder, C.LLVMConstNull(resultLLVMType), resultSlot)
-		callArgs := make([]C.LLVMValueRef, 0, len(args)+1)
+		resultSlot := llvmBuildAlloca(builder, resultLLVMType, cStringFree("export.ret.slot"))
+		llvmBuildStore(builder, llvmConstNull(resultLLVMType), resultSlot)
+		callArgs := make([]llvmIRValueRef, 0, len(args)+1)
 		callArgs = append(callArgs, resultSlot)
 		callArgs = append(callArgs, args...)
-		call = C.LLVMBuildCall2(builder, llvmTargetType, targetValue, llvmValueSlicePtr(callArgs), C.unsigned(len(callArgs)), callNameC)
+		call = llvmBuildCall2(builder, llvmTargetType, targetValue, llvmValueSlicePtr(callArgs), llvmIRUnsigned(len(callArgs)), callNameC)
 		unionLLVMType, err := g.lowerType(targetType.Return)
 		if err != nil {
 			return err
 		}
-		targetResult = C.LLVMGetUndef(unionLLVMType)
-		targetResult = C.LLVMBuildInsertValue(builder, targetResult, call, 0, cStringFree("export.ret.err"))
-		targetResult = C.LLVMBuildInsertValue(builder, targetResult, resultSlot, 1, cStringFree("export.ret.val.ptr"))
+		targetResult = llvmGetUndef(unionLLVMType)
+		targetResult = llvmBuildInsertValue(builder, targetResult, call, 0, cStringFree("export.ret.err"))
+		targetResult = llvmBuildInsertValue(builder, targetResult, resultSlot, 1, cStringFree("export.ret.val.ptr"))
 	} else {
-		call = C.LLVMBuildCall2(builder, llvmTargetType, targetValue, llvmValueSlicePtr(args), C.unsigned(len(args)), callNameC)
+		call = llvmBuildCall2(builder, llvmTargetType, targetValue, llvmValueSlicePtr(args), llvmIRUnsigned(len(args)), callNameC)
 		targetResult = call
 	}
 	if isVoidType(targetType.Return) {
-		C.LLVMBuildRetVoid(builder)
+		llvmBuildRetVoid(builder)
 		return nil
 	}
 	if !semantic.SameType(exported.Signature.Return, targetType.Return) {
@@ -196,32 +189,32 @@ func (g *llvmGenerator) emitExportedFunction(exported *semantic.ExportedFunc) er
 	}
 	// Pack the implementation's result into its ABI form.
 	if abi.ret.sret {
-		C.LLVMBuildStore(builder, targetResult, sretPtr)
-		C.LLVMBuildRetVoid(builder)
+		llvmBuildStore(builder, targetResult, sretPtr)
+		llvmBuildRetVoid(builder)
 		return nil
 	}
 	if !g.cAbiIsAggregate(exported.Signature.Return) || abi.ret.retType == abi.ret.llvmType {
-		C.LLVMBuildRet(builder, targetResult)
+		llvmBuildRet(builder, targetResult)
 		return nil
 	}
-	bytes := uint64(C.LLVMABISizeOfType(g.targetData, abi.ret.llvmType))
-	if abiBytes := uint64(C.LLVMABISizeOfType(g.targetData, abi.ret.retType)); abiBytes > bytes {
+	bytes := uint64(llvmABISizeOfType(g.targetData, abi.ret.llvmType))
+	if abiBytes := uint64(llvmABISizeOfType(g.targetData, abi.ret.retType)); abiBytes > bytes {
 		bytes = abiBytes
 	}
 	slot := g.cAbiSlot(builder, bytes, "export.ret.slot")
-	C.LLVMBuildStore(builder, targetResult, slot)
-	C.LLVMBuildRet(builder, C.LLVMBuildLoad2(builder, abi.ret.retType, slot, cStringFree("export.ret")))
+	llvmBuildStore(builder, targetResult, slot)
+	llvmBuildRet(builder, llvmBuildLoad2(builder, abi.ret.retType, slot, cStringFree("export.ret")))
 	return nil
 }
 
-func (g *llvmGenerator) ensureExportFunctionDeclared(name string, fnType C.LLVMTypeRef) (C.LLVMValueRef, error) {
+func (g *llvmGenerator) ensureExportFunctionDeclared(name string, fnType llvmIRTypeRef) (llvmIRValueRef, error) {
 	if value, ok := g.functions[name]; ok {
 		return value, nil
 	}
 	nameC := cString(name)
-	defer C.free(unsafe.Pointer(nameC))
-	value := C.LLVMAddFunction(g.module, nameC, fnType)
-	C.LLVMSetLinkage(value, C.LLVMExternalLinkage)
+	defer llvmFree(unsafe.Pointer(nameC))
+	value := llvmAddFunction(g.module, nameC, fnType)
+	llvmSetLinkage(value, llvmExternalLinkage)
 	g.functions[name] = value
 	return value, nil
 }
@@ -282,7 +275,7 @@ func (g *llvmGenerator) sameNameExportNeedsWrapperUncached(exported *semantic.Ex
 	if implType == abi.fnType {
 		return false
 	}
-	return disposeLLVMMessage(C.LLVMPrintTypeToString(implType), "a") != disposeLLVMMessage(C.LLVMPrintTypeToString(abi.fnType), "b")
+	return disposeLLVMMessage(llvmPrintTypeToString(implType), "a") != disposeLLVMMessage(llvmPrintTypeToString(abi.fnType), "b")
 }
 
 // sameNameExportImplSymbol returns the symbol an implementation is emitted under when

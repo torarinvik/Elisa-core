@@ -2,11 +2,6 @@
 
 package backend
 
-/*
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -23,15 +18,15 @@ import (
 // elemSize is a compile-time constant, so the overflow test is a single compare
 // against the constant SIZE_MAX/elemSize (no umul intrinsic needed). For
 // elemSize <= 1 the product cannot exceed countValue, so the check is skipped.
-func (s *functionState) emitCheckedElemByteCount(countValue C.LLVMValueRef, elemSize uint64, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitCheckedElemByteCount(countValue llvmIRValueRef, elemSize uint64, name string) (llvmIRValueRef, error) {
 	usizeType := s.g.namedType("usize")
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, err
 	}
-	elemSizeValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(elemSize), 0)
+	elemSizeValue := llvmConstInt(usizeLLVMType, llvmIRUnsignedLongLong(elemSize), 0)
 	if elemSize <= 1 {
-		return C.LLVMBuildMul(s.builder, countValue, elemSizeValue, cStringFree(name+".bytes")), nil
+		return llvmBuildMul(s.builder, countValue, elemSizeValue, cStringFree(name+".bytes")), nil
 	}
 	// maxCount = SIZE_MAX / elemSize. count > maxCount  <=>  count*elemSize overflows.
 	//
@@ -43,23 +38,23 @@ func (s *functionState) emitCheckedElemByteCount(countValue C.LLVMValueRef, elem
 		sizeMax = (uint64(1) << uint(bits)) - 1
 	}
 	maxCount := sizeMax / elemSize
-	maxCountValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(maxCount), 0)
-	overflow := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntUGT), countValue, maxCountValue, cStringFree(name+".size.overflow"))
+	maxCountValue := llvmConstInt(usizeLLVMType, llvmIRUnsignedLongLong(maxCount), 0)
+	overflow := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntUGT), countValue, maxCountValue, cStringFree(name+".size.overflow"))
 
-	trapBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".size.overflow.trap"))
-	contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".size.ok"))
-	C.LLVMBuildCondBr(s.builder, overflow, trapBB, contBB)
+	trapBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".size.overflow.trap"))
+	contBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".size.ok"))
+	llvmBuildCondBr(s.builder, overflow, trapBB, contBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, trapBB)
+	llvmPositionBuilderAtEnd(s.builder, trapBB)
 	if err := s.emitTrapUnreachable(name + ".size.overflow"); err != nil {
 		return nil, err
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, contBB)
-	return C.LLVMBuildMul(s.builder, countValue, elemSizeValue, cStringFree(name+".bytes")), nil
+	llvmPositionBuilderAtEnd(s.builder, contBB)
+	return llvmBuildMul(s.builder, countValue, elemSizeValue, cStringFree(name+".bytes")), nil
 }
 
-func (s *functionState) emitReserveBoundExpr(expr ast.Expr, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitReserveBoundExpr(expr ast.Expr, name string) (llvmIRValueRef, error) {
 	usizeType := s.g.namedType("usize")
 	if reserveBoundNeedsCheckedArithmetic(expr) {
 		return s.emitCheckedUSizeReserveBoundExpr(expr, name)
@@ -83,7 +78,7 @@ func reserveBoundNeedsCheckedArithmetic(expr ast.Expr) bool {
 	return false
 }
 
-func (s *functionState) emitCheckedUSizeReserveBoundExpr(expr ast.Expr, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitCheckedUSizeReserveBoundExpr(expr ast.Expr, name string) (llvmIRValueRef, error) {
 	usizeType := s.g.namedType("usize")
 	if paren, ok := expr.(*ast.ParenExpr); ok && paren != nil {
 		return s.emitCheckedUSizeReserveBoundExpr(paren.Inner, name)
@@ -113,25 +108,25 @@ func (s *functionState) emitCheckedUSizeReserveBoundExpr(expr ast.Expr, name str
 	}
 }
 
-func (s *functionState) emitCheckedUSizeBinaryIntrinsic(intrinsicName string, left, right C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitCheckedUSizeBinaryIntrinsic(intrinsicName string, left, right llvmIRValueRef, name string) (llvmIRValueRef, error) {
 	value, overflow, err := s.emitUSizeBinaryOverflowIntrinsic(intrinsicName, left, right, name)
 	if err != nil {
 		return nil, err
 	}
-	trapBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".overflow.trap"))
-	contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".ok"))
-	C.LLVMBuildCondBr(s.builder, overflow, trapBB, contBB)
+	trapBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".overflow.trap"))
+	contBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".ok"))
+	llvmBuildCondBr(s.builder, overflow, trapBB, contBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, trapBB)
+	llvmPositionBuilderAtEnd(s.builder, trapBB)
 	if err := s.emitTrapUnreachable(name + ".overflow"); err != nil {
 		return nil, err
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, contBB)
+	llvmPositionBuilderAtEnd(s.builder, contBB)
 	return value, nil
 }
 
-func (s *functionState) emitUSizeBinaryOverflowIntrinsic(intrinsicName string, left, right C.LLVMValueRef, name string) (C.LLVMValueRef, C.LLVMValueRef, error) {
+func (s *functionState) emitUSizeBinaryOverflowIntrinsic(intrinsicName string, left, right llvmIRValueRef, name string) (llvmIRValueRef, llvmIRValueRef, error) {
 	usizeType := s.g.namedType("usize")
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
@@ -141,26 +136,26 @@ func (s *functionState) emitUSizeBinaryOverflowIntrinsic(intrinsicName string, l
 	if err != nil {
 		return nil, nil, err
 	}
-	call := C.LLVMBuildCall2(s.builder, C.LLVMGlobalGetValueType(fn), fn, llvmValueSlicePtr([]C.LLVMValueRef{left, right}), 2, cStringFree(name+".checked"))
-	value := C.LLVMBuildExtractValue(s.builder, call, 0, cStringFree(name+".value"))
-	overflow := C.LLVMBuildExtractValue(s.builder, call, 1, cStringFree(name+".overflow"))
+	call := llvmBuildCall2(s.builder, llvmGlobalGetValueType(fn), fn, llvmValueSlicePtr([]llvmIRValueRef{left, right}), 2, cStringFree(name+".checked"))
+	value := llvmBuildExtractValue(s.builder, call, 0, cStringFree(name+".value"))
+	overflow := llvmBuildExtractValue(s.builder, call, 1, cStringFree(name+".overflow"))
 	return value, overflow, nil
 }
 
-func (s *functionState) emitCheckedUSizeAdd(left, right C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitCheckedUSizeAdd(left, right llvmIRValueRef, name string) (llvmIRValueRef, error) {
 	return s.emitCheckedUSizeBinaryIntrinsic("llvm.uadd.with.overflow", left, right, name)
 }
 
-func (s *functionState) emitCheckedUSizeMul(left, right C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitCheckedUSizeMul(left, right llvmIRValueRef, name string) (llvmIRValueRef, error) {
 	return s.emitCheckedUSizeBinaryIntrinsic("llvm.umul.with.overflow", left, right, name)
 }
 
-func (s *functionState) emitSafeDoubledCapacity(currentCapacity, neededCapacity C.LLVMValueRef, usizeLLVMType C.LLVMTypeRef, name string) (C.LLVMValueRef, error) {
-	doubled, overflow, err := s.emitUSizeBinaryOverflowIntrinsic("llvm.umul.with.overflow", currentCapacity, C.LLVMConstInt(usizeLLVMType, 2, 0), name+".capacity.double")
+func (s *functionState) emitSafeDoubledCapacity(currentCapacity, neededCapacity llvmIRValueRef, usizeLLVMType llvmIRTypeRef, name string) (llvmIRValueRef, error) {
+	doubled, overflow, err := s.emitUSizeBinaryOverflowIntrinsic("llvm.umul.with.overflow", currentCapacity, llvmConstInt(usizeLLVMType, 2, 0), name+".capacity.double")
 	if err != nil {
 		return nil, err
 	}
-	return C.LLVMBuildSelect(s.builder, overflow, neededCapacity, doubled, cStringFree(name+".capacity.double.safe")), nil
+	return llvmBuildSelect(s.builder, overflow, neededCapacity, doubled, cStringFree(name+".capacity.double.safe")), nil
 }
 
 // signedOverflowIntrinsicName maps `+`/`-`/`*` to the LLVM signed-with-overflow intrinsic. The
@@ -183,7 +178,7 @@ func signedOverflowIntrinsicName(op lexer.TokenKind) (string, bool) {
 // debug/contracts-enabled lowering of signed arithmetic: trapping on overflow makes the static
 // verifier's "signed arithmetic does not overflow" assumption sound in exactly the builds where
 // contracts are live. Release builds keep the plain wrapping op (callers gate on the opt level).
-func (s *functionState) emitCheckedSignedBinary(op lexer.TokenKind, left, right C.LLVMValueRef, llvmType C.LLVMTypeRef, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitCheckedSignedBinary(op lexer.TokenKind, left, right llvmIRValueRef, llvmType llvmIRTypeRef, name string) (llvmIRValueRef, error) {
 	intrinsicName, ok := signedOverflowIntrinsicName(op)
 	if !ok {
 		return nil, fmt.Errorf("no signed overflow intrinsic for operator %v", op)
@@ -192,27 +187,27 @@ func (s *functionState) emitCheckedSignedBinary(op lexer.TokenKind, left, right 
 	if err != nil {
 		return nil, err
 	}
-	call := C.LLVMBuildCall2(s.builder, C.LLVMGlobalGetValueType(fn), fn, llvmValueSlicePtr([]C.LLVMValueRef{left, right}), 2, cStringFree(name+".checked"))
-	value := C.LLVMBuildExtractValue(s.builder, call, 0, cStringFree(name+".value"))
-	overflow := C.LLVMBuildExtractValue(s.builder, call, 1, cStringFree(name+".overflow"))
-	trapBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".overflow.trap"))
-	contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".ok"))
-	C.LLVMBuildCondBr(s.builder, overflow, trapBB, contBB)
+	call := llvmBuildCall2(s.builder, llvmGlobalGetValueType(fn), fn, llvmValueSlicePtr([]llvmIRValueRef{left, right}), 2, cStringFree(name+".checked"))
+	value := llvmBuildExtractValue(s.builder, call, 0, cStringFree(name+".value"))
+	overflow := llvmBuildExtractValue(s.builder, call, 1, cStringFree(name+".overflow"))
+	trapBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".overflow.trap"))
+	contBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".ok"))
+	llvmBuildCondBr(s.builder, overflow, trapBB, contBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, trapBB)
+	llvmPositionBuilderAtEnd(s.builder, trapBB)
 	if err := s.emitTrapUnreachable(name + ".overflow"); err != nil {
 		return nil, err
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, contBB)
+	llvmPositionBuilderAtEnd(s.builder, contBB)
 	return value, nil
 }
 
-func (s *functionState) overflowIntrinsic(name string, llvmType C.LLVMTypeRef) (C.LLVMValueRef, error) {
+func (s *functionState) overflowIntrinsic(name string, llvmType llvmIRTypeRef) (llvmIRValueRef, error) {
 	nameC := cStringFree(name)
-	intrinsicID := C.LLVMLookupIntrinsicID(nameC, C.size_t(len(name)))
+	intrinsicID := llvmLookupIntrinsicID(nameC, llvmIRSize(len(name)))
 	if intrinsicID == 0 {
 		return nil, fmt.Errorf("unknown LLVM intrinsic %s", name)
 	}
-	return C.LLVMGetIntrinsicDeclaration(s.g.module, intrinsicID, llvmTypeSlicePtr([]C.LLVMTypeRef{llvmType}), 1), nil
+	return llvmGetIntrinsicDeclaration(s.g.module, intrinsicID, llvmTypeSlicePtr([]llvmIRTypeRef{llvmType}), 1), nil
 }

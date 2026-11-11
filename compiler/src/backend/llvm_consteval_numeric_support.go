@@ -2,12 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -229,59 +223,59 @@ func integerBitWidth(t semantic.Type, wordBits int) int {
 		return wordBits
 	}
 }
-func llvmIntPredicate(op lexer.TokenKind, operandType semantic.Type) (C.LLVMIntPredicate, error) {
+func llvmIntPredicate(op lexer.TokenKind, operandType semantic.Type) (llvmIRIntPredicate, error) {
 	signed := isSignedIntegerType(operandType)
 	switch op {
 	case lexer.TOKEN_EQEQ:
-		return C.LLVMIntEQ, nil
+		return llvmIntEQ, nil
 	case lexer.TOKEN_BANGEQ:
-		return C.LLVMIntNE, nil
+		return llvmIntNE, nil
 	case lexer.TOKEN_LT:
 		if signed {
-			return C.LLVMIntSLT, nil
+			return llvmIntSLT, nil
 		}
-		return C.LLVMIntULT, nil
+		return llvmIntULT, nil
 	case lexer.TOKEN_GT:
 		if signed {
-			return C.LLVMIntSGT, nil
+			return llvmIntSGT, nil
 		}
-		return C.LLVMIntUGT, nil
+		return llvmIntUGT, nil
 	case lexer.TOKEN_LTEQ:
 		if signed {
-			return C.LLVMIntSLE, nil
+			return llvmIntSLE, nil
 		}
-		return C.LLVMIntULE, nil
+		return llvmIntULE, nil
 	case lexer.TOKEN_GTEQ:
 		if signed {
-			return C.LLVMIntSGE, nil
+			return llvmIntSGE, nil
 		}
-		return C.LLVMIntUGE, nil
+		return llvmIntUGE, nil
 	default:
 		return 0, fmt.Errorf("unsupported comparison operator %s", lexer.TokenName(op))
 	}
 }
-func llvmFloatPredicate(op lexer.TokenKind) (C.LLVMRealPredicate, error) {
+func llvmFloatPredicate(op lexer.TokenKind) (llvmIRRealPredicate, error) {
 	switch op {
 	case lexer.TOKEN_EQEQ:
-		return C.LLVMRealOEQ, nil
+		return llvmRealOEQ, nil
 	case lexer.TOKEN_BANGEQ:
 		// C/IEEE `!=` is unordered-not-equal: NaN != every value, including
 		// another NaN. LLVMRealONE is ordered-not-equal and incorrectly returns
 		// false for NaN.
-		return C.LLVMRealUNE, nil
+		return llvmRealUNE, nil
 	case lexer.TOKEN_LT:
-		return C.LLVMRealOLT, nil
+		return llvmRealOLT, nil
 	case lexer.TOKEN_GT:
-		return C.LLVMRealOGT, nil
+		return llvmRealOGT, nil
 	case lexer.TOKEN_LTEQ:
-		return C.LLVMRealOLE, nil
+		return llvmRealOLE, nil
 	case lexer.TOKEN_GTEQ:
-		return C.LLVMRealOGE, nil
+		return llvmRealOGE, nil
 	default:
 		return 0, fmt.Errorf("unsupported comparison operator %s", lexer.TokenName(op))
 	}
 }
-func cStringFree(s string) *C.char {
+func cStringFree(s string) *llvmIRChar {
 	if s == "" {
 		return nil
 	}
@@ -290,12 +284,12 @@ func cStringFree(s string) *C.char {
 	if ptr := moduleCStringState.byName[s]; ptr != nil {
 		return ptr
 	}
-	ptr := C.CString(s)
+	ptr := llvmCString(s)
 	if moduleCStringState.byName == nil {
 		// Production callers are enclosed by begin/endModuleCStringLifetime.
 		// Keep the helper total for isolated backend tests too; those tests must
 		// use the same lifetime pair when they exercise LLVM builders.
-		moduleCStringState.byName = make(map[string]*C.char)
+		moduleCStringState.byName = make(map[string]*llvmIRChar)
 	}
 	moduleCStringState.byName[s] = ptr
 	moduleCStringState.owned = append(moduleCStringState.owned, ptr)

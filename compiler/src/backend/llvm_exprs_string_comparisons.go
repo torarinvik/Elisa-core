@@ -2,13 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-#include <llvm-c/Target.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -17,7 +10,7 @@ import (
 	"unsafe"
 )
 
-func (s *functionState) emitStringViewStaticLiteralEqual(viewExpr ast.Expr, viewType semantic.Type, literalExpr ast.Expr, literalText string) (C.LLVMValueRef, error) {
+func (s *functionState) emitStringViewStaticLiteralEqual(viewExpr ast.Expr, viewType semantic.Type, literalExpr ast.Expr, literalText string) (llvmIRValueRef, error) {
 	// Through a REFERENCE (`found: mutable sview&`, e.g. `dict.get(...) is existing`),
 	// emitExpr yields the POINTER rather than the StringView aggregate, and the
 	// ExtractValue below then ran on a pointer and took LLVM down with a SIGSEGV inside
@@ -35,16 +28,16 @@ func (s *functionState) emitStringViewStaticLiteralEqual(viewExpr ast.Expr, view
 // emitStringViewValueStaticLiteralEqual lowers the literal comparison from an
 // already evaluated view value. Match scrutinees use this form so a call or
 // other effectful expression is never emitted a second time for each arm.
-func (s *functionState) emitStringViewValueStaticLiteralEqual(viewValue C.LLVMValueRef, literalExpr ast.Expr, literalText string) (C.LLVMValueRef, error) {
-	viewData := C.LLVMBuildExtractValue(s.builder, viewValue, 0, cStringFree("svlit.data"))
-	viewLen := C.LLVMBuildExtractValue(s.builder, viewValue, 1, cStringFree("svlit.len"))
+func (s *functionState) emitStringViewValueStaticLiteralEqual(viewValue llvmIRValueRef, literalExpr ast.Expr, literalText string) (llvmIRValueRef, error) {
+	viewData := llvmBuildExtractValue(s.builder, viewValue, 0, cStringFree("svlit.data"))
+	viewLen := llvmBuildExtractValue(s.builder, viewValue, 1, cStringFree("svlit.len"))
 	literalLen := len([]byte(literalText))
 	lenLLVMType, err := s.g.lowerBuiltin("i64")
 	if err != nil {
 		return nil, err
 	}
-	lenValue := C.LLVMConstInt(lenLLVMType, C.ulonglong(literalLen), 0)
-	lenEqual := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), viewLen, lenValue, cStringFree("svlit.len.eq"))
+	lenValue := llvmConstInt(lenLLVMType, llvmIRUnsignedLongLong(literalLen), 0)
+	lenEqual := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), viewLen, lenValue, cStringFree("svlit.len.eq"))
 	if literalLen == 0 {
 		return lenEqual, nil
 	}
@@ -54,22 +47,22 @@ func (s *functionState) emitStringViewValueStaticLiteralEqual(viewValue C.LLVMVa
 	// preserve the runtime helper's null guard before it reaches byte loads or
 	// memcmp. The pointer comparison itself is safe; the branch below keeps all
 	// memory reads control-dependent on both the length and non-null checks.
-	viewDataNonNull := C.LLVMBuildICmp(
+	viewDataNonNull := llvmBuildICmp(
 		s.builder,
-		C.LLVMIntPredicate(C.LLVMIntNE),
+		llvmIRIntPredicate(llvmIntNE),
 		viewData,
-		C.LLVMConstNull(C.LLVMTypeOf(viewData)),
+		llvmConstNull(llvmTypeOf(viewData)),
 		cStringFree("svlit.data.nonnull"),
 	)
-	compareAllowed := C.LLVMBuildAnd(s.builder, lenEqual, viewDataNonNull, cStringFree("svlit.valid"))
+	compareAllowed := llvmBuildAnd(s.builder, lenEqual, viewDataNonNull, cStringFree("svlit.valid"))
 
-	entryBlock := C.LLVMGetInsertBlock(s.builder)
-	compareBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("svlit.compare"))
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("svlit.merge"))
-	C.LLVMBuildCondBr(s.builder, compareAllowed, compareBB, mergeBB)
+	entryBlock := llvmGetInsertBlock(s.builder)
+	compareBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("svlit.compare"))
+	mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("svlit.merge"))
+	llvmBuildCondBr(s.builder, compareAllowed, compareBB, mergeBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, compareBB)
-	var compareValue C.LLVMValueRef
+	llvmPositionBuilderAtEnd(s.builder, compareBB)
+	var compareValue llvmIRValueRef
 	if literalLen <= 8 {
 		compareValue, err = s.emitStringViewLiteralBytesEqual(viewData, literalText)
 	} else {
@@ -82,26 +75,26 @@ func (s *functionState) emitStringViewValueStaticLiteralEqual(viewValue C.LLVMVa
 	if err != nil {
 		return nil, err
 	}
-	compareEnd := C.LLVMGetInsertBlock(s.builder)
-	C.LLVMBuildBr(s.builder, mergeBB)
+	compareEnd := llvmGetInsertBlock(s.builder)
+	llvmBuildBr(s.builder, mergeBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
-	boolType := C.LLVMInt1TypeInContext(s.g.context)
-	phi := C.LLVMBuildPhi(s.builder, boolType, cStringFree("svlit.eq"))
-	falseValue := C.LLVMConstInt(boolType, 0, 0)
-	values := []C.LLVMValueRef{falseValue, compareValue}
-	blocks := []C.LLVMBasicBlockRef{entryBlock, compareEnd}
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
+	llvmPositionBuilderAtEnd(s.builder, mergeBB)
+	boolType := llvmInt1TypeInContext(s.g.context)
+	phi := llvmBuildPhi(s.builder, boolType, cStringFree("svlit.eq"))
+	falseValue := llvmConstInt(boolType, 0, 0)
+	values := []llvmIRValueRef{falseValue, compareValue}
+	blocks := []llvmIRBlockRef{entryBlock, compareEnd}
+	llvmAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), llvmIRUnsigned(len(values)))
 	return phi, nil
 }
-func (s *functionState) emitCStrStaticLiteralEqual(textExpr ast.Expr, textType semantic.Type, literalExpr ast.Expr, literalText string) (C.LLVMValueRef, error) {
+func (s *functionState) emitCStrStaticLiteralEqual(textExpr ast.Expr, textType semantic.Type, literalExpr ast.Expr, literalText string) (llvmIRValueRef, error) {
 	if classifyRuntimeStringCompareKind(textType) != runtimeStringCompareCStr {
 		return nil, fmt.Errorf("cstr literal specialization requires cstr operand")
 	}
 	lenType := s.g.namedType("i64")
 	var (
-		textData C.LLVMValueRef
-		textLen  C.LLVMValueRef
+		textData llvmIRValueRef
+		textLen  llvmIRValueRef
 		err      error
 	)
 	if baseExpr, baseType, start, end, ok := s.constantCStrSliceCall(textExpr); ok {
@@ -125,19 +118,19 @@ func (s *functionState) emitCStrStaticLiteralEqual(textExpr ast.Expr, textType s
 	if err != nil {
 		return nil, err
 	}
-	lenValue := C.LLVMConstInt(lenLLVMType, C.ulonglong(literalLen), 0)
-	lenEqual := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), textLen, lenValue, cStringFree("cstrlit.len.eq"))
+	lenValue := llvmConstInt(lenLLVMType, llvmIRUnsignedLongLong(literalLen), 0)
+	lenEqual := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), textLen, lenValue, cStringFree("cstrlit.len.eq"))
 	if literalLen == 0 {
 		return lenEqual, nil
 	}
 
-	entryBlock := C.LLVMGetInsertBlock(s.builder)
-	compareBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("cstrlit.compare"))
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("cstrlit.merge"))
-	C.LLVMBuildCondBr(s.builder, lenEqual, compareBB, mergeBB)
+	entryBlock := llvmGetInsertBlock(s.builder)
+	compareBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("cstrlit.compare"))
+	mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("cstrlit.merge"))
+	llvmBuildCondBr(s.builder, lenEqual, compareBB, mergeBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, compareBB)
-	var compareValue C.LLVMValueRef
+	llvmPositionBuilderAtEnd(s.builder, compareBB)
+	var compareValue llvmIRValueRef
 	if literalLen <= 8 {
 		compareValue, err = s.emitStringViewLiteralBytesEqual(textData, literalText)
 	} else {
@@ -150,21 +143,21 @@ func (s *functionState) emitCStrStaticLiteralEqual(textExpr ast.Expr, textType s
 	if err != nil {
 		return nil, err
 	}
-	compareEnd := C.LLVMGetInsertBlock(s.builder)
-	C.LLVMBuildBr(s.builder, mergeBB)
+	compareEnd := llvmGetInsertBlock(s.builder)
+	llvmBuildBr(s.builder, mergeBB)
 
-	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
-	boolType := C.LLVMInt1TypeInContext(s.g.context)
-	phi := C.LLVMBuildPhi(s.builder, boolType, cStringFree("cstrlit.eq"))
-	falseValue := C.LLVMConstInt(boolType, 0, 0)
-	values := []C.LLVMValueRef{falseValue, compareValue}
-	blocks := []C.LLVMBasicBlockRef{entryBlock, compareEnd}
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
+	llvmPositionBuilderAtEnd(s.builder, mergeBB)
+	boolType := llvmInt1TypeInContext(s.g.context)
+	phi := llvmBuildPhi(s.builder, boolType, cStringFree("cstrlit.eq"))
+	falseValue := llvmConstInt(boolType, 0, 0)
+	values := []llvmIRValueRef{falseValue, compareValue}
+	blocks := []llvmIRBlockRef{entryBlock, compareEnd}
+	llvmAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), llvmIRUnsigned(len(values)))
 	return phi, nil
 }
-func (s *functionState) emitStringViewLiteralBytesEqual(viewData C.LLVMValueRef, literalText string) (C.LLVMValueRef, error) {
-	boolType := C.LLVMInt1TypeInContext(s.g.context)
-	byteType := C.LLVMInt8TypeInContext(s.g.context)
+func (s *functionState) emitStringViewLiteralBytesEqual(viewData llvmIRValueRef, literalText string) (llvmIRValueRef, error) {
+	boolType := llvmInt1TypeInContext(s.g.context)
+	byteType := llvmInt8TypeInContext(s.g.context)
 	indexType, err := s.g.lowerBuiltin("usize")
 	if err != nil {
 		return nil, err
@@ -172,8 +165,8 @@ func (s *functionState) emitStringViewLiteralBytesEqual(viewData C.LLVMValueRef,
 	if err := s.g.ensureTargetMachine(); err != nil {
 		return nil, err
 	}
-	littleEndian := C.LLVMByteOrder(s.g.targetData) == C.LLVMLittleEndian
-	result := C.LLVMConstInt(boolType, 1, 0)
+	littleEndian := llvmByteOrder(s.g.targetData) == llvmLittleEndian
+	result := llvmConstInt(boolType, 1, 0)
 	// The caller has checked the length (and a nonempty view's pointer).
 	// Load only complete chunks within those bytes, with alignment 1: views
 	// need not be word-aligned and the last byte may precede a guard page.
@@ -190,29 +183,29 @@ func (s *functionState) emitStringViewLiteralBytesEqual(viewData C.LLVMValueRef,
 			}
 			word |= uint64(literalText[offset+j]) << (8 * shift)
 		}
-		indexValue := C.LLVMConstInt(indexType, C.ulonglong(offset), 0)
-		indices := []C.LLVMValueRef{indexValue}
-		ptr := C.LLVMBuildGEP2(s.builder, byteType, viewData, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("svlit.chunk.ptr"))
-		chunkType := C.LLVMIntTypeInContext(s.g.context, C.unsigned(width*8))
-		value := C.LLVMBuildLoad2(s.builder, chunkType, ptr, cStringFree("svlit.chunk"))
-		C.LLVMSetAlignment(value, 1)
-		literalValue := C.LLVMConstInt(chunkType, C.ulonglong(word), 0)
-		equal := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), value, literalValue, cStringFree("svlit.chunk.eq"))
-		result = C.LLVMBuildAnd(s.builder, result, equal, cStringFree("svlit.bytes.and"))
+		indexValue := llvmConstInt(indexType, llvmIRUnsignedLongLong(offset), 0)
+		indices := []llvmIRValueRef{indexValue}
+		ptr := llvmBuildGEP2(s.builder, byteType, viewData, llvmValueSlicePtr(indices), llvmIRUnsigned(len(indices)), cStringFree("svlit.chunk.ptr"))
+		chunkType := llvmIntTypeInContext(s.g.context, llvmIRUnsigned(width*8))
+		value := llvmBuildLoad2(s.builder, chunkType, ptr, cStringFree("svlit.chunk"))
+		llvmSetAlignment(value, 1)
+		literalValue := llvmConstInt(chunkType, llvmIRUnsignedLongLong(word), 0)
+		equal := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), value, literalValue, cStringFree("svlit.chunk.eq"))
+		result = llvmBuildAnd(s.builder, result, equal, cStringFree("svlit.bytes.and"))
 		offset += width
 	}
 	return result, nil
 }
-func (s *functionState) emitMemcmpEqual(left C.LLVMValueRef, right C.LLVMValueRef, length int) (C.LLVMValueRef, error) {
+func (s *functionState) emitMemcmpEqual(left llvmIRValueRef, right llvmIRValueRef, length int) (llvmIRValueRef, error) {
 	usizeType := s.g.namedType("usize")
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, err
 	}
-	lengthValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(length), 0)
+	lengthValue := llvmConstInt(usizeLLVMType, llvmIRUnsignedLongLong(length), 0)
 	return s.emitMemcmpEqualValue(left, right, lengthValue, "svlit.memcmp", false)
 }
-func (s *functionState) emitMemcmpEqualValue(left C.LLVMValueRef, right C.LLVMValueRef, lengthValue C.LLVMValueRef, callName string, noAliasArgs bool) (C.LLVMValueRef, error) {
+func (s *functionState) emitMemcmpEqualValue(left llvmIRValueRef, right llvmIRValueRef, lengthValue llvmIRValueRef, callName string, noAliasArgs bool) (llvmIRValueRef, error) {
 	voidType := s.g.namedType("void")
 	usizeType := s.g.namedType("usize")
 	// libc's memcmp returns C int (i32); Elisa's `int` is 64-bit and conflicts
@@ -232,17 +225,17 @@ func (s *functionState) emitMemcmpEqualValue(left C.LLVMValueRef, right C.LLVMVa
 	if err != nil {
 		return nil, err
 	}
-	call := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{left, right, lengthValue}, callName)
+	call := s.buildCall(llvmFnType, callee, []llvmIRValueRef{left, right, lengthValue}, callName)
 	if noAliasArgs {
-		s.addCallSiteEnumAttribute(call, C.uint(1), "noalias")
-		s.addCallSiteEnumAttribute(call, C.uint(2), "noalias")
+		s.addCallSiteEnumAttribute(call, llvmIRUnsigned(1), "noalias")
+		s.addCallSiteEnumAttribute(call, llvmIRUnsigned(2), "noalias")
 	}
 	intLLVMType, err := s.g.lowerType(intType)
 	if err != nil {
 		return nil, err
 	}
-	zero := C.LLVMConstInt(intLLVMType, 0, 0)
-	return C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), call, zero, cStringFree(callName+".eq")), nil
+	zero := llvmConstInt(intLLVMType, 0, 0)
+	return llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), call, zero, cStringFree(callName+".eq")), nil
 }
 func (s *functionState) staticCStringLiteral(expr ast.Expr) (string, bool) {
 	switch n := expr.(type) {
@@ -262,47 +255,47 @@ func (s *functionState) staticCStringLiteral(expr ast.Expr) (string, bool) {
 		return "", false
 	}
 }
-func (s *functionState) emitLogicalExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitLogicalExpr(expr *ast.BinaryExpr) (llvmIRValueRef, semantic.Type, error) {
 	left, _, err := s.emitExpr(expr.Left, s.g.namedType("bool"))
 	if err != nil {
 		return nil, nil, err
 	}
-	parentBlock := C.LLVMGetInsertBlock(s.builder)
+	parentBlock := llvmGetInsertBlock(s.builder)
 	rhsName := cString("logic.rhs")
-	defer C.free(unsafe.Pointer(rhsName))
-	rhsBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, rhsName)
+	defer llvmFree(unsafe.Pointer(rhsName))
+	rhsBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, rhsName)
 	mergeName := cString("logic.end")
-	defer C.free(unsafe.Pointer(mergeName))
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, mergeName)
+	defer llvmFree(unsafe.Pointer(mergeName))
+	mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, mergeName)
 
 	if expr.Op == lexer.TOKEN_AND {
-		C.LLVMBuildCondBr(s.builder, left, rhsBB, mergeBB)
+		llvmBuildCondBr(s.builder, left, rhsBB, mergeBB)
 	} else {
-		C.LLVMBuildCondBr(s.builder, left, mergeBB, rhsBB)
+		llvmBuildCondBr(s.builder, left, mergeBB, rhsBB)
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, rhsBB)
+	llvmPositionBuilderAtEnd(s.builder, rhsBB)
 	right, _, err := s.emitExpr(expr.Right, s.g.namedType("bool"))
 	if err != nil {
 		return nil, nil, err
 	}
-	rhsEnd := C.LLVMGetInsertBlock(s.builder)
-	if C.LLVMGetBasicBlockTerminator(rhsEnd) == nil {
-		C.LLVMBuildBr(s.builder, mergeBB)
+	rhsEnd := llvmGetInsertBlock(s.builder)
+	if llvmGetBasicBlockTerminator(rhsEnd) == nil {
+		llvmBuildBr(s.builder, mergeBB)
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
-	phi := C.LLVMBuildPhi(s.builder, C.LLVMInt1TypeInContext(s.g.context), cStringFree("logicphi"))
-	fallback := C.LLVMConstInt(C.LLVMInt1TypeInContext(s.g.context), 0, 0)
+	llvmPositionBuilderAtEnd(s.builder, mergeBB)
+	phi := llvmBuildPhi(s.builder, llvmInt1TypeInContext(s.g.context), cStringFree("logicphi"))
+	fallback := llvmConstInt(llvmInt1TypeInContext(s.g.context), 0, 0)
 	if expr.Op == lexer.TOKEN_OR {
-		fallback = C.LLVMConstInt(C.LLVMInt1TypeInContext(s.g.context), 1, 0)
+		fallback = llvmConstInt(llvmInt1TypeInContext(s.g.context), 1, 0)
 	}
-	values := []C.LLVMValueRef{fallback, right}
-	blocks := []C.LLVMBasicBlockRef{parentBlock, rhsEnd}
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
+	values := []llvmIRValueRef{fallback, right}
+	blocks := []llvmIRBlockRef{parentBlock, rhsEnd}
+	llvmAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), llvmIRUnsigned(len(values)))
 	return phi, s.g.namedType("bool"), nil
 }
-func (s *functionState) emitUnaryExpr(expr *ast.UnaryExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitUnaryExpr(expr *ast.UnaryExpr) (llvmIRValueRef, semantic.Type, error) {
 	if expr == nil || expr.Operand == nil {
 		pos := lexer.Pos{}
 		op := lexer.TokenKind(0)
@@ -324,14 +317,14 @@ func (s *functionState) emitUnaryExpr(expr *ast.UnaryExpr) (C.LLVMValueRef, sema
 	resultType := s.exprType(expr)
 	switch expr.Op {
 	case lexer.TOKEN_NOT:
-		return C.LLVMBuildNot(s.builder, value, cStringFree("nottmp")), resultType, nil
+		return llvmBuildNot(s.builder, value, cStringFree("nottmp")), resultType, nil
 	case lexer.TOKEN_MINUS:
 		if isFloatType(operandType) {
-			return C.LLVMBuildFNeg(s.builder, value, cStringFree("negtmp")), resultType, nil
+			return llvmBuildFNeg(s.builder, value, cStringFree("negtmp")), resultType, nil
 		}
-		return C.LLVMBuildNeg(s.builder, value, cStringFree("negtmp")), resultType, nil
+		return llvmBuildNeg(s.builder, value, cStringFree("negtmp")), resultType, nil
 	case lexer.TOKEN_TILDE:
-		return C.LLVMBuildNot(s.builder, value, cStringFree("invt")), resultType, nil
+		return llvmBuildNot(s.builder, value, cStringFree("invt")), resultType, nil
 	case lexer.TOKEN_BANG:
 		return value, resultType, nil
 	default:

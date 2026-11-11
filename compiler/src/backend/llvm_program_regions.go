@@ -2,12 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"fmt"
 	"unsafe"
@@ -41,39 +35,39 @@ func (s *functionState) programPackedStore(enumType *semantic.EnumType) (packedS
 		}
 		s.g.globals[getterName] = getter
 	}
-	fnType := C.LLVMGlobalGetValueType(getter)
-	value := C.LLVMBuildCall2(s.builder, fnType, getter, nil, 0, cStringFree("program.store"))
+	fnType := llvmGlobalGetValueType(getter)
+	value := llvmBuildCall2(s.builder, fnType, getter, nil, 0, cStringFree("program.store"))
 	return packedStoreBinding{value: value, typ: storeType}, true, nil
 }
 
-func (s *functionState) emitProgramStoreGetter(name string, root *semantic.EnumType, storeType *semantic.PackedEnumStoreType, storeLLVMType C.LLVMTypeRef) (C.LLVMValueRef, error) {
+func (s *functionState) emitProgramStoreGetter(name string, root *semantic.EnumType, storeType *semantic.PackedEnumStoreType, storeLLVMType llvmIRTypeRef) (llvmIRValueRef, error) {
 	g := s.g
-	globalName := C.CString("__elisa_program_store." + root.Name)
-	defer C.free(unsafe.Pointer(globalName))
-	global := C.LLVMAddGlobal(g.module, storeLLVMType, globalName)
-	C.LLVMSetInitializer(global, C.LLVMConstNull(storeLLVMType))
-	C.LLVMSetLinkage(global, C.LLVMLinkOnceAnyLinkage)
+	globalName := llvmCString("__elisa_program_store." + root.Name)
+	defer llvmFree(unsafe.Pointer(globalName))
+	global := llvmAddGlobal(g.module, storeLLVMType, globalName)
+	llvmSetInitializer(global, llvmConstNull(storeLLVMType))
+	llvmSetLinkage(global, llvmLinkOnceAnyLinkage)
 
-	nameC := C.CString(name)
-	defer C.free(unsafe.Pointer(nameC))
-	fnType := C.LLVMFunctionType(storeLLVMType, nil, 0, 0)
-	fn := C.LLVMAddFunction(g.module, nameC, fnType)
-	C.LLVMSetLinkage(fn, C.LLVMLinkOnceAnyLinkage)
+	nameC := llvmCString(name)
+	defer llvmFree(unsafe.Pointer(nameC))
+	fnType := llvmFunctionType(storeLLVMType, nil, 0, 0)
+	fn := llvmAddFunction(g.module, nameC, fnType)
+	llvmSetLinkage(fn, llvmLinkOnceAnyLinkage)
 
-	builder := C.LLVMCreateBuilderInContext(g.context)
-	defer C.LLVMDisposeBuilder(builder)
-	entry := C.LLVMAppendBasicBlockInContext(g.context, fn, cStringFree("entry"))
-	initBB := C.LLVMAppendBasicBlockInContext(g.context, fn, cStringFree("init"))
-	readyBB := C.LLVMAppendBasicBlockInContext(g.context, fn, cStringFree("ready"))
-	C.LLVMPositionBuilderAtEnd(builder, entry)
-	current := C.LLVMBuildLoad2(builder, storeLLVMType, global, cStringFree("store"))
-	state := C.LLVMBuildExtractValue(builder, current, 2, cStringFree("state"))
-	isNull := C.LLVMBuildIsNull(builder, state, cStringFree("uninit"))
-	C.LLVMBuildCondBr(builder, isNull, initBB, readyBB)
-	C.LLVMPositionBuilderAtEnd(builder, readyBB)
-	C.LLVMBuildRet(builder, current)
+	builder := llvmCreateBuilderInContext(g.context)
+	defer llvmDisposeBuilder(builder)
+	entry := llvmAppendBasicBlockInContext(g.context, fn, cStringFree("entry"))
+	initBB := llvmAppendBasicBlockInContext(g.context, fn, cStringFree("init"))
+	readyBB := llvmAppendBasicBlockInContext(g.context, fn, cStringFree("ready"))
+	llvmPositionBuilderAtEnd(builder, entry)
+	current := llvmBuildLoad2(builder, storeLLVMType, global, cStringFree("store"))
+	state := llvmBuildExtractValue(builder, current, 2, cStringFree("state"))
+	isNull := llvmBuildIsNull(builder, state, cStringFree("uninit"))
+	llvmBuildCondBr(builder, isNull, initBB, readyBB)
+	llvmPositionBuilderAtEnd(builder, readyBB)
+	llvmBuildRet(builder, current)
 
-	C.LLVMPositionBuilderAtEnd(builder, initBB)
+	llvmPositionBuilderAtEnd(builder, initBB)
 	arena, ok, err := s.programRegionArena(root.DeclaredStoreRegion())
 	if err != nil {
 		return nil, err
@@ -86,8 +80,8 @@ func (s *functionState) emitProgramStoreGetter(name string, root *semantic.EnumT
 	if err != nil {
 		return nil, err
 	}
-	C.LLVMBuildStore(builder, created, global)
-	C.LLVMBuildRet(builder, created)
+	llvmBuildStore(builder, created, global)
+	llvmBuildRet(builder, created)
 	return fn, nil
 }
 
@@ -112,11 +106,11 @@ func (s *functionState) programRegionArena(name string) (valueBinding, bool, err
 	if err != nil {
 		return valueBinding{}, false, err
 	}
-	nameC := C.CString(key)
-	defer C.free(unsafe.Pointer(nameC))
-	value := C.LLVMAddGlobal(s.g.module, llvmType, nameC)
-	C.LLVMSetInitializer(value, C.LLVMConstNull(llvmType))
-	C.LLVMSetLinkage(value, C.LLVMLinkOnceAnyLinkage)
+	nameC := llvmCString(key)
+	defer llvmFree(unsafe.Pointer(nameC))
+	value := llvmAddGlobal(s.g.module, llvmType, nameC)
+	llvmSetInitializer(value, llvmConstNull(llvmType))
+	llvmSetLinkage(value, llvmLinkOnceAnyLinkage)
 	s.g.applyTypeAlignment(value, arenaType)
 	s.g.globals[key] = value
 	return valueBinding{ptr: value, typ: arenaType}, true, nil

@@ -2,12 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"fmt"
 	"unsafe"
@@ -24,7 +18,7 @@ type staticDictSlot struct {
 	occupied  bool
 }
 
-func (g *llvmGenerator) constDictLiteralValue(expr *ast.ListLitExpr, dictType *semantic.DictType, namespace string) (C.LLVMValueRef, error) {
+func (g *llvmGenerator) constDictLiteralValue(expr *ast.ListLitExpr, dictType *semantic.DictType, namespace string) (llvmIRValueRef, error) {
 	if expr == nil || dictType == nil {
 		return nil, fmt.Errorf("const dict literal requires a dict type")
 	}
@@ -81,9 +75,9 @@ func (g *llvmGenerator) constDictLiteralValue(expr *ast.ListLitExpr, dictType *s
 	if err != nil {
 		return nil, err
 	}
-	ptrType := C.LLVMPointerTypeInContext(g.context, 0)
+	ptrType := llvmPointerTypeInContext(g.context, 0)
 
-	itemsValue := C.LLVMConstNull(ptrType)
+	itemsValue := llvmConstNull(ptrType)
 	if capacity > 0 {
 		itemsValue, err = g.constDictBucketArray(expr, dictType, slots, capacity, namespace)
 		if err != nil {
@@ -91,19 +85,19 @@ func (g *llvmGenerator) constDictLiteralValue(expr *ast.ListLitExpr, dictType *s
 		}
 	}
 
-	count := C.LLVMConstInt(usizeType, C.ulonglong(len(expr.Elems)), 0)
-	capValue := C.LLVMConstInt(usizeType, C.ulonglong(capacity), 0)
-	fields := []C.LLVMValueRef{
+	count := llvmConstInt(usizeType, llvmIRUnsignedLongLong(len(expr.Elems)), 0)
+	capValue := llvmConstInt(usizeType, llvmIRUnsignedLongLong(capacity), 0)
+	fields := []llvmIRValueRef{
 		itemsValue,
 		count,
 		count,
 		capValue,
-		C.LLVMConstNull(ptrType),
+		llvmConstNull(ptrType),
 	}
-	return C.LLVMConstNamedStruct(dictLLVMType, llvmValueSlicePtr(fields), C.unsigned(len(fields))), nil
+	return llvmConstNamedStruct(dictLLVMType, llvmValueSlicePtr(fields), llvmIRUnsigned(len(fields))), nil
 }
 
-func (g *llvmGenerator) constDictBucketArray(expr *ast.ListLitExpr, dictType *semantic.DictType, slots []staticDictSlot, capacity int, namespace string) (C.LLVMValueRef, error) {
+func (g *llvmGenerator) constDictBucketArray(expr *ast.ListLitExpr, dictType *semantic.DictType, slots []staticDictSlot, capacity int, namespace string) (llvmIRValueRef, error) {
 	base, ok := g.lookupNamedType("DictBucket")
 	if !ok {
 		return nil, fmt.Errorf("missing runtime struct DictBucket")
@@ -113,7 +107,7 @@ func (g *llvmGenerator) constDictBucketArray(expr *ast.ListLitExpr, dictType *se
 	if err != nil {
 		return nil, err
 	}
-	arrayType := C.LLVMArrayType2(bucketLLVMType, C.uint64_t(capacity))
+	arrayType := llvmArrayType2(bucketLLVMType, llvmIRUint64(capacity))
 
 	zeroKey, err := g.constZero(dictType.Key)
 	if err != nil {
@@ -123,12 +117,12 @@ func (g *llvmGenerator) constDictBucketArray(expr *ast.ListLitExpr, dictType *se
 	if err != nil {
 		return nil, err
 	}
-	stateType := C.LLVMInt8TypeInContext(g.context)
-	buckets := make([]C.LLVMValueRef, 0, capacity)
+	stateType := llvmInt8TypeInContext(g.context)
+	buckets := make([]llvmIRValueRef, 0, capacity)
 	for _, slot := range slots {
 		key := zeroKey
 		value := zeroValue
-		state := C.LLVMConstInt(stateType, 0, 0)
+		state := llvmConstInt(stateType, 0, 0)
 		if slot.occupied {
 			key, err = g.constExprValueInNamespace(slot.keyExpr, dictType.Key, namespace)
 			if err != nil {
@@ -138,22 +132,22 @@ func (g *llvmGenerator) constDictBucketArray(expr *ast.ListLitExpr, dictType *se
 			if err != nil {
 				return nil, err
 			}
-			state = C.LLVMConstInt(stateType, 1, 0)
+			state = llvmConstInt(stateType, 1, 0)
 		}
-		fields := []C.LLVMValueRef{key, value, state}
-		buckets = append(buckets, C.LLVMConstNamedStruct(bucketLLVMType, llvmValueSlicePtr(fields), C.unsigned(len(fields))))
+		fields := []llvmIRValueRef{key, value, state}
+		buckets = append(buckets, llvmConstNamedStruct(bucketLLVMType, llvmValueSlicePtr(fields), llvmIRUnsigned(len(fields))))
 	}
-	initializer := C.LLVMConstArray2(bucketLLVMType, llvmValueSlicePtr(buckets), C.uint64_t(len(buckets)))
+	initializer := llvmConstArray2(bucketLLVMType, llvmValueSlicePtr(buckets), llvmIRUint64(len(buckets)))
 	name := cString(g.nextSyntheticName(".const.dict.buckets."))
-	defer C.free(unsafe.Pointer(name))
-	global := C.LLVMAddGlobal(g.module, arrayType, name)
-	C.LLVMSetLinkage(global, C.LLVMPrivateLinkage)
-	C.LLVMSetGlobalConstant(global, 1)
-	C.LLVMSetUnnamedAddress(global, C.LLVMGlobalUnnamedAddr)
-	C.LLVMSetInitializer(global, initializer)
-	zero32 := C.LLVMConstInt(C.LLVMInt32TypeInContext(g.context), 0, 0)
-	indices := []C.LLVMValueRef{zero32, zero32}
-	return C.LLVMConstInBoundsGEP2(arrayType, global, llvmValueSlicePtr(indices), C.unsigned(len(indices))), nil
+	defer llvmFree(unsafe.Pointer(name))
+	global := llvmAddGlobal(g.module, arrayType, name)
+	llvmSetLinkage(global, llvmPrivateLinkage)
+	llvmSetGlobalConstant(global, 1)
+	llvmSetUnnamedAddress(global, llvmGlobalUnnamedAddr)
+	llvmSetInitializer(global, initializer)
+	zero32 := llvmConstInt(llvmInt32TypeInContext(g.context), 0, 0)
+	indices := []llvmIRValueRef{zero32, zero32}
+	return llvmConstInBoundsGEP2(arrayType, global, llvmValueSlicePtr(indices), llvmIRUnsigned(len(indices))), nil
 }
 
 func staticDictCapacity(count int) int {

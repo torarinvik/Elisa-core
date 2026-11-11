@@ -106,3 +106,68 @@ func llvmGlobalGetValueType(value llvmIRValueRef) llvmIRTypeRef {
 func llvmConstReal(typ llvmIRTypeRef, value llvmIRDouble) llvmIRValueRef {
 	return C.LLVMConstReal(typ, value)
 }
+
+type llvmIRSize = C.size_t
+type llvmIRUnnamedAddr = C.LLVMUnnamedAddr
+
+const (
+	llvmExternalLinkage    = C.LLVMExternalLinkage
+	llvmLinkOnceAnyLinkage = C.LLVMLinkOnceAnyLinkage
+	llvmGlobalUnnamedAddr  = C.LLVMGlobalUnnamedAddr
+)
+
+func llvmAddGlobal(module llvmIRModuleRef, typ llvmIRTypeRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMAddGlobal(module, typ, name)
+}
+
+func llvmAddFunction(module llvmIRModuleRef, name *llvmIRChar, typ llvmIRTypeRef) llvmIRValueRef {
+	return C.LLVMAddFunction(module, name, typ)
+}
+
+func llvmAddAlias2(module llvmIRModuleRef, typ llvmIRTypeRef, addressSpace llvmIRUnsigned, aliasee llvmIRValueRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMAddAlias2(module, typ, addressSpace, aliasee, name)
+}
+
+func llvmGetParam(function llvmIRValueRef, index llvmIRUnsigned) llvmIRValueRef {
+	return C.LLVMGetParam(function, index)
+}
+
+func llvmFunctionType(result llvmIRTypeRef, params *llvmIRTypeRef, count llvmIRUnsigned, variadic llvmIRBool) llvmIRTypeRef {
+	return C.LLVMFunctionType(result, params, count, variadic)
+}
+
+func llvmConstAllOnes(typ llvmIRTypeRef) llvmIRValueRef {
+	return C.LLVMConstAllOnes(typ)
+}
+
+func llvmConstSub(left, right llvmIRValueRef) llvmIRValueRef {
+	return C.LLVMConstSub(left, right)
+}
+
+func llvmConstArray2(element llvmIRTypeRef, values *llvmIRValueRef, count llvmIRUint64) llvmIRValueRef {
+	return C.LLVMConstArray2(element, values, count)
+}
+
+func llvmConstNamedStruct(typ llvmIRTypeRef, values *llvmIRValueRef, count llvmIRUnsigned) llvmIRValueRef {
+	return C.LLVMConstNamedStruct(typ, values, count)
+}
+
+func llvmConstInBoundsGEP2(typ llvmIRTypeRef, base llvmIRValueRef, indices *llvmIRValueRef, count llvmIRUnsigned) llvmIRValueRef {
+	return C.LLVMConstInBoundsGEP2(typ, base, indices, count)
+}
+
+func llvmSetUnnamedAddress(global llvmIRValueRef, kind llvmIRUnnamedAddr) {
+	C.LLVMSetUnnamedAddress(global, kind)
+}
+
+func llvmLookupIntrinsicID(name *llvmIRChar, length llvmIRSize) llvmIRUnsigned {
+	return C.LLVMLookupIntrinsicID(name, length)
+}
+
+func llvmGetIntrinsicDeclaration(module llvmIRModuleRef, id llvmIRUnsigned, types *llvmIRTypeRef, count llvmIRSize) llvmIRValueRef {
+	return C.LLVMGetIntrinsicDeclaration(module, id, types, count)
+}
+
+func llvmPrintTypeToString(typ llvmIRTypeRef) *llvmIRChar {
+	return C.LLVMPrintTypeToString(typ)
+}

@@ -325,3 +325,16 @@ func upperBoundUnrollLimit() int { return int(C.elisacoreUpperBoundUnrollLimit()
 func sinkPrivateInitializations(module C.LLVMModuleRef) int {
 	return int(C.elisacoreSinkPrivateInitializations(module))
 }
+
+type llvmIRTargetDataRef = C.LLVMTargetDataRef
+type llvmIRByteOrder = C.enum_LLVMByteOrdering
+
+const llvmLittleEndian = C.LLVMLittleEndian
+
+func llvmByteOrder(target llvmIRTargetDataRef) llvmIRByteOrder {
+	return C.LLVMByteOrder(target)
+}
+
+func llvmABISizeOfType(target llvmIRTargetDataRef, typ llvmIRTypeRef) llvmIRUnsignedLongLong {
+	return C.LLVMABISizeOfType(target, typ)
+}

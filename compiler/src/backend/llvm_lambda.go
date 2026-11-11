@@ -2,12 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"fmt"
 
@@ -20,7 +14,7 @@ type lambdaCaptureBinding struct {
 	binding valueBinding
 }
 
-func (g *llvmGenerator) ensureLambdaClosureType() (C.LLVMTypeRef, error) {
+func (g *llvmGenerator) ensureLambdaClosureType() (llvmIRTypeRef, error) {
 	const name = "ElisaCoreLambdaClosure"
 	ty, err := g.ensureNamedStructType(name)
 	if err != nil {
@@ -29,9 +23,9 @@ func (g *llvmGenerator) ensureLambdaClosureType() (C.LLVMTypeRef, error) {
 	if g.structBodies[name] {
 		return ty, nil
 	}
-	ptrType := C.LLVMPointerTypeInContext(g.context, 0)
-	fields := []C.LLVMTypeRef{ptrType, ptrType}
-	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
+	ptrType := llvmPointerTypeInContext(g.context, 0)
+	fields := []llvmIRTypeRef{ptrType, ptrType}
+	llvmStructSetBody(ty, llvmTypeSlicePtr(fields), llvmIRUnsigned(len(fields)), 0)
 	g.structBodies[name] = true
 	return ty, nil
 }
@@ -86,7 +80,7 @@ func (s *functionState) lambdaCaptureBindings(expr *ast.LambdaExpr) ([]lambdaCap
 	return captures, nil
 }
 
-func (s *functionState) emitMallocBytes(byteCount uint64, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitMallocBytes(byteCount uint64, name string) (llvmIRValueRef, error) {
 	usizeType := s.g.namedType("usize")
 	llvmSizeType, err := s.g.lowerType(usizeType)
 	if err != nil {
@@ -103,15 +97,15 @@ func (s *functionState) emitMallocBytes(byteCount uint64, name string) (C.LLVMVa
 	if err != nil {
 		return nil, err
 	}
-	sizeValue := C.LLVMConstInt(llvmSizeType, C.ulonglong(byteCount), 0)
-	return s.buildCall(llvmMallocType, callee, []C.LLVMValueRef{sizeValue}, name), nil
+	sizeValue := llvmConstInt(llvmSizeType, llvmIRUnsignedLongLong(byteCount), 0)
+	return s.buildCall(llvmMallocType, callee, []llvmIRValueRef{sizeValue}, name), nil
 }
 
-func (s *functionState) emitLambdaEnvironment(captures []lambdaCaptureBinding, name string) (C.LLVMValueRef, C.LLVMTypeRef, error) {
+func (s *functionState) emitLambdaEnvironment(captures []lambdaCaptureBinding, name string) (llvmIRValueRef, llvmIRTypeRef, error) {
 	if len(captures) == 0 {
 		return nil, nil, nil
 	}
-	fieldTypes := make([]C.LLVMTypeRef, 0, len(captures))
+	fieldTypes := make([]llvmIRTypeRef, 0, len(captures))
 	for _, capture := range captures {
 		fieldType, err := s.g.lowerType(capture.binding.typ)
 		if err != nil {
@@ -119,7 +113,7 @@ func (s *functionState) emitLambdaEnvironment(captures []lambdaCaptureBinding, n
 		}
 		fieldTypes = append(fieldTypes, fieldType)
 	}
-	envType := C.LLVMStructTypeInContext(s.g.context, llvmTypeSlicePtr(fieldTypes), C.unsigned(len(fieldTypes)), 0)
+	envType := llvmStructTypeInContext(s.g.context, llvmTypeSlicePtr(fieldTypes), llvmIRUnsigned(len(fieldTypes)), 0)
 	envBytes, err := s.g.abiSizeOfLLVMType(envType)
 	if err != nil {
 		return nil, nil, err
@@ -133,25 +127,25 @@ func (s *functionState) emitLambdaEnvironment(captures []lambdaCaptureBinding, n
 		if err != nil {
 			return nil, nil, err
 		}
-		fieldPtr := C.LLVMBuildStructGEP2(s.builder, envType, envPtr, C.unsigned(i), cStringFree(name+"."+capture.name+".ptr"))
-		C.LLVMBuildStore(s.builder, captureValue, fieldPtr)
+		fieldPtr := llvmBuildStructGEP2(s.builder, envType, envPtr, llvmIRUnsigned(i), cStringFree(name+"."+capture.name+".ptr"))
+		llvmBuildStore(s.builder, captureValue, fieldPtr)
 	}
 	return envPtr, envType, nil
 }
 
-func (s *functionState) tagLambdaClosurePointer(ptr C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+func (s *functionState) tagLambdaClosurePointer(ptr llvmIRValueRef, name string) (llvmIRValueRef, error) {
 	usizeType := s.g.namedType("usize")
 	llvmSizeType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, err
 	}
-	ptrType := C.LLVMPointerTypeInContext(s.g.context, 0)
-	ptrInt := C.LLVMBuildPtrToInt(s.builder, ptr, llvmSizeType, cStringFree(name+".int"))
-	taggedInt := C.LLVMBuildOr(s.builder, ptrInt, C.LLVMConstInt(llvmSizeType, 1, 0), cStringFree(name+".tagged"))
-	return C.LLVMBuildIntToPtr(s.builder, taggedInt, ptrType, cStringFree(name+".value")), nil
+	ptrType := llvmPointerTypeInContext(s.g.context, 0)
+	ptrInt := llvmBuildPtrToInt(s.builder, ptr, llvmSizeType, cStringFree(name+".int"))
+	taggedInt := llvmBuildOr(s.builder, ptrInt, llvmConstInt(llvmSizeType, 1, 0), cStringFree(name+".tagged"))
+	return llvmBuildIntToPtr(s.builder, taggedInt, ptrType, cStringFree(name+".value")), nil
 }
 
-func (s *functionState) emitLambdaHelper(expr *ast.LambdaExpr, funcType *semantic.FuncType, captures []lambdaCaptureBinding, envType C.LLVMTypeRef, helperName string) (C.LLVMValueRef, error) {
+func (s *functionState) emitLambdaHelper(expr *ast.LambdaExpr, funcType *semantic.FuncType, captures []lambdaCaptureBinding, envType llvmIRTypeRef, helperName string) (llvmIRValueRef, error) {
 	if expr == nil || funcType == nil {
 		return nil, fmt.Errorf("missing lambda expression metadata")
 	}
@@ -168,21 +162,21 @@ func (s *functionState) emitLambdaHelper(expr *ast.LambdaExpr, funcType *semanti
 	// The helper is used only inside its defining partition. Keeping it local
 	// also prevents unrelated linked objects from defining the same name.
 	if s.g.partSynthNS != "" {
-		C.LLVMSetLinkage(fnValue, C.LLVMPrivateLinkage)
+		llvmSetLinkage(fnValue, llvmPrivateLinkage)
 		if s.g.partLocalHelpers == nil {
 			s.g.partLocalHelpers = make(map[string]bool)
 		}
 		s.g.partLocalHelpers[llvmValueName(fnValue)] = true
 	}
-	if C.LLVMCountBasicBlocks(fnValue) != 0 {
+	if llvmCountBasicBlocks(fnValue) != 0 {
 		return fnValue, nil
 	}
 
-	builder := C.LLVMCreateBuilderInContext(s.g.context)
-	defer C.LLVMDisposeBuilder(builder)
+	builder := llvmCreateBuilderInContext(s.g.context)
+	defer llvmDisposeBuilder(builder)
 
-	entry := C.LLVMAppendBasicBlockInContext(s.g.context, fnValue, cStringFree("entry"))
-	C.LLVMPositionBuilderAtEnd(builder, entry)
+	entry := llvmAppendBasicBlockInContext(s.g.context, fnValue, cStringFree("entry"))
+	llvmPositionBuilderAtEnd(builder, entry)
 
 	decl := &ast.FuncDecl{Name: helperName, Params: append([]ast.ParamDecl(nil), expr.Params...), Body: expr.Body}
 	state := &functionState{
@@ -195,23 +189,23 @@ func (s *functionState) emitLambdaHelper(expr *ast.LambdaExpr, funcType *semanti
 
 	paramOffset := 0
 	if _, ok := nonVoidErrorUnion(helperType.Return); ok {
-		state.resultSlot = C.LLVMGetParam(fnValue, 0)
+		state.resultSlot = llvmGetParam(fnValue, 0)
 		paramOffset = 1
 	}
 	if hasEnv {
-		envParam := C.LLVMGetParam(fnValue, C.unsigned(paramOffset))
+		envParam := llvmGetParam(fnValue, llvmIRUnsigned(paramOffset))
 		for i, capture := range captures {
-			fieldPtr := C.LLVMBuildStructGEP2(builder, envType, envParam, C.unsigned(i), cStringFree(helperName+"."+capture.name+".env.ptr"))
+			fieldPtr := llvmBuildStructGEP2(builder, envType, envParam, llvmIRUnsigned(i), cStringFree(helperName+"."+capture.name+".env.ptr"))
 			captureLLVMType, err := state.g.lowerType(capture.binding.typ)
 			if err != nil {
 				return nil, err
 			}
-			captureValue := C.LLVMBuildLoad2(builder, captureLLVMType, fieldPtr, cStringFree(helperName+"."+capture.name+".env"))
+			captureValue := llvmBuildLoad2(builder, captureLLVMType, fieldPtr, cStringFree(helperName+"."+capture.name+".env"))
 			alloca, err := state.createEntryAlloca(capture.name, capture.binding.typ)
 			if err != nil {
 				return nil, err
 			}
-			C.LLVMBuildStore(builder, captureValue, alloca)
+			llvmBuildStore(builder, captureValue, alloca)
 			state.defineBinding(capture.name, valueBinding{ptr: alloca, typ: capture.binding.typ, mutable: capture.binding.mutable})
 			state.bindPackedStoreValue(capture.binding.typ, captureValue)
 		}
@@ -225,8 +219,8 @@ func (s *functionState) emitLambdaHelper(expr *ast.LambdaExpr, funcType *semanti
 		if err != nil {
 			return nil, err
 		}
-		paramValue := C.LLVMGetParam(fnValue, C.unsigned(i+paramOffset))
-		C.LLVMBuildStore(builder, paramValue, alloca)
+		paramValue := llvmGetParam(fnValue, llvmIRUnsigned(i+paramOffset))
+		llvmBuildStore(builder, paramValue, alloca)
 		state.defineBinding(param.Name, valueBinding{ptr: alloca, typ: funcType.Params[i], mutable: param.Mutable})
 		state.bindPackedStoreValue(funcType.Params[i], paramValue)
 	}
@@ -254,7 +248,7 @@ func (s *functionState) emitLambdaHelper(expr *ast.LambdaExpr, funcType *semanti
 			return nil, err
 		}
 		if isVoidType(helperType.Return) {
-			C.LLVMBuildRetVoid(builder)
+			llvmBuildRetVoid(builder)
 		} else if retUnion, ok := helperType.Return.(*semantic.ErrorUnionType); ok && isVoidType(retUnion.Value) {
 			zeroCode, err := state.errorCodeConstant(0)
 			if err != nil {
@@ -264,7 +258,7 @@ func (s *functionState) emitLambdaHelper(expr *ast.LambdaExpr, funcType *semanti
 			if err != nil {
 				return nil, err
 			}
-			C.LLVMBuildRet(builder, successValue)
+			llvmBuildRet(builder, successValue)
 		} else {
 			return nil, fmt.Errorf("lambda helper %s may fall through without returning a value", helperName)
 		}
@@ -272,7 +266,7 @@ func (s *functionState) emitLambdaHelper(expr *ast.LambdaExpr, funcType *semanti
 	return fnValue, nil
 }
 
-func (s *functionState) emitLambdaExpr(expr *ast.LambdaExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitLambdaExpr(expr *ast.LambdaExpr) (llvmIRValueRef, semantic.Type, error) {
 	funcType, ok := s.exprType(expr).(*semantic.FuncType)
 	if !ok || funcType == nil {
 		return nil, nil, fmt.Errorf("lambda expression is missing a function type")
@@ -309,10 +303,10 @@ func (s *functionState) emitLambdaExpr(expr *ast.LambdaExpr) (C.LLVMValueRef, se
 	if err != nil {
 		return nil, nil, err
 	}
-	codeFieldPtr := C.LLVMBuildStructGEP2(s.builder, closureType, closurePtr, 0, cStringFree(helperName+".closure.code.ptr"))
-	envFieldPtr := C.LLVMBuildStructGEP2(s.builder, closureType, closurePtr, 1, cStringFree(helperName+".closure.env.ptr"))
-	C.LLVMBuildStore(s.builder, helperValue, codeFieldPtr)
-	C.LLVMBuildStore(s.builder, envPtr, envFieldPtr)
+	codeFieldPtr := llvmBuildStructGEP2(s.builder, closureType, closurePtr, 0, cStringFree(helperName+".closure.code.ptr"))
+	envFieldPtr := llvmBuildStructGEP2(s.builder, closureType, closurePtr, 1, cStringFree(helperName+".closure.env.ptr"))
+	llvmBuildStore(s.builder, helperValue, codeFieldPtr)
+	llvmBuildStore(s.builder, envPtr, envFieldPtr)
 	closureValue, err := s.tagLambdaClosurePointer(closurePtr, helperName+".closure")
 	if err != nil {
 		return nil, nil, err
@@ -320,7 +314,7 @@ func (s *functionState) emitLambdaExpr(expr *ast.LambdaExpr) (C.LLVMValueRef, se
 	return closureValue, funcType, nil
 }
 
-func (s *functionState) emitFunctionValueCall(calleeValue C.LLVMValueRef, funcType *semantic.FuncType, callArgs []C.LLVMValueRef, callName string) (C.LLVMValueRef, error) {
+func (s *functionState) emitFunctionValueCall(calleeValue llvmIRValueRef, funcType *semantic.FuncType, callArgs []llvmIRValueRef, callName string) (llvmIRValueRef, error) {
 	if funcType == nil {
 		return nil, fmt.Errorf("missing function type for dynamic call")
 	}
@@ -345,23 +339,23 @@ func (s *functionState) emitFunctionValueCall(calleeValue C.LLVMValueRef, funcTy
 	if err != nil {
 		return nil, err
 	}
-	ptrType := C.LLVMPointerTypeInContext(s.g.context, 0)
-	tagMask := C.LLVMConstInt(llvmSizeType, 1, 0)
-	zero := C.LLVMConstInt(llvmSizeType, 0, 0)
-	allOnes := C.LLVMConstAllOnes(llvmSizeType)
-	clearMask := C.LLVMConstSub(allOnes, tagMask)
+	ptrType := llvmPointerTypeInContext(s.g.context, 0)
+	tagMask := llvmConstInt(llvmSizeType, 1, 0)
+	zero := llvmConstInt(llvmSizeType, 0, 0)
+	allOnes := llvmConstAllOnes(llvmSizeType)
+	clearMask := llvmConstSub(allOnes, tagMask)
 
-	calleeInt := C.LLVMBuildPtrToInt(s.builder, calleeValue, llvmSizeType, cStringFree(callName+".callee.int"))
-	calleeTag := C.LLVMBuildAnd(s.builder, calleeInt, tagMask, cStringFree(callName+".callee.tag"))
-	isClosure := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), calleeTag, zero, cStringFree(callName+".callee.is_closure"))
+	calleeInt := llvmBuildPtrToInt(s.builder, calleeValue, llvmSizeType, cStringFree(callName+".callee.int"))
+	calleeTag := llvmBuildAnd(s.builder, calleeInt, tagMask, cStringFree(callName+".callee.tag"))
+	isClosure := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntNE), calleeTag, zero, cStringFree(callName+".callee.is_closure"))
 
-	rawBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(callName+".raw"))
-	closureBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(callName+".closure"))
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(callName+".merge"))
-	C.LLVMBuildCondBr(s.builder, isClosure, closureBB, rawBB)
+	rawBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(callName+".raw"))
+	closureBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(callName+".closure"))
+	mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(callName+".merge"))
+	llvmBuildCondBr(s.builder, isClosure, closureBB, rawBB)
 
-	incomingValues := make([]C.LLVMValueRef, 0, 2)
-	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, 2)
+	incomingValues := make([]llvmIRValueRef, 0, 2)
+	incomingBlocks := make([]llvmIRBlockRef, 0, 2)
 	returnsVoid := isVoidType(funcType.Return)
 	rawCallName := callName + ".raw"
 	closureCallName := callName + ".closure"
@@ -370,25 +364,25 @@ func (s *functionState) emitFunctionValueCall(calleeValue C.LLVMValueRef, funcTy
 		closureCallName = ""
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, rawBB)
+	llvmPositionBuilderAtEnd(s.builder, rawBB)
 	rawCall := s.buildTypedCall(rawLLVMType, calleeValue, callArgs, rawCallName, funcType)
 	if !s.currentBlockTerminated() {
-		rawEnd := C.LLVMGetInsertBlock(s.builder)
-		C.LLVMBuildBr(s.builder, mergeBB)
+		rawEnd := llvmGetInsertBlock(s.builder)
+		llvmBuildBr(s.builder, mergeBB)
 		if !returnsVoid {
 			incomingValues = append(incomingValues, rawCall)
 			incomingBlocks = append(incomingBlocks, rawEnd)
 		}
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, closureBB)
-	closureInt := C.LLVMBuildAnd(s.builder, calleeInt, clearMask, cStringFree(callName+".closure.int"))
-	closurePtr := C.LLVMBuildIntToPtr(s.builder, closureInt, ptrType, cStringFree(callName+".closure.ptr"))
-	codePtrPtr := C.LLVMBuildStructGEP2(s.builder, closureType, closurePtr, 0, cStringFree(callName+".closure.code.ptr"))
-	envPtrPtr := C.LLVMBuildStructGEP2(s.builder, closureType, closurePtr, 1, cStringFree(callName+".closure.env.ptr"))
-	codePtr := C.LLVMBuildLoad2(s.builder, ptrType, codePtrPtr, cStringFree(callName+".closure.code"))
-	envPtr := C.LLVMBuildLoad2(s.builder, ptrType, envPtrPtr, cStringFree(callName+".closure.env"))
-	closureArgs := make([]C.LLVMValueRef, 0, len(callArgs)+1)
+	llvmPositionBuilderAtEnd(s.builder, closureBB)
+	closureInt := llvmBuildAnd(s.builder, calleeInt, clearMask, cStringFree(callName+".closure.int"))
+	closurePtr := llvmBuildIntToPtr(s.builder, closureInt, ptrType, cStringFree(callName+".closure.ptr"))
+	codePtrPtr := llvmBuildStructGEP2(s.builder, closureType, closurePtr, 0, cStringFree(callName+".closure.code.ptr"))
+	envPtrPtr := llvmBuildStructGEP2(s.builder, closureType, closurePtr, 1, cStringFree(callName+".closure.env.ptr"))
+	codePtr := llvmBuildLoad2(s.builder, ptrType, codePtrPtr, cStringFree(callName+".closure.code"))
+	envPtr := llvmBuildLoad2(s.builder, ptrType, envPtrPtr, cStringFree(callName+".closure.env"))
+	closureArgs := make([]llvmIRValueRef, 0, len(callArgs)+1)
 	if _, ok := nonVoidErrorUnion(funcType.Return); ok {
 		closureArgs = append(closureArgs, callArgs[0], envPtr)
 		closureArgs = append(closureArgs, callArgs[1:]...)
@@ -398,22 +392,22 @@ func (s *functionState) emitFunctionValueCall(calleeValue C.LLVMValueRef, funcTy
 	}
 	closureCall := s.buildTypedCall(closureLLVMType, codePtr, closureArgs, closureCallName, funcType)
 	if !s.currentBlockTerminated() {
-		closureEnd := C.LLVMGetInsertBlock(s.builder)
-		C.LLVMBuildBr(s.builder, mergeBB)
+		closureEnd := llvmGetInsertBlock(s.builder)
+		llvmBuildBr(s.builder, mergeBB)
 		if !returnsVoid {
 			incomingValues = append(incomingValues, closureCall)
 			incomingBlocks = append(incomingBlocks, closureEnd)
 		}
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	llvmPositionBuilderAtEnd(s.builder, mergeBB)
 	if returnsVoid {
 		return nil, nil
 	}
 	if len(incomingValues) == 1 {
 		return incomingValues[0], nil
 	}
-	phi := C.LLVMBuildPhi(s.builder, llvmReturnType, cStringFree(callName))
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingBlocks)))
+	phi := llvmBuildPhi(s.builder, llvmReturnType, cStringFree(callName))
+	llvmAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), llvmIRUnsigned(len(incomingBlocks)))
 	return phi, nil
 }

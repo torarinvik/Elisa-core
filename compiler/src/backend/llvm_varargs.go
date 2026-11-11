@@ -2,12 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"fmt"
 	"unsafe"
@@ -18,14 +12,14 @@ import (
 
 // emitVaArgCall lowers the compiler-owned generic surface
 //
-//     va_arg[T](storage)
+//	va_arg[T](storage)
 //
 // to LLVM's va_arg instruction. LLVM exposes this as a builder operation rather
 // than an ordinary callable intrinsic, so leaving the call to the normal extern
 // path would produce an unresolved `va_arg` symbol at link time. The generic
 // return type supplies the exact ABI type selected by the source program while
 // the storage argument remains the opaque pointer produced by va_start.
-func (s *functionState) emitVaArgCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitVaArgCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if expr == nil || s == nil || s.g == nil {
 		return nil, nil, true, fmt.Errorf("va_arg requires an active function context")
 	}
@@ -55,8 +49,8 @@ func (s *functionState) emitVaArgCall(expr *ast.CallExpr) (C.LLVMValueRef, seman
 		return nil, nil, true, fmt.Errorf("va_arg result type %s: %w", resultType, err)
 	}
 	nameC := cString("va_arg")
-	defer C.free(unsafe.Pointer(nameC))
-	value := C.LLVMBuildVAArg(s.builder, storage, llvmResultType, nameC)
+	defer llvmFree(unsafe.Pointer(nameC))
+	value := llvmBuildVAArg(s.builder, storage, llvmResultType, nameC)
 	if value == nil {
 		return nil, nil, true, fmt.Errorf("LLVM failed to build va_arg for result type %s", resultType)
 	}
@@ -68,7 +62,7 @@ func (s *functionState) emitVaArgCall(expr *ast.CallExpr) (C.LLVMValueRef, seman
 // address space, so declaring it as an ordinary extern or relying on the
 // generic @intrinsic spelling can manufacture a wrongly mangled symbol. Resolve
 // the intrinsic explicitly and call the declaration LLVM gives us.
-func (s *functionState) emitVaCopyCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitVaCopyCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	if expr == nil || s == nil || s.g == nil {
 		return nil, nil, true, fmt.Errorf("va_copy requires an active function context")
 	}
@@ -91,20 +85,20 @@ func (s *functionState) emitVaCopyCall(expr *ast.CallExpr) (C.LLVMValueRef, sema
 		return nil, nil, true, fmt.Errorf("va_copy storage expression emitted no value")
 	}
 	intrinsicName := cStringFree("llvm.va_copy")
-	intrinsicID := C.LLVMLookupIntrinsicID(intrinsicName, C.size_t(len("llvm.va_copy")))
+	intrinsicID := llvmLookupIntrinsicID(intrinsicName, llvmIRSize(len("llvm.va_copy")))
 	if intrinsicID == 0 {
 		return nil, nil, true, fmt.Errorf("unknown LLVM intrinsic llvm.va_copy")
 	}
-	intrinsic := C.LLVMGetIntrinsicDeclaration(s.g.module, intrinsicID, llvmTypeSlicePtr([]C.LLVMTypeRef{C.LLVMTypeOf(destination)}), 1)
+	intrinsic := llvmGetIntrinsicDeclaration(s.g.module, intrinsicID, llvmTypeSlicePtr([]llvmIRTypeRef{llvmTypeOf(destination)}), 1)
 	if intrinsic == nil {
 		return nil, nil, true, fmt.Errorf("LLVM failed to declare llvm.va_copy")
 	}
-	args := []C.LLVMValueRef{destination, source}
+	args := []llvmIRValueRef{destination, source}
 	// LLVM still dereferences the name for a void call, so use a non-nil empty
 	// C string rather than cStringFree("") (which intentionally returns nil).
 	emptyName := cString("")
-	defer C.free(unsafe.Pointer(emptyName))
-	call := C.LLVMBuildCall2(s.builder, C.LLVMGlobalGetValueType(intrinsic), intrinsic, llvmValueSlicePtr(args), 2, emptyName)
+	defer llvmFree(unsafe.Pointer(emptyName))
+	call := llvmBuildCall2(s.builder, llvmGlobalGetValueType(intrinsic), intrinsic, llvmValueSlicePtr(args), 2, emptyName)
 	if call == nil {
 		return nil, nil, true, fmt.Errorf("LLVM failed to build llvm.va_copy")
 	}
