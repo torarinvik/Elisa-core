@@ -2,35 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-
-// elisacoreValueIsTriviallyValidPtr reports whether an LLVM value used as a load
-// address is provably a valid (non-null, non-near-null) pointer at compile time, so
-// the null-deref guard can skip it: stack slots (alloca), module globals/functions,
-// and constants (e.g. a constant GEP off a global) all have addresses far from the
-// near-null zone. Pointers derived at runtime (GEP off a loaded base, inttoptr, call
-// results) return 0 and get guarded.
-static int elisacoreValueIsTriviallyValidPtr(LLVMValueRef v) {
-	if (v == NULL) {
-		return 1;
-	}
-	if (LLVMIsAAllocaInst(v) != NULL) {
-		return 1;
-	}
-	if (LLVMIsAGlobalValue(v) != NULL) {
-		return 1;
-	}
-	if (LLVMIsConstant(v)) {
-		return 1;
-	}
-	return 0;
-}
-
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -91,12 +62,12 @@ func aliasSafeElemType(t semantic.Type, depth int) bool {
 
 // markElementDerivedPtr records an address inside a darray/view element buffer whose type is a
 // plain struct that is not alias-safe as a whole (it contains a header somewhere).
-func (s *functionState) markElementDerivedPtr(ptr C.LLVMValueRef) {
+func (s *functionState) markElementDerivedPtr(ptr llvmIRValueRef) {
 	if s == nil || ptr == nil {
 		return
 	}
 	if s.elementDerivedPtrs == nil {
-		s.elementDerivedPtrs = map[C.LLVMValueRef]bool{}
+		s.elementDerivedPtrs = map[llvmIRValueRef]bool{}
 	}
 	s.elementDerivedPtrs[ptr] = true
 }
@@ -107,7 +78,7 @@ func (s *functionState) markElementDerivedPtr(ptr C.LLVMValueRef) {
 // when a sibling field is a darray), and a nested plain struct field stays element-derived.
 // Enum payloads are excluded: variants overlap, so a scalar slot of one variant may be a header
 // slot of another.
-func (s *functionState) propagateAliasSafeFieldPtr(objPtr, fieldPtr C.LLVMValueRef, containerType, fieldType semantic.Type, pointerLike bool) {
+func (s *functionState) propagateAliasSafeFieldPtr(objPtr, fieldPtr llvmIRValueRef, containerType, fieldType semantic.Type, pointerLike bool) {
 	if s == nil || pointerLike || objPtr == nil || fieldPtr == nil {
 		return
 	}
@@ -149,11 +120,11 @@ const (
 )
 
 // tagDarrayHeaderLoad marks a darray header (data-pointer) load as not aliasing scalar element memory.
-func (s *functionState) tagDarrayHeaderLoad(load C.LLVMValueRef) {
+func (s *functionState) tagDarrayHeaderLoad(load llvmIRValueRef) {
 	if s == nil || load == nil {
 		return
 	}
-	if C.LLVMIsALoadInst(load) == nil {
+	if llvmIsALoadInst(load) == nil {
 		return
 	}
 	s.attachAliasScopeMetadataWithNames(load, darrayAliasDomain, darrayAliasScopeHdr, []string{darrayAliasScopeElt})
@@ -161,18 +132,18 @@ func (s *functionState) tagDarrayHeaderLoad(load C.LLVMValueRef) {
 
 // markAliasSafeElementPtr records a scalar-darray element address so subsequent loads/stores through
 // it get tagged with the "elt" scope (noalias "hdr") in loadValue/storeValue.
-func (s *functionState) markAliasSafeElementPtr(ptr C.LLVMValueRef) {
+func (s *functionState) markAliasSafeElementPtr(ptr llvmIRValueRef) {
 	if s == nil || ptr == nil {
 		return
 	}
 	if s.aliasSafeElementPtrs == nil {
-		s.aliasSafeElementPtrs = map[C.LLVMValueRef]bool{}
+		s.aliasSafeElementPtrs = map[llvmIRValueRef]bool{}
 	}
 	s.aliasSafeElementPtrs[ptr] = true
 }
 
 // tagDarrayElementAccess marks a scalar-darray element load/store as not aliasing header memory.
-func (s *functionState) tagDarrayElementAccess(inst C.LLVMValueRef, ptr C.LLVMValueRef) {
+func (s *functionState) tagDarrayElementAccess(inst llvmIRValueRef, ptr llvmIRValueRef) {
 	if s == nil || inst == nil || ptr == nil {
 		return
 	}
@@ -206,7 +177,7 @@ func (s *functionState) tagDarrayElementAccess(inst C.LLVMValueRef, ptr C.LLVMVa
 	}
 }
 
-func (s *functionState) markComprehensionElementPtr(object ast.Expr, ptr C.LLVMValueRef) {
+func (s *functionState) markComprehensionElementPtr(object ast.Expr, ptr llvmIRValueRef) {
 	if s == nil || ptr == nil || s.comprehensionAliasContext == nil {
 		return
 	}
@@ -225,11 +196,11 @@ func (s *functionState) markComprehensionElementPtr(object ast.Expr, ptr C.LLVMV
 		return
 	}
 	if s.comprehensionElementScopes == nil {
-		s.comprehensionElementScopes = map[C.LLVMValueRef]comprehensionAliasAccess{}
+		s.comprehensionElementScopes = map[llvmIRValueRef]comprehensionAliasAccess{}
 	}
 	s.comprehensionElementScopes[ptr] = access
 }
-func (s *functionState) loweredEnumStorageType(enumType *semantic.EnumType) (C.LLVMTypeRef, error) {
+func (s *functionState) loweredEnumStorageType(enumType *semantic.EnumType) (llvmIRTypeRef, error) {
 	if enumType == nil {
 		return nil, fmt.Errorf("missing enum type")
 	}
@@ -238,7 +209,7 @@ func (s *functionState) loweredEnumStorageType(enumType *semantic.EnumType) (C.L
 	}
 	return s.g.lowerType(enumType)
 }
-func (s *functionState) coercePackedEnumHandleValue(value C.LLVMValueRef, actual semantic.Type, expected *semantic.EnumType) (C.LLVMValueRef, bool, error) {
+func (s *functionState) coercePackedEnumHandleValue(value llvmIRValueRef, actual semantic.Type, expected *semantic.EnumType) (llvmIRValueRef, bool, error) {
 	if s == nil || s.g == nil || expected == nil || !expected.Packed {
 		return nil, false, nil
 	}
@@ -263,7 +234,7 @@ func runtimeIndexedElemType(t semantic.Type) (semantic.Type, bool) {
 		return nil, false
 	}
 }
-func (s *functionState) loadValue(ptr C.LLVMValueRef, t semantic.Type, name string) (C.LLVMValueRef, error) {
+func (s *functionState) loadValue(ptr llvmIRValueRef, t semantic.Type, name string) (llvmIRValueRef, error) {
 	llvmType, err := s.g.lowerType(t)
 	if err != nil {
 		return nil, err
@@ -271,7 +242,7 @@ func (s *functionState) loadValue(ptr C.LLVMValueRef, t semantic.Type, name stri
 	if err := s.emitDebugPointerDerefGuard(ptr); err != nil {
 		return nil, err
 	}
-	load := C.LLVMBuildLoad2(s.builder, llvmType, ptr, cStringFree(name))
+	load := llvmBuildLoad2(s.builder, llvmType, ptr, cStringFree(name))
 	s.tagDarrayElementAccess(load, ptr)
 	return load, nil
 }
@@ -289,57 +260,57 @@ const derefGuardNearNullLimit = 0x10000
 // the offending address recorded into the -ftrace ring, instead of letting them surface
 // later as a SIGSEGV on a derived bad address. Compile-time-valid addresses (allocas,
 // globals, constants) are skipped.
-func (s *functionState) emitDebugPointerDerefGuard(ptr C.LLVMValueRef) error {
+func (s *functionState) emitDebugPointerDerefGuard(ptr llvmIRValueRef) error {
 	if s == nil || s.g == nil || !s.g.forceBoundsCheck {
 		return nil
 	}
 	if s.builder == nil || s.fnValue == nil || ptr == nil {
 		return nil
 	}
-	if C.elisacoreValueIsTriviallyValidPtr(ptr) != 0 {
+	if llvmValueIsTriviallyValidPtr(ptr) != 0 {
 		return nil
 	}
-	i64 := C.LLVMInt64TypeInContext(s.g.context)
-	ptrInt := C.LLVMBuildPtrToInt(s.builder, ptr, i64, cStringFree("pg.addr"))
-	limit := C.LLVMConstInt(i64, C.ulonglong(derefGuardNearNullLimit), 0)
-	valid := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntUGE), ptrInt, limit, cStringFree("pg.valid"))
-	okBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("pg.ok"))
-	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("pg.fail"))
-	C.LLVMBuildCondBr(s.builder, valid, okBB, failBB)
-	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+	i64 := llvmInt64TypeInContext(s.g.context)
+	ptrInt := llvmBuildPtrToInt(s.builder, ptr, i64, cStringFree("pg.addr"))
+	limit := llvmConstInt(i64, llvmIRUnsignedLongLong(derefGuardNearNullLimit), 0)
+	valid := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntUGE), ptrInt, limit, cStringFree("pg.valid"))
+	okBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("pg.ok"))
+	failBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("pg.fail"))
+	llvmBuildCondBr(s.builder, valid, okBB, failBB)
+	llvmPositionBuilderAtEnd(s.builder, failBB)
 	if s.g.emitTrace && s.g.trace != nil {
 		s.g.trace.recordValue(s, 0, "deref.nullptr", ptrInt, s.g.namedType("usize"))
 	}
 	if err := s.emitTrapUnreachable("pg.trap"); err != nil {
 		return err
 	}
-	C.LLVMPositionBuilderAtEnd(s.builder, okBB)
+	llvmPositionBuilderAtEnd(s.builder, okBB)
 	return nil
 }
 
 // resizeUnsignedInt resizes an integer value to the target integer type (zext when widening,
 // trunc when narrowing, no-op at equal width) — the docs/82 handle-boundary cast.
-func (s *functionState) resizeUnsignedInt(value C.LLVMValueRef, target C.LLVMTypeRef, name string) C.LLVMValueRef {
-	fromBits := C.LLVMGetIntTypeWidth(C.LLVMTypeOf(value))
-	toBits := C.LLVMGetIntTypeWidth(target)
+func (s *functionState) resizeUnsignedInt(value llvmIRValueRef, target llvmIRTypeRef, name string) llvmIRValueRef {
+	fromBits := llvmGetIntTypeWidth(llvmTypeOf(value))
+	toBits := llvmGetIntTypeWidth(target)
 	switch {
 	case fromBits < toBits:
-		return C.LLVMBuildZExt(s.builder, value, target, cStringFree(name))
+		return llvmBuildZExt(s.builder, value, target, cStringFree(name))
 	case fromBits > toBits:
-		return C.LLVMBuildTrunc(s.builder, value, target, cStringFree(name))
+		return llvmBuildTrunc(s.builder, value, target, cStringFree(name))
 	default:
 		return value
 	}
 }
 
-func (s *functionState) coerceValue(value C.LLVMValueRef, actual semantic.Type, expected semantic.Type) (C.LLVMValueRef, error) {
+func (s *functionState) coerceValue(value llvmIRValueRef, actual semantic.Type, expected semantic.Type) (llvmIRValueRef, error) {
 	if expected == nil || actual == nil || semantic.SameType(actual, expected) {
 		return value, nil
 	}
 	// docs/82: a packed enum's opaque handle may be narrower/wider than the u32 the store runtime
 	// traffics in (`layout(handle: uN)`). Coerce integer ↔ handle at the boundary with an
 	// unsigned int resize; same-width is a no-op.
-	if value != nil && C.LLVMGetTypeKind(C.LLVMTypeOf(value)) == C.LLVMIntegerTypeKind {
+	if value != nil && llvmGetTypeKind(llvmTypeOf(value)) == llvmIntegerTypeKind {
 		if expectedEnum, ok := semantic.StripAggregateStateType(expected).(*semantic.EnumType); ok && expectedEnum != nil && expectedEnum.Packed && isNumericType(actual) {
 			handleType, err := s.g.lowerType(expectedEnum)
 			if err != nil {
@@ -352,7 +323,7 @@ func (s *functionState) coerceValue(value C.LLVMValueRef, actual semantic.Type, 
 			if err != nil {
 				return nil, err
 			}
-			if C.LLVMGetTypeKind(expectedLLVM) == C.LLVMIntegerTypeKind {
+			if llvmGetTypeKind(expectedLLVM) == llvmIntegerTypeKind {
 				return s.resizeUnsignedInt(value, expectedLLVM, "handle.resize"), nil
 			}
 		}
@@ -383,20 +354,20 @@ func (s *functionState) coerceValue(value C.LLVMValueRef, actual semantic.Type, 
 		if err != nil {
 			return nil, err
 		}
-		return C.LLVMGetUndef(llvmType), nil
+		return llvmGetUndef(llvmType), nil
 	}
 	if expectedBuiltin, ok := expected.(*semantic.BuiltinType); ok && expectedBuiltin.Name == "bool" {
 		actualLLVM, err := s.g.lowerType(actual)
 		if err != nil {
 			return nil, err
 		}
-		zero := C.LLVMConstNull(actualLLVM)
+		zero := llvmConstNull(actualLLVM)
 		if isFloatType(actual) {
 			// C truthiness treats NaN as nonzero. Use unordered-not-equal so
 			// `if (nan)` remains true instead of using ordered-not-equal.
-			return C.LLVMBuildFCmp(s.builder, C.LLVMRealPredicate(C.LLVMRealUNE), value, zero, cStringFree("tobool")), nil
+			return llvmBuildFCmp(s.builder, llvmIRRealPredicate(llvmRealUNE), value, zero, cStringFree("tobool")), nil
 		}
-		return C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), value, zero, cStringFree("tobool")), nil
+		return llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntNE), value, zero, cStringFree("tobool")), nil
 	}
 	if expectedErrSet, ok := expected.(*semantic.ErrorSetType); ok {
 		if actualErrSet, ok := actual.(*semantic.ErrorSetType); ok {
@@ -412,7 +383,7 @@ func (s *functionState) coerceValue(value C.LLVMValueRef, actual semantic.Type, 
 			if err != nil {
 				return nil, err
 			}
-			return C.LLVMBuildIntToPtr(s.builder, value, expectedLLVM, cStringFree("addrspace.inttoptr")), nil
+			return llvmBuildIntToPtr(s.builder, value, expectedLLVM, cStringFree("addrspace.inttoptr")), nil
 		}
 	}
 	if expectedAddr, ok := expected.(*semantic.AddressSpaceType); ok {
@@ -523,13 +494,13 @@ func (s *functionState) coerceValue(value C.LLVMValueRef, actual semantic.Type, 
 		return value, nil
 	}
 	if semantic.IsNullType(actual) && isPointerLikeType(expected) {
-		return C.LLVMConstNull(expectedLLVM), nil
+		return llvmConstNull(expectedLLVM), nil
 	}
 	if isNumericCastType(actual) && isNumericCastType(expected) {
 		return s.coerceNumericValue(value, actual, expected)
 	}
 	if isPointerLikeType(actual) && isNumericCastType(expected) {
-		return C.LLVMBuildPtrToInt(s.builder, value, expectedLLVM, cStringFree("ptrtoint")), nil
+		return llvmBuildPtrToInt(s.builder, value, expectedLLVM, cStringFree("ptrtoint")), nil
 	}
 	if isNumericCastType(actual) && isPointerLikeType(expected) {
 		// LLVM requires integer-typed input for inttoptr; float->ptr must lower
@@ -543,9 +514,9 @@ func (s *functionState) coerceValue(value C.LLVMValueRef, actual semantic.Type, 
 			if err != nil {
 				return nil, err
 			}
-			return C.LLVMBuildIntToPtr(s.builder, coerced, expectedLLVM, cStringFree("inttoptr")), nil
+			return llvmBuildIntToPtr(s.builder, coerced, expectedLLVM, cStringFree("inttoptr")), nil
 		}
-		return C.LLVMBuildIntToPtr(s.builder, value, expectedLLVM, cStringFree("inttoptr")), nil
+		return llvmBuildIntToPtr(s.builder, value, expectedLLVM, cStringFree("inttoptr")), nil
 	}
 	return value, nil
 }

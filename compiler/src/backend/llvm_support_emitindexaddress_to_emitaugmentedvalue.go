@@ -2,27 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-
-// elisacoreConstIndexInBounds reports whether both the index and the count are
-// compile-time constant integers and index < count. When true the index bounds
-// guard is statically satisfied (the comparison would fold to `i1 true`), so emitting
-// a runtime branch is pure overhead and — by splitting the basic block — defeats
-// per-block read CSE at the indexed site. Returns 0 if either operand is non-constant.
-static int elisacoreConstIndexInBounds(LLVMValueRef index, LLVMValueRef count) {
-	if (index == NULL || count == NULL) {
-		return 0;
-	}
-	if (LLVMIsAConstantInt(index) == NULL || LLVMIsAConstantInt(count) == NULL) {
-		return 0;
-	}
-	return LLVMConstIntGetZExtValue(index) < LLVMConstIntGetZExtValue(count) ? 1 : 0;
-}
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -134,7 +113,7 @@ func (g *llvmGenerator) provenIndexPositionsFor(view *semantic.Result) map[lexer
 // a genuine user `arr[i]` access (vs compiler-internal carrier reads): only such
 // accesses receive the debug-mode bounds watchdog, so debug verification stays
 // at the user-operation boundary and never instruments internal machinery.
-func (s *functionState) emitIndexAddress(expr *ast.IndexExpr, userFacing bool, readOnly ...bool) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitIndexAddress(expr *ast.IndexExpr, userFacing bool, readOnly ...bool) (llvmIRValueRef, semantic.Type, error) {
 	if expr != nil && expr.Fallback != nil {
 		return nil, nil, fmt.Errorf("safe index fallback is not addressable")
 	}
@@ -154,7 +133,7 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr, userFacing bool, r
 	s.pendingDisjointScope = s.disjointScopeForObject(expr.Object)
 	// guaranteed: a proof, static check, or dominating trapping guard puts the index in range.
 	guaranteed := s.indexBoundsProven(expr)
-	zero := C.LLVMConstInt(C.LLVMInt32TypeInContext(s.g.context), 0, 0)
+	zero := llvmConstInt(llvmInt32TypeInContext(s.g.context), 0, 0)
 	switch t := objType.(type) {
 	case *semantic.ArrayType:
 		object := expr.Object
@@ -195,10 +174,10 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr, userFacing bool, r
 		if err != nil {
 			return nil, nil, err
 		}
-		indices := []C.LLVMValueRef{zero, indexValue}
-		ptr := C.LLVMBuildGEP2(s.builder, arrayLLVMType, arrayPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("idx.ptr"))
+		indices := []llvmIRValueRef{zero, indexValue}
+		ptr := llvmBuildGEP2(s.builder, arrayLLVMType, arrayPtr, llvmValueSlicePtr(indices), llvmIRUnsigned(len(indices)), cStringFree("idx.ptr"))
 		if guaranteed {
-			C.LLVMSetIsInBounds(ptr, 1)
+			llvmSetIsInBounds(ptr, 1)
 		}
 		return ptr, t.Elem, nil
 	case *semantic.DArrayType:
@@ -219,7 +198,7 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr, userFacing bool, r
 		}
 		s.markComprehensionElementPtr(expr.Object, ptr)
 		if guaranteed {
-			C.LLVMSetIsInBounds(ptr, 1)
+			llvmSetIsInBounds(ptr, 1)
 		}
 		return ptr, elemType, nil
 	case *semantic.ViewType:
@@ -239,7 +218,7 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr, userFacing bool, r
 			return nil, nil, err
 		}
 		if guaranteed {
-			C.LLVMSetIsInBounds(ptr, 1)
+			llvmSetIsInBounds(ptr, 1)
 		}
 		return ptr, elemType, nil
 	case *semantic.RefType:
@@ -264,10 +243,10 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr, userFacing bool, r
 			if err != nil {
 				return nil, nil, err
 			}
-			indices := []C.LLVMValueRef{zero, indexValue}
-			ptr := C.LLVMBuildGEP2(s.builder, arrayLLVMType, basePtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("idx.ptr"))
+			indices := []llvmIRValueRef{zero, indexValue}
+			ptr := llvmBuildGEP2(s.builder, arrayLLVMType, basePtr, llvmValueSlicePtr(indices), llvmIRUnsigned(len(indices)), cStringFree("idx.ptr"))
 			if guaranteed {
-				C.LLVMSetIsInBounds(ptr, 1)
+				llvmSetIsInBounds(ptr, 1)
 			}
 			return ptr, arrayElem.Elem, nil
 		}
@@ -285,7 +264,7 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr, userFacing bool, r
 			}
 			s.markComprehensionElementPtr(expr.Object, ptr)
 			if guaranteed {
-				C.LLVMSetIsInBounds(ptr, 1)
+				llvmSetIsInBounds(ptr, 1)
 			}
 			return ptr, elemType, nil
 		}
@@ -293,17 +272,17 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr, userFacing bool, r
 		if err != nil {
 			return nil, nil, err
 		}
-		indices := []C.LLVMValueRef{indexValue}
-		ptr := C.LLVMBuildGEP2(s.builder, elemLLVMType, basePtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("idx.ptr"))
+		indices := []llvmIRValueRef{indexValue}
+		ptr := llvmBuildGEP2(s.builder, elemLLVMType, basePtr, llvmValueSlicePtr(indices), llvmIRUnsigned(len(indices)), cStringFree("idx.ptr"))
 		if guaranteed {
-			C.LLVMSetIsInBounds(ptr, 1)
+			llvmSetIsInBounds(ptr, 1)
 		}
 		return ptr, t.Elem, nil
 	default:
 		return nil, nil, fmt.Errorf("indexing is not implemented for %s", objType.String())
 	}
 }
-func (s *functionState) emitRuntimeIndexedAddress(containerPtr C.LLVMValueRef, containerType semantic.Type, elemType semantic.Type, indexValue C.LLVMValueRef) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitRuntimeIndexedAddress(containerPtr llvmIRValueRef, containerType semantic.Type, elemType semantic.Type, indexValue llvmIRValueRef) (llvmIRValueRef, semantic.Type, error) {
 	containerLLVMType, err := s.g.lowerType(containerType)
 	if err != nil {
 		return nil, nil, err
@@ -328,7 +307,7 @@ func (s *functionState) emitRuntimeIndexedAddress(containerPtr C.LLVMValueRef, c
 // is guaranteed: the analyzer proved it, the constant index is statically in range, or a trapping
 // guard was just emitted and dominates the insertion point. Only then may the element GEP carry
 // `inbounds`; an access with no guarantee (no countable bound) must stay a plain GEP.
-func (s *functionState) emitDebugIndexBoundsGuard(expr *ast.IndexExpr, containerPtr C.LLVMValueRef, containerType semantic.Type, indexValue C.LLVMValueRef) (guaranteed bool, err error) {
+func (s *functionState) emitDebugIndexBoundsGuard(expr *ast.IndexExpr, containerPtr llvmIRValueRef, containerType semantic.Type, indexValue llvmIRValueRef) (guaranteed bool, err error) {
 	if s == nil || s.g == nil {
 		return false, nil
 	}
@@ -344,7 +323,7 @@ func (s *functionState) emitDebugIndexBoundsGuard(expr *ast.IndexExpr, container
 	if expr != nil && s.mergedIndexGuarded[expr] {
 		return true, nil
 	}
-	var countValue C.LLVMValueRef
+	var countValue llvmIRValueRef
 	switch t := containerType.(type) {
 	case *semantic.DArrayType, *semantic.ViewType:
 		cv, err := s.emitContainerCountValue(containerPtr, containerType, "wd.count")
@@ -364,7 +343,7 @@ func (s *functionState) emitDebugIndexBoundsGuard(expr *ast.IndexExpr, container
 		if err != nil {
 			return false, err
 		}
-		countValue = C.LLVMConstInt(usizeLLVM, C.ulonglong(t.ConstSize), 0)
+		countValue = llvmConstInt(usizeLLVM, llvmIRUnsignedLongLong(t.ConstSize), 0)
 	default:
 		return false, nil
 	}
@@ -373,18 +352,18 @@ func (s *functionState) emitDebugIndexBoundsGuard(expr *ast.IndexExpr, container
 	// no verification value (a constant index has no runtime variability to catch) and splits the
 	// basic block, which defeats per-block read CSE at repeated indexed accesses (e.g.
 	// `a[0].f + a[0].f`). Elide it for the provably-in-bounds constant case.
-	if C.elisacoreConstIndexInBounds(indexValue, countValue) != 0 {
+	if llvmConstIndexInBounds(indexValue, countValue) != 0 {
 		return true, nil
 	}
-	guardedFrom := C.LLVMGetInsertBlock(s.builder)
-	inBounds := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), indexValue, countValue, cStringFree("wd.in_bounds"))
-	okBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("wd.ok"))
-	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("wd.fail"))
-	C.LLVMBuildCondBr(s.builder, inBounds, okBB, failBB)
+	guardedFrom := llvmGetInsertBlock(s.builder)
+	inBounds := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntULT), indexValue, countValue, cStringFree("wd.in_bounds"))
+	okBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("wd.ok"))
+	failBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("wd.fail"))
+	llvmBuildCondBr(s.builder, inBounds, okBB, failBB)
 	// wd.ok is a straight-line continuation of the guarded block (wd.fail always traps), so record it
 	// for read-cache block canonicalization (see straightLineBlockParent).
 	s.recordStraightLineBlock(okBB, guardedFrom)
-	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+	llvmPositionBuilderAtEnd(s.builder, failBB)
 	// When -ftrace is also on, record the offending index and the container count into
 	// the trace ring just before trapping, so the fault dump shows the exact values
 	// (e.g. `oob.index = 4294967295`, `oob.count = 1712`) at the right site.
@@ -397,23 +376,23 @@ func (s *functionState) emitDebugIndexBoundsGuard(expr *ast.IndexExpr, container
 	if err := s.emitTrapUnreachable("wd.trap"); err != nil {
 		return false, err
 	}
-	C.LLVMPositionBuilderAtEnd(s.builder, okBB)
+	llvmPositionBuilderAtEnd(s.builder, okBB)
 	return true, nil
 }
-func (s *functionState) emitRuntimePointerIndexedAddress(containerPtr C.LLVMValueRef, lowerContainer func() (C.LLVMTypeRef, error), elemType semantic.Type, indexValue C.LLVMValueRef) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitRuntimePointerIndexedAddress(containerPtr llvmIRValueRef, lowerContainer func() (llvmIRTypeRef, error), elemType semantic.Type, indexValue llvmIRValueRef) (llvmIRValueRef, semantic.Type, error) {
 	containerLLVMType, err := lowerContainer()
 	if err != nil {
 		return nil, nil, err
 	}
 	return s.emitRuntimePointerIndexedAddressWithType(containerPtr, containerLLVMType, elemType, indexValue)
 }
-func (s *functionState) emitRuntimePointerIndexedAddressWithType(containerPtr C.LLVMValueRef, containerLLVMType C.LLVMTypeRef, elemType semantic.Type, indexValue C.LLVMValueRef) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitRuntimePointerIndexedAddressWithType(containerPtr llvmIRValueRef, containerLLVMType llvmIRTypeRef, elemType semantic.Type, indexValue llvmIRValueRef) (llvmIRValueRef, semantic.Type, error) {
 	// docs/84 Increment 3b: consume the staged per-param disjoint scope exactly once and
 	// clear it, so a later non-index caller of this function (iter loops, node tables) can
 	// never pick up a stale scope from a previous indexing site.
 	disjointScope := s.pendingDisjointScope
 	s.pendingDisjointScope = nil
-	dataFieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, containerPtr, 0, cStringFree("idx.data.ptr"))
+	dataFieldPtr := llvmBuildStructGEP2(s.builder, containerLLVMType, containerPtr, 0, cStringFree("idx.data.ptr"))
 	dataPtr, err := s.loadValue(dataFieldPtr, &semantic.RefType{Elem: elemType, State: semantic.RefStateNullable, Storage: semantic.RefStorageAny}, "idx.data")
 	if err != nil {
 		return nil, nil, err
@@ -422,8 +401,8 @@ func (s *functionState) emitRuntimePointerIndexedAddressWithType(containerPtr C.
 	if err != nil {
 		return nil, nil, err
 	}
-	indices := []C.LLVMValueRef{indexValue}
-	ptr := C.LLVMBuildGEP2(s.builder, elemLLVMType, dataPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("idx.ptr"))
+	indices := []llvmIRValueRef{indexValue}
+	ptr := llvmBuildGEP2(s.builder, elemLLVMType, dataPtr, llvmValueSlicePtr(indices), llvmIRUnsigned(len(indices)), cStringFree("idx.ptr"))
 	// The data-pointer load reads header memory; every "elt"-tagged access is a scalar leaf
 	// that can never be header memory, so the hdr tag is sound for any element type.
 	s.tagDarrayHeaderLoad(dataPtr)
@@ -443,7 +422,7 @@ func (s *functionState) emitRuntimePointerIndexedAddressWithType(containerPtr C.
 		// both the base-pointer-hoist and cross-param NoAlias claims.
 		if disjointScope != nil {
 			if s.disjointElementPtrs == nil {
-				s.disjointElementPtrs = map[C.LLVMValueRef]*disjointParamScope{}
+				s.disjointElementPtrs = map[llvmIRValueRef]*disjointParamScope{}
 			}
 			s.disjointElementPtrs[ptr] = disjointScope
 		}

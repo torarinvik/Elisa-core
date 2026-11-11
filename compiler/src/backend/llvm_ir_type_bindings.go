@@ -2,7 +2,32 @@
 
 package backend
 
-// #include <llvm-c/Core.h>
+/*
+#include <llvm-c/Core.h>
+
+static int elisacoreConstIntGetZExtValue(LLVMValueRef Value, unsigned long long* Out) {
+	if (LLVMIsAConstantInt(Value) == NULL) {
+		return 0;
+	}
+	*Out = LLVMConstIntGetZExtValue(Value);
+	return 1;
+}
+
+// elisacoreConstIndexInBounds reports whether both the index and the count are
+// compile-time constant integers and index < count. When true the index bounds
+// guard is statically satisfied (the comparison would fold to `i1 true`), so emitting
+// a runtime branch is pure overhead and — by splitting the basic block — defeats
+// per-block read CSE at the indexed site. Returns 0 if either operand is non-constant.
+static int elisacoreConstIndexInBounds(LLVMValueRef index, LLVMValueRef count) {
+	if (index == NULL || count == NULL) {
+		return 0;
+	}
+	if (LLVMIsAConstantInt(index) == NULL || LLVMIsAConstantInt(count) == NULL) {
+		return 0;
+	}
+	return LLVMConstIntGetZExtValue(index) < LLVMConstIntGetZExtValue(count) ? 1 : 0;
+}
+*/
 import "C"
 
 type llvmIRModuleRef = C.LLVMModuleRef
@@ -196,4 +221,22 @@ func llvmConstIntToPtr(value llvmIRValueRef, typ llvmIRTypeRef) llvmIRValueRef {
 
 func llvmConstPtrToInt(value llvmIRValueRef, typ llvmIRTypeRef) llvmIRValueRef {
 	return C.LLVMConstPtrToInt(value, typ)
+}
+
+const llvmStructTypeKind = C.LLVMStructTypeKind
+
+func llvmCountStructElementTypes(typ llvmIRTypeRef) llvmIRUnsigned {
+	return C.LLVMCountStructElementTypes(typ)
+}
+
+func llvmIsPackedStruct(typ llvmIRTypeRef) llvmIRBool {
+	return C.LLVMIsPackedStruct(typ)
+}
+
+func llvmTryConstIntGetZExtValue(value llvmIRValueRef, result *llvmIRUnsignedLongLong) C.int {
+	return C.elisacoreConstIntGetZExtValue(value, result)
+}
+
+func llvmConstIndexInBounds(index, count llvmIRValueRef) C.int {
+	return C.elisacoreConstIndexInBounds(index, count)
 }

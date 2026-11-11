@@ -2,12 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -16,22 +10,22 @@ import (
 	"strings"
 )
 
-func (s *functionState) emitNamedStateIsTest(leftExpr ast.Expr, base *semantic.StructType, cases []string) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitNamedStateIsTest(leftExpr ast.Expr, base *semantic.StructType, cases []string) (llvmIRValueRef, semantic.Type, error) {
 	if base == nil {
 		return nil, nil, fmt.Errorf("missing named-state struct metadata")
 	}
 	if len(cases) == 0 {
-		return C.LLVMConstInt(C.LLVMInt1TypeInContext(s.g.context), 0, 0), s.g.namedType("bool"), nil
+		return llvmConstInt(llvmInt1TypeInContext(s.g.context), 0, 0), s.g.namedType("bool"), nil
 	}
 	if len(cases) == len(base.NamedStateCases) {
-		return C.LLVMConstInt(C.LLVMInt1TypeInContext(s.g.context), 1, 0), s.g.namedType("bool"), nil
+		return llvmConstInt(llvmInt1TypeInContext(s.g.context), 1, 0), s.g.namedType("bool"), nil
 	}
 	selfType := s.exprType(leftExpr)
 	selfValue, _, err := s.emitExpr(leftExpr, selfType)
 	if err != nil {
 		return nil, nil, err
 	}
-	var combined C.LLVMValueRef
+	var combined llvmIRValueRef
 	for i, stateName := range cases {
 		pred, err := s.emitDerivedStatePredicate(base, stateName, selfValue, selfType)
 		if err != nil {
@@ -41,11 +35,11 @@ func (s *functionState) emitNamedStateIsTest(leftExpr ast.Expr, base *semantic.S
 			combined = pred
 			continue
 		}
-		combined = C.LLVMBuildOr(s.builder, combined, pred, cStringFree("isstate.or"))
+		combined = llvmBuildOr(s.builder, combined, pred, cStringFree("isstate.or"))
 	}
 	return combined, s.g.namedType("bool"), nil
 }
-func (s *functionState) emitDerivedStatePredicate(base *semantic.StructType, stateName string, selfValue C.LLVMValueRef, selfType semantic.Type) (C.LLVMValueRef, error) {
+func (s *functionState) emitDerivedStatePredicate(base *semantic.StructType, stateName string, selfValue llvmIRValueRef, selfType semantic.Type) (llvmIRValueRef, error) {
 	if base == nil || base.DerivedStateMap == nil {
 		return nil, fmt.Errorf("struct %q is missing derived state metadata", base.Name)
 	}
@@ -62,7 +56,7 @@ func (s *functionState) emitDerivedStatePredicate(base *semantic.StructType, sta
 	}
 	return value, nil
 }
-func (s *functionState) emitDerivedStateExpr(expr ast.Expr, selfValue C.LLVMValueRef, selfType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitDerivedStateExpr(expr ast.Expr, selfValue llvmIRValueRef, selfType semantic.Type) (llvmIRValueRef, semantic.Type, error) {
 	if path, ok := derivedStateSelfFieldPath(expr); ok {
 		value, fieldType, err := s.emitDerivedStateSelfPath(selfValue, selfType, path)
 		return value, fieldType, err
@@ -85,14 +79,14 @@ func (s *functionState) emitDerivedStateExpr(expr ast.Expr, selfValue C.LLVMValu
 		}
 		switch n.Op {
 		case lexer.TOKEN_NOT:
-			return C.LLVMBuildNot(s.builder, operand, cStringFree("isstate.not")), s.g.namedType("bool"), nil
+			return llvmBuildNot(s.builder, operand, cStringFree("isstate.not")), s.g.namedType("bool"), nil
 		case lexer.TOKEN_MINUS:
 			if isFloatType(operandType) {
-				return C.LLVMBuildFNeg(s.builder, operand, cStringFree("isstate.fneg")), operandType, nil
+				return llvmBuildFNeg(s.builder, operand, cStringFree("isstate.fneg")), operandType, nil
 			}
-			return C.LLVMBuildNeg(s.builder, operand, cStringFree("isstate.neg")), operandType, nil
+			return llvmBuildNeg(s.builder, operand, cStringFree("isstate.neg")), operandType, nil
 		case lexer.TOKEN_TILDE:
-			return C.LLVMBuildNot(s.builder, operand, cStringFree("isstate.bitnot")), operandType, nil
+			return llvmBuildNot(s.builder, operand, cStringFree("isstate.bitnot")), operandType, nil
 		default:
 			return nil, nil, fmt.Errorf("unsupported derived-state unary operator %s", lexer.TokenName(n.Op))
 		}
@@ -107,23 +101,23 @@ func (s *functionState) emitDerivedStateExpr(expr ast.Expr, selfValue C.LLVMValu
 		}
 		if n.Op == lexer.TOKEN_AND || n.Op == lexer.TOKEN_OR {
 			if n.Op == lexer.TOKEN_AND {
-				return C.LLVMBuildAnd(s.builder, leftValue, rightValue, cStringFree("isstate.and")), s.g.namedType("bool"), nil
+				return llvmBuildAnd(s.builder, leftValue, rightValue, cStringFree("isstate.and")), s.g.namedType("bool"), nil
 			}
-			return C.LLVMBuildOr(s.builder, leftValue, rightValue, cStringFree("isstate.or")), s.g.namedType("bool"), nil
+			return llvmBuildOr(s.builder, leftValue, rightValue, cStringFree("isstate.or")), s.g.namedType("bool"), nil
 		}
 		if (n.Op == lexer.TOKEN_EQEQ || n.Op == lexer.TOKEN_BANGEQ) && (isPointerLikeType(leftType) || semantic.IsNullType(leftType)) && (isPointerLikeType(rightType) || semantic.IsNullType(rightType)) {
-			pred := C.LLVMIntPredicate(C.LLVMIntEQ)
+			pred := llvmIRIntPredicate(llvmIntEQ)
 			if n.Op == lexer.TOKEN_BANGEQ {
-				pred = C.LLVMIntPredicate(C.LLVMIntNE)
+				pred = llvmIRIntPredicate(llvmIntNE)
 			}
-			return C.LLVMBuildICmp(s.builder, pred, leftValue, rightValue, cStringFree("isstate.ptrcmp")), s.g.namedType("bool"), nil
+			return llvmBuildICmp(s.builder, pred, leftValue, rightValue, cStringFree("isstate.ptrcmp")), s.g.namedType("bool"), nil
 		}
 		if semantic.IsBoolType(leftType) && semantic.IsBoolType(rightType) && (n.Op == lexer.TOKEN_EQEQ || n.Op == lexer.TOKEN_BANGEQ) {
-			pred := C.LLVMIntPredicate(C.LLVMIntEQ)
+			pred := llvmIRIntPredicate(llvmIntEQ)
 			if n.Op == lexer.TOKEN_BANGEQ {
-				pred = C.LLVMIntPredicate(C.LLVMIntNE)
+				pred = llvmIRIntPredicate(llvmIntNE)
 			}
-			return C.LLVMBuildICmp(s.builder, pred, leftValue, rightValue, cStringFree("isstate.boolcmp")), s.g.namedType("bool"), nil
+			return llvmBuildICmp(s.builder, pred, leftValue, rightValue, cStringFree("isstate.boolcmp")), s.g.namedType("bool"), nil
 		}
 		operandType := s.binaryOperandType(n.Op, leftType, rightType)
 		coercedLeft, err := s.coerceValue(leftValue, leftType, operandType)
@@ -141,58 +135,58 @@ func (s *functionState) emitDerivedStateExpr(expr ast.Expr, selfValue C.LLVMValu
 		switch n.Op {
 		case lexer.TOKEN_PLUS:
 			if isFloatType(operandType) {
-				return C.LLVMBuildFAdd(s.builder, coercedLeft, coercedRight, cStringFree("isstate.add")), resultType, nil
+				return llvmBuildFAdd(s.builder, coercedLeft, coercedRight, cStringFree("isstate.add")), resultType, nil
 			}
-			return C.LLVMBuildAdd(s.builder, coercedLeft, coercedRight, cStringFree("isstate.add")), resultType, nil
+			return llvmBuildAdd(s.builder, coercedLeft, coercedRight, cStringFree("isstate.add")), resultType, nil
 		case lexer.TOKEN_MINUS:
 			if isFloatType(operandType) {
-				return C.LLVMBuildFSub(s.builder, coercedLeft, coercedRight, cStringFree("isstate.sub")), resultType, nil
+				return llvmBuildFSub(s.builder, coercedLeft, coercedRight, cStringFree("isstate.sub")), resultType, nil
 			}
-			return C.LLVMBuildSub(s.builder, coercedLeft, coercedRight, cStringFree("isstate.sub")), resultType, nil
+			return llvmBuildSub(s.builder, coercedLeft, coercedRight, cStringFree("isstate.sub")), resultType, nil
 		case lexer.TOKEN_STAR:
 			if isFloatType(operandType) {
-				return C.LLVMBuildFMul(s.builder, coercedLeft, coercedRight, cStringFree("isstate.mul")), resultType, nil
+				return llvmBuildFMul(s.builder, coercedLeft, coercedRight, cStringFree("isstate.mul")), resultType, nil
 			}
-			return C.LLVMBuildMul(s.builder, coercedLeft, coercedRight, cStringFree("isstate.mul")), resultType, nil
+			return llvmBuildMul(s.builder, coercedLeft, coercedRight, cStringFree("isstate.mul")), resultType, nil
 		case lexer.TOKEN_SLASH:
 			if isFloatType(operandType) {
-				return C.LLVMBuildFDiv(s.builder, coercedLeft, coercedRight, cStringFree("isstate.div")), resultType, nil
+				return llvmBuildFDiv(s.builder, coercedLeft, coercedRight, cStringFree("isstate.div")), resultType, nil
 			}
 			if isSignedIntegerType(operandType) {
-				return C.LLVMBuildSDiv(s.builder, coercedLeft, coercedRight, cStringFree("isstate.div")), resultType, nil
+				return llvmBuildSDiv(s.builder, coercedLeft, coercedRight, cStringFree("isstate.div")), resultType, nil
 			}
-			return C.LLVMBuildUDiv(s.builder, coercedLeft, coercedRight, cStringFree("isstate.div")), resultType, nil
+			return llvmBuildUDiv(s.builder, coercedLeft, coercedRight, cStringFree("isstate.div")), resultType, nil
 		case lexer.TOKEN_PERCENT:
 			if isSignedIntegerType(operandType) {
-				return C.LLVMBuildSRem(s.builder, coercedLeft, coercedRight, cStringFree("isstate.rem")), resultType, nil
+				return llvmBuildSRem(s.builder, coercedLeft, coercedRight, cStringFree("isstate.rem")), resultType, nil
 			}
-			return C.LLVMBuildURem(s.builder, coercedLeft, coercedRight, cStringFree("isstate.rem")), resultType, nil
+			return llvmBuildURem(s.builder, coercedLeft, coercedRight, cStringFree("isstate.rem")), resultType, nil
 		case lexer.TOKEN_PIPE:
-			return C.LLVMBuildOr(s.builder, coercedLeft, coercedRight, cStringFree("isstate.bitor")), resultType, nil
+			return llvmBuildOr(s.builder, coercedLeft, coercedRight, cStringFree("isstate.bitor")), resultType, nil
 		case lexer.TOKEN_CARET:
-			return C.LLVMBuildXor(s.builder, coercedLeft, coercedRight, cStringFree("isstate.bitxor")), resultType, nil
+			return llvmBuildXor(s.builder, coercedLeft, coercedRight, cStringFree("isstate.bitxor")), resultType, nil
 		case lexer.TOKEN_AMPERSAND:
-			return C.LLVMBuildAnd(s.builder, coercedLeft, coercedRight, cStringFree("isstate.bitand")), resultType, nil
+			return llvmBuildAnd(s.builder, coercedLeft, coercedRight, cStringFree("isstate.bitand")), resultType, nil
 		case lexer.TOKEN_LSHIFT:
-			return C.LLVMBuildShl(s.builder, coercedLeft, coercedRight, cStringFree("isstate.shl")), resultType, nil
+			return llvmBuildShl(s.builder, coercedLeft, coercedRight, cStringFree("isstate.shl")), resultType, nil
 		case lexer.TOKEN_RSHIFT:
 			if isSignedIntegerType(operandType) {
-				return C.LLVMBuildAShr(s.builder, coercedLeft, coercedRight, cStringFree("isstate.shr")), resultType, nil
+				return llvmBuildAShr(s.builder, coercedLeft, coercedRight, cStringFree("isstate.shr")), resultType, nil
 			}
-			return C.LLVMBuildLShr(s.builder, coercedLeft, coercedRight, cStringFree("isstate.shr")), resultType, nil
+			return llvmBuildLShr(s.builder, coercedLeft, coercedRight, cStringFree("isstate.shr")), resultType, nil
 		case lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ, lexer.TOKEN_LT, lexer.TOKEN_GT, lexer.TOKEN_LTEQ, lexer.TOKEN_GTEQ:
 			if isFloatType(operandType) {
 				pred, err := llvmFloatPredicate(n.Op)
 				if err != nil {
 					return nil, nil, err
 				}
-				return C.LLVMBuildFCmp(s.builder, pred, coercedLeft, coercedRight, cStringFree("isstate.fcmp")), s.g.namedType("bool"), nil
+				return llvmBuildFCmp(s.builder, pred, coercedLeft, coercedRight, cStringFree("isstate.fcmp")), s.g.namedType("bool"), nil
 			}
 			pred, err := llvmIntPredicate(n.Op, operandType)
 			if err != nil {
 				return nil, nil, err
 			}
-			return C.LLVMBuildICmp(s.builder, pred, coercedLeft, coercedRight, cStringFree("isstate.icmp")), s.g.namedType("bool"), nil
+			return llvmBuildICmp(s.builder, pred, coercedLeft, coercedRight, cStringFree("isstate.icmp")), s.g.namedType("bool"), nil
 		default:
 			return nil, nil, fmt.Errorf("unsupported derived-state binary operator %s", lexer.TokenName(n.Op))
 		}
@@ -200,7 +194,7 @@ func (s *functionState) emitDerivedStateExpr(expr ast.Expr, selfValue C.LLVMValu
 		return nil, nil, fmt.Errorf("unsupported derived-state expression %T", expr)
 	}
 }
-func (s *functionState) emitDerivedStateSelfPath(selfValue C.LLVMValueRef, selfType semantic.Type, path []string) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitDerivedStateSelfPath(selfValue llvmIRValueRef, selfType semantic.Type, path []string) (llvmIRValueRef, semantic.Type, error) {
 	// A named-state test is commonly applied to a borrowed value (`value is
 	// App[Running]`). The semantic type retains that reference transport while
 	// the derived predicate describes fields of the referenced struct. Load the
@@ -230,7 +224,7 @@ func (s *functionState) emitDerivedStateSelfPath(selfValue C.LLVMValueRef, selfT
 		if pointerLike {
 			return nil, nil, fmt.Errorf("derived-state field access over pointer-like self path is not supported")
 		}
-		currentValue = C.LLVMBuildExtractValue(s.builder, currentValue, C.unsigned(index), cStringFree("isstate.field."+field))
+		currentValue = llvmBuildExtractValue(s.builder, currentValue, llvmIRUnsigned(index), cStringFree("isstate.field."+field))
 		currentType = fieldType
 	}
 	return currentValue, currentType, nil
@@ -284,12 +278,12 @@ func namedStatePayloadFamily(typ semantic.Type) *semantic.StructType {
 
 // Only checked semantic state changes reach this helper. No runtime tag or
 // reinterpret cast is introduced: each field must keep its exact LLVM type.
-func (s *functionState) emitNamedStatePayloadRetype(value C.LLVMValueRef, source, target semantic.Type, label string) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitNamedStatePayloadRetype(value llvmIRValueRef, source, target semantic.Type, label string) (llvmIRValueRef, semantic.Type, error) {
 	targetLLVM, err := s.g.lowerType(target)
 	if err != nil {
 		return nil, nil, err
 	}
-	sourceLLVM := C.LLVMTypeOf(value)
+	sourceLLVM := llvmTypeOf(value)
 	if sourceLLVM == targetLLVM {
 		return value, target, nil
 	}
@@ -297,22 +291,22 @@ func (s *functionState) emitNamedStatePayloadRetype(value C.LLVMValueRef, source
 	if sourceFamily == nil || targetFamily == nil || sourceFamily.Name != targetFamily.Name {
 		return nil, nil, fmt.Errorf("%s changes the named-state family", label)
 	}
-	if C.LLVMGetTypeKind(sourceLLVM) != C.LLVMStructTypeKind || C.LLVMGetTypeKind(targetLLVM) != C.LLVMStructTypeKind {
+	if llvmGetTypeKind(sourceLLVM) != llvmStructTypeKind || llvmGetTypeKind(targetLLVM) != llvmStructTypeKind {
 		return nil, nil, fmt.Errorf("%s requires direct aggregate lowering", label)
 	}
-	count := C.LLVMCountStructElementTypes(sourceLLVM)
-	if count != C.LLVMCountStructElementTypes(targetLLVM) || C.LLVMIsPackedStruct(sourceLLVM) != C.LLVMIsPackedStruct(targetLLVM) {
+	count := llvmCountStructElementTypes(sourceLLVM)
+	if count != llvmCountStructElementTypes(targetLLVM) || llvmIsPackedStruct(sourceLLVM) != llvmIsPackedStruct(targetLLVM) {
 		return nil, nil, fmt.Errorf("%s changes payload layout", label)
 	}
-	for i := C.unsigned(0); i < count; i++ {
-		if C.LLVMStructGetTypeAtIndex(sourceLLVM, i) != C.LLVMStructGetTypeAtIndex(targetLLVM, i) {
+	for i := llvmIRUnsigned(0); i < count; i++ {
+		if llvmStructGetTypeAtIndex(sourceLLVM, i) != llvmStructGetTypeAtIndex(targetLLVM, i) {
 			return nil, nil, fmt.Errorf("%s changes payload field %d", label, i)
 		}
 	}
-	result := C.LLVMGetUndef(targetLLVM)
-	for i := C.unsigned(0); i < count; i++ {
-		field := C.LLVMBuildExtractValue(s.builder, value, i, cStringFree(label+".payload"))
-		result = C.LLVMBuildInsertValue(s.builder, result, field, i, cStringFree(label+".result"))
+	result := llvmGetUndef(targetLLVM)
+	for i := llvmIRUnsigned(0); i < count; i++ {
+		field := llvmBuildExtractValue(s.builder, value, i, cStringFree(label+".payload"))
+		result = llvmBuildInsertValue(s.builder, result, field, i, cStringFree(label+".result"))
 	}
 	return result, target, nil
 }

@@ -15,6 +15,28 @@ void elisa_coreSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigne
 #cgo nocallback LLVMAddIncoming
 #cgo noescape LLVMBuildGEP2
 #cgo nocallback LLVMBuildGEP2
+
+// elisacoreValueIsTriviallyValidPtr reports whether an LLVM value used as a load
+// address is provably a valid (non-null, non-near-null) pointer at compile time, so
+// the null-deref guard can skip it: stack slots (alloca), module globals/functions,
+// and constants (e.g. a constant GEP off a global) all have addresses far from the
+// near-null zone. Pointers derived at runtime (GEP off a loaded base, inttoptr, call
+// results) return 0 and get guarded.
+static int elisacoreValueIsTriviallyValidPtr(LLVMValueRef v) {
+	if (v == NULL) {
+		return 1;
+	}
+	if (LLVMIsAAllocaInst(v) != NULL) {
+		return 1;
+	}
+	if (LLVMIsAGlobalValue(v) != NULL) {
+		return 1;
+	}
+	if (LLVMIsConstant(v)) {
+		return 1;
+	}
+	return 0;
+}
 */
 import "C"
 
@@ -315,4 +337,48 @@ func llvmIsAConstantInt(value llvmIRValueRef) llvmIRValueRef {
 
 func llvmIsConditional(branch llvmIRValueRef) llvmIRBool {
 	return C.LLVMIsConditional(branch)
+}
+
+func llvmBuildAShr(builder llvmIRBuilderRef, left, right llvmIRValueRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildAShr(builder, left, right, name)
+}
+
+func llvmBuildFAdd(builder llvmIRBuilderRef, left, right llvmIRValueRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildFAdd(builder, left, right, name)
+}
+
+func llvmBuildFDiv(builder llvmIRBuilderRef, left, right llvmIRValueRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildFDiv(builder, left, right, name)
+}
+
+func llvmBuildFMul(builder llvmIRBuilderRef, left, right llvmIRValueRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildFMul(builder, left, right, name)
+}
+
+func llvmBuildFSub(builder llvmIRBuilderRef, left, right llvmIRValueRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildFSub(builder, left, right, name)
+}
+
+func llvmBuildSDiv(builder llvmIRBuilderRef, left, right llvmIRValueRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildSDiv(builder, left, right, name)
+}
+
+func llvmBuildSRem(builder llvmIRBuilderRef, left, right llvmIRValueRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildSRem(builder, left, right, name)
+}
+
+func llvmGetOperand(value llvmIRValueRef, index llvmIRUnsigned) llvmIRValueRef {
+	return C.LLVMGetOperand(value, index)
+}
+
+func llvmIsALoadInst(value llvmIRValueRef) llvmIRValueRef {
+	return C.LLVMIsALoadInst(value)
+}
+
+func llvmSetIsInBounds(value llvmIRValueRef, inBounds llvmIRBool) {
+	C.LLVMSetIsInBounds(value, inBounds)
+}
+
+func llvmValueIsTriviallyValidPtr(value llvmIRValueRef) C.int {
+	return C.elisacoreValueIsTriviallyValidPtr(value)
 }

@@ -2,12 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -59,14 +53,14 @@ func (s *functionState) listLiteralTargetDArrayType(expr *ast.ListLitExpr, expec
 	}
 	return actualDArray, nil
 }
-func (s *functionState) emitStackTempZeroed(t semantic.Type, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitStackTempZeroed(t semantic.Type, name string) (llvmIRValueRef, error) {
 	zero, err := s.zeroValue(t)
 	if err != nil {
 		return nil, err
 	}
 	return s.emitStackTempValue(zero, t, name)
 }
-func (s *functionState) emitStackTempValue(value C.LLVMValueRef, t semantic.Type, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitStackTempValue(value llvmIRValueRef, t semantic.Type, name string) (llvmIRValueRef, error) {
 	alloca, err := s.createTempStorage(name, t)
 	if err != nil {
 		return nil, err
@@ -80,22 +74,22 @@ func (s *functionState) emitStackTempValue(value C.LLVMValueRef, t semantic.Type
 	}
 	return alloca, nil
 }
-func (s *functionState) emitBoolLiteral(expr *ast.BoolLit) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitBoolLiteral(expr *ast.BoolLit) (llvmIRValueRef, semantic.Type, error) {
 	llvmType, err := s.g.lowerBuiltin("bool")
 	if err != nil {
 		return nil, nil, err
 	}
-	var raw C.ulonglong
+	var raw llvmIRUnsignedLongLong
 	if expr.Value {
 		raw = 1
 	}
-	return C.LLVMConstInt(llvmType, raw, 0), s.g.namedType("bool"), nil
+	return llvmConstInt(llvmType, raw, 0), s.g.namedType("bool"), nil
 }
-func (s *functionState) emitNullLiteral() (C.LLVMValueRef, semantic.Type, error) {
-	ptrType := C.LLVMPointerTypeInContext(s.g.context, 0)
-	return C.LLVMConstNull(ptrType), &semantic.NullType{}, nil
+func (s *functionState) emitNullLiteral() (llvmIRValueRef, semantic.Type, error) {
+	ptrType := llvmPointerTypeInContext(s.g.context, 0)
+	return llvmConstNull(ptrType), &semantic.NullType{}, nil
 }
-func (s *functionState) emitBinaryExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitBinaryExpr(expr *ast.BinaryExpr) (llvmIRValueRef, semantic.Type, error) {
 	if expr.LoweredCall != nil {
 		return s.emitExpr(expr.LoweredCall, nil)
 	}
@@ -174,63 +168,63 @@ func (s *functionState) emitBinaryExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, se
 	switch expr.Op {
 	case lexer.TOKEN_PLUS:
 		if isFloatType(operandType) {
-			return s.fpContract(C.LLVMBuildFAdd(s.builder, left, right, cStringFree("addtmp"))), resultType, nil
+			return s.fpContract(llvmBuildFAdd(s.builder, left, right, cStringFree("addtmp"))), resultType, nil
 		}
-		return C.LLVMBuildAdd(s.builder, left, right, cStringFree("addtmp")), resultType, nil
+		return llvmBuildAdd(s.builder, left, right, cStringFree("addtmp")), resultType, nil
 	case lexer.TOKEN_MINUS:
 		if isFloatType(operandType) {
-			return s.fpContract(C.LLVMBuildFSub(s.builder, left, right, cStringFree("subtmp"))), resultType, nil
+			return s.fpContract(llvmBuildFSub(s.builder, left, right, cStringFree("subtmp"))), resultType, nil
 		}
-		return C.LLVMBuildSub(s.builder, left, right, cStringFree("subtmp")), resultType, nil
+		return llvmBuildSub(s.builder, left, right, cStringFree("subtmp")), resultType, nil
 	case lexer.TOKEN_STAR:
 		if isFloatType(operandType) {
-			return s.fpContract(C.LLVMBuildFMul(s.builder, left, right, cStringFree("multmp"))), resultType, nil
+			return s.fpContract(llvmBuildFMul(s.builder, left, right, cStringFree("multmp"))), resultType, nil
 		}
-		return C.LLVMBuildMul(s.builder, left, right, cStringFree("multmp")), resultType, nil
+		return llvmBuildMul(s.builder, left, right, cStringFree("multmp")), resultType, nil
 	case lexer.TOKEN_SLASH:
 		if isFloatType(operandType) {
-			return s.fpContractReciprocal(C.LLVMBuildFDiv(s.builder, left, right, cStringFree("divtmp"))), resultType, nil
+			return s.fpContractReciprocal(llvmBuildFDiv(s.builder, left, right, cStringFree("divtmp"))), resultType, nil
 		}
 		if isSignedIntegerType(operandType) {
-			return C.LLVMBuildSDiv(s.builder, left, right, cStringFree("divtmp")), resultType, nil
+			return llvmBuildSDiv(s.builder, left, right, cStringFree("divtmp")), resultType, nil
 		}
-		return C.LLVMBuildUDiv(s.builder, left, right, cStringFree("divtmp")), resultType, nil
+		return llvmBuildUDiv(s.builder, left, right, cStringFree("divtmp")), resultType, nil
 	case lexer.TOKEN_PERCENT:
 		if isSignedIntegerType(operandType) {
-			return C.LLVMBuildSRem(s.builder, left, right, cStringFree("remtmp")), resultType, nil
+			return llvmBuildSRem(s.builder, left, right, cStringFree("remtmp")), resultType, nil
 		}
-		return C.LLVMBuildURem(s.builder, left, right, cStringFree("remtmp")), resultType, nil
+		return llvmBuildURem(s.builder, left, right, cStringFree("remtmp")), resultType, nil
 	case lexer.TOKEN_PIPE:
-		return C.LLVMBuildOr(s.builder, left, right, cStringFree("ortmp")), resultType, nil
+		return llvmBuildOr(s.builder, left, right, cStringFree("ortmp")), resultType, nil
 	case lexer.TOKEN_CARET:
-		return C.LLVMBuildXor(s.builder, left, right, cStringFree("xortmp")), resultType, nil
+		return llvmBuildXor(s.builder, left, right, cStringFree("xortmp")), resultType, nil
 	case lexer.TOKEN_AMPERSAND:
-		return C.LLVMBuildAnd(s.builder, left, right, cStringFree("andtmp")), resultType, nil
+		return llvmBuildAnd(s.builder, left, right, cStringFree("andtmp")), resultType, nil
 	case lexer.TOKEN_LSHIFT:
-		return C.LLVMBuildShl(s.builder, left, right, cStringFree("shltmp")), resultType, nil
+		return llvmBuildShl(s.builder, left, right, cStringFree("shltmp")), resultType, nil
 	case lexer.TOKEN_RSHIFT:
 		if isSignedIntegerType(operandType) {
-			return C.LLVMBuildAShr(s.builder, left, right, cStringFree("shrtmp")), resultType, nil
+			return llvmBuildAShr(s.builder, left, right, cStringFree("shrtmp")), resultType, nil
 		}
-		return C.LLVMBuildLShr(s.builder, left, right, cStringFree("shrtmp")), resultType, nil
+		return llvmBuildLShr(s.builder, left, right, cStringFree("shrtmp")), resultType, nil
 	case lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ, lexer.TOKEN_LT, lexer.TOKEN_GT, lexer.TOKEN_LTEQ, lexer.TOKEN_GTEQ:
 		if isFloatType(operandType) {
 			pred, err := llvmFloatPredicate(expr.Op)
 			if err != nil {
 				return nil, nil, err
 			}
-			return C.LLVMBuildFCmp(s.builder, pred, left, right, cStringFree("cmptmp")), resultType, nil
+			return llvmBuildFCmp(s.builder, pred, left, right, cStringFree("cmptmp")), resultType, nil
 		}
 		pred, err := llvmIntPredicate(expr.Op, operandType)
 		if err != nil {
 			return nil, nil, err
 		}
-		return C.LLVMBuildICmp(s.builder, pred, left, right, cStringFree("cmptmp")), resultType, nil
+		return llvmBuildICmp(s.builder, pred, left, right, cStringFree("cmptmp")), resultType, nil
 	default:
 		return nil, nil, fmt.Errorf("unsupported binary operator %s", lexer.TokenName(expr.Op))
 	}
 }
-func (s *functionState) emitMembershipExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitMembershipExpr(expr *ast.BinaryExpr) (llvmIRValueRef, semantic.Type, error) {
 	if setType, _, ok := builtinSetReceiverType(s.exprType(expr.Right)); ok && setType != nil {
 		setValue, setType, err := s.emitBuiltinSetReceiverValue(expr.Right, s.exprType(expr.Right))
 		if err != nil {
@@ -248,7 +242,7 @@ func (s *functionState) emitMembershipExpr(expr *ast.BinaryExpr) (C.LLVMValueRef
 		if err != nil {
 			return nil, nil, err
 		}
-		value := s.buildCall(llvmType, callee, []C.LLVMValueRef{setValue, leftValue}, "set.in")
+		value := s.buildCall(llvmType, callee, []llvmIRValueRef{setValue, leftValue}, "set.in")
 		return value, s.g.namedType("bool"), nil
 	}
 	list, ok := s.membershipCandidateList(expr.Right)
@@ -256,39 +250,39 @@ func (s *functionState) emitMembershipExpr(expr *ast.BinaryExpr) (C.LLVMValueRef
 		return nil, nil, fmt.Errorf("membership operator requires a list literal or tokenset on the right-hand side")
 	}
 	resultType := s.g.namedType("bool")
-	boolLLVMType := C.LLVMInt1TypeInContext(s.g.context)
+	boolLLVMType := llvmInt1TypeInContext(s.g.context)
 	if len(list.Elems) == 0 {
-		return C.LLVMConstInt(boolLLVMType, 0, 0), resultType, nil
+		return llvmConstInt(boolLLVMType, 0, 0), resultType, nil
 	}
 	leftType := s.exprType(expr.Left)
 	leftValue, _, err := s.emitExpr(expr.Left, leftType)
 	if err != nil {
 		return nil, nil, err
 	}
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("membership.merge"))
-	incomingValues := make([]C.LLVMValueRef, 0, len(list.Elems))
-	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, len(list.Elems))
+	mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("membership.merge"))
+	incomingValues := make([]llvmIRValueRef, 0, len(list.Elems))
+	incomingBlocks := make([]llvmIRBlockRef, 0, len(list.Elems))
 	for i, elem := range list.Elems {
-		currentBlock := C.LLVMGetInsertBlock(s.builder)
+		currentBlock := llvmGetInsertBlock(s.builder)
 		cmp, err := s.emitMembershipCompareValueAndExpr(leftValue, leftType, elem)
 		if err != nil {
 			return nil, nil, err
 		}
 		if i == len(list.Elems)-1 {
-			C.LLVMBuildBr(s.builder, mergeBB)
+			llvmBuildBr(s.builder, mergeBB)
 			incomingValues = append(incomingValues, cmp)
 			incomingBlocks = append(incomingBlocks, currentBlock)
 			break
 		}
-		nextBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(fmt.Sprintf("membership.next.%d", i)))
-		C.LLVMBuildCondBr(s.builder, cmp, mergeBB, nextBB)
-		incomingValues = append(incomingValues, C.LLVMConstInt(boolLLVMType, 1, 0))
+		nextBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(fmt.Sprintf("membership.next.%d", i)))
+		llvmBuildCondBr(s.builder, cmp, mergeBB, nextBB)
+		incomingValues = append(incomingValues, llvmConstInt(boolLLVMType, 1, 0))
 		incomingBlocks = append(incomingBlocks, currentBlock)
-		C.LLVMPositionBuilderAtEnd(s.builder, nextBB)
+		llvmPositionBuilderAtEnd(s.builder, nextBB)
 	}
-	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
-	phi := C.LLVMBuildPhi(s.builder, boolLLVMType, cStringFree("membership.result"))
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
+	llvmPositionBuilderAtEnd(s.builder, mergeBB)
+	phi := llvmBuildPhi(s.builder, boolLLVMType, cStringFree("membership.result"))
+	llvmAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), llvmIRUnsigned(len(incomingValues)))
 	return phi, resultType, nil
 }
 func (s *functionState) membershipCandidateList(expr ast.Expr) (*ast.ListLitExpr, bool) {
@@ -361,7 +355,7 @@ func (s *functionState) backendCharsetRef(name string) *ast.CharsetDecl {
 	ref, _ := sym.Node.(*ast.CharsetDecl)
 	return ref
 }
-func (s *functionState) emitMembershipCompareValueAndExpr(leftValue C.LLVMValueRef, leftType semantic.Type, rightExpr ast.Expr) (C.LLVMValueRef, error) {
+func (s *functionState) emitMembershipCompareValueAndExpr(leftValue llvmIRValueRef, leftType semantic.Type, rightExpr ast.Expr) (llvmIRValueRef, error) {
 	if rangeExpr, ok := rightExpr.(*ast.MembershipRangeExpr); ok {
 		return s.emitMembershipRangeCompareValueAndExpr(leftValue, leftType, rangeExpr)
 	}
@@ -390,12 +384,12 @@ func (s *functionState) emitMembershipCompareValueAndExpr(leftValue C.LLVMValueR
 		return cmp, err
 	}
 	if isFloatType(operandType) {
-		return C.LLVMBuildFCmp(s.builder, C.LLVMRealOEQ, coercedLeft, rightValue, cStringFree("membership.eq")), nil
+		return llvmBuildFCmp(s.builder, llvmRealOEQ, coercedLeft, rightValue, cStringFree("membership.eq")), nil
 	}
-	return C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), coercedLeft, rightValue, cStringFree("membership.eq")), nil
+	return llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntEQ), coercedLeft, rightValue, cStringFree("membership.eq")), nil
 }
 
-func (s *functionState) emitMembershipRangeCompareValueAndExpr(leftValue C.LLVMValueRef, leftType semantic.Type, rangeExpr *ast.MembershipRangeExpr) (C.LLVMValueRef, error) {
+func (s *functionState) emitMembershipRangeCompareValueAndExpr(leftValue llvmIRValueRef, leftType semantic.Type, rangeExpr *ast.MembershipRangeExpr) (llvmIRValueRef, error) {
 	if rangeExpr == nil {
 		return nil, fmt.Errorf("membership range expression is nil")
 	}
@@ -427,9 +421,9 @@ func (s *functionState) emitMembershipRangeCompareValueAndExpr(leftValue C.LLVMV
 	if err != nil {
 		return nil, err
 	}
-	lower := C.LLVMBuildICmp(s.builder, lowerPred, coercedLeft, startValue, cStringFree("membership.range.lower"))
-	upper := C.LLVMBuildICmp(s.builder, upperPred, coercedLeft, endValue, cStringFree("membership.range.upper"))
-	return C.LLVMBuildAnd(s.builder, lower, upper, cStringFree("membership.range")), nil
+	lower := llvmBuildICmp(s.builder, lowerPred, coercedLeft, startValue, cStringFree("membership.range.lower"))
+	upper := llvmBuildICmp(s.builder, upperPred, coercedLeft, endValue, cStringFree("membership.range.upper"))
+	return llvmBuildAnd(s.builder, lower, upper, cStringFree("membership.range")), nil
 }
 
 // fpAllowContract marks a floating-point instruction as contraction-allowed so the backend may fuse

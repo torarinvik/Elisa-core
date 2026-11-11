@@ -2,19 +2,6 @@
 
 package backend
 
-/*
-#include <llvm-c/Core.h>
-
-static int elisacoreConstIntGetZExtValue(LLVMValueRef Value, unsigned long long* Out) {
-	if (LLVMIsAConstantInt(Value) == NULL) {
-		return 0;
-	}
-	*Out = LLVMConstIntGetZExtValue(Value);
-	return 1;
-}
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -23,7 +10,7 @@ import (
 
 type packedStoreOps struct {
 	s          *functionState
-	storeValue C.LLVMValueRef
+	storeValue llvmIRValueRef
 	storeType  *semantic.PackedEnumStoreType
 }
 
@@ -88,20 +75,20 @@ func (ops *packedStoreOps) cachedRuntimeHelperType(name string, build func() *se
 	ops.s.g.runtimeHelperTypes[name] = helperType
 	return helperType
 }
-func (ops *packedStoreOps) stateValue(name string) (C.LLVMValueRef, error) {
+func (ops *packedStoreOps) stateValue(name string) (llvmIRValueRef, error) {
 	return ops.s.emitPackedStoreStateValueNamed(ops.storeValue, ops.storeType, name)
 }
-func (ops *packedStoreOps) arenaValue(name string) (C.LLVMValueRef, error) {
+func (ops *packedStoreOps) arenaValue(name string) (llvmIRValueRef, error) {
 	return ops.s.emitPackedStoreArenaValueNamed(ops.storeValue, ops.storeType, name)
 }
-func (ops *packedStoreOps) rowBytesValue(name string) (C.LLVMValueRef, error) {
+func (ops *packedStoreOps) rowBytesValue(name string) (llvmIRValueRef, error) {
 	return ops.s.emitPackedStoreRowBytesValueNamed(ops.storeValue, ops.storeType, name)
 }
-func (ops *packedStoreOps) currentBlock() C.LLVMBasicBlockRef {
+func (ops *packedStoreOps) currentBlock() llvmIRBlockRef {
 	if ops == nil || ops.s == nil || ops.s.builder == nil {
 		return nil
 	}
-	return C.LLVMGetInsertBlock(ops.s.builder)
+	return llvmGetInsertBlock(ops.s.builder)
 }
 func (ops *packedStoreOps) canCacheDenseHandleReads(enumType *semantic.EnumType) bool {
 	if ops == nil || ops.s == nil || ops.s.g == nil || enumType == nil || !enumType.Packed {
@@ -127,24 +114,24 @@ func (ops *packedStoreOps) canCacheDirectReadValues(enumType *semantic.EnumType)
 	}
 	return ops.currentBlock() != nil
 }
-func (ops *packedStoreOps) canonicalizeDenseHandleKey(handleValue C.LLVMValueRef) C.LLVMValueRef {
+func (ops *packedStoreOps) canonicalizeDenseHandleKey(handleValue llvmIRValueRef) llvmIRValueRef {
 	if handleValue == nil {
 		return nil
 	}
-	if C.LLVMIsALoadInst(handleValue) != nil {
-		if sourcePtr := C.LLVMGetOperand(handleValue, 0); sourcePtr != nil {
+	if llvmIsALoadInst(handleValue) != nil {
+		if sourcePtr := llvmGetOperand(handleValue, 0); sourcePtr != nil {
 			return sourcePtr
 		}
 	}
 	return handleValue
 }
-func (ops *packedStoreOps) denseReadCacheIdentity(origin packedReadOriginKey, handleValue C.LLVMValueRef) (packedReadOriginKey, C.LLVMValueRef) {
+func (ops *packedStoreOps) denseReadCacheIdentity(origin packedReadOriginKey, handleValue llvmIRValueRef) (packedReadOriginKey, llvmIRValueRef) {
 	if origin.root != nil {
 		return origin, nil
 	}
 	return packedReadOriginKey{}, ops.canonicalizeDenseHandleKey(handleValue)
 }
-func (ops *packedStoreOps) directReadCacheIdentity(enumType *semantic.EnumType, origin packedReadOriginKey, handleValue C.LLVMValueRef) (packedReadOriginKey, C.LLVMValueRef) {
+func (ops *packedStoreOps) directReadCacheIdentity(enumType *semantic.EnumType, origin packedReadOriginKey, handleValue llvmIRValueRef) (packedReadOriginKey, llvmIRValueRef) {
 	if ops == nil {
 		return packedReadOriginKey{}, handleValue
 	}
@@ -163,7 +150,7 @@ func (ops *packedStoreOps) directReadCacheIdentity(enumType *semantic.EnumType, 
 // SSA each time — so leaving it in the key makes two syntactically identical frozen reads miss the
 // cache and emit duplicate read-helper calls. Dropping it once the origin is known restores the
 // single cached read. Without an origin the volatile SSA is kept (the only available identity).
-func (ops *packedStoreOps) cacheKeyStoreSSA(originKey packedReadOriginKey, storeSSA C.LLVMValueRef) C.LLVMValueRef {
+func (ops *packedStoreOps) cacheKeyStoreSSA(originKey packedReadOriginKey, storeSSA llvmIRValueRef) llvmIRValueRef {
 	if originKey.root != nil {
 		return nil
 	}
@@ -174,7 +161,7 @@ func (ops *packedStoreOps) cacheKeyStoreSSA(originKey packedReadOriginKey, store
 // current block through straightLineBlockParent so reads separated only by straight-line trap-guard
 // splits (the wd.ok arms of index bounds checks) share one cache entry, while reads across genuine
 // divergent control flow keep distinct blocks. See functionState.straightLineBlockParent.
-func (ops *packedStoreOps) cacheKeyBlock() C.LLVMBasicBlockRef {
+func (ops *packedStoreOps) cacheKeyBlock() llvmIRBlockRef {
 	if ops == nil || ops.s == nil {
 		return nil
 	}
@@ -183,12 +170,12 @@ func (ops *packedStoreOps) cacheKeyBlock() C.LLVMBasicBlockRef {
 
 // recordStraightLineBlock notes that child is reachable only as a straight-line continuation of
 // parent (parent dominates child), so read-cache keys on child canonicalize back to parent.
-func (s *functionState) recordStraightLineBlock(child, parent C.LLVMBasicBlockRef) {
+func (s *functionState) recordStraightLineBlock(child, parent llvmIRBlockRef) {
 	if s == nil || child == nil || parent == nil || child == parent {
 		return
 	}
 	if s.straightLineBlockParent == nil {
-		s.straightLineBlockParent = map[C.LLVMBasicBlockRef]C.LLVMBasicBlockRef{}
+		s.straightLineBlockParent = map[llvmIRBlockRef]llvmIRBlockRef{}
 	}
 	s.straightLineBlockParent[child] = parent
 }
@@ -196,7 +183,7 @@ func (s *functionState) recordStraightLineBlock(child, parent C.LLVMBasicBlockRe
 // canonicalCacheBlock walks straightLineBlockParent to the straight-line root of block. Two blocks
 // share a root only when one is reachable from the other purely through trap-guard continuations, so
 // a value live in the root dominates both — sound to share a cached read across them.
-func (s *functionState) canonicalCacheBlock(block C.LLVMBasicBlockRef) C.LLVMBasicBlockRef {
+func (s *functionState) canonicalCacheBlock(block llvmIRBlockRef) llvmIRBlockRef {
 	if s == nil {
 		return block
 	}
@@ -209,12 +196,12 @@ func (s *functionState) canonicalCacheBlock(block C.LLVMBasicBlockRef) C.LLVMBas
 	}
 	return block
 }
-func (ops *packedStoreOps) constantUint64(value C.LLVMValueRef) (uint64, bool) {
+func (ops *packedStoreOps) constantUint64(value llvmIRValueRef) (uint64, bool) {
 	if value == nil {
 		return 0, false
 	}
-	var raw C.ulonglong
-	if C.elisacoreConstIntGetZExtValue(value, &raw) == 0 {
+	var raw llvmIRUnsignedLongLong
+	if llvmTryConstIntGetZExtValue(value, &raw) == 0 {
 		return 0, false
 	}
 	return uint64(raw), true
@@ -241,7 +228,7 @@ func (ops *packedStoreOps) canUseOptimizedIndexSOADirectPrefixRead(enumType *sem
 func (ops *packedStoreOps) canUseOptimizedIndexSOADirectMetadataRead(enumType *semantic.EnumType) bool {
 	return ops.canUseOptimizedIndexSOADirectPrefixRead(enumType)
 }
-func (ops *packedStoreOps) loadPackedStoreDArrayElementDirect(stateValue C.LLVMValueRef, fieldOffsetBytes uint64, elemType semantic.Type, indexValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+func (ops *packedStoreOps) loadPackedStoreDArrayElementDirect(stateValue llvmIRValueRef, fieldOffsetBytes uint64, elemType semantic.Type, indexValue llvmIRValueRef, name string) (llvmIRValueRef, error) {
 	if ops == nil || ops.s == nil || ops.s.g == nil {
 		return nil, fmt.Errorf("missing packed store lowering state")
 	}
@@ -267,16 +254,16 @@ func (ops *packedStoreOps) loadPackedStoreDArrayElementDirect(stateValue C.LLVMV
 	if err != nil {
 		return nil, err
 	}
-	elemPtr := C.LLVMBuildGEP2(ops.s.builder, elemLLVMType, itemsDataPtr, llvmValueSlicePtr([]C.LLVMValueRef{coercedIndex}), 1, cStringFree(name+".elem.ptr"))
-	return C.LLVMBuildLoad2(ops.s.builder, elemLLVMType, elemPtr, cStringFree(name+".elem")), nil
+	elemPtr := llvmBuildGEP2(ops.s.builder, elemLLVMType, itemsDataPtr, llvmValueSlicePtr([]llvmIRValueRef{coercedIndex}), 1, cStringFree(name+".elem.ptr"))
+	return llvmBuildLoad2(ops.s.builder, elemLLVMType, elemPtr, cStringFree(name+".elem")), nil
 }
-func (ops *packedStoreOps) loadPackedStoreDArrayItemsDirect(stateValue C.LLVMValueRef, fieldOffsetBytes uint64, name string) (C.LLVMValueRef, error) {
+func (ops *packedStoreOps) loadPackedStoreDArrayItemsDirect(stateValue llvmIRValueRef, fieldOffsetBytes uint64, name string) (llvmIRValueRef, error) {
 	if ops == nil || ops.s == nil || ops.s.g == nil {
 		return nil, fmt.Errorf("missing packed store lowering state")
 	}
 	if ops.canCacheDenseHandleReads(ops.storeType.Enum) {
 		if ops.s.packedDenseDArrayItemsReads == nil {
-			ops.s.packedDenseDArrayItemsReads = map[packedDenseDArrayItemsReadCacheKey]C.LLVMValueRef{}
+			ops.s.packedDenseDArrayItemsReads = map[packedDenseDArrayItemsReadCacheKey]llvmIRValueRef{}
 		}
 		key := packedDenseDArrayItemsReadCacheKey{block: ops.currentBlock(), storeType: ops.storeType, state: stateValue, fieldOffsetBytes: fieldOffsetBytes}
 		if cached, ok := ops.s.packedDenseDArrayItemsReads[key]; ok && cached != nil {
@@ -291,29 +278,29 @@ func (ops *packedStoreOps) loadPackedStoreDArrayItemsDirect(stateValue C.LLVMVal
 	}
 	return ops.loadPackedStoreDArrayItemsDirectUncached(stateValue, fieldOffsetBytes, name)
 }
-func (ops *packedStoreOps) loadPackedStoreDArrayItemsDirectUncached(stateValue C.LLVMValueRef, fieldOffsetBytes uint64, name string) (C.LLVMValueRef, error) {
+func (ops *packedStoreOps) loadPackedStoreDArrayItemsDirectUncached(stateValue llvmIRValueRef, fieldOffsetBytes uint64, name string) (llvmIRValueRef, error) {
 	itemsPtrPtr, err := ops.s.emitByteOffsetPtr(stateValue, fieldOffsetBytes, name+".ptr")
 	if err != nil {
 		return nil, err
 	}
-	opaquePtrType := C.LLVMPointerTypeInContext(ops.s.g.context, 0)
-	return C.LLVMBuildLoad2(ops.s.builder, opaquePtrType, itemsPtrPtr, cStringFree(name)), nil
+	opaquePtrType := llvmPointerTypeInContext(ops.s.g.context, 0)
+	return llvmBuildLoad2(ops.s.builder, opaquePtrType, itemsPtrPtr, cStringFree(name)), nil
 }
-func (ops *packedStoreOps) loadIndexSOAHandleDirect(stateValue C.LLVMValueRef, indexValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+func (ops *packedStoreOps) loadIndexSOAHandleDirect(stateValue llvmIRValueRef, indexValue llvmIRValueRef, name string) (llvmIRValueRef, error) {
 	fieldOffset, err := ops.packedStoreStateFieldOffset("handles")
 	if err != nil {
 		return nil, err
 	}
 	return ops.loadPackedStoreDArrayElementDirect(stateValue, fieldOffset, ops.s.g.namedType("uintptr"), indexValue, name)
 }
-func (ops *packedStoreOps) loadIndexSOATagDirect(stateValue C.LLVMValueRef, indexValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+func (ops *packedStoreOps) loadIndexSOATagDirect(stateValue llvmIRValueRef, indexValue llvmIRValueRef, name string) (llvmIRValueRef, error) {
 	fieldOffset, err := ops.packedStoreStateFieldOffset("tags")
 	if err != nil {
 		return nil, err
 	}
 	return ops.loadPackedStoreDArrayElementDirect(stateValue, fieldOffset, ops.s.g.namedType("u32"), indexValue, name)
 }
-func (ops *packedStoreOps) loadIndexSOAPrefixWordDirect(stateValue C.LLVMValueRef, indexValue C.LLVMValueRef, wordOffset uint64, name string) (C.LLVMValueRef, error) {
+func (ops *packedStoreOps) loadIndexSOAPrefixWordDirect(stateValue llvmIRValueRef, indexValue llvmIRValueRef, wordOffset uint64, name string) (llvmIRValueRef, error) {
 	if ops == nil || ops.s == nil || ops.s.g == nil {
 		return nil, fmt.Errorf("missing packed store lowering state")
 	}
@@ -336,17 +323,17 @@ func (ops *packedStoreOps) loadIndexSOAPrefixWordDirect(stateValue C.LLVMValueRe
 	if err != nil {
 		return nil, err
 	}
-	opaquePtrType := C.LLVMPointerTypeInContext(ops.s.g.context, 0)
-	columnOffsetValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(wordOffset), 0)
-	columnSlotPtr := C.LLVMBuildGEP2(ops.s.builder, uintptrLLVMType, columnsDataPtr, llvmValueSlicePtr([]C.LLVMValueRef{columnOffsetValue}), 1, cStringFree(name+".prefix.column.slot.ptr"))
-	columnBaseValue := C.LLVMBuildLoad2(ops.s.builder, uintptrLLVMType, columnSlotPtr, cStringFree(name+".prefix.column.base"))
-	columnDataPtr := C.LLVMBuildIntToPtr(ops.s.builder, columnBaseValue, opaquePtrType, cStringFree(name+".prefix.column.ptr"))
+	opaquePtrType := llvmPointerTypeInContext(ops.s.g.context, 0)
+	columnOffsetValue := llvmConstInt(usizeLLVMType, llvmIRUnsignedLongLong(wordOffset), 0)
+	columnSlotPtr := llvmBuildGEP2(ops.s.builder, uintptrLLVMType, columnsDataPtr, llvmValueSlicePtr([]llvmIRValueRef{columnOffsetValue}), 1, cStringFree(name+".prefix.column.slot.ptr"))
+	columnBaseValue := llvmBuildLoad2(ops.s.builder, uintptrLLVMType, columnSlotPtr, cStringFree(name+".prefix.column.base"))
+	columnDataPtr := llvmBuildIntToPtr(ops.s.builder, columnBaseValue, opaquePtrType, cStringFree(name+".prefix.column.ptr"))
 	columnIndex, err := ops.s.coerceValue(indexValue, u32Type, usizeType)
 	if err != nil {
 		return nil, err
 	}
-	columnWordPtr := C.LLVMBuildGEP2(ops.s.builder, uintptrLLVMType, columnDataPtr, llvmValueSlicePtr([]C.LLVMValueRef{columnIndex}), 1, cStringFree(name+".prefix.word.ptr"))
-	return C.LLVMBuildLoad2(ops.s.builder, uintptrLLVMType, columnWordPtr, cStringFree(name+".prefix.word")), nil
+	columnWordPtr := llvmBuildGEP2(ops.s.builder, uintptrLLVMType, columnDataPtr, llvmValueSlicePtr([]llvmIRValueRef{columnIndex}), 1, cStringFree(name+".prefix.word.ptr"))
+	return llvmBuildLoad2(ops.s.builder, uintptrLLVMType, columnWordPtr, cStringFree(name+".prefix.word")), nil
 }
 
 func (ops *packedStoreOps) packedStoreStateFieldOffset(fieldName string) (uint64, error) {
@@ -360,7 +347,7 @@ func (ops *packedStoreOps) packedStoreStateFieldOffset(fieldName string) (uint64
 	return ops.s.g.abiFieldOffset(stateType, fieldName)
 }
 
-func (ops *packedStoreOps) storeCount(name string) (C.LLVMValueRef, error) {
+func (ops *packedStoreOps) storeCount(name string) (llvmIRValueRef, error) {
 	stateValue, err := ops.stateValue(name + ".state")
 	if err != nil {
 		return nil, err
@@ -377,9 +364,9 @@ func (ops *packedStoreOps) storeCount(name string) (C.LLVMValueRef, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{stateValue}, name), nil
+	return ops.s.buildCall(llvmFnType, callee, []llvmIRValueRef{stateValue}, name), nil
 }
-func (ops *packedStoreOps) encodeDenseIndex(rowPtr C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+func (ops *packedStoreOps) encodeDenseIndex(rowPtr llvmIRValueRef, name string) (llvmIRValueRef, error) {
 	arenaValue, err := ops.arenaValue(name + ".arena")
 	if err != nil {
 		return nil, err
@@ -400,9 +387,9 @@ func (ops *packedStoreOps) encodeDenseIndex(rowPtr C.LLVMValueRef, name string) 
 	if err != nil {
 		return nil, err
 	}
-	return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, rowPtr, stateValue}, name), nil
+	return ops.s.buildCall(llvmFnType, callee, []llvmIRValueRef{arenaValue, rowPtr, stateValue}, name), nil
 }
-func (ops *packedStoreOps) decodeDenseIndex(indexValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+func (ops *packedStoreOps) decodeDenseIndex(indexValue llvmIRValueRef, name string) (llvmIRValueRef, error) {
 	arenaValue, err := ops.arenaValue(name + ".arena")
 	if err != nil {
 		return nil, err
@@ -423,9 +410,9 @@ func (ops *packedStoreOps) decodeDenseIndex(indexValue C.LLVMValueRef, name stri
 	if err != nil {
 		return nil, err
 	}
-	return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, indexValue, stateValue}, name), nil
+	return ops.s.buildCall(llvmFnType, callee, []llvmIRValueRef{arenaValue, indexValue, stateValue}, name), nil
 }
-func (ops *packedStoreOps) encodeHandle(rowPtr C.LLVMValueRef, enumType *semantic.EnumType, name string) (C.LLVMValueRef, error) {
+func (ops *packedStoreOps) encodeHandle(rowPtr llvmIRValueRef, enumType *semantic.EnumType, name string) (llvmIRValueRef, error) {
 	if enumType == nil || !enumType.Packed {
 		return nil, fmt.Errorf("missing packed enum handle metadata")
 	}
@@ -451,7 +438,7 @@ func (ops *packedStoreOps) encodeHandle(rowPtr C.LLVMValueRef, enumType *semanti
 		if err != nil {
 			return nil, err
 		}
-		encoded := ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, rowPtr, stateValue}, name)
+		encoded := ops.s.buildCall(llvmFnType, callee, []llvmIRValueRef{arenaValue, rowPtr, stateValue}, name)
 		return ops.s.coerceValue(encoded, u32Type, enumType)
 	case packedEnumABIVariantSparse:
 		stateValue, err := ops.stateValue(name + ".state")
@@ -468,13 +455,13 @@ func (ops *packedStoreOps) encodeHandle(rowPtr C.LLVMValueRef, enumType *semanti
 		if err != nil {
 			return nil, err
 		}
-		encoded := ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{rowPtr, stateValue}, name)
+		encoded := ops.s.buildCall(llvmFnType, callee, []llvmIRValueRef{rowPtr, stateValue}, name)
 		return ops.s.coerceValue(encoded, u32Type, enumType)
 	default:
 		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", ops.s.g.packedModeForEnum(enumType))
 	}
 }
-func (ops *packedStoreOps) decodeHandle(handleValue C.LLVMValueRef, enumType *semantic.EnumType, name string) (C.LLVMValueRef, error) {
+func (ops *packedStoreOps) decodeHandle(handleValue llvmIRValueRef, enumType *semantic.EnumType, name string) (llvmIRValueRef, error) {
 	if enumType == nil || !enumType.Packed {
 		return nil, fmt.Errorf("missing packed enum handle metadata")
 	}
@@ -504,7 +491,7 @@ func (ops *packedStoreOps) decodeHandle(handleValue C.LLVMValueRef, enumType *se
 		if err != nil {
 			return nil, err
 		}
-		return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, coercedHandle, stateValue}, name), nil
+		return ops.s.buildCall(llvmFnType, callee, []llvmIRValueRef{arenaValue, coercedHandle, stateValue}, name), nil
 	case packedEnumABIVariantSparse:
 		stateValue, err := ops.stateValue(name + ".state")
 		if err != nil {
@@ -524,7 +511,7 @@ func (ops *packedStoreOps) decodeHandle(handleValue C.LLVMValueRef, enumType *se
 		if err != nil {
 			return nil, err
 		}
-		return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{coercedHandle, stateValue}, name), nil
+		return ops.s.buildCall(llvmFnType, callee, []llvmIRValueRef{coercedHandle, stateValue}, name), nil
 	case packedEnumABIAoS:
 		// docs/76 Slice 2: decode a handle to its record address = ctx_aos_store_record(state, index).
 		return ops.aosRecordPtr(handleValue, enumType, name)
@@ -532,7 +519,7 @@ func (ops *packedStoreOps) decodeHandle(handleValue C.LLVMValueRef, enumType *se
 		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", ops.s.g.packedModeForEnum(enumType))
 	}
 }
-func (ops *packedStoreOps) storeValueAt(indexValue C.LLVMValueRef, name string) (C.LLVMValueRef, semantic.Type, error) {
+func (ops *packedStoreOps) storeValueAt(indexValue llvmIRValueRef, name string) (llvmIRValueRef, semantic.Type, error) {
 	stateValue, err := ops.stateValue(name + ".state")
 	if err != nil {
 		return nil, nil, err
@@ -552,7 +539,7 @@ func (ops *packedStoreOps) storeValueAt(indexValue C.LLVMValueRef, name string) 
 		if err != nil {
 			return nil, nil, err
 		}
-		value := ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{stateValue, indexValue}, name)
+		value := ops.s.buildCall(llvmFnType, callee, []llvmIRValueRef{stateValue, indexValue}, name)
 		coerced, err := ops.s.coerceValue(value, u32Type, ops.storeType.Enum)
 		if err != nil {
 			return nil, nil, err
