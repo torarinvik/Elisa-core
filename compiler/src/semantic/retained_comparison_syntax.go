@@ -203,17 +203,21 @@ func retainedWalkDecls(file *ast.File) []ast.Decl {
 				return
 			}
 			if v.Kind() == reflect.Pointer && v.CanInterface() {
-				if d, ok := v.Interface().(ast.Decl); ok {
-					out = append(out, d)
-					switch d := d.(type) {
-					case *ast.FuncDecl:
-						return
-					case *ast.NamespaceDecl:
-						for _, member := range d.Decls {
-							visit(reflect.ValueOf(member))
-						}
-						return
+				switch node := v.Interface().(type) {
+				case *ast.FuncDecl:
+					out = append(out, node)
+					return
+				case *ast.NamespaceDecl:
+					out = append(out, node)
+					for _, member := range node.Decls {
+						visit(reflect.ValueOf(member))
 					}
+					return
+				case ast.Decl:
+					out = append(out, node)
+				case *ast.Ident, *ast.IntLit, *ast.FloatLit, *ast.StringLit,
+					*ast.CharLit, *ast.BoolLit, *ast.NullLit, *ast.ZeroedLit:
+					return
 				}
 			}
 			visit(v.Elem())
