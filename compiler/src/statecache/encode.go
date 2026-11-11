@@ -93,15 +93,21 @@ func (r *Registry) EncodeFramedWithCapacity(root any, capacity int) ([]byte, err
 }
 
 func (r *Registry) encode(root any, framed bool, capacity int) ([]byte, error) {
-	var pointerCapacity int
+	var pointerCapacity, sliceCapacity int
 	if framed && capacity >= 32<<20 {
 		// Reused checkpoints usually retain most of their graph. Reserve
 		// a conservative fraction of the previous wire size to avoid
 		// repeated growth of the address index while discovering objects.
 		pointerCapacity = min(capacity/128, 2_000_000)
+		if capacity >= 256<<20 {
+			// Large resumed analysis graphs contain millions of both kinds
+			// of entries. Reserve both tables to avoid growing them mid-walk.
+			pointerCapacity = min(capacity/96, 6_000_000)
+			sliceCapacity = min(capacity/224, 3_000_000)
+		}
 	}
 	e := &encoder{
-		registry: r, objects: map[identity]uint64{}, scanning: true,
+		registry: r, objects: make(map[identity]uint64, sliceCapacity), scanning: true,
 		pointerObjects: pointerObjectIndex{byAddress: make(map[uintptr]pointerObject, pointerCapacity)},
 		strings:        map[string]uint64{}, framed: framed,
 	}
