@@ -203,14 +203,10 @@ func (a *Analyzer) walkParamStores(body []ast.Stmt, pidx map[string]int, out map
 		}
 	}
 	walk = func(v reflect.Value) {
-		if !v.IsValid() {
-			return
+		for v.Kind() == reflect.Interface {
+			v = v.Elem()
 		}
 		switch v.Kind() {
-		case reflect.Interface:
-			// Dispatch on the concrete pointer so a call or store reached
-			// through an interface is transferred only once.
-			walk(v.Elem())
 		case reflect.Pointer:
 			if v.IsNil() {
 				return
@@ -218,6 +214,12 @@ func (a *Analyzer) walkParamStores(body []ast.Stmt, pidx map[string]int, out map
 			switch n := v.Interface().(type) {
 			case *ast.Ident, *ast.IntLit, *ast.FloatLit, *ast.StringLit,
 				*ast.CharLit, *ast.BoolLit, *ast.NullLit, *ast.ZeroedLit:
+				return
+			case *ast.ExprStmt:
+				walk(reflect.ValueOf(n.Expr))
+				return
+			case *ast.FieldExpr:
+				walk(reflect.ValueOf(n.Object))
 				return
 			case *ast.IterForStmt:
 				walk(reflect.ValueOf(n.Source))
