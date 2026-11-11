@@ -2,12 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -15,7 +9,7 @@ import (
 	"fmt"
 )
 
-func (s *functionState) emitDictComprehensionExpr(expr *ast.ListComprehensionExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitDictComprehensionExpr(expr *ast.ListComprehensionExpr) (llvmValueRef, semantic.Type, error) {
 	resultType, ok := s.exprType(expr).(*semantic.DictType)
 	if !ok || resultType == nil {
 		return nil, nil, fmt.Errorf("dict comprehension requires a resolved dict result type")
@@ -50,7 +44,7 @@ func (s *functionState) emitDictComprehensionExpr(expr *ast.ListComprehensionExp
 //
 // — a single fused loop with no intermediate collection (docs/79). `add` is the frictionless
 // set insert (parity with darray push). Mirrors the darray/dict comprehension paths.
-func (s *functionState) emitSetComprehensionExpr(expr *ast.ListComprehensionExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitSetComprehensionExpr(expr *ast.ListComprehensionExpr) (llvmValueRef, semantic.Type, error) {
 	resultType, ok := s.exprType(expr).(*semantic.SetType)
 	if !ok || resultType == nil {
 		return nil, nil, fmt.Errorf("set comprehension requires a resolved set result type")
@@ -76,7 +70,7 @@ func (s *functionState) emitSetComprehensionExpr(expr *ast.ListComprehensionExpr
 	block := comprehensionDesugarBlock(expr, resultName, resultInit, resultIdent, addCall)
 	return s.emitExprBlock(block, resultType)
 }
-func (s *functionState) emitQueryExpr(expr *ast.QueryExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitQueryExpr(expr *ast.QueryExpr) (llvmValueRef, semantic.Type, error) {
 	resultType := s.exprType(expr)
 	if resultType == nil {
 		return nil, nil, fmt.Errorf("query expression requires a resolved result type")

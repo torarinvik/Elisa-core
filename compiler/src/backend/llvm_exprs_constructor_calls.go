@@ -2,19 +2,13 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
 )
 
-func (s *functionState) emitTypeConstructorCastCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitTypeConstructorCastCall(expr *ast.CallExpr) (llvmValueRef, semantic.Type, bool, error) {
 	if s == nil || expr == nil {
 		return nil, nil, false, nil
 	}

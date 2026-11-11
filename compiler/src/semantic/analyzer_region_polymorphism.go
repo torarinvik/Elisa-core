@@ -50,14 +50,30 @@ func (a *Analyzer) classifyRegionPolymorphicFunctions(decls []scopedDecl) {
 	// `def Parser(...)->Parser`) still resolves to the constructor's FuncType. The
 	// stored *FuncType is the same pointer mutated below, so RegionPolymorphic reads
 	// stay live across the fixpoint.
+	type regionPolyCandidate struct {
+		fn           *ast.FuncDecl
+		fnType       *FuncType
+		scope        scopedDecl
+		localFactory bool
+	}
+	candidates := make([]regionPolyCandidate, 0, len(funcs))
 	a.regionPolyCandidateFnTypes = map[string][]*FuncType{}
 	for _, fn := range funcs {
-		if fn == nil || fn.Name == "" {
+		if fn == nil {
 			continue
 		}
 		if ft := a.funcTypeForRegionPoly(fn); ft != nil {
-			key := simpleTypeNameSegment(fn.Name)
-			a.regionPolyCandidateFnTypes[key] = append(a.regionPolyCandidateFnTypes[key], ft)
+			if fn.Name != "" {
+				key := simpleTypeNameSegment(fn.Name)
+				a.regionPolyCandidateFnTypes[key] = append(a.regionPolyCandidateFnTypes[key], ft)
+			}
+			// Explicit arenas exclude every route to these implicit-region facts.
+			if !funcHasArenaParam(fn) {
+				candidates = append(candidates, regionPolyCandidate{
+					fn: fn, fnType: ft, scope: fnScope[fn],
+					localFactory: functionBuildsAndReturnsLocalContainer(fn) || functionBuildsAndReturnsLocalStruct(fn, ft),
+				})
+			}
 		}
 	}
 	defer func() { a.regionPolyCandidateFnTypes = nil }()
@@ -65,26 +81,18 @@ func (a *Analyzer) classifyRegionPolymorphicFunctions(decls []scopedDecl) {
 	changed := true
 	for changed {
 		changed = false
-		for _, fn := range funcs {
-			fnType := a.funcTypeForRegionPoly(fn)
-			if fnType == nil {
+		for _, candidate := range candidates {
+			fn, fnType, sc := candidate.fn, candidate.fnType, candidate.scope
+			// The fixpoint only adds facts. A settled result needs no further
+			// walk, and syntactic factory results do not depend on any callee.
+			if a.regionPolyReturnsCallerArena[fnType] && fnType.RegionPolymorphic {
 				continue
 			}
-			// A function that threads an allocator (`Arena&` param) manages its own
-			// allocation — same gate as functionBuildsAndReturnsLocalContainer and the
-			// parser's maybeWrapFunctionBodyInAutoRegion: its returned node was built
-			// into the explicit arena (`in alloc:`), not an adoptable inferred region,
-			// so classifying it region-polymorphic would inject a spurious
-			// `__region_auto` param and break its callers.
 			a.regionPolyFn = fn
-			sc := fnScope[fn]
 			isPoly := false
-			returnsCallerArena := false
+			returnsCallerArena := candidate.localFactory
 			a.withResolutionContext(sc.Namespace, sc.Usings, func() {
-				returnsRegionAllocated := a.functionReturnsRegionAllocatedValue(fn)
-				buildsLocalContainer := functionBuildsAndReturnsLocalContainer(fn)
-				buildsLocalStruct := functionBuildsAndReturnsLocalStruct(fn, fnType)
-				returnsCallerArena = !funcHasArenaParam(fn) && (returnsRegionAllocated || buildsLocalContainer || buildsLocalStruct)
+				returnsCallerArena = returnsCallerArena || a.functionReturnsRegionAllocatedValue(fn)
 				// docs/125: a function that WRITES a region-backed packed handle-enum through a scalar
 				// `mutable T&` out-param (`out <- (Ast::Expr.Foo(...))`) is region-polymorphic, exactly as
 				// one that RETURNS such a node. Threading `__region_auto` makes its node builders allocate
@@ -93,10 +101,7 @@ func (a *Analyzer) classifyRegionPolymorphicFunctions(decls []scopedDecl) {
 				// Composes with an existing `__rg_parser` struct-region param (they thread DIFFERENT
 				// regions — the tree store vs. the Parser's field arena), so no RegionParams gate needed.
 				// Over-triggering is sound: a handle built in the caller ignores the threaded region.
-				isPoly = (returnsRegionAllocated && !funcHasArenaParam(fn)) ||
-					buildsLocalContainer ||
-					buildsLocalStruct ||
-					(!funcHasArenaParam(fn) && a.functionWritesHandleToScalarOutParam(fn))
+				isPoly = returnsCallerArena || fnType.RegionPolymorphic || a.functionWritesHandleToScalarOutParam(fn)
 			})
 			if returnsCallerArena && !a.regionPolyReturnsCallerArena[fnType] {
 				a.regionPolyReturnsCallerArena[fnType] = true

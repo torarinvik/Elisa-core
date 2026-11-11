@@ -2,13 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-void elisa_coreSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigned trueWeight, unsigned falseWeight);
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -53,7 +46,7 @@ func (s *functionState) emitLocalVarDecl(n *ast.VarDeclStmt) error {
 	// return i`: the INTERPRETER answers 3 and the native binary loops forever. Two
 	// answers from one compiler, and the interpreter's is the correct one — a
 	// declaration's initializer belongs to the enclosing scope.
-	var initValue C.LLVMValueRef
+	var initValue llvmValueRef
 	if n.Value != nil {
 		savedInitializerCarriesRegionStorage := s.activeInitializerCarriesRegionStorage
 		savedInitializerName := s.activeInitializerName

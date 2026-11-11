@@ -2,22 +2,9 @@
 
 package backend
 
-/*
-#include <llvm-c/Core.h>
-
-static int elisacoreConstIntGetZExtValue(LLVMValueRef Value, unsigned long long* Out) {
-	if (LLVMIsAConstantInt(Value) == NULL) {
-		return 0;
-	}
-	*Out = LLVMConstIntGetZExtValue(Value);
-	return 1;
-}
-*/
-import "C"
-
 import "elisacore/src/semantic"
 
-func (ops *packedStoreOps) loadSideWordAtOrigin(indexValue C.LLVMValueRef, wordOffset C.LLVMValueRef, origin packedReadOriginKey, name string) (C.LLVMValueRef, error) {
+func (ops *packedStoreOps) loadSideWordAtOrigin(indexValue llvmValueRef, wordOffset llvmValueRef, origin packedReadOriginKey, name string) (llvmValueRef, error) {
 	stateValue, err := ops.stateValue(name + ".state")
 	if err != nil {
 		return nil, err
@@ -48,23 +35,23 @@ func (ops *packedStoreOps) loadSideWordAtOrigin(indexValue C.LLVMValueRef, wordO
 	}
 	if ops.canCacheDenseHandleReads(ops.storeType.Enum) {
 		if ops.s.packedDenseSideWordReads == nil {
-			ops.s.packedDenseSideWordReads = map[packedDenseSideWordReadCacheKey]C.LLVMValueRef{}
+			ops.s.packedDenseSideWordReads = map[packedDenseSideWordReadCacheKey]llvmValueRef{}
 		}
 		originKey, cacheIndex := ops.denseReadCacheIdentity(origin, coercedIndex)
 		key := packedDenseSideWordReadCacheKey{block: ops.cacheKeyBlock(), storeType: ops.storeType, state: ops.cacheKeyStoreSSA(originKey, stateValue), origin: originKey, index: cacheIndex, offset: wordOffset}
 		if cached, ok := ops.s.packedDenseSideWordReads[key]; ok && cached != nil {
 			return cached, nil
 		}
-		wordValue := ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{stateValue, coercedIndex, wordOffset}, name)
+		wordValue := ops.s.buildCall(llvmFnType, callee, []llvmValueRef{stateValue, coercedIndex, wordOffset}, name)
 		ops.s.packedDenseSideWordReads[key] = wordValue
 		return wordValue, nil
 	}
-	return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{stateValue, coercedIndex, wordOffset}, name), nil
+	return ops.s.buildCall(llvmFnType, callee, []llvmValueRef{stateValue, coercedIndex, wordOffset}, name), nil
 }
-func (ops *packedStoreOps) loadSideWord(indexValue C.LLVMValueRef, wordOffset C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+func (ops *packedStoreOps) loadSideWord(indexValue llvmValueRef, wordOffset llvmValueRef, name string) (llvmValueRef, error) {
 	return ops.loadSideWordAtOrigin(indexValue, wordOffset, packedReadOriginKey{}, name)
 }
-func (ops *packedStoreOps) storeTagsView(startValue C.LLVMValueRef, endValue C.LLVMValueRef, resultType *semantic.ViewType, name string) (C.LLVMValueRef, semantic.Type, error) {
+func (ops *packedStoreOps) storeTagsView(startValue llvmValueRef, endValue llvmValueRef, resultType *semantic.ViewType, name string) (llvmValueRef, semantic.Type, error) {
 	stateValue, err := ops.stateValue(name + ".state")
 	if err != nil {
 		return nil, nil, err
@@ -82,6 +69,6 @@ func (ops *packedStoreOps) storeTagsView(startValue C.LLVMValueRef, endValue C.L
 	if err != nil {
 		return nil, nil, err
 	}
-	value := ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{stateValue, startValue, endValue}, name)
+	value := ops.s.buildCall(llvmFnType, callee, []llvmValueRef{stateValue, startValue, endValue}, name)
 	return value, resultType, nil
 }

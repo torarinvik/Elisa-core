@@ -2,13 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-void elisa_coreSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigned trueWeight, unsigned falseWeight);
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -141,7 +134,7 @@ func (s *functionState) registerFunctionCleanup(binding scopedCleanupBinding) {
 // retaining it in s.regions as function-owned emitted a second arena_free on the function return.
 // Loop-reset regions are deliberately kept function-owned because their scope cleanup resets them
 // for reuse and the function exit must perform the final free.
-func (s *functionState) markRegionScopeOwned(ptr C.LLVMValueRef) {
+func (s *functionState) markRegionScopeOwned(ptr llvmValueRef) {
 	if s == nil || ptr == nil {
 		return
 	}
@@ -281,7 +274,7 @@ func (s *functionState) emitRegionDeclImpl(n *ast.RegionStmt, loopReset bool) er
 	if arenaType == nil {
 		return fmt.Errorf("missing builtin Arena type for region %s", n.Name)
 	}
-	var alloca C.LLVMValueRef
+	var alloca llvmValueRef
 	var err error
 	if loopReset {
 		// Zero once in the entry block; do NOT re-zero per iteration (that would lose the blocks).

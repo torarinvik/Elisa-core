@@ -2,11 +2,6 @@
 
 package backend
 
-/*
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"fmt"
 	"strings"
@@ -91,7 +86,7 @@ func (s *functionState) resolveStaticInterfaceMethod(expr *ast.FieldExpr) (*sema
 	return sym, fnType, true, nil
 }
 
-func (s *functionState) emitStaticInterfaceMethodExpr(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitStaticInterfaceMethodExpr(expr *ast.FieldExpr) (llvmValueRef, semantic.Type, bool, error) {
 	sym, fnType, handled, err := s.resolveStaticInterfaceMethod(expr)
 	if !handled {
 		return nil, nil, false, nil

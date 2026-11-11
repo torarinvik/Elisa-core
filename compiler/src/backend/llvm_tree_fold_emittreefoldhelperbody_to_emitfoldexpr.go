@@ -2,19 +2,13 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
 )
 
-func (s *functionState) emitFoldExpr(expr *ast.FoldExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitFoldExpr(expr *ast.FoldExpr) (llvmValueRef, semantic.Type, error) {
 	if expr == nil {
 		return nil, nil, fmt.Errorf("missing fold expression")
 	}

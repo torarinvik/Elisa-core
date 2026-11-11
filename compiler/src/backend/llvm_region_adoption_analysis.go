@@ -2,13 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-void elisa_coreSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigned trueWeight, unsigned falseWeight);
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -16,12 +9,12 @@ import (
 	"reflect"
 )
 
-func (s *functionState) callerStorageArenasForBody(decl *ast.FuncDecl, fnType *semantic.FuncType, body []ast.Stmt) map[string]C.LLVMValueRef {
-	result := map[string]C.LLVMValueRef{}
+func (s *functionState) callerStorageArenasForBody(decl *ast.FuncDecl, fnType *semantic.FuncType, body []ast.Stmt) map[string]llvmValueRef {
+	result := map[string]llvmValueRef{}
 	if s == nil || decl == nil || fnType == nil {
 		return result
 	}
-	paramArenas := map[string]C.LLVMValueRef{}
+	paramArenas := map[string]llvmValueRef{}
 	explicitCount := backendExplicitParamCount(fnType, decl)
 	if explicitCount > len(decl.Params) {
 		explicitCount = len(decl.Params)
@@ -412,7 +405,7 @@ func (s *functionState) prepareAdoptedEscapeNames() {
 	s.adoptedEscapeReady = true
 }
 
-func (s *functionState) adoptedScratchForLocal(name string) C.LLVMValueRef {
+func (s *functionState) adoptedScratchForLocal(name string) llvmValueRef {
 	if s == nil || s.scratchArena == nil {
 		return nil
 	}

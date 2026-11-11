@@ -2,11 +2,6 @@
 
 package backend
 
-/*
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -15,7 +10,7 @@ import (
 
 // Retyping transfers the existing payload, never writes a runtime state tag.
 // Semantic analysis has already checked graph authority and consumed the owner.
-func (s *functionState) emitProtocolTransitionCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitProtocolTransitionCall(expr *ast.CallExpr) (llvmValueRef, semantic.Type, bool, error) {
 	if !s.g.result.IsCompilerBuiltinHelperCall(expr, "transition") {
 		return nil, nil, false, nil
 	}
