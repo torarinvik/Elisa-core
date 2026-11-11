@@ -202,13 +202,18 @@ func retainedWalkDecls(file *ast.File) []ast.Decl {
 			if v.IsNil() {
 				return
 			}
-			// An interface holding a declaration is recorded through the pointer it holds,
-			// so each declaration is listed once.
-			if v.Kind() == reflect.Pointer && v.Type().Implements(retainedDeclType) {
-				d := v.Interface().(ast.Decl)
-				out = append(out, d)
-				if _, isFn := d.(*ast.FuncDecl); isFn {
-					return
+			if v.Kind() == reflect.Pointer && v.CanInterface() {
+				if d, ok := v.Interface().(ast.Decl); ok {
+					out = append(out, d)
+					switch d := d.(type) {
+					case *ast.FuncDecl:
+						return
+					case *ast.NamespaceDecl:
+						for _, member := range d.Decls {
+							visit(reflect.ValueOf(member))
+						}
+						return
+					}
 				}
 			}
 			visit(v.Elem())
@@ -223,20 +228,9 @@ func retainedWalkDecls(file *ast.File) []ast.Decl {
 			if v.Type().Elem().Kind() == reflect.Uint8 {
 				return
 			}
-			// Function declarations terminate this traversal. Handle the common
-			// declaration-slice case directly while retaining the reflective walk
-			// for other declarations and every other slice shape.
 			if v.Type() == reflect.TypeFor[[]ast.Decl]() {
 				for i := 0; i < v.Len(); i++ {
-					item := v.Index(i)
-					if !item.IsNil() {
-						ptr := item.Elem()
-						if ptr.Type() == reflect.TypeFor[*ast.FuncDecl]() && !ptr.IsNil() && ptr.CanInterface() {
-							out = append(out, ptr.Interface().(*ast.FuncDecl))
-							continue
-						}
-					}
-					visit(item)
+					visit(v.Index(i).Elem())
 				}
 				return
 			}
@@ -248,8 +242,8 @@ func retainedWalkDecls(file *ast.File) []ast.Decl {
 	if file == nil {
 		return nil
 	}
-	for i := range file.Decls {
-		visit(reflect.ValueOf(&file.Decls[i]).Elem())
+	for _, decl := range file.Decls {
+		visit(reflect.ValueOf(decl))
 	}
 	return out
 }
