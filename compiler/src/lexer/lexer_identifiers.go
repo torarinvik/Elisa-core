@@ -8,11 +8,14 @@ func (l *Lexer) readIdent() Token {
 	p := l.curPos()
 	start := l.pos
 	for l.sourceHas(l.pos) {
-		r, _ := l.peekRune()
+		r, size := l.peekRune()
 		if !isIdentCharRune(r) {
 			break
 		}
-		l.advanceRune()
+		// The peek recorded the bytes used by this rune. Identifiers
+		// cannot contain a newline, and columns count source bytes.
+		l.pos += size
+		l.col += size
 	}
 	text := bytesToStringView(l.sourceSlice(start, l.pos))
 	kind := LookupKeyword(text)

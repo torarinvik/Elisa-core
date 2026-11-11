@@ -115,9 +115,13 @@ func (l *Lexer) peekRune() (rune, int) {
 	if !l.sourceHas(l.pos) {
 		return 0, 0
 	}
-	r, size := utf8.DecodeRune(l.runeBytes(l.pos))
+	lookahead := l.runeBytes(l.pos)
+	if lookahead[0] < utf8.RuneSelf {
+		return rune(lookahead[0]), 1
+	}
+	r, size := utf8.DecodeRune(lookahead)
 	if r == utf8.RuneError && size == 1 {
-		return rune(l.sourceByte(l.pos)), 1
+		return rune(lookahead[0]), 1
 	}
 	return r, size
 }
