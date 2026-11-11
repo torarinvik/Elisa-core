@@ -86,8 +86,7 @@ type analysisDiskBuildCheckpoint struct {
 	started      time.Time
 }
 
-func restoreAnalysisDiskBuildCheckpoint(complete analysisDiskArtifact, program *loadedProgram, options semantic.AnalyzeOptions) (*analysisDiskBuildCheckpoint, error) {
-	artifact := analysisBuildArtifact(complete, program.source)
+func restoreAnalysisDiskBuildCheckpoint(artifact analysisDiskArtifact, program *loadedProgram, options semantic.AnalyzeOptions) (*analysisDiskBuildCheckpoint, error) {
 	started := time.Now()
 	var checkpoint *analysisDiskBuildCheckpoint
 	err := artifact.withPayload(func(data []byte) error {
@@ -171,7 +170,7 @@ func advanceAnalysisDiskBuildWithCheckpoint(program *loadedProgram, file *ast.Fi
 		post, phases := build.PostProgress()
 		debugAnalysisDisk(stderr, "bootstrap restore completed=%d/%d post=%d/%d bytes=%d in=%v", done, total, post, phases, checkpoint.bytes, time.Since(started).Round(time.Millisecond))
 	} else if !checkpointTried {
-		restored, restoreErr := restoreAnalysisDiskBuildCheckpoint(complete, program, options)
+		restored, restoreErr := restoreAnalysisDiskBuildCheckpoint(artifact, program, options)
 		if restoreErr == nil {
 			checkpoint = restored
 			build = checkpoint.build

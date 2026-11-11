@@ -45,8 +45,9 @@ func startAnalysisDiskRestoration(program *loadedProgram, options semantic.Analy
 		program.tokenCache = newRequestSourceTokenCache()
 	}
 	pending := &analysisDiskRestoration{artifact: artifact, started: time.Now(), done: make(chan struct{})}
+	var buildArtifact analysisDiskArtifact
 	if analysisDiskBootstrapEnabled() {
-		buildArtifact := analysisBuildArtifact(artifact, program.source)
+		buildArtifact = analysisBuildArtifact(artifact, program.source)
 		if _, statErr := os.Stat(buildArtifact.path); statErr == nil {
 			pending.checkpointCandidate = !analysisDiskBaselineSourceMatches(artifact, program.source)
 		}
@@ -59,7 +60,7 @@ func startAnalysisDiskRestoration(program *loadedProgram, options semantic.Analy
 		// completed snapshot still needs its normal restore and source check.
 		if pending.checkpointCandidate {
 			pending.buildTried = true
-			pending.build, pending.buildErr = restoreAnalysisDiskBuildCheckpoint(artifact, program, options)
+			pending.build, pending.buildErr = restoreAnalysisDiskBuildCheckpoint(buildArtifact, program, options)
 			if analysisDiskCheckpointShadows(artifact, pending.build) {
 				pending.shadowed = pending.build
 				pending.build = nil

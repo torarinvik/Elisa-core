@@ -390,7 +390,7 @@ func TestAnalysisDiskBuildCheckpointRevalidatesAtHandoff(t *testing.T) {
 	if err := checkpoint.publish(data); err != nil {
 		t.Fatal(err)
 	}
-	valid, err := restoreAnalysisDiskBuildCheckpoint(complete, program, options)
+	valid, err := restoreAnalysisDiskBuildCheckpoint(checkpoint, program, options)
 	if err != nil {
 		t.Fatal(err)
 	}
