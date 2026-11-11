@@ -53,6 +53,8 @@ func (a *Analyzer) computeFillMayAdopt() map[*ast.FuncDecl]bool {
 		// nothing, and its callers' fills stay tracked. Calls into other seeds close over callers.
 		if decl.AmbientGrownContainerRegion != "" && a.fillMayAdoptFreshShapes(decl, byName) {
 			seed(decl)
+			// A seed is already in the closure regardless of its callees.
+			continue
 		}
 		valueParams := map[string]bool{}
 		// declaredHeads maps each binding name to its declared type's head, "" when any binding
@@ -73,7 +75,12 @@ func (a *Analyzer) computeFillMayAdopt() map[*ast.FuncDecl]bool {
 		// buffer for the next function.
 		bodyNodes = bodyNodes[:0]
 		fillMayAdoptWalk(reflect.ValueOf(decl.Body), func(node any) {
-			bodyNodes = append(bodyNodes, node)
+			switch node.(type) {
+			case *ast.LambdaExpr, *ast.VarDeclStmt, *ast.ForStmt, *ast.IterForStmt,
+				*ast.FuncDecl, *ast.MatchStmt, *ast.MatchExpr, *ast.CatchExpr,
+				*ast.Ident, *ast.FieldExpr, *ast.CallExpr:
+				bodyNodes = append(bodyNodes, node)
+			}
 		})
 		forEachBodyNode := func(visit func(any)) {
 			for _, node := range bodyNodes {
@@ -211,6 +218,13 @@ func (a *Analyzer) computeFillMayAdopt() map[*ast.FuncDecl]bool {
 			shadowed = map[string]bool{}
 			armShadowed = map[*ast.Ident]bool{}
 		}
+		addCaller := func(callee *ast.FuncDecl) {
+			edges := callers[callee]
+			// All mentions in one caller are collected consecutively.
+			if len(edges) == 0 || edges[len(edges)-1] != decl {
+				callers[callee] = append(edges, decl)
+			}
+		}
 		unknown := false
 		forEachBodyNode(func(v any) {
 			switch n := v.(type) {
@@ -220,17 +234,21 @@ func (a *Analyzer) computeFillMayAdopt() map[*ast.FuncDecl]bool {
 					break
 				}
 				for _, callee := range byName[n.Name] {
-					callers[callee] = append(callers[callee], decl)
+					addCaller(callee)
 				}
 			case *ast.FieldExpr:
 				// `recv.m`: a builtin-container receiver never selects a method whose receiver
 				// parameter is a declared struct (the darray `push` is not InlineVec's).
+				candidates := byName[n.Field]
+				if len(candidates) == 0 {
+					break
+				}
 				receiverHead := ""
 				if root, ok := fillMayAdoptStripParens(n.Object).(*ast.Ident); ok && root != nil {
 					receiverHead = declaredHeads[root.Name]
 				}
 				builtinReceiver := fillMayAdoptBuiltinHeads[receiverHead]
-				for _, callee := range byName[n.Field] {
+				for _, callee := range candidates {
 					if builtinReceiver && len(callee.Params) > 0 {
 						head, known := firstParamHeads[callee]
 						if !known {
@@ -241,7 +259,7 @@ func (a *Analyzer) computeFillMayAdopt() map[*ast.FuncDecl]bool {
 							continue
 						}
 					}
-					callers[callee] = append(callers[callee], decl)
+					addCaller(callee)
 				}
 			case *ast.CallExpr:
 				call := n
