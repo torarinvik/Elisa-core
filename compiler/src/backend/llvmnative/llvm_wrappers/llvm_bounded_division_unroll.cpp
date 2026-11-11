@@ -296,90 +296,6 @@ extern "C" unsigned elisacoreUnrollBoundedDivisionLoops(LLVMModuleRef Ref) {
   }
   return Changed;
 }
-// Unroll a three-state shift recurrence by its rotation length. This gives
-// the register allocator a straight-line body with no register shifts between
-// the three additions. LLVM retains the runtime remainder and exit checks.
-static bool isLaggedAdditionBlock(BasicBlock &B) {
-  auto *Branch = dyn_cast<CondBrInst>(B.getTerminator());
-  auto *Cmp = Branch ? dyn_cast<ICmpInst>(Branch->getCondition()) : nullptr;
-  if (!Cmp || !Cmp->isEquality() || B.size() != 8 ||
-      Branch->getSuccessor(Cmp->getPredicate() == ICmpInst::ICMP_EQ ? 1 : 0) != &B ||
-      Branch->getSuccessor(Cmp->getPredicate() == ICmpInst::ICMP_EQ ? 0 : 1) == &B)
-    return false;
-  auto *Counter = dyn_cast<PHINode>(Cmp->getOperand(0));
-  if (!Counter || Counter->getParent() != &B ||
-      !Counter->getType()->isIntegerTy(64) || Counter->getNumIncomingValues() != 2)
-    return false;
-  auto *Step = dyn_cast<BinaryOperator>(Counter->getIncomingValueForBlock(&B));
-  auto *One = Step ? dyn_cast<ConstantInt>(Step->getOperand(1)) : nullptr;
-  if (!Step || Step->getParent() != &B || Step->getOpcode() != Instruction::Add ||
-      Step->getOperand(0) != Counter || !One || !One->isOne()) return false;
-  unsigned PhiCount = 0;
-  BinaryOperator *Sum = nullptr;
-  for (Instruction &I : B) {
-    if (isa<PHINode>(I)) { ++PhiCount; continue; }
-    if (&I == Step || &I == Cmp || &I == Branch) continue;
-    if (Sum || I.getOpcode() != Instruction::Add) return false;
-    Sum = cast<BinaryOperator>(&I);
-  }
-  if (PhiCount != 4 || !Sum) return false;
-  auto Shift = [&](Value *V) -> PHINode * {
-    auto *P = dyn_cast<PHINode>(V);
-    return P && P != Counter && P->getParent() == &B &&
-           P->getNumIncomingValues() == 2 ? P : nullptr;
-  };
-  PHINode *A = Shift(Sum->getOperand(0)), *Next = Shift(Sum->getOperand(1));
-  if (!A || !Next || A == Next) return false;
-  if (A->getIncomingValueForBlock(&B) != Next) std::swap(A, Next);
-  if (A->getIncomingValueForBlock(&B) != Next) return false;
-  auto *Newest = Shift(Next->getIncomingValueForBlock(&B));
-  return Newest && Newest != A && Newest != Next &&
-         Newest->getIncomingValueForBlock(&B) == Sum;
-}
-
-extern "C" unsigned elisacoreUnrollLaggedRecurrences(LLVMModuleRef Ref) {
-  if (!Ref) return 0;
-  Module &M = *unwrap(Ref);
-  if (!M.getTargetTriple().isAArch64()) return 0;
-  PassBuilder PB;
-  LoopAnalysisManager LAM;
-  FunctionAnalysisManager FAM;
-  CGSCCAnalysisManager CGAM;
-  ModuleAnalysisManager MAM;
-  PB.registerModuleAnalyses(MAM);
-  PB.registerCGSCCAnalyses(CGAM);
-  PB.registerFunctionAnalyses(FAM);
-  PB.registerLoopAnalyses(LAM);
-  PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
-  unsigned Changed = 0, Analyzed = 0;
-  for (Function &F : M) {
-    if (BDU_SkipFunction(F, M) || F.size() > 24) continue;
-    for (BasicBlock &B : F) {
-      if (!isLaggedAdditionBlock(B)) continue;
-      if (++Analyzed > 32) return Changed;
-      auto &LI = FAM.getResult<LoopAnalysis>(F);
-      Loop *L = LI.getLoopFor(&B);
-      if (!L || L->getHeader() != &B || L->getParentLoop() || L->getLoopID() ||
-          L->getNumBlocks() != 1) break;
-      auto &SE = FAM.getResult<ScalarEvolutionAnalysis>(F);
-      unsigned MaxTrips = SE.getSmallConstantMaxTripCount(L);
-      if (MaxTrips < 16 || MaxTrips > 256) break;
-      auto &DT = FAM.getResult<DominatorTreeAnalysis>(F);
-      auto &AC = FAM.getResult<AssumptionAnalysis>(F);
-      auto &TTI = FAM.getResult<TargetIRAnalysis>(F);
-      auto &ORE = FAM.getResult<OptimizationRemarkEmitterAnalysis>(F);
-      if (simplifyLoop(L, &DT, &LI, &SE, &AC, nullptr, false)) ++Changed;
-      if (!L->isLoopSimplifyForm()) break;
-      if (formLCSSA(*L, DT, &LI, &SE)) ++Changed;
-      UnrollLoopOptions Options{3, true, true, true, false, false, nullptr, 1000};
-      if (UnrollLoop(L, Options, &LI, &SE, &DT, &AC, &TTI, &ORE, true) !=
-          LoopUnrollResult::Unmodified) ++Changed;
-      break;
-    }
-  }
-  return Changed;
-}
-
 #include "llvm_shift_parity.cpp"
 #include "llvm_shift_bit_reverse.cpp"
 extern "C" bool elisacoreFoldPowerPositionInFunction(LLVMValueRef);
@@ -414,11 +330,11 @@ static unsigned elisacoreReuseEdgeDivisions(Module &M) {
 #include "llvm_bounded_carry.cpp"
 
 #else
-extern "C" unsigned elisacoreUnrollLaggedRecurrences(LLVMModuleRef) { return 0; }
 extern "C" unsigned elisacoreUnrollBoundedDivisionLoops(LLVMModuleRef) { return 0; }
 #endif
 
 #include <llvm-c/Transforms/PassBuilder.h>
+extern "C" unsigned elisacoreUnrollLaggedRecurrences(LLVMModuleRef);
 extern "C" unsigned elisacoreOptimizeBoundedDivisionLoops(LLVMModuleRef M, LLVMTargetMachineRef T) {
   unsigned Changed = elisacoreUnrollBoundedDivisionLoops(M);
   Changed += elisacoreUnrollLaggedRecurrences(M);
