@@ -374,8 +374,10 @@ def classify_call() -> int:
 			t.Fatalf("expected tiny string match literals to avoid %q, got:\n%s", bad, body)
 		}
 	}
-	if strings.Count(body, "icmp eq i8") < 2 {
-		t.Fatalf("expected classify to compare literal bytes directly for both string arms, got:\n%s", body)
+	// The two-byte arm compares one i16 chunk. Longer literals may use
+	// wider chunks followed by an i8 tail.
+	if strings.Count(body, "= icmp eq i64 %svlit.len") < 2 || !strings.Contains(body, "icmp eq i16") || !strings.Contains(body, "icmp eq i8") {
+		t.Fatalf("expected direct chunk comparisons for both string arms, got:\n%s", body)
 	}
 	callBody := functionIR(output, "classify_call")
 	if strings.Count(callBody, "call %StringView @next_view(") != 1 {
@@ -421,8 +423,10 @@ func TestGenerateLLVMIRLowersStringMatchStatementsWithoutPhi(t *testing.T) {
 			t.Fatalf("expected statement-form tiny string match to avoid %q, got:\n%s", bad, body)
 		}
 	}
-	if strings.Count(body, "icmp eq i8") < 2 {
-		t.Fatalf("expected classify to compare literal bytes directly for both string arms, got:\n%s", body)
+	// The two-byte arm compares one i16 chunk. Longer literals may use
+	// wider chunks followed by an i8 tail.
+	if strings.Count(body, "= icmp eq i64 %svlit.len") < 2 || !strings.Contains(body, "icmp eq i16") || !strings.Contains(body, "icmp eq i8") {
+		t.Fatalf("expected direct chunk comparisons for both string arms, got:\n%s", body)
 	}
 }
 func TestGenerateLLVMIRLowersNestedMatchPatterns(t *testing.T) {
