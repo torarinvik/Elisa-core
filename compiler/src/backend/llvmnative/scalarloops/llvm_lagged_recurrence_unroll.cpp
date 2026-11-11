@@ -3,6 +3,7 @@
 
 #if LLVM_VERSION_MAJOR >= 23
 #include <llvm/IR/Instructions.h>
+#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Analysis/AssumptionCache.h>
 #include <llvm/Analysis/LoopInfo.h>
@@ -32,10 +33,46 @@ static bool BDU_SkipFunction(const Function &F, const Module &M) {
   return false;
 }
 
-// Unroll a three-state addition by its rotation length or a scaled two-state
-// recurrence by two rotations. Peel the first scaled iteration to keep a
-// one-trip input out of the runtime remainder loop.
-static unsigned laggedRecurrenceUnrollFactor(BasicBlock &B) {
+struct AffineLaggedRecurrence {
+  PHINode *Previous = nullptr;
+  PHINode *Current = nullptr;
+  BinaryOperator *Bias = nullptr;
+  BinaryOperator *Sum = nullptr;
+  ConstantInt *Offset = nullptr;
+};
+
+// With wrapping arithmetic, shifting both states by C turns
+// next = previous + current + C into an ordinary two-state sum.
+static bool rebaseLaggedRecurrence(const AffineLaggedRecurrence &R, Loop &L) {
+  BasicBlock *Header = L.getHeader(), *Entry = L.getLoopPreheader();
+  auto *Prev = dyn_cast_or_null<ConstantInt>(R.Previous->getIncomingValueForBlock(Entry));
+  auto *Current = dyn_cast_or_null<ConstantInt>(R.Current->getIncomingValueForBlock(Entry));
+  if (!Prev || !Current) return false;
+  SmallVector<PHINode *, 2> Exits;
+  for (User *U : R.Sum->users()) {
+    if (U == R.Current) continue;
+    auto *Exit = dyn_cast<PHINode>(U);
+    if (!Exit || L.contains(Exit->getParent()) || Exit->getNumIncomingValues() != 1 ||
+        Exit->getIncomingBlock(0) != Header)
+      return false;
+    Exits.push_back(Exit);
+  }
+  LLVMContext &Ctx = Header->getContext();
+  R.Previous->setIncomingValueForBlock(Entry, ConstantInt::get(Ctx, Prev->getValue() + R.Offset->getValue()));
+  R.Current->setIncomingValueForBlock(Entry, ConstantInt::get(Ctx, Current->getValue() + R.Offset->getValue()));
+  R.Sum->replaceUsesOfWith(R.Bias, R.Bias->getOperand(0));
+  R.Bias->eraseFromParent();
+  for (PHINode *Exit : Exits) {
+    IRBuilder<> B(Exit->getParent(), Exit->getParent()->getFirstNonPHIIt());
+    auto *Value = cast<Instruction>(B.CreateSub(Exit, R.Offset));
+    Exit->replaceUsesWithIf(Value, [Value](Use &U) { return U.getUser() != Value; });
+  }
+  return true;
+}
+
+// Unroll small lagged recurrences by full state rotations. Peel the first
+// iteration of two-state loops to keep one-trip inputs out of the remainder.
+static unsigned laggedRecurrenceUnrollFactor(BasicBlock &B, AffineLaggedRecurrence &Affine) {
   auto *Branch = dyn_cast<CondBrInst>(B.getTerminator());
   auto *Cmp = Branch ? dyn_cast<ICmpInst>(Branch->getCondition()) : nullptr;
   if (!Cmp || !Cmp->isEquality() || B.size() != 8 ||
@@ -51,14 +88,17 @@ static unsigned laggedRecurrenceUnrollFactor(BasicBlock &B) {
   if (!Step || Step->getParent() != &B || Step->getOpcode() != Instruction::Add ||
       Step->getOperand(0) != Counter || !One || !One->isOne()) return 0;
   unsigned PhiCount = 0;
-  BinaryOperator *Sum = nullptr, *Scale = nullptr;
+  BinaryOperator *Sum = nullptr, *Scale = nullptr, *Bias = nullptr;
   for (Instruction &I : B) {
     if (isa<PHINode>(I)) { ++PhiCount; continue; }
     if (&I == Step || &I == Cmp || &I == Branch) continue;
     if (!Sum && I.getOpcode() == Instruction::Add) {
       Sum = cast<BinaryOperator>(&I);
-    } else if (!Scale && I.getOpcode() == Instruction::Shl) {
+    } else if (!Scale && !Bias && I.getOpcode() == Instruction::Shl) {
       Scale = cast<BinaryOperator>(&I);
+    } else if (!Scale && !Bias && Sum && I.getOpcode() == Instruction::Add) {
+      Bias = Sum;
+      Sum = cast<BinaryOperator>(&I);
     } else {
       return 0;
     }
@@ -69,6 +109,28 @@ static unsigned laggedRecurrenceUnrollFactor(BasicBlock &B) {
     return P && P != Counter && P->getParent() == &B &&
            P->getNumIncomingValues() == 2 ? P : nullptr;
   };
+  if (Bias) {
+    auto *Offset = dyn_cast<ConstantInt>(Bias->getOperand(1));
+    if (PhiCount != 3 || !Offset || Offset->isZero() || !Bias->hasOneUse() ||
+        Bias->hasNoSignedWrap() || Bias->hasNoUnsignedWrap() ||
+        Sum->hasNoSignedWrap() || Sum->hasNoUnsignedWrap())
+      return 0;
+    Value *Other = Sum->getOperand(0);
+    if (Sum->getOperand(1) != Bias) {
+      if (Other != Bias) return 0;
+      Other = Sum->getOperand(1);
+    }
+    PHINode *Previous = Shift(Bias->getOperand(0)), *Current = Shift(Other);
+    if (!Previous || !Current || Previous == Current) return 0;
+    if (Current->getIncomingValueForBlock(&B) == Previous)
+      std::swap(Previous, Current);
+    if (Previous->getIncomingValueForBlock(&B) != Current ||
+        Current->getIncomingValueForBlock(&B) != Sum ||
+        !Previous->hasOneUse() || !Current->hasNUses(2))
+      return 0;
+    Affine = {Previous, Current, Bias, Sum, Offset};
+    return 4;
+  }
   if (Scale) {
     if (PhiCount != 3 || !Scale->hasOneUse()) return 0;
     auto *OneBit = dyn_cast<ConstantInt>(Scale->getOperand(1));
@@ -111,7 +173,8 @@ extern "C" unsigned elisacoreUnrollLaggedRecurrences(LLVMModuleRef Ref) {
   for (Function &F : M) {
     if (BDU_SkipFunction(F, M) || F.size() > 24) continue;
     for (BasicBlock &B : F) {
-      unsigned Factor = laggedRecurrenceUnrollFactor(B);
+      AffineLaggedRecurrence Affine;
+      unsigned Factor = laggedRecurrenceUnrollFactor(B, Affine);
       if (!Factor) continue;
       if (++Analyzed > 32) return Changed;
       auto &LI = FAM.getResult<LoopAnalysis>(F);
@@ -130,6 +193,10 @@ extern "C" unsigned elisacoreUnrollLaggedRecurrences(LLVMModuleRef Ref) {
       if (formLCSSA(*L, DT, &LI, &SE)) ++Changed;
       if (Factor == 4) {
         if (!canPeel(L)) break;
+        if (Affine.Bias) {
+          if (!rebaseLaggedRecurrence(Affine, *L)) break;
+          SE.forgetLoop(L);
+        }
         ValueToValueMapTy FirstIteration;
         peelLoop(L, 1, false, &LI, &SE, DT, &AC, true, FirstIteration);
         ++Changed;

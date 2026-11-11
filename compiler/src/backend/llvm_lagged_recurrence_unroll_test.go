@@ -7,11 +7,7 @@ import (
 	"testing"
 )
 
-func TestScaledLaggedRecurrencePeelsAndUnrolls(t *testing.T) {
-	if !boundedDivisionUnrollSupported() {
-		t.Skip("requires LLVM 23")
-	}
-	const source = `
+const boundedLaggedRecurrenceIR = `
 target triple = "arm64-apple-macosx"
 define i64 @bounded_recurrence(i64 %limit) {
 entry:
@@ -34,6 +30,31 @@ exit:
   ret i64 %result
 }
 `
+
+func TestScaledLaggedRecurrencePeelsAndUnrolls(t *testing.T) {
+	testLaggedRecurrenceUnroll(t, boundedLaggedRecurrenceIR, true)
+}
+
+func TestAffineLaggedRecurrencePreservesOverflowContract(t *testing.T) {
+	source := strings.ReplaceAll(boundedLaggedRecurrenceIR, "shl i64 %current, 1", "add i64 %current, 1")
+	t.Run("wrapping", func(t *testing.T) {
+		ir := testLaggedRecurrenceUnroll(t, source, true)
+		if !strings.Contains(ir, ", -1") {
+			t.Fatalf("missing output adjustment:\n%s", ir)
+		}
+	})
+	t.Run("no signed wrap", func(t *testing.T) {
+		source := strings.ReplaceAll(source, "add i64 %current, 1", "add nsw i64 %current, 1")
+		testLaggedRecurrenceUnroll(t, source, false)
+	})
+}
+
+func testLaggedRecurrenceUnroll(t *testing.T, source string, wantUnroll bool) string {
+	t.Helper()
+	if !boundedDivisionUnrollSupported() {
+		t.Skip("requires LLVM 23")
+	}
+
 	g, err := parseLLVMIRForSplitHalfTest(source)
 	if err != nil {
 		t.Fatal(err)
@@ -42,14 +63,15 @@ exit:
 	if err := g.ensureTargetMachine(); err != nil {
 		t.Fatal(err)
 	}
-	if got := unrollBoundedDivisionLoops(g); got != 1 {
-		t.Fatalf("unroll returned %d, want changed", got)
+	if got := unrollBoundedDivisionLoops(g); got == 2 || (got == 1) != wantUnroll {
+		t.Fatalf("unroll returned %d, want changed=%t", got, wantUnroll)
 	}
 	if err := g.verify(); err != nil {
 		t.Fatal(err)
 	}
 	ir := g.printModule()
-	if !strings.Contains(ir, "icmp eq i64 %limit, 2") || !strings.Contains(ir, "add i64 %niter, 4") {
-		t.Fatalf("missing peeled exit or four-step body:\n%s", ir)
+	if got := strings.Contains(ir, "icmp eq i64 %limit, 2") && strings.Contains(ir, "add i64 %niter, 4"); got != wantUnroll {
+		t.Fatalf("peeled four-step body=%t, want %t:\n%s", got, wantUnroll, ir)
 	}
+	return ir
 }
