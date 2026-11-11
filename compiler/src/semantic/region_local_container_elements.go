@@ -424,12 +424,13 @@ func (s *localContainerElementScan) walkNode(node ast.Node, parent ast.Node, fie
 }
 
 func (s *localContainerElementScan) walkValue(v reflect.Value, owner ast.Node, field string) {
-	switch v.Kind() {
-	case reflect.Interface:
+	if v.Kind() == reflect.Interface {
 		if v.IsNil() {
 			return
 		}
-		s.walkValue(v.Elem(), owner, field)
+		v = v.Elem()
+	}
+	switch v.Kind() {
 	case reflect.Ptr:
 		if v.IsNil() {
 			return
@@ -475,7 +476,7 @@ type localContainerScanField struct {
 var localContainerScanFieldCache sync.Map // map[reflect.Type][]localContainerScanField
 
 // localContainerScanFields lists a struct type's exported fields that walkStructFields descends
-// into (maps, funcs and channels are skipped), cached per type instead of re-derived per node.
+// into. Scalar fields other than strings and non-AST structs cannot affect the scan.
 func localContainerScanFields(t reflect.Type) []localContainerScanField {
 	if cached, ok := localContainerScanFieldCache.Load(t); ok {
 		return cached.([]localContainerScanField)
@@ -487,7 +488,12 @@ func localContainerScanFields(t reflect.Type) []localContainerScanField {
 			continue
 		}
 		switch f.Type.Kind() {
-		case reflect.Map, reflect.Func, reflect.Chan:
+		case reflect.Struct:
+			if f.Type.PkgPath() != astPkgPath {
+				continue
+			}
+		case reflect.Interface, reflect.Ptr, reflect.Slice, reflect.Array, reflect.String:
+		default:
 			continue
 		}
 		fields = append(fields, localContainerScanField{index: i, name: f.Name})
