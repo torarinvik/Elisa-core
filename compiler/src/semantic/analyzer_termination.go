@@ -228,7 +228,7 @@ func (a *Analyzer) typeCastNodesInExpr(expr ast.Expr) {
 		}
 	case *ast.CastExpr:
 		if n != nil {
-			a.analyzeExpr(n) // records exprTypes for n and its operand on the current scope
+			analyzeExprForTypeOrProof(a, n) // records exprTypes for n and its operand on the current scope
 		}
 	}
 }
@@ -474,7 +474,7 @@ func (a *Analyzer) typePureTerminationExprsForSMT(exprs ...ast.Expr) {
 			continue
 		}
 		a.typeCastNodesInExpr(expr)
-		a.analyzeExpr(expr)
+		analyzeExprForTypeOrProof(a, expr)
 	}
 }
 

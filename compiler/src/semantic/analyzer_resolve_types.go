@@ -364,7 +364,7 @@ func (a *Analyzer) validateConstantWhereRefinementPredicate(n *ast.WhereRefineme
 	if a == nil || n == nil || n.Predicate == nil || exprContainsIdent(n.Predicate) {
 		return
 	}
-	t := analyzeConstantWherePredicate(a, n.Predicate)
+	t := analyzeExprForTypeOrProof(a, n.Predicate)
 	if t != nil && !IsBoolType(t) {
 		// Emit the base type so the user knows what subject the predicate applies to.
 		baseDesc := "unknown"
