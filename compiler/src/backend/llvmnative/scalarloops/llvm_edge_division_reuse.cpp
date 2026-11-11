@@ -6,6 +6,7 @@
 #include <llvm/IR/ConstantRange.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Transforms/Utils/BasicBlockUtils.h>
 
@@ -161,6 +162,91 @@ static bool skipRedundantFactorDivision(BasicBlock &Loop) {
   return false;
 }
 
+// When the outer loop has already divided by this factor, reuse that quotient
+// for the first divisibility test. Repeated removals still divide on their
+// backedge, where the original loop would have divided again.
+static bool carryFactorQuotient(BasicBlock &Loop) {
+  if (Loop.size() > 12 || Loop.isEHPad() || Loop.hasAddressTaken()) return false;
+  auto *Div = dyn_cast<BinaryOperator>(&*Loop.getFirstNonPHIIt());
+  if (!Div || Div->getOpcode() != Instruction::UDiv || Div->isExact() ||
+      !Div->getType()->isIntegerTy(64) || Div->hasMetadataOtherThanDebugLoc())
+    return false;
+  auto *Remaining = dyn_cast<PHINode>(Div->getOperand(0));
+  auto *Branch = dyn_cast<CondBrInst>(Loop.getTerminator());
+  auto *Cmp = Branch ? dyn_cast<ICmpInst>(Branch->getCondition()) : nullptr;
+  if (!Remaining || Remaining->getParent() != &Loop || Remaining->getNumIncomingValues() != 2 ||
+      !Cmp || Cmp->getPredicate() != ICmpInst::ICMP_EQ ||
+      Branch->getSuccessor(0) != &Loop || Branch->getSuccessor(1) == &Loop)
+    return false;
+  Value *Factor = Div->getOperand(1);
+  if (auto *I = dyn_cast<Instruction>(Factor); I && I->getParent() == &Loop) return false;
+  Value *ProductValue = Cmp->getOperand(0);
+  if (ProductValue == Remaining) ProductValue = Cmp->getOperand(1);
+  else if (Cmp->getOperand(1) != Remaining) return false;
+  auto *Product = dyn_cast<BinaryOperator>(ProductValue);
+  if (!Product || Product->getOpcode() != Instruction::Mul ||
+      !((Product->getOperand(0) == Div && Product->getOperand(1) == Factor) ||
+        (Product->getOperand(0) == Factor && Product->getOperand(1) == Div)))
+    return false;
+
+  int BackIndex = Remaining->getBasicBlockIndex(&Loop);
+  if (BackIndex < 0 || Remaining->getIncomingValue(BackIndex) != Div) return false;
+  BasicBlock *Join = Remaining->getIncomingBlock(1 - BackIndex);
+  Value *Dividend = Remaining->getIncomingValue(1 - BackIndex);
+  auto *Jump = dyn_cast<UncondBrInst>(Join->getTerminator());
+  if (!Jump || Jump->getSuccessor() != &Loop || Join->isEHPad()) return false;
+  SmallVector<BasicBlock *, 2> Preds(predecessors(Join));
+  if (Preds.size() != 2 || Preds[0] == Preds[1]) return false;
+
+  Value *EntryQuotients[2] = {};
+  Value *EdgeDividends[2] = {};
+  int Shifts[2] = {-1, -1};
+  bool ReusesDivision = false;
+  for (unsigned I = 0; I < 2; ++I) {
+    BasicBlock *Pred = Preds[I];
+    if (Pred == Join || Pred == &Loop || Pred->size() > 32) return false;
+    Value *N = divisionOperandOnEdge(Dividend, *Join, Pred);
+    Value *D = divisionOperandOnEdge(Factor, *Join, Pred);
+    if (!N || !D) return false;
+    for (Instruction &Inst : *Pred) {
+      auto *Op = dyn_cast<BinaryOperator>(&Inst);
+      if (Op && Op->getOpcode() == Instruction::UDiv && !Op->isExact() &&
+          Op->getOperand(0) == N && Op->getOperand(1) == D) {
+        EntryQuotients[I] = Op;
+        ReusesDivision = true;
+        break;
+      }
+    }
+    if (EntryQuotients[I]) continue;
+    auto *K = dyn_cast<ConstantInt>(D);
+    if (!K || !K->getValue().isPowerOf2()) return false;
+    EdgeDividends[I] = N;
+    Shifts[I] = K->getValue().exactLogBase2();
+  }
+  if (!ReusesDivision) return false;
+
+  BasicBlock *Back = SplitCriticalEdge(Branch, 0, CriticalEdgeSplittingOptions(),
+                                      "factor.quotient.backedge");
+  if (!Back) return false;
+  auto *EntryQuotient = PHINode::Create(Div->getType(), 2, "factor.entry.quotient",
+                                       Join->getFirstNonPHIIt());
+  for (unsigned I = 0; I < 2; ++I) {
+    if (Shifts[I] >= 0) {
+      IRBuilder<> B(Preds[I]->getTerminator());
+      EntryQuotients[I] = B.CreateLShr(EdgeDividends[I], Shifts[I], "factor.initial.quotient");
+    }
+    EntryQuotient->addIncoming(EntryQuotients[I], Preds[I]);
+  }
+  auto *Quotient = PHINode::Create(Div->getType(), 2, "factor.quotient", Div->getIterator());
+  Quotient->addIncoming(EntryQuotient, Join);
+  IRBuilder<> B(Back->getTerminator());
+  B.SetCurrentDebugLocation(Div->getDebugLoc());
+  Quotient->addIncoming(B.CreateUDiv(Quotient, Factor, "factor.next.quotient"), Back);
+  Div->replaceAllUsesWith(Quotient);
+  Div->eraseFromParent();
+  return true;
+}
+
 static bool reuseEdgeDivision(BasicBlock &Join) {
   auto *Div = dyn_cast<BinaryOperator>(&*Join.getFirstNonPHIIt());
   if (!Div || (Div->getOpcode() != Instruction::SDiv &&
@@ -235,7 +321,7 @@ static bool reuseEdgeDivision(BasicBlock &Join) {
 extern "C" bool elisacoreReuseEdgeDivisionsInFunction(LLVMValueRef Ref) {
   auto &F = *cast<Function>(unwrap(Ref));
   for (BasicBlock &B : F) {
-    if (skipRedundantFactorDivision(B) || reuseJoinedQuotient(B) || reuseEdgeDivision(B)) return true;
+    if (skipRedundantFactorDivision(B) || carryFactorQuotient(B) || reuseJoinedQuotient(B) || reuseEdgeDivision(B)) return true;
   }
   return false;
 }
