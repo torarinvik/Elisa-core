@@ -163,6 +163,12 @@ func (a *Analyzer) funcOwnsRegion(fn *ast.FuncDecl) bool {
 		if found {
 			return false
 		}
+		// These leaves cannot contain a region scope or a shared subtree.
+		switch node.(type) {
+		case *ast.Ident, *ast.IntLit, *ast.FloatLit, *ast.StringLit,
+			*ast.CharLit, *ast.BoolLit, *ast.NullLit, *ast.ZeroedLit:
+			return false
+		}
 		key := reflect.ValueOf(node).Pointer()
 		if seen.values[key] {
 			return false
