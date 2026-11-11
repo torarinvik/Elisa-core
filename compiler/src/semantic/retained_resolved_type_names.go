@@ -114,12 +114,12 @@ func captureResolvedTypeNameContributions(rows map[ast.TypeExpr]string, decls []
 	work := 0
 	defer func() { certificate.walkWork = work }()
 
-	// Siblings reuse the traversal buffer. Only a retained type-name path
-	// needs its own immutable string.
-	rootPath := make([]byte, 1, 512)
-	rootPath[0] = '$'
-	var walk func(reflect.Value, string, string, []byte, bool, int) error
-	walk = func(value reflect.Value, owner, region string, path []byte, skipNestedFunctions bool, depth int) error {
+	// Keep path components until a type-expression location actually needs
+	// a stable string. Siblings reuse both buffers.
+	rootPath := make([]resolvedTypeNamePathPart, 0, 64)
+	pathText := make([]byte, 0, 512)
+	var walk func(reflect.Value, string, string, []resolvedTypeNamePathPart, bool, int) error
+	walk = func(value reflect.Value, owner, region string, path []resolvedTypeNamePathPart, skipNestedFunctions bool, depth int) error {
 		work++
 		if work > 32_000_000 {
 			return fmt.Errorf("AST ownership walk work budget exceeded (%d)", work)
@@ -161,17 +161,18 @@ func captureResolvedTypeNameContributions(rows map[ast.TypeExpr]string, decls []
 			}
 			active[ptr] = true
 			if expr, ok := node.(ast.TypeExpr); ok {
+				pathText = appendResolvedTypeNamePath(pathText[:0], path)
 				location := locations[expr]
 				if location.owner != "" && (location.owner != owner || location.region != region) {
 					ambiguous[expr] = true
 				}
 				if location.firstPath == "" {
-					location = resolvedTypeNameLocation{owner: owner, region: region, firstPath: string(path)}
-				} else if location.firstPath != string(path) {
+					location = resolvedTypeNameLocation{owner: owner, region: region, firstPath: string(pathText)}
+				} else if location.firstPath != string(pathText) {
 					if location.morePaths == nil {
 						location.morePaths = map[string]bool{}
 					}
-					location.morePaths[string(path)] = true
+					location.morePaths[string(pathText)] = true
 				}
 				locations[expr] = location
 			}
@@ -184,7 +185,7 @@ func captureResolvedTypeNameContributions(rows map[ast.TypeExpr]string, decls []
 				if !field.published {
 					return fmt.Errorf("unpublished AST ownership field %s.%s", typ, field.name)
 				}
-				if err := walk(value.Field(field.index), owner, region, append(path, field.pathSuffix...), skipNestedFunctions, depth+1); err != nil {
+				if err := walk(value.Field(field.index), owner, region, append(path, resolvedTypeNamePathPart{fieldOrKey: field.pathSuffix, index: resolvedTypeNamePathField}), skipNestedFunctions, depth+1); err != nil {
 					return err
 				}
 			}
@@ -193,8 +194,7 @@ func captureResolvedTypeNameContributions(rows map[ast.TypeExpr]string, decls []
 				return fmt.Errorf("AST ownership slice budget exceeded")
 			}
 			for i := 0; i < value.Len(); i++ {
-				indexPath := strconv.AppendInt(append(path, '['), int64(i), 10)
-				if err := walk(value.Index(i), owner, region, append(indexPath, ']'), skipNestedFunctions, depth+1); err != nil {
+				if err := walk(value.Index(i), owner, region, append(path, resolvedTypeNamePathPart{index: i}), skipNestedFunctions, depth+1); err != nil {
 					return err
 				}
 			}
@@ -209,8 +209,8 @@ func captureResolvedTypeNameContributions(rows map[ast.TypeExpr]string, decls []
 			keys := value.MapKeys()
 			sort.Slice(keys, func(i, j int) bool { return keys[i].String() < keys[j].String() })
 			for _, key := range keys {
-				keyPath := strconv.AppendQuote(append(path, '['), key.String())
-				if err := walk(value.MapIndex(key), owner, region, append(keyPath, ']'), skipNestedFunctions, depth+1); err != nil {
+				keyPart := resolvedTypeNamePathPart{fieldOrKey: key.String(), index: resolvedTypeNamePathMapKey}
+				if err := walk(value.MapIndex(key), owner, region, append(path, keyPart), skipNestedFunctions, depth+1); err != nil {
 					return err
 				}
 			}
@@ -362,20 +362,27 @@ func captureResolvedTypeNameContributions(rows map[ast.TypeExpr]string, decls []
 	return certificate, locations
 }
 
-func collectResolvedTypeNameFunctionPaths(walk func(reflect.Value, string, string, []byte, bool, int) error, fn *ast.FuncDecl, key string, rootPath []byte) error {
+var resolvedTypeNameFunctionHeaderFields = sync.OnceValue(func() []resolvedTypeNameOwnershipField {
+	typ := reflect.TypeOf(ast.FuncDecl{})
+	var plan []resolvedTypeNameOwnershipField
+	for i, field := range reflectFields(typ) {
+		if field.Name != "Body" && resolvedTypeNameFieldMayContainAST(field.Type) {
+			plan = append(plan, resolvedTypeNameOwnershipField{
+				index: i, name: field.Name, pathSuffix: "." + field.Name, published: field.IsExported(),
+			})
+		}
+	}
+	return plan
+})
+
+func collectResolvedTypeNameFunctionPaths(walk func(reflect.Value, string, string, []resolvedTypeNamePathPart, bool, int) error, fn *ast.FuncDecl, key string, rootPath []resolvedTypeNamePathPart) error {
 	owner := "fn:" + key
 	value := reflect.ValueOf(fn).Elem()
-	typ := value.Type()
-	fields := reflectFields(typ)
-	for i := 0; i < value.NumField(); i++ {
-		field := &fields[i]
-		if field.Name == "Body" || !resolvedTypeNameFieldMayContainAST(field.Type) {
-			continue
+	for _, field := range resolvedTypeNameFunctionHeaderFields() {
+		if !field.published {
+			return fmt.Errorf("unpublished function header field %s.%s", value.Type(), field.name)
 		}
-		if !value.Field(i).CanInterface() {
-			return fmt.Errorf("unpublished function header field %s.%s", typ, field.Name)
-		}
-		if err := walk(value.Field(i), owner, "header", append(append(rootPath, '.'), field.Name...), false, 0); err != nil {
+		if err := walk(value.Field(field.index), owner, "header", append(rootPath, resolvedTypeNamePathPart{fieldOrKey: field.pathSuffix, index: resolvedTypeNamePathField}), false, 0); err != nil {
 			return err
 		}
 	}

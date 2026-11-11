@@ -144,7 +144,7 @@ func captureResolvedTypeNameContributionsReference(rows map[ast.TypeExpr]string,
 				return certificate, locations
 			}
 			functionOwners[key], functionPaths[fn] = true, true
-			if err := collectResolvedTypeNameFunctionPaths(walk, fn, key, rootPath); err != nil {
+			if err := collectResolvedTypeNameReferenceFunctionPaths(walk, fn, key, rootPath); err != nil {
 				certificate.failure = err.Error()
 				return certificate, locations
 			}
@@ -173,7 +173,7 @@ func captureResolvedTypeNameContributionsReference(rows map[ast.TypeExpr]string,
 				return certificate, locations
 			}
 			functionOwners[key], functionPaths[fn] = true, true
-			if err := collectResolvedTypeNameFunctionPaths(walk, fn, key, rootPath); err != nil {
+			if err := collectResolvedTypeNameReferenceFunctionPaths(walk, fn, key, rootPath); err != nil {
 				certificate.failure = err.Error()
 				return certificate, locations
 			}
@@ -266,4 +266,27 @@ func captureResolvedTypeNameContributionsReference(rows map[ast.TypeExpr]string,
 		}
 	}
 	return certificate, locations
+}
+
+func collectResolvedTypeNameReferenceFunctionPaths(walk func(reflect.Value, string, string, []byte, bool, int) error, fn *ast.FuncDecl, key string, rootPath []byte) error {
+	owner := "fn:" + key
+	value := reflect.ValueOf(fn).Elem()
+	typ := value.Type()
+	fields := reflectFields(typ)
+	for i := 0; i < value.NumField(); i++ {
+		field := &fields[i]
+		if field.Name == "Body" || !resolvedTypeNameFieldMayContainAST(field.Type) {
+			continue
+		}
+		if !value.Field(i).CanInterface() {
+			return fmt.Errorf("unpublished function header field %s.%s", typ, field.Name)
+		}
+		if err := walk(value.Field(i), owner, "header", append(append(rootPath, '.'), field.Name...), false, 0); err != nil {
+			return err
+		}
+	}
+	if err := walk(reflect.ValueOf(fn.Body), owner, "body", rootPath, false, 0); err != nil {
+		return err
+	}
+	return nil
 }
