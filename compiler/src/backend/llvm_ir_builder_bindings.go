@@ -382,3 +382,7 @@ func llvmSetIsInBounds(value llvmIRValueRef, inBounds llvmIRBool) {
 func llvmValueIsTriviallyValidPtr(value llvmIRValueRef) C.int {
 	return C.elisacoreValueIsTriviallyValidPtr(value)
 }
+
+func llvmBuildNUWMul(builder llvmIRBuilderRef, left, right llvmIRValueRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildNUWMul(builder, left, right, name)
+}

@@ -2,25 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-
-static LLVMTypeRef elisacoreGlobalValueType(LLVMValueRef Value) {
-	return LLVMGlobalGetValueType(Value);
-}
-
-static char* elisacorePrintType(LLVMTypeRef Type) {
-	return LLVMPrintTypeToString(Type);
-}
-
-static void elisacoreSetFunctionCallConv(LLVMValueRef Fn, unsigned CallConv) {
-	LLVMSetFunctionCallConv(Fn, CallConv);
-}
-
-*/
-import "C"
-
 import (
 	"elisacore/src/semantic"
 	"fmt"
@@ -276,7 +257,7 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 	}
 	return err
 }
-func (g *llvmGenerator) ensureFunctionDeclared(name string, fn *semantic.FuncType) (C.LLVMValueRef, error) {
+func (g *llvmGenerator) ensureFunctionDeclared(name string, fn *semantic.FuncType) (llvmIRValueRef, error) {
 	if value, ok := g.functions[name]; ok {
 		if err := g.ensureDeclaredFunctionType(name, value, fn); err != nil {
 			return nil, err
@@ -309,7 +290,7 @@ func (g *llvmGenerator) llvmSymbolName(name string) string {
 	}
 	return sym.LinkName
 }
-func (g *llvmGenerator) ensureDeclaredFunctionType(name string, value C.LLVMValueRef, fn *semantic.FuncType) error {
+func (g *llvmGenerator) ensureDeclaredFunctionType(name string, value llvmIRValueRef, fn *semantic.FuncType) error {
 	if g == nil || value == nil || fn == nil {
 		return nil
 	}
@@ -317,18 +298,18 @@ func (g *llvmGenerator) ensureDeclaredFunctionType(name string, value C.LLVMValu
 	if err != nil {
 		return err
 	}
-	actualType := C.elisacoreGlobalValueType(value)
+	actualType := llvmGlobalGetValueType(value)
 	if actualType == expectedType {
 		return nil
 	}
-	actualText := disposeLLVMMessage(C.elisacorePrintType(actualType), "<unknown>")
-	expectedText := disposeLLVMMessage(C.elisacorePrintType(expectedType), "<unknown>")
+	actualText := disposeLLVMMessage(llvmPrintTypeToString(actualType), "<unknown>")
+	expectedText := disposeLLVMMessage(llvmPrintTypeToString(expectedType), "<unknown>")
 	if actualText == expectedText {
 		return nil
 	}
 	return fmt.Errorf("conflicting LLVM function declaration for %q: existing %s, requested %s", name, actualText, expectedText)
 }
-func (g *llvmGenerator) ensureGlobalDeclared(name string, t semantic.Type, external bool) (C.LLVMValueRef, error) {
+func (g *llvmGenerator) ensureGlobalDeclared(name string, t semantic.Type, external bool) (llvmIRValueRef, error) {
 	if value, ok := g.globals[name]; ok {
 		return value, nil
 	}
@@ -339,7 +320,7 @@ func (g *llvmGenerator) ensureGlobalDeclared(name string, t semantic.Type, exter
 	g.globals[name] = value
 	return value, nil
 }
-func (g *llvmGenerator) addFunction(name string, fn *semantic.FuncType) (C.LLVMValueRef, error) {
+func (g *llvmGenerator) addFunction(name string, fn *semantic.FuncType) (llvmIRValueRef, error) {
 	lookupName := name
 	if fn != nil && strings.TrimSpace(fn.IntrinsicName) != "" {
 		lookupName = strings.TrimSpace(fn.IntrinsicName)
@@ -350,7 +331,7 @@ func (g *llvmGenerator) addFunction(name string, fn *semantic.FuncType) (C.LLVMV
 	if intrinsicID, overloadedParamTypes, ok, err := g.lookupIntrinsic(lookupName, fn); err != nil {
 		return nil, err
 	} else if ok {
-		return C.LLVMGetIntrinsicDeclaration(g.module, intrinsicID, llvmTypeSlicePtr(overloadedParamTypes), C.size_t(len(overloadedParamTypes))), nil
+		return llvmGetIntrinsicDeclaration(g.module, intrinsicID, llvmTypeSlicePtr(overloadedParamTypes), llvmIRSize(len(overloadedParamTypes))), nil
 	}
 
 	fnType, err := g.lowerFunctionTypeForSymbol(name, fn)
@@ -359,7 +340,7 @@ func (g *llvmGenerator) addFunction(name string, fn *semantic.FuncType) (C.LLVMV
 	}
 	symbolName := g.llvmSymbolName(name)
 	nameC := cString(symbolName)
-	defer C.free(unsafe.Pointer(nameC))
+	defer llvmFree(unsafe.Pointer(nameC))
 	// Two externs can resolve to the same linker symbol — e.g. a plain
 	// `extern mprotect` and a `@link_name(mprotect)`-aliased `ge_mprotect`.
 	// LLVMAddFunction would rename the second to "mprotect.1", which on a
@@ -367,13 +348,13 @@ func (g *llvmGenerator) addFunction(name string, fn *semantic.FuncType) (C.LLVMV
 	// (there is no such libc symbol) and crashes when called. Reuse the
 	// existing global for the symbol so both names share one import; with
 	// opaque pointers, call sites supply their own lowered function type.
-	if existing := C.LLVMGetNamedFunction(g.module, nameC); existing != nil {
+	if existing := llvmGetNamedFunction(g.module, nameC); existing != nil {
 		return existing, nil
 	}
-	value := C.LLVMAddFunction(g.module, nameC, fnType)
-	C.LLVMSetLinkage(value, C.LLVMExternalLinkage)
+	value := llvmAddFunction(g.module, nameC, fnType)
+	llvmSetLinkage(value, llvmExternalLinkage)
 	if callConv, ok := g.llvmCallConvForFunc(fn); ok {
-		C.elisacoreSetFunctionCallConv(value, callConv)
+		llvmSetFunctionCallConv(value, callConv)
 	}
 	if module := g.wasmImportModule(name); module != "" {
 		g.addFunctionStringAttribute(value, "wasm-import-module", module)

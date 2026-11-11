@@ -2,15 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-static LLVMValueRef elisacoreGetInlineAsmLocal(LLVMTypeRef Ty, const char* AsmString, size_t AsmStringSize, const char* Constraints, size_t ConstraintsSize, LLVMBool HasSideEffects, LLVMBool IsAlignStack) {
-	return LLVMGetInlineAsm(Ty, (char*)AsmString, AsmStringSize, (char*)Constraints, ConstraintsSize, HasSideEffects, IsAlignStack, LLVMInlineAsmDialectATT, 0);
-}
-*/
-import "C"
-
 import (
 	"elisacore/src/easm"
 	"elisacore/src/semantic"
@@ -83,8 +74,8 @@ func (g *llvmGenerator) appendAppleX64SegmentReservations(targetTriple string) {
 		".zerofill SYSTEM_RESERVED,SYSTEM_RESERVED,__SYSTEM_RESERVED,0x7C0004000\n" +
 		".zerofill USER_AREA,USER_AREA,__USER_AREA,0x5F9000000000"
 	cAsm := cString(directives)
-	defer C.free(unsafe.Pointer(cAsm))
-	C.LLVMAppendModuleInlineAsm(g.module, cAsm, C.size_t(len(directives)))
+	defer llvmFree(unsafe.Pointer(cAsm))
+	llvmAppendModuleInlineAsm(g.module, cAsm, llvmIRSize(len(directives)))
 }
 
 func (g *llvmGenerator) emitEASMFunction(fn *easm.Function) error {
@@ -102,13 +93,13 @@ func (g *llvmGenerator) emitEASMFunction(fn *easm.Function) error {
 	if err != nil {
 		return fmt.Errorf("EASM %s extern signature mismatch: %w", fn.Name, err)
 	}
-	if C.LLVMCountBasicBlocks(value) != 0 {
+	if llvmCountBasicBlocks(value) != 0 {
 		return fmt.Errorf("EASM %s conflicts with an already-defined function", fn.Name)
 	}
-	entry := C.LLVMAppendBasicBlockInContext(g.context, value, cStringFree("entry"))
-	builder := C.LLVMCreateBuilderInContext(g.context)
-	defer C.LLVMDisposeBuilder(builder)
-	C.LLVMPositionBuilderAtEnd(builder, entry)
+	entry := llvmAppendBasicBlockInContext(g.context, value, cStringFree("entry"))
+	builder := llvmCreateBuilderInContext(g.context)
+	defer llvmDisposeBuilder(builder)
+	llvmPositionBuilderAtEnd(builder, entry)
 
 	asmText := easmInlineAsmText(fn)
 	constraints := easmInlineAsmConstraints(fn)
@@ -118,42 +109,42 @@ func (g *llvmGenerator) emitEASMFunction(fn *easm.Function) error {
 		return err
 	}
 	asmC := cString(asmText)
-	defer C.free(unsafe.Pointer(asmC))
+	defer llvmFree(unsafe.Pointer(asmC))
 	constraintsC := cString(constraints)
-	defer C.free(unsafe.Pointer(constraintsC))
+	defer llvmFree(unsafe.Pointer(constraintsC))
 	inlineAsmType, err := g.easmInlineAsmFunctionType(fn, semanticType)
 	if err != nil {
 		return err
 	}
-	inlineAsm := C.elisacoreGetInlineAsmLocal(inlineAsmType, asmC, C.size_t(len(asmText)), constraintsC, C.size_t(len(constraints)), 1, easmStackAlignFlag(fn))
-	args := make([]C.LLVMValueRef, len(fn.Params))
+	inlineAsm := llvmGetInlineAsmLocal(inlineAsmType, asmC, llvmIRSize(len(asmText)), constraintsC, llvmIRSize(len(constraints)), 1, easmStackAlignFlag(fn))
+	args := make([]llvmIRValueRef, len(fn.Params))
 	for i := range fn.Params {
-		args[i] = C.LLVMGetParam(value, C.unsigned(i))
+		args[i] = llvmGetParam(value, llvmIRUnsigned(i))
 	}
 	if len(args) == 0 {
-		i32Type := C.LLVMInt32TypeInContext(g.context)
-		args = append(args, C.LLVMConstInt(i32Type, 0, 0))
+		i32Type := llvmInt32TypeInContext(g.context)
+		args = append(args, llvmConstInt(i32Type, 0, 0))
 	}
 	callName := "easm.call"
 	argPtr := llvmValueSlicePtr(args)
-	var dummyArg C.LLVMValueRef
+	var dummyArg llvmIRValueRef
 	if len(args) == 0 {
 		argPtr = &dummyArg
 	}
-	call := C.LLVMBuildCall2(builder, inlineAsmType, inlineAsm, argPtr, C.unsigned(len(args)), cStringFree(callName))
+	call := llvmBuildCall2(builder, inlineAsmType, inlineAsm, argPtr, llvmIRUnsigned(len(args)), cStringFree(callName))
 	if easmHasControl(fn, "noreturn") {
-		C.LLVMBuildUnreachable(builder)
+		llvmBuildUnreachable(builder)
 		return nil
 	}
 	if strings.TrimSpace(fn.ReturnType) == "void" {
-		C.LLVMBuildRetVoid(builder)
+		llvmBuildRetVoid(builder)
 	} else {
-		C.LLVMBuildRet(builder, call)
+		llvmBuildRet(builder, call)
 	}
 	return nil
 }
 
-func (g *llvmGenerator) easmInlineAsmFunctionType(fn *easm.Function, declared *semantic.FuncType) (C.LLVMTypeRef, error) {
+func (g *llvmGenerator) easmInlineAsmFunctionType(fn *easm.Function, declared *semantic.FuncType) (llvmIRTypeRef, error) {
 	if strings.TrimSpace(fn.ReturnType) != "void" && len(declared.Params) != 0 {
 		return g.lowerFunctionType(declared)
 	}
@@ -169,7 +160,7 @@ func (g *llvmGenerator) easmInlineAsmFunctionType(fn *easm.Function, declared *s
 	return g.lowerFunctionType(dummy)
 }
 
-func (g *llvmGenerator) lowerEASMFunctionType(fn *easm.Function) (C.LLVMTypeRef, *semantic.FuncType, error) {
+func (g *llvmGenerator) lowerEASMFunctionType(fn *easm.Function) (llvmIRTypeRef, *semantic.FuncType, error) {
 	params := make([]semantic.Type, 0, len(fn.Params))
 	for _, param := range fn.Params {
 		t, err := g.easmSemanticType(param.Type)
@@ -466,7 +457,7 @@ func easmHasControl(fn *easm.Function, control string) bool {
 	return false
 }
 
-func easmStackAlignFlag(fn *easm.Function) C.LLVMBool {
+func easmStackAlignFlag(fn *easm.Function) llvmIRBool {
 	for _, item := range fn.Stack {
 		if strings.Contains(strings.ToLower(item), "aligned") {
 			return 1

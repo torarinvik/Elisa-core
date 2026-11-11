@@ -2,75 +2,13 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-
-// A GEP into a packed record carries no natural-alignment guarantee for its
-// fields. Opaque pointers lose that fact at LLVMBuildLoad2/LLVMBuildStore.
-static int elisacorePackedAddress(LLVMValueRef p, LLVMValueRef *path, unsigned depth) {
- if (!p) return 0;
- for (unsigned i = 0; i < depth; ++i) if (path[i] == p) return 0;
- if (depth == 64) return 1; // conservative for unusually deep address expressions
- path[depth++] = p;
- int instruction = LLVMIsAInstruction(p) != 0;
- int expression = LLVMIsAConstantExpr(p) != 0;
- if (!instruction && !expression) return 0;
- LLVMOpcode op = instruction ? LLVMGetInstructionOpcode(p) : LLVMGetConstOpcode(p);
- if (op == LLVMGetElementPtr) {
-  LLVMTypeRef type = LLVMGetGEPSourceElementType(p);
-  unsigned count = LLVMGetNumOperands(p);
-  for (unsigned i = 2; i < count; ++i) {
-   LLVMTypeKind kind = LLVMGetTypeKind(type);
-   if (kind == LLVMStructTypeKind) {
-    if (LLVMIsPackedStruct(type)) return 1;
-    LLVMValueRef index = LLVMGetOperand(p, i);
-    if (!LLVMIsAConstantInt(index)) return 1;
-    unsigned field = (unsigned)LLVMConstIntGetZExtValue(index);
-    if (field >= LLVMCountStructElementTypes(type)) return 1;
-    type = LLVMStructGetTypeAtIndex(type, field);
-   } else if (kind == LLVMArrayTypeKind || kind == LLVMVectorTypeKind || kind == LLVMScalableVectorTypeKind) {
-    type = LLVMGetElementType(type);
-   } else { break; }
-  }
-  if (LLVMGetTypeKind(type) == LLVMStructTypeKind && LLVMIsPackedStruct(type)) return 1;
-  return elisacorePackedAddress(LLVMGetOperand(p, 0), path, depth);
- }
- if (op == LLVMBitCast || op == LLVMAddrSpaceCast)
-  return elisacorePackedAddress(LLVMGetOperand(p, 0), path, depth);
- if (op == LLVMSelect)
-  return elisacorePackedAddress(LLVMGetOperand(p, 1), path, depth) || elisacorePackedAddress(LLVMGetOperand(p, 2), path, depth);
- if (op == LLVMPHI) {
-  for (unsigned i = 0; i < LLVMCountIncoming(p); ++i)
-   if (elisacorePackedAddress(LLVMGetIncomingValue(p, i), path, depth)) return 1;
- }
- return 0;
-}
-
-static void elisacoreAlignPackedRecordAccesses(LLVMModuleRef module) {
- LLVMValueRef path[64];
- for (LLVMValueRef f = LLVMGetFirstFunction(module); f; f = LLVMGetNextFunction(f)) {
-  for (LLVMBasicBlockRef b = LLVMGetFirstBasicBlock(f); b; b = LLVMGetNextBasicBlock(b)) {
-   for (LLVMValueRef i = LLVMGetFirstInstruction(b); i; i = LLVMGetNextInstruction(i)) {
-    LLVMOpcode op = LLVMGetInstructionOpcode(i);
-    LLVMValueRef p = 0;
-    if (op == LLVMLoad) p = LLVMGetOperand(i, 0);
-    if (op == LLVMStore) p = LLVMGetOperand(i, 1);
-    if (p && elisacorePackedAddress(p, path, 0)) LLVMSetAlignment(i, 1);
-   }
-  }
- }
-}
-*/
-import "C"
-
 import (
 	"elisacore/src/semantic"
 	"fmt"
 	"unsafe"
 )
 
-func (g *llvmGenerator) lowerPackedEnumType(enumType *semantic.EnumType) (C.LLVMTypeRef, error) {
+func (g *llvmGenerator) lowerPackedEnumType(enumType *semantic.EnumType) (llvmIRTypeRef, error) {
 	if enumType == nil || !enumType.Packed {
 		return nil, fmt.Errorf("missing packed enum type")
 	}
@@ -92,7 +30,7 @@ func (g *llvmGenerator) lowerPackedEnumType(enumType *semantic.EnumType) (C.LLVM
 		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", g.packedModeForEnum(enumType))
 	}
 }
-func (g *llvmGenerator) lowerPackedEnumStoreType(storeType *semantic.PackedEnumStoreType) (C.LLVMTypeRef, error) {
+func (g *llvmGenerator) lowerPackedEnumStoreType(storeType *semantic.PackedEnumStoreType) (llvmIRTypeRef, error) {
 	if storeType == nil {
 		return nil, fmt.Errorf("missing packed enum store type")
 	}
@@ -104,7 +42,7 @@ func (g *llvmGenerator) lowerPackedEnumStoreType(storeType *semantic.PackedEnumS
 	}
 }
 
-func (g *llvmGenerator) ensurePackedEnumStorageType(enumType *semantic.EnumType) (C.LLVMTypeRef, error) {
+func (g *llvmGenerator) ensurePackedEnumStorageType(enumType *semantic.EnumType) (llvmIRTypeRef, error) {
 	if enumType == nil || !enumType.Packed {
 		return nil, fmt.Errorf("missing packed enum storage type")
 	}
@@ -118,7 +56,7 @@ func (g *llvmGenerator) ensurePackedEnumStorageType(enumType *semantic.EnumType)
 		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", g.packedModeForEnum(enumType))
 	}
 }
-func (g *llvmGenerator) ensurePackedVariantViewCarrierType(viewType *semantic.PackedVariantViewType) (C.LLVMTypeRef, error) {
+func (g *llvmGenerator) ensurePackedVariantViewCarrierType(viewType *semantic.PackedVariantViewType) (llvmIRTypeRef, error) {
 	if viewType == nil || viewType.Enum == nil || viewType.Variant == nil {
 		return nil, fmt.Errorf("missing packedview carrier metadata")
 	}
@@ -134,7 +72,7 @@ func (g *llvmGenerator) ensurePackedVariantViewCarrierType(viewType *semantic.Pa
 	if err != nil {
 		return nil, err
 	}
-	fields := []C.LLVMTypeRef{handleType}
+	fields := []llvmIRTypeRef{handleType}
 	// docs/77: a sealed hierarchy shares ONE store per root, so the carrier embeds the
 	// ROOT's store type (the store value flowing in IS the root store).
 	if root := viewType.Enum.Root(); root.StoreType != nil {
@@ -144,7 +82,7 @@ func (g *llvmGenerator) ensurePackedVariantViewCarrierType(viewType *semantic.Pa
 		}
 		fields = append(fields, storeType)
 	}
-	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
+	llvmStructSetBody(ty, llvmTypeSlicePtr(fields), llvmIRUnsigned(len(fields)), 0)
 	g.structBodies[name] = true
 	return ty, nil
 }
@@ -328,7 +266,7 @@ func (g *llvmGenerator) packedEnumCommonFieldLayout(enumType *semantic.EnumType,
 	}
 	return nil, fmt.Errorf("packed enum %s has no common field %s", enumType.Name, fieldName)
 }
-func (g *llvmGenerator) ensurePackedEnumStoreCarrierType(storeType *semantic.PackedEnumStoreType) (C.LLVMTypeRef, error) {
+func (g *llvmGenerator) ensurePackedEnumStoreCarrierType(storeType *semantic.PackedEnumStoreType) (llvmIRTypeRef, error) {
 	if storeType == nil {
 		return nil, fmt.Errorf("missing packed enum store type")
 	}
@@ -344,8 +282,8 @@ func (g *llvmGenerator) ensurePackedEnumStoreCarrierType(storeType *semantic.Pac
 	if err != nil {
 		return nil, err
 	}
-	fields := []C.LLVMTypeRef{C.LLVMPointerTypeInContext(g.context, 0), usizeType, C.LLVMPointerTypeInContext(g.context, 0)}
-	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
+	fields := []llvmIRTypeRef{llvmPointerTypeInContext(g.context, 0), usizeType, llvmPointerTypeInContext(g.context, 0)}
+	llvmStructSetBody(ty, llvmTypeSlicePtr(fields), llvmIRUnsigned(len(fields)), 0)
 	g.structBodies[name] = true
 	return ty, nil
 }
@@ -358,31 +296,31 @@ func packedEnumStoreCarrierName(storeType *semantic.PackedEnumStoreType) string 
 	}
 	return sanitizeIdentifier(storeType.Name)
 }
-func (g *llvmGenerator) lowerBuiltin(name string) (C.LLVMTypeRef, error) {
+func (g *llvmGenerator) lowerBuiltin(name string) (llvmIRTypeRef, error) {
 	switch name {
 	case "void":
-		return C.LLVMVoidTypeInContext(g.context), nil
+		return llvmVoidTypeInContext(g.context), nil
 	case "bool":
-		return C.LLVMInt1TypeInContext(g.context), nil
+		return llvmInt1TypeInContext(g.context), nil
 	case "char":
-		return C.LLVMInt64TypeInContext(g.context), nil
+		return llvmInt64TypeInContext(g.context), nil
 	case "i8", "u8":
-		return C.LLVMInt8TypeInContext(g.context), nil
+		return llvmInt8TypeInContext(g.context), nil
 	case "i16", "u16":
-		return C.LLVMInt16TypeInContext(g.context), nil
+		return llvmInt16TypeInContext(g.context), nil
 	case "i32", "u32":
-		return C.LLVMInt32TypeInContext(g.context), nil
+		return llvmInt32TypeInContext(g.context), nil
 	case "i64", "u64":
-		return C.LLVMInt64TypeInContext(g.context), nil
+		return llvmInt64TypeInContext(g.context), nil
 	case "f32":
-		return C.LLVMFloatTypeInContext(g.context), nil
+		return llvmFloatTypeInContext(g.context), nil
 	case "f64":
-		return C.LLVMDoubleTypeInContext(g.context), nil
+		return llvmDoubleTypeInContext(g.context), nil
 	case "int", "isize", "usize", "uintptr":
 		if g.wordBits == 32 {
-			return C.LLVMInt32TypeInContext(g.context), nil
+			return llvmInt32TypeInContext(g.context), nil
 		}
-		return C.LLVMInt64TypeInContext(g.context), nil
+		return llvmInt64TypeInContext(g.context), nil
 	default:
 		return nil, fmt.Errorf("unsupported builtin type %q", name)
 	}
@@ -395,17 +333,17 @@ func (g *llvmGenerator) lookupStructType(name string) (*semantic.StructType, boo
 	st, ok := t.(*semantic.StructType)
 	return st, ok
 }
-func (g *llvmGenerator) ensureNamedStructType(name string) (C.LLVMTypeRef, error) {
+func (g *llvmGenerator) ensureNamedStructType(name string) (llvmIRTypeRef, error) {
 	if ty, ok := g.structTypes[name]; ok {
 		return ty, nil
 	}
 	nameC := cString(name)
-	defer C.free(unsafe.Pointer(nameC))
-	ty := C.LLVMStructCreateNamed(g.context, nameC)
+	defer llvmFree(unsafe.Pointer(nameC))
+	ty := llvmStructCreateNamed(g.context, nameC)
 	g.structTypes[name] = ty
 	return ty, nil
 }
-func (g *llvmGenerator) ensureStructBody(name string, st *semantic.StructType) (C.LLVMTypeRef, error) {
+func (g *llvmGenerator) ensureStructBody(name string, st *semantic.StructType) (llvmIRTypeRef, error) {
 	ty, err := g.ensureNamedStructType(name)
 	if err != nil {
 		return nil, err
@@ -413,7 +351,7 @@ func (g *llvmGenerator) ensureStructBody(name string, st *semantic.StructType) (
 	if g.structBodies[name] || st == nil || st.Decl == nil {
 		return ty, nil
 	}
-	fields := make([]C.LLVMTypeRef, 0, len(st.Decl.Fields))
+	fields := make([]llvmIRTypeRef, 0, len(st.Decl.Fields))
 	for _, fieldDecl := range st.Decl.Fields {
 		field, ok := st.Fields[fieldDecl.Name]
 		if !ok {
@@ -430,12 +368,12 @@ func (g *llvmGenerator) ensureStructBody(name string, st *semantic.StructType) (
 		}
 		fields = append(fields, fieldType)
 	}
-	packed := C.LLVMBool(0)
+	packed := llvmIRBool(0)
 	if st.PackedLayout {
 		g.hasPackedRecords = true
-		packed = C.LLVMBool(1)
+		packed = llvmIRBool(1)
 	}
-	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), packed)
+	llvmStructSetBody(ty, llvmTypeSlicePtr(fields), llvmIRUnsigned(len(fields)), packed)
 	g.structBodies[name] = true
 	return ty, nil
 }
@@ -446,6 +384,6 @@ func (g *llvmGenerator) ensureStructBody(name string, st *semantic.StructType) (
 // it does not change the language's contracts for escaped scalar references.
 func (g *llvmGenerator) alignPackedRecordAccesses() {
 	if g.hasPackedRecords {
-		C.elisacoreAlignPackedRecordAccesses(g.module)
+		llvmAlignPackedRecordAccesses(g.module)
 	}
 }

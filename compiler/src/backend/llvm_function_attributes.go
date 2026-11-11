@@ -2,27 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-
-static void elisacoreAddAlwaysInlineAttr(LLVMContextRef Ctx, LLVMValueRef Fn, const char* Name, size_t NameLen) {
-	unsigned Kind = LLVMGetEnumAttributeKindForName(Name, NameLen);
-	if (Kind == 0) {
-		return;
-	}
-	LLVMAttributeRef Attr = LLVMCreateEnumAttribute(Ctx, Kind, 0);
-	LLVMAddAttributeAtIndex(Fn, LLVMAttributeFunctionIndex, Attr);
-}
-
-static void elisacoreAddFunctionStringAttr(LLVMContextRef Ctx, LLVMValueRef Fn, const char* Name, size_t NameLen, const char* Value, size_t ValueLen) {
-	LLVMAttributeRef Attr = LLVMCreateStringAttribute(Ctx, Name, NameLen, Value, ValueLen);
-	LLVMAddAttributeAtIndex(Fn, LLVMAttributeFunctionIndex, Attr);
-}
-
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -55,28 +34,28 @@ func (g *llvmGenerator) wasmImportModule(name string) string {
 	return ""
 }
 
-func (g *llvmGenerator) llvmCallConvForFunc(fn *semantic.FuncType) (C.uint, bool) {
+func (g *llvmGenerator) llvmCallConvForFunc(fn *semantic.FuncType) (llvmIRUnsigned, bool) {
 	if fn == nil {
 		return 0, false
 	}
 	switch strings.ToLower(strings.TrimSpace(fn.CallConv)) {
 	case "", "c":
-		return C.LLVMCCallConv, fn.CallConv != ""
+		return llvmCCallConv, fn.CallConv != ""
 	case "fast":
-		return C.LLVMFastCallConv, true
+		return llvmFastCallConv, true
 	case "cold":
-		return C.LLVMColdCallConv, true
+		return llvmColdCallConv, true
 	case "stdcall":
-		return C.LLVMX86StdcallCallConv, true
+		return llvmX86StdcallCallConv, true
 	case "winapi":
 		triple := ""
 		if g != nil {
 			triple = strings.ToLower(g.requestedTargetTriple)
 		}
 		if strings.Contains(triple, "i386") || strings.Contains(triple, "i686") {
-			return C.LLVMX86StdcallCallConv, true
+			return llvmX86StdcallCallConv, true
 		}
-		return C.LLVMCCallConv, true
+		return llvmCCallConv, true
 	default:
 		return 0, false
 	}
@@ -95,22 +74,22 @@ func (g *llvmGenerator) isDirectlyExportedFunction(name string) bool {
 	}
 	return false
 }
-func (g *llvmGenerator) setDefinedFunctionLinkage(name string, value C.LLVMValueRef, fnType *semantic.FuncType) {
+func (g *llvmGenerator) setDefinedFunctionLinkage(name string, value llvmIRValueRef, fnType *semantic.FuncType) {
 	if value == nil {
 		return
 	}
-	linkage := C.LLVMLinkage(C.LLVMExternalLinkage)
+	linkage := llvmIRLinkage(llvmExternalLinkage)
 	if g.preferPrivateLinkage && !g.isDirectlyExportedFunction(name) {
-		linkage = C.LLVMLinkage(C.LLVMPrivateLinkage)
+		linkage = llvmIRLinkage(llvmPrivateLinkage)
 	}
 	// `main` is the program entry point: the C runtime (crt0) calls it from outside the module,
 	// so it must stay externally visible. Without this it gets private linkage at -O>0 and the
 	// optimizer's GlobalDCE strips it (no in-module callers), breaking native exe links with
 	// "undefined symbol _main".
 	if name == "main" || g.isDirectlyExportedFunction(name) || g.isDefaultNativeRuntimeSupportExport(name) {
-		linkage = C.LLVMLinkage(C.LLVMExternalLinkage)
+		linkage = llvmIRLinkage(llvmExternalLinkage)
 	}
-	C.LLVMSetLinkage(value, linkage)
+	llvmSetLinkage(value, linkage)
 	// Every Elisa-defined function is `nounwind`: the language has no exceptions and the backend
 	// emits no `invoke`/landingpad/personality — panics lower to `trap`/`unreachable` (noreturn) and
 	// all cleanup (defer/drop) runs on straight-line normal-exit paths, so no body can unwind. The
@@ -139,7 +118,7 @@ func (g *llvmGenerator) setDefinedFunctionLinkage(name string, value C.LLVMValue
 	if explicitInlineMode {
 		return
 	}
-	if linkage == C.LLVMLinkage(C.LLVMPrivateLinkage) {
+	if linkage == llvmIRLinkage(llvmPrivateLinkage) {
 		if g.shouldNeverInlineDefinedFunction(name) {
 			g.addNoInlineAttribute(value)
 		}
@@ -214,13 +193,13 @@ func (g *llvmGenerator) isDefaultNativeRuntimeSupportExport(name string) bool {
 		return false
 	}
 }
-func (g *llvmGenerator) applyFunctionNoRecurseAttributes(fn C.LLVMValueRef, fnType *semantic.FuncType) {
+func (g *llvmGenerator) applyFunctionNoRecurseAttributes(fn llvmIRValueRef, fnType *semantic.FuncType) {
 	if g == nil || fn == nil || fnType == nil || !fnType.HasNoRecurse {
 		return
 	}
 	g.addNoRecurseAttribute(fn)
 }
-func (g *llvmGenerator) applyFunctionTemperatureAttributes(fn C.LLVMValueRef, fnType *semantic.FuncType) {
+func (g *llvmGenerator) applyFunctionTemperatureAttributes(fn llvmIRValueRef, fnType *semantic.FuncType) {
 	if g == nil || fn == nil || fnType == nil || !fnType.HasTemperatureMode {
 		return
 	}
@@ -243,7 +222,7 @@ func profileHotFunctionsFromEnvironment() map[string]bool {
 	return result
 }
 
-func (g *llvmGenerator) applyProfileTemperatureAttributes(name string, fn C.LLVMValueRef, fnType *semantic.FuncType) {
+func (g *llvmGenerator) applyProfileTemperatureAttributes(name string, fn llvmIRValueRef, fnType *semantic.FuncType) {
 	if g == nil || fn == nil || fnType == nil || fnType.HasTemperatureMode {
 		return
 	}
@@ -258,7 +237,7 @@ func (g *llvmGenerator) applyProfileTemperatureAttributes(name string, fn C.LLVM
 		g.addHotAttribute(fn)
 	}
 }
-func (g *llvmGenerator) applyFunctionSegmentSafetyAttributes(fn C.LLVMValueRef, fnType *semantic.FuncType) {
+func (g *llvmGenerator) applyFunctionSegmentSafetyAttributes(fn llvmIRValueRef, fnType *semantic.FuncType) {
 	if g == nil || fn == nil || fnType == nil {
 		return
 	}
@@ -272,25 +251,25 @@ func (g *llvmGenerator) applyFunctionSegmentSafetyAttributes(fn C.LLVMValueRef, 
 		g.addFunctionStringAttribute(fn, "elisacore.segment_establishing", "true")
 	}
 }
-func (g *llvmGenerator) addAlwaysInlineAttribute(fn C.LLVMValueRef) {
+func (g *llvmGenerator) addAlwaysInlineAttribute(fn llvmIRValueRef) {
 	if g == nil || g.context == nil || fn == nil {
 		return
 	}
 	g.addFunctionEnumAttribute(fn, "alwaysinline")
 }
-func (g *llvmGenerator) addNoInlineAttribute(fn C.LLVMValueRef) {
+func (g *llvmGenerator) addNoInlineAttribute(fn llvmIRValueRef) {
 	if g == nil || g.context == nil || fn == nil {
 		return
 	}
 	g.addFunctionEnumAttribute(fn, "noinline")
 }
-func (g *llvmGenerator) addNoRecurseAttribute(fn C.LLVMValueRef) {
+func (g *llvmGenerator) addNoRecurseAttribute(fn llvmIRValueRef) {
 	if g == nil || g.context == nil || fn == nil {
 		return
 	}
 	g.addFunctionEnumAttribute(fn, "norecurse")
 }
-func (g *llvmGenerator) addNoUnwindAttribute(fn C.LLVMValueRef) {
+func (g *llvmGenerator) addNoUnwindAttribute(fn llvmIRValueRef) {
 	if g == nil || g.context == nil || fn == nil {
 		return
 	}
@@ -300,35 +279,35 @@ func (g *llvmGenerator) addNoUnwindAttribute(fn C.LLVMValueRef) {
 		g.addFunctionStringAttribute(fn, "frame-pointer", "all")
 	}
 }
-func (g *llvmGenerator) addHotAttribute(fn C.LLVMValueRef) {
+func (g *llvmGenerator) addHotAttribute(fn llvmIRValueRef) {
 	if g == nil || g.context == nil || fn == nil {
 		return
 	}
 	g.addFunctionEnumAttribute(fn, "hot")
 }
-func (g *llvmGenerator) addColdAttribute(fn C.LLVMValueRef) {
+func (g *llvmGenerator) addColdAttribute(fn llvmIRValueRef) {
 	if g == nil || g.context == nil || fn == nil {
 		return
 	}
 	g.addFunctionEnumAttribute(fn, "cold")
 }
-func (g *llvmGenerator) addFunctionEnumAttribute(fn C.LLVMValueRef, name string) {
+func (g *llvmGenerator) addFunctionEnumAttribute(fn llvmIRValueRef, name string) {
 	if g == nil || g.context == nil || fn == nil || name == "" {
 		return
 	}
 	nameC := cString(name)
-	defer C.free(unsafe.Pointer(nameC))
-	C.elisacoreAddAlwaysInlineAttr(g.context, fn, nameC, C.size_t(len(name)))
+	defer llvmFree(unsafe.Pointer(nameC))
+	llvmAddAlwaysInlineAttr(g.context, fn, nameC, llvmIRSize(len(name)))
 }
-func (g *llvmGenerator) addFunctionStringAttribute(fn C.LLVMValueRef, name string, value string) {
+func (g *llvmGenerator) addFunctionStringAttribute(fn llvmIRValueRef, name string, value string) {
 	if g == nil || g.context == nil || fn == nil || name == "" {
 		return
 	}
 	nameC := cString(name)
-	defer C.free(unsafe.Pointer(nameC))
+	defer llvmFree(unsafe.Pointer(nameC))
 	valueC := cString(value)
-	defer C.free(unsafe.Pointer(valueC))
-	C.elisacoreAddFunctionStringAttr(g.context, fn, nameC, C.size_t(len(name)), valueC, C.size_t(len(value)))
+	defer llvmFree(unsafe.Pointer(valueC))
+	llvmAddFunctionStringAttr(g.context, fn, nameC, llvmIRSize(len(name)), valueC, llvmIRSize(len(value)))
 }
 func (g *llvmGenerator) shouldNeverInlineDefinedFunction(name string) bool {
 	switch name {
@@ -346,13 +325,13 @@ func (g *llvmGenerator) shouldNeverInlineDefinedFunction(name string) bool {
 		return false
 	}
 }
-func (g *llvmGenerator) lookupIntrinsic(name string, fn *semantic.FuncType) (C.uint, []C.LLVMTypeRef, bool, error) {
+func (g *llvmGenerator) lookupIntrinsic(name string, fn *semantic.FuncType) (llvmIRUnsigned, []llvmIRTypeRef, bool, error) {
 	if !strings.HasPrefix(strings.TrimSpace(name), "llvm.") {
 		return 0, nil, false, nil
 	}
 	nameC := cString(name)
-	defer C.free(unsafe.Pointer(nameC))
-	intrinsicID := C.LLVMLookupIntrinsicID(nameC, C.size_t(len(name)))
+	defer llvmFree(unsafe.Pointer(nameC))
+	intrinsicID := llvmLookupIntrinsicID(nameC, llvmIRSize(len(name)))
 	if intrinsicID == 0 {
 		return 0, nil, false, nil
 	}
@@ -364,7 +343,7 @@ func (g *llvmGenerator) lookupIntrinsic(name string, fn *semantic.FuncType) (C.u
 	// freestanding WASM component runtimes, whose memory intrinsics are already
 	// fully specialized in their @intrinsic spelling.
 	overloadParams := []semantic.Type(nil)
-	if C.LLVMIntrinsicIsOverloaded(intrinsicID) != 0 {
+	if llvmIntrinsicIsOverloaded(intrinsicID) != 0 {
 		if resolved, ok, err := g.resolveIntrinsicOverloadTypes(intrinsicID, fn); err != nil {
 			return 0, nil, false, err
 		} else if ok {
@@ -372,7 +351,7 @@ func (g *llvmGenerator) lookupIntrinsic(name string, fn *semantic.FuncType) (C.u
 		}
 		overloadParams = intrinsicOverloadParams(name, fn)
 	}
-	paramTypes := make([]C.LLVMTypeRef, 0, len(overloadParams))
+	paramTypes := make([]llvmIRTypeRef, 0, len(overloadParams))
 	for _, param := range overloadParams {
 		paramType, err := g.lowerType(param)
 		if err != nil {
@@ -399,15 +378,15 @@ func intrinsicOverloadParams(name string, fn *semantic.FuncType) []semantic.Type
 	}
 	return fn.Params
 }
-func (g *llvmGenerator) addGlobal(name string, t semantic.Type, external bool) (C.LLVMValueRef, error) {
+func (g *llvmGenerator) addGlobal(name string, t semantic.Type, external bool) (llvmIRValueRef, error) {
 	globalType, err := g.lowerType(t)
 	if err != nil {
 		return nil, err
 	}
 	nameC := cString(g.llvmSymbolName(name))
-	defer C.free(unsafe.Pointer(nameC))
-	value := C.LLVMAddGlobal(g.module, globalType, nameC)
-	C.LLVMSetLinkage(value, C.LLVMExternalLinkage)
+	defer llvmFree(unsafe.Pointer(nameC))
+	value := llvmAddGlobal(g.module, globalType, nameC)
+	llvmSetLinkage(value, llvmExternalLinkage)
 	g.applyTypeAlignment(value, t)
 	_ = external
 	return value, nil

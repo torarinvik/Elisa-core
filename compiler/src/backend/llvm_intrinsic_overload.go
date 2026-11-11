@@ -2,20 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-
-static void elisacoreAddAlwaysInlineAttrExt(LLVMContextRef Ctx, LLVMValueRef Fn, const char* Name, size_t NameLen) {
-	unsigned Kind = LLVMGetEnumAttributeKindForName(Name, NameLen);
-	if (Kind == 0) {
-		return;
-	}
-	LLVMAddAttributeAtIndex(Fn, LLVMAttributeFunctionIndex, LLVMCreateEnumAttribute(Ctx, Kind, 0));
-}
-*/
-import "C"
-
 import (
 	"strings"
 	"unsafe"
@@ -31,7 +17,7 @@ import (
 // distinct types of the signature in order of appearance (return first), and the
 // first prefix whose LLVMIntrinsicGetType equals the lowered extern type wins.
 // ok=false leaves the caller's fixed per-name table in charge.
-func (g *llvmGenerator) resolveIntrinsicOverloadTypes(id C.uint, fn *semantic.FuncType) ([]C.LLVMTypeRef, bool, error) {
+func (g *llvmGenerator) resolveIntrinsicOverloadTypes(id llvmIRUnsigned, fn *semantic.FuncType) ([]llvmIRTypeRef, bool, error) {
 	if fn == nil {
 		return nil, false, nil
 	}
@@ -44,7 +30,7 @@ func (g *llvmGenerator) resolveIntrinsicOverloadTypes(id C.uint, fn *semantic.Fu
 		signature = append(signature, fn.Return)
 	}
 	signature = append(signature, fn.Params...)
-	var distinct []C.LLVMTypeRef
+	var distinct []llvmIRTypeRef
 	for _, t := range signature {
 		if t == nil {
 			continue
@@ -53,7 +39,7 @@ func (g *llvmGenerator) resolveIntrinsicOverloadTypes(id C.uint, fn *semantic.Fu
 		if err != nil {
 			return nil, false, err
 		}
-		if lowered == C.LLVMVoidTypeInContext(g.context) {
+		if lowered == llvmVoidTypeInContext(g.context) {
 			continue
 		}
 		seen := false
@@ -69,88 +55,88 @@ func (g *llvmGenerator) resolveIntrinsicOverloadTypes(id C.uint, fn *semantic.Fu
 	}
 	for k := 1; k <= len(distinct); k++ {
 		candidate := distinct[:k]
-		got := C.LLVMIntrinsicGetType(g.context, id, llvmTypeSlicePtr(candidate), C.size_t(len(candidate)))
+		got := llvmIntrinsicGetType(g.context, id, llvmTypeSlicePtr(candidate), llvmIRSize(len(candidate)))
 		if got == want {
-			return append([]C.LLVMTypeRef(nil), candidate...), true, nil
+			return append([]llvmIRTypeRef(nil), candidate...), true, nil
 		}
 	}
 	return nil, false, nil
 }
 
-func (g *llvmGenerator) elisaBuiltinIntrinsicFunction(name string) (C.LLVMValueRef, bool) {
+func (g *llvmGenerator) elisaBuiltinIntrinsicFunction(name string) (llvmIRValueRef, bool) {
 	name = strings.TrimSpace(name)
 	if !semantic.IsElisaBuiltinIntrinsic(name) {
 		return nil, false
 	}
-	nameC := C.CString(name)
-	defer C.free(unsafe.Pointer(nameC))
-	if existing := C.LLVMGetNamedFunction(g.module, nameC); existing != nil {
+	nameC := llvmCString(name)
+	defer llvmFree(unsafe.Pointer(nameC))
+	if existing := llvmGetNamedFunction(g.module, nameC); existing != nil {
 		return existing, true
 	}
 	switch name {
 	case "elisa.mul_hi.u64":
-		i64 := C.LLVMInt64TypeInContext(g.context)
-		i128 := C.LLVMInt128TypeInContext(g.context)
-		params := []C.LLVMTypeRef{i64, i64}
-		fnType := C.LLVMFunctionType(i64, llvmTypeSlicePtr(params), 2, 0)
-		fn := C.LLVMAddFunction(g.module, nameC, fnType)
-		C.LLVMSetLinkage(fn, C.LLVMInternalLinkage)
+		i64 := llvmInt64TypeInContext(g.context)
+		i128 := llvmInt128TypeInContext(g.context)
+		params := []llvmIRTypeRef{i64, i64}
+		fnType := llvmFunctionType(i64, llvmTypeSlicePtr(params), 2, 0)
+		fn := llvmAddFunction(g.module, nameC, fnType)
+		llvmSetLinkage(fn, llvmInternalLinkage)
 		attr := "alwaysinline"
-		attrC := C.CString(attr)
-		C.elisacoreAddAlwaysInlineAttrExt(g.context, fn, attrC, C.size_t(len(attr)))
-		C.free(unsafe.Pointer(attrC))
-		builder := C.LLVMCreateBuilderInContext(g.context)
-		defer C.LLVMDisposeBuilder(builder)
-		entry := C.LLVMAppendBasicBlockInContext(g.context, fn, cStringFree("entry"))
-		C.LLVMPositionBuilderAtEnd(builder, entry)
-		left := C.LLVMBuildZExt(builder, C.LLVMGetParam(fn, 0), i128, cStringFree("a"))
-		right := C.LLVMBuildZExt(builder, C.LLVMGetParam(fn, 1), i128, cStringFree("b"))
-		product := C.LLVMBuildNUWMul(builder, left, right, cStringFree("p"))
-		high := C.LLVMBuildLShr(builder, product, C.LLVMConstInt(i128, 64, 0), cStringFree("hi"))
-		C.LLVMBuildRet(builder, C.LLVMBuildTrunc(builder, high, i64, cStringFree("r")))
+		attrC := llvmCString(attr)
+		llvmAddAlwaysInlineAttr(g.context, fn, attrC, llvmIRSize(len(attr)))
+		llvmFree(unsafe.Pointer(attrC))
+		builder := llvmCreateBuilderInContext(g.context)
+		defer llvmDisposeBuilder(builder)
+		entry := llvmAppendBasicBlockInContext(g.context, fn, cStringFree("entry"))
+		llvmPositionBuilderAtEnd(builder, entry)
+		left := llvmBuildZExt(builder, llvmGetParam(fn, 0), i128, cStringFree("a"))
+		right := llvmBuildZExt(builder, llvmGetParam(fn, 1), i128, cStringFree("b"))
+		product := llvmBuildNUWMul(builder, left, right, cStringFree("p"))
+		high := llvmBuildLShr(builder, product, llvmConstInt(i128, 64, 0), cStringFree("hi"))
+		llvmBuildRet(builder, llvmBuildTrunc(builder, high, i64, cStringFree("r")))
 		return fn, true
 	case "elisa.div_wide.u64":
-		i64 := C.LLVMInt64TypeInContext(g.context)
-		i128 := C.LLVMInt128TypeInContext(g.context)
-		params := []C.LLVMTypeRef{i64, i64, i64}
-		fnType := C.LLVMFunctionType(i64, llvmTypeSlicePtr(params), 3, 0)
-		fn := C.LLVMAddFunction(g.module, nameC, fnType)
-		C.LLVMSetLinkage(fn, C.LLVMInternalLinkage)
+		i64 := llvmInt64TypeInContext(g.context)
+		i128 := llvmInt128TypeInContext(g.context)
+		params := []llvmIRTypeRef{i64, i64, i64}
+		fnType := llvmFunctionType(i64, llvmTypeSlicePtr(params), 3, 0)
+		fn := llvmAddFunction(g.module, nameC, fnType)
+		llvmSetLinkage(fn, llvmInternalLinkage)
 		attr := "alwaysinline"
-		attrC := C.CString(attr)
-		C.elisacoreAddAlwaysInlineAttrExt(g.context, fn, attrC, C.size_t(len(attr)))
-		C.free(unsafe.Pointer(attrC))
-		builder := C.LLVMCreateBuilderInContext(g.context)
-		defer C.LLVMDisposeBuilder(builder)
-		entry := C.LLVMAppendBasicBlockInContext(g.context, fn, cStringFree("entry"))
-		C.LLVMPositionBuilderAtEnd(builder, entry)
-		high := C.LLVMBuildZExt(builder, C.LLVMGetParam(fn, 0), i128, cStringFree("hi"))
-		low := C.LLVMBuildZExt(builder, C.LLVMGetParam(fn, 1), i128, cStringFree("lo"))
-		divisor := C.LLVMBuildZExt(builder, C.LLVMGetParam(fn, 2), i128, cStringFree("d"))
-		joined := C.LLVMBuildOr(builder, C.LLVMBuildShl(builder, high, C.LLVMConstInt(i128, 64, 0), cStringFree("hs")), low, cStringFree("n"))
-		quotient := C.LLVMBuildUDiv(builder, joined, divisor, cStringFree("q"))
-		C.LLVMBuildRet(builder, C.LLVMBuildTrunc(builder, quotient, i64, cStringFree("r")))
+		attrC := llvmCString(attr)
+		llvmAddAlwaysInlineAttr(g.context, fn, attrC, llvmIRSize(len(attr)))
+		llvmFree(unsafe.Pointer(attrC))
+		builder := llvmCreateBuilderInContext(g.context)
+		defer llvmDisposeBuilder(builder)
+		entry := llvmAppendBasicBlockInContext(g.context, fn, cStringFree("entry"))
+		llvmPositionBuilderAtEnd(builder, entry)
+		high := llvmBuildZExt(builder, llvmGetParam(fn, 0), i128, cStringFree("hi"))
+		low := llvmBuildZExt(builder, llvmGetParam(fn, 1), i128, cStringFree("lo"))
+		divisor := llvmBuildZExt(builder, llvmGetParam(fn, 2), i128, cStringFree("d"))
+		joined := llvmBuildOr(builder, llvmBuildShl(builder, high, llvmConstInt(i128, 64, 0), cStringFree("hs")), low, cStringFree("n"))
+		quotient := llvmBuildUDiv(builder, joined, divisor, cStringFree("q"))
+		llvmBuildRet(builder, llvmBuildTrunc(builder, quotient, i64, cStringFree("r")))
 		return fn, true
 	case "elisa.f64_to_bits", "elisa.f64_from_bits":
-		i64 := C.LLVMInt64TypeInContext(g.context)
-		f64 := C.LLVMDoubleTypeInContext(g.context)
+		i64 := llvmInt64TypeInContext(g.context)
+		f64 := llvmDoubleTypeInContext(g.context)
 		from, to := f64, i64
 		if name == "elisa.f64_from_bits" {
 			from, to = i64, f64
 		}
-		params := []C.LLVMTypeRef{from}
-		fnType := C.LLVMFunctionType(to, llvmTypeSlicePtr(params), 1, 0)
-		fn := C.LLVMAddFunction(g.module, nameC, fnType)
-		C.LLVMSetLinkage(fn, C.LLVMInternalLinkage)
+		params := []llvmIRTypeRef{from}
+		fnType := llvmFunctionType(to, llvmTypeSlicePtr(params), 1, 0)
+		fn := llvmAddFunction(g.module, nameC, fnType)
+		llvmSetLinkage(fn, llvmInternalLinkage)
 		attr := "alwaysinline"
-		attrC := C.CString(attr)
-		C.elisacoreAddAlwaysInlineAttrExt(g.context, fn, attrC, C.size_t(len(attr)))
-		C.free(unsafe.Pointer(attrC))
-		builder := C.LLVMCreateBuilderInContext(g.context)
-		defer C.LLVMDisposeBuilder(builder)
-		entry := C.LLVMAppendBasicBlockInContext(g.context, fn, cStringFree("entry"))
-		C.LLVMPositionBuilderAtEnd(builder, entry)
-		C.LLVMBuildRet(builder, C.LLVMBuildBitCast(builder, C.LLVMGetParam(fn, 0), to, cStringFree("bits")))
+		attrC := llvmCString(attr)
+		llvmAddAlwaysInlineAttr(g.context, fn, attrC, llvmIRSize(len(attr)))
+		llvmFree(unsafe.Pointer(attrC))
+		builder := llvmCreateBuilderInContext(g.context)
+		defer llvmDisposeBuilder(builder)
+		entry := llvmAppendBasicBlockInContext(g.context, fn, cStringFree("entry"))
+		llvmPositionBuilderAtEnd(builder, entry)
+		llvmBuildRet(builder, llvmBuildBitCast(builder, llvmGetParam(fn, 0), to, cStringFree("bits")))
 		return fn, true
 	}
 	return nil, false

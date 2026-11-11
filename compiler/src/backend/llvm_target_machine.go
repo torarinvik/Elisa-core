@@ -3,6 +3,15 @@
 package backend
 
 /*
+#cgo darwin,arm64 CFLAGS: -I/opt/homebrew/opt/llvm/include
+#cgo darwin,arm64 LDFLAGS: -L/opt/homebrew/opt/llvm/lib -lLLVM
+#cgo darwin,amd64 CFLAGS: -I/usr/local/opt/llvm/include
+#cgo darwin,amd64 LDFLAGS: -L/usr/local/opt/llvm/lib -lLLVM
+#cgo linux CFLAGS: -I/usr/lib/llvm-23/include -I/usr/include -I/usr/lib/llvm-21/include -I/usr/lib/llvm-20/include -I/usr/lib/llvm-19/include -I/usr/lib/llvm-18/include -I/usr/lib/llvm-17/include -I/usr/lib/llvm-16/include -I/usr/lib/llvm-15/include
+#cgo linux LDFLAGS: -L/usr/lib/llvm-23/lib -Wl,-rpath,/usr/lib/llvm-23/lib -L/usr/lib/llvm-21/lib -L/usr/lib/llvm-20/lib -L/usr/lib/llvm-19/lib -L/usr/lib/llvm-18/lib -L/usr/lib/llvm-17/lib -L/usr/lib/llvm-16/lib -L/usr/lib/llvm-15/lib -lLLVM
+#cgo windows CFLAGS: -IC:/msys64/mingw64/include
+#cgo windows LDFLAGS: -LC:/msys64/mingw64/lib -lLLVM-22
+
 #include <stdlib.h>
 #include <llvm-c/Core.h>
 #include <llvm-c/Error.h>
@@ -337,4 +346,14 @@ func llvmByteOrder(target llvmIRTargetDataRef) llvmIRByteOrder {
 
 func llvmABISizeOfType(target llvmIRTargetDataRef, typ llvmIRTypeRef) llvmIRUnsignedLongLong {
 	return C.LLVMABISizeOfType(target, typ)
+}
+
+type llvmIRTargetMachineRef = C.LLVMTargetMachineRef
+
+func llvmDisposeTargetData(target llvmIRTargetDataRef) {
+	C.LLVMDisposeTargetData(target)
+}
+
+func llvmDisposeTargetMachine(target llvmIRTargetMachineRef) {
+	C.LLVMDisposeTargetMachine(target)
 }

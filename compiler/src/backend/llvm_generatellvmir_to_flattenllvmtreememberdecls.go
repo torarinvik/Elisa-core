@@ -2,23 +2,6 @@
 
 package backend
 
-/*
-#cgo darwin,arm64 CFLAGS: -I/opt/homebrew/opt/llvm/include
-#cgo darwin,arm64 LDFLAGS: -L/opt/homebrew/opt/llvm/lib -lLLVM
-#cgo darwin,amd64 CFLAGS: -I/usr/local/opt/llvm/include
-#cgo darwin,amd64 LDFLAGS: -L/usr/local/opt/llvm/lib -lLLVM
-#cgo linux CFLAGS: -I/usr/lib/llvm-23/include -I/usr/include -I/usr/lib/llvm-21/include -I/usr/lib/llvm-20/include -I/usr/lib/llvm-19/include -I/usr/lib/llvm-18/include -I/usr/lib/llvm-17/include -I/usr/lib/llvm-16/include -I/usr/lib/llvm-15/include
-#cgo linux LDFLAGS: -L/usr/lib/llvm-23/lib -Wl,-rpath,/usr/lib/llvm-23/lib -L/usr/lib/llvm-21/lib -L/usr/lib/llvm-20/lib -L/usr/lib/llvm-19/lib -L/usr/lib/llvm-18/lib -L/usr/lib/llvm-17/lib -L/usr/lib/llvm-16/lib -L/usr/lib/llvm-15/lib -lLLVM
-#cgo windows CFLAGS: -IC:/msys64/mingw64/include
-#cgo windows LDFLAGS: -LC:/msys64/mingw64/lib -lLLVM-22
-#include <stdlib.h>
-#include <llvm-c/Analysis.h>
-#include <llvm-c/Core.h>
-#include <llvm-c/Target.h>
-#include <llvm-c/TargetMachine.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -249,15 +232,15 @@ type llvmGenerator struct {
 	provenIndexSpansSize   int
 	provenIndexSpansResult *semantic.Result
 	// panicReportFn is the module's outlined panic reporter (llvm_panic_report.go), created lazily.
-	panicReportFn             C.LLVMValueRef
+	panicReportFn             llvmIRValueRef
 	sameNameWrapperDecisions  map[*semantic.ExportedFunc]bool
 	result                    *semantic.Result
 	optLevel                  OptimizationLevel
-	context                   C.LLVMContextRef
-	module                    C.LLVMModuleRef
-	targetMachine             C.LLVMTargetMachineRef
-	targetData                C.LLVMTargetDataRef
-	targetTriple              *C.char
+	context                   llvmIRContextRef
+	module                    llvmIRModuleRef
+	targetMachine             llvmIRTargetMachineRef
+	targetData                llvmIRTargetDataRef
+	targetTriple              *llvmIRChar
 	targetTripleOwnedByLLVM   bool
 	requestedTargetTriple     string
 	optimizedForCodegen       bool
@@ -266,17 +249,17 @@ type llvmGenerator struct {
 	packedEnumABI             packedEnumABIMode
 	symbolsByNode             map[ast.Node]*semantic.Symbol
 	easmLayoutNames           map[string]bool
-	structTypes               map[string]C.LLVMTypeRef
+	structTypes               map[string]llvmIRTypeRef
 	structBodies              map[string]bool
-	functionTypes             map[*semantic.FuncType]C.LLVMTypeRef
+	functionTypes             map[*semantic.FuncType]llvmIRTypeRef
 	runtimeHelperTypes        map[string]*semantic.FuncType
 	packedViewTypes           map[*semantic.EnumVariant]*semantic.PackedVariantViewType
-	packedVariantPayloadTypes map[*semantic.EnumVariant]C.LLVMTypeRef
+	packedVariantPayloadTypes map[*semantic.EnumVariant]llvmIRTypeRef
 	commonFieldLayouts        map[packedEnumCommonFieldLayoutCacheKey]*packedEnumCommonFieldLayout
 	specializedFuncTypes      map[string]*semantic.FuncType
 	genericSymbolKeys         map[string]string
-	functions                 map[string]C.LLVMValueRef
-	globals                   map[string]C.LLVMValueRef
+	functions                 map[string]llvmIRValueRef
+	globals                   map[string]llvmIRValueRef
 	constEvalScopes           []map[string]semantic.ConstValue
 	staticCallDepth           int
 	noteTypeInProgress        map[typeMemoKey]bool
@@ -340,7 +323,7 @@ func newLLVMGenerator(result *semantic.Result, shared ...*sharedCodegenLookups) 
 	if activeFile == nil || !newIRCodegenReadView(result, nil).HasGlobalScope() {
 		return nil, fmt.Errorf("backend requires a semantic result with file and global scope")
 	}
-	ctx := C.LLVMContextCreate()
+	ctx := llvmContextCreate()
 	// LLVM's module identifier is not semantic source metadata.  Keeping the
 	// caller's absolute path here made object code depend on whether the same
 	// source was invoked as `src/file.elisa` or `/abs/.../src/file.elisa` on
@@ -353,8 +336,8 @@ func newLLVMGenerator(result *semantic.Result, shared ...*sharedCodegenLookups) 
 		moduleID = "module.elisa"
 	}
 	moduleName := cString(moduleID)
-	defer C.free(unsafe.Pointer(moduleName))
-	mod := C.LLVMModuleCreateWithNameInContext(moduleName, ctx)
+	defer llvmFree(unsafe.Pointer(moduleName))
+	mod := llvmModuleCreateWithNameInContext(moduleName, ctx)
 	g := &llvmGenerator{
 		result:                    result,
 		context:                   ctx,
@@ -362,16 +345,16 @@ func newLLVMGenerator(result *semantic.Result, shared ...*sharedCodegenLookups) 
 		packedProfile:             DefaultPackedLoweringProfile(),
 		packedEnumABI:             packedEnumABIVariantSparse,
 		symbolsByNode:             map[ast.Node]*semantic.Symbol{},
-		structTypes:               map[string]C.LLVMTypeRef{},
+		structTypes:               map[string]llvmIRTypeRef{},
 		structBodies:              map[string]bool{},
-		functionTypes:             map[*semantic.FuncType]C.LLVMTypeRef{},
+		functionTypes:             map[*semantic.FuncType]llvmIRTypeRef{},
 		runtimeHelperTypes:        map[string]*semantic.FuncType{},
 		packedViewTypes:           map[*semantic.EnumVariant]*semantic.PackedVariantViewType{},
-		packedVariantPayloadTypes: map[*semantic.EnumVariant]C.LLVMTypeRef{},
+		packedVariantPayloadTypes: map[*semantic.EnumVariant]llvmIRTypeRef{},
 		commonFieldLayouts:        map[packedEnumCommonFieldLayoutCacheKey]*packedEnumCommonFieldLayout{},
 		specializedFuncTypes:      map[string]*semantic.FuncType{},
-		functions:                 map[string]C.LLVMValueRef{},
-		globals:                   map[string]C.LLVMValueRef{},
+		functions:                 map[string]llvmIRValueRef{},
+		globals:                   map[string]llvmIRValueRef{},
 		noteTypeInProgress:        map[typeMemoKey]bool{},
 		noteTypeDone:              map[typeMemoKey]bool{},
 		wordBits:                  int(unsafe.Sizeof(uintptr(0)) * 8),
@@ -432,23 +415,23 @@ func (g *llvmGenerator) dispose() {
 		g.di = nil
 	}
 	if g.targetData != nil {
-		C.LLVMDisposeTargetData(g.targetData)
+		llvmDisposeTargetData(g.targetData)
 	}
 	if g.targetMachine != nil {
-		C.LLVMDisposeTargetMachine(g.targetMachine)
+		llvmDisposeTargetMachine(g.targetMachine)
 	}
 	if g.targetTriple != nil {
 		if g.targetTripleOwnedByLLVM {
-			C.LLVMDisposeMessage(g.targetTriple)
+			llvmDisposeMessage(g.targetTriple)
 		} else {
-			C.free(unsafe.Pointer(g.targetTriple))
+			llvmFree(unsafe.Pointer(g.targetTriple))
 		}
 	}
 	if g.module != nil {
-		C.LLVMDisposeModule(g.module)
+		llvmDisposeModule(g.module)
 	}
 	if g.context != nil {
-		C.LLVMContextDispose(g.context)
+		llvmContextDispose(g.context)
 	}
 	if g.transientCStringLifetime {
 		endModuleCStringLifetime()
@@ -476,10 +459,10 @@ func (g *llvmGenerator) disposeInBackground(scope *llvmDisposalScope) {
 	}
 	scope.schedule(func() {
 		if module != nil {
-			C.LLVMDisposeModule(module)
+			llvmDisposeModule(module)
 		}
 		if context != nil {
-			C.LLVMContextDispose(context)
+			llvmContextDispose(context)
 		}
 		if retainCStringLifetime {
 			endModuleCStringLifetime()
