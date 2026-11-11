@@ -104,7 +104,7 @@ func (r *Registry) encode(root any, framed bool, capacity int) ([]byte, error) {
 			// Large resumed analysis graphs contain millions of both kinds
 			// of entries. Reserve both tables to avoid growing them mid-walk.
 			pointerCapacity = min(capacity/96, 6_000_000)
-			sliceCapacity = min(capacity/224, 3_000_000)
+			sliceCapacity = min(capacity/256, 3_000_000)
 		}
 	}
 	e := &encoder{
