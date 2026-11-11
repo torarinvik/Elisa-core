@@ -148,7 +148,6 @@ func captureResolvedTypeNameContributions(rows map[ast.TypeExpr]string, decls []
 		if !value.IsValid() {
 			return nil
 		}
-		typ := value.Type()
 		switch value.Kind() {
 		case reflect.Interface:
 			if value.IsNil() {
@@ -159,18 +158,19 @@ func captureResolvedTypeNameContributions(rows map[ast.TypeExpr]string, decls []
 			if value.IsNil() {
 				return nil
 			}
-			if typ.Elem().PkgPath() != resolvedTypeNameASTPackage {
-				return nil
-			}
-			if skipNestedFunctions && typ == reflect.TypeOf((*ast.FuncDecl)(nil)) {
-				return nil
-			}
 			node := value.Interface()
 			// These leaves cannot own type-expression keys or contain cycles.
 			// Avoid a reflective descent and cycle-table updates for each one.
 			switch node.(type) {
 			case *ast.Ident, *ast.IntLit, *ast.FloatLit, *ast.StringLit,
 				*ast.CharLit, *ast.BoolLit, *ast.NullLit, *ast.ZeroedLit:
+				return nil
+			}
+			typ := value.Type()
+			if typ.Elem().PkgPath() != resolvedTypeNameASTPackage {
+				return nil
+			}
+			if skipNestedFunctions && typ == reflect.TypeOf((*ast.FuncDecl)(nil)) {
 				return nil
 			}
 			ptr := resolvedTypeNamePointer{typ: typ, ptr: value.Pointer()}
@@ -197,6 +197,7 @@ func captureResolvedTypeNameContributions(rows map[ast.TypeExpr]string, decls []
 			delete(active, ptr)
 			return err
 		case reflect.Struct:
+			typ := value.Type()
 			if typ.PkgPath() != resolvedTypeNameASTPackage {
 				return nil
 			}
@@ -222,8 +223,9 @@ func captureResolvedTypeNameContributions(rows map[ast.TypeExpr]string, decls []
 			if value.IsNil() {
 				return nil
 			}
-			if typ.Key().Kind() != reflect.String {
-				return fmt.Errorf("unsupported AST ownership map key %s", typ.Key())
+			keyType := value.Type().Key()
+			if keyType.Kind() != reflect.String {
+				return fmt.Errorf("unsupported AST ownership map key %s", keyType)
 			}
 			keys := value.MapKeys()
 			sort.Slice(keys, func(i, j int) bool { return keys[i].String() < keys[j].String() })
