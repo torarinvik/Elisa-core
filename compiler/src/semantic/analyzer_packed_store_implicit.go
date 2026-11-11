@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"maps"
 	"reflect"
 	"sort"
 	"strings"
@@ -63,33 +64,37 @@ func (a *Analyzer) computeTransitiveStoreNeeds(funcs []*ast.FuncDecl, regionBack
 	// All signatures in this pass read the same declaration shapes.
 	fieldOrders := map[*StructType][]string{}
 	var order []*FuncType
+	sig := make(map[string]*EnumType)
 	for _, fn := range funcs {
 		ft := a.funcTypeForRegionPoly(fn)
 		if ft == nil {
 			continue
 		}
-		if _, seen := needs[ft]; !seen {
-			needs[ft] = map[string]*EnumType{}
+		if _, seen := callees[ft]; !seen {
 			callees[ft] = map[*FuncType]bool{}
 			order = append(order, ft)
-			sig := map[string]*EnumType{}
 			collectPackedEnumsInSignatureWithOrder(ft, true, sig, fieldOrders)
 			for name, et := range sig {
 				// Pointer handles are self-contained for reads. Construction
 				// can still require a store, which is recorded below.
 				if !regionBacked[name] || et.HandleIsPointer() {
 					delete(sig, name)
-					continue
 				}
-				needs[ft][name] = et
 			}
 			if len(sig) != 0 {
-				signatureNeeds[ft] = sig
+				signatureNeeds[ft] = make(map[string]*EnumType, len(sig))
+				needs[ft] = make(map[string]*EnumType, len(sig))
+				maps.Copy(signatureNeeds[ft], sig)
+				maps.Copy(needs[ft], sig)
 			}
+			clear(sig)
 		}
 		constructors, bareVariants := a.scanPackedStoreBody(fn, callees[ft])
 		for name, et := range constructors {
 			if regionBacked[name] && et.HandleIsPointer() {
+				if needs[ft] == nil {
+					needs[ft] = make(map[string]*EnumType)
+				}
 				needs[ft][name] = et
 			}
 			if regionBacked[name] {
@@ -114,6 +119,9 @@ func (a *Analyzer) computeTransitiveStoreNeeds(funcs []*ast.FuncDecl, regionBack
 			for g := range callees[ft] {
 				for name, et := range needs[g] {
 					if needs[ft][name] == nil {
+						if needs[ft] == nil {
+							needs[ft] = make(map[string]*EnumType)
+						}
 						needs[ft][name] = et
 						changed = true
 					}
