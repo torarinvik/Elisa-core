@@ -195,6 +195,17 @@ func advanceAnalysisDiskBuildWithCheckpoint(program *loadedProgram, file, pristi
 	}
 	// A new build needs an independent syntax tree, but it can borrow the
 	// primary parse's tokens. The restoration future has already joined.
+	if build != nil && file == nil {
+		writeParserNotices(stderr, build.SourceParseNotices)
+		debugAnalysisDisk(stderr, "reuse exact checkpoint parse")
+	}
+	if build == nil && file == nil {
+		var ok bool
+		file, ok = parseLoadedProgramSource(program, stderr)
+		if !ok {
+			return nil, nil
+		}
+	}
 	if build == nil && pristine == nil {
 		pristine, _ = parseAnalysisBuildPristine(program)
 	}
@@ -210,6 +221,8 @@ func advanceAnalysisDiskBuildWithCheckpoint(program *loadedProgram, file, pristi
 		if err != nil {
 			return incomplete(err), nil
 		}
+		build.SourceParseRecorded = program.parseNotices != nil
+		build.SourceParseNotices = program.parseNotices
 	}
 	limit, _ := strconv.Atoi(os.Getenv("ELISACORE_ANALYSIS_BOOTSTRAP_DECLS"))
 	automatic := os.Getenv("ELISACORE_ANALYSIS_BOOTSTRAP") == "" && limit <= 0

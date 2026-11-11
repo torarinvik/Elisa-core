@@ -17,17 +17,20 @@ import (
 // Checkpoints admit only the exact same source and invocation, unlike the
 // completed RetainedAnalysis, which supports incremental edits.
 type AnalysisBuild struct {
-	retained    *RetainedAnalysis
-	file        *ast.File
-	loweredFile *ast.File
-	next        int
-	postNext    int
-	started     bool
-	done        bool
-	LastStats   AnalysisBuildStats
-	lateStarted bool
-	lateNext    int
-	lateLast    map[*ast.FuncDecl]int
+	// Recorded parser notices can be replayed for an exact bootstrap resume.
+	SourceParseRecorded bool
+	SourceParseNotices  []string
+	retained            *RetainedAnalysis
+	file                *ast.File
+	loweredFile         *ast.File
+	next                int
+	postNext            int
+	started             bool
+	done                bool
+	LastStats           AnalysisBuildStats
+	lateStarted         bool
+	lateNext            int
+	lateLast            map[*ast.FuncDecl]int
 }
 
 // AnalysisBuildStats describes the latest step, including the indivisible

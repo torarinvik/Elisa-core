@@ -326,7 +326,7 @@ func debugAnalysisDisk(stderr io.Writer, format string, args ...any) {
 func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options semantic.AnalyzeOptions, stderr io.Writer, pending *analysisDiskRestoration) *semantic.Result {
 	artifact, eligible := analysisDiskArtifactFor(program, options)
 	if !eligible {
-		return semantic.AnalyzeWithOptions(file, options)
+		return analyzeUncachedProgramSource(program, file, options, stderr)
 	}
 	var state *semantic.RetainedAnalysis
 	var result *semantic.Result
@@ -341,6 +341,13 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 		pending = startAnalysisDiskRestoration(program, options)
 	}
 	pending.join()
+	if file == nil && (pending == nil || pending.build == nil) {
+		var ok bool
+		file, ok = parseLoadedProgramSource(program, stderr)
+		if !ok {
+			return nil
+		}
+	}
 	if pending != nil {
 		buildCheckpoint = pending.build
 		checkpointTried = pending.buildTried
@@ -424,7 +431,7 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 					// unfinished progress into a compile failure. The external
 					// process cap still applies; no deadline clock is reset.
 					debugAnalysisDisk(stderr, "automatic checkpoint storage unavailable: %v; uncached local analysis", err)
-					return semantic.AnalyzeWithOptions(file, options)
+					return analyzeUncachedProgramSource(program, file, options, stderr)
 				}
 			}
 			result, state = advanceAnalysisDiskBuildWithCheckpoint(program, file, pristine, options, artifact, stderr, analysisDiskResumeCheckpoint(buildCheckpoint, pending), checkpointTried)
@@ -485,4 +492,15 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 		}
 	}
 	return result
+}
+
+func analyzeUncachedProgramSource(program *loadedProgram, file *ast.File, options semantic.AnalyzeOptions, stderr io.Writer) *semantic.Result {
+	if file == nil {
+		var ok bool
+		file, ok = parseLoadedProgramSource(program, stderr)
+		if !ok {
+			return nil
+		}
+	}
+	return semantic.AnalyzeWithOptions(file, options)
 }

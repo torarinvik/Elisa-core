@@ -263,7 +263,7 @@ ANALYSIS_MAIN_FILES = (
     "analysis_command_status.go", "analysis_disk_build.go", "analysis_disk_cache.go",
     "analysis_disk_family.go", "analysis_disk_payload_other.go", "analysis_disk_payload_unix.go",
     "analysis_disk_prepare.go", "retained_autoserver.go", "retained_server.go",
-    "main_main_to_aggregatestateplaceholders.go",
+    "main_main_to_aggregatestateplaceholders.go", "program_input.go",
 )
 
 

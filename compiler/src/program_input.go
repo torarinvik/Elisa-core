@@ -27,6 +27,7 @@ func isSurfaceSourcePath(path string) bool {
 }
 
 type loadedProgram struct {
+	parseNotices          []string
 	proofReportRequested  bool // --explain will print the proof report
 	objectCacheIneligible bool
 	tokenCache            *sourceTokenCache
@@ -141,7 +142,21 @@ func analyzeLoadedProgramWithSession(program *loadedProgram, stderr io.Writer, o
 			pending = startAnalysisDiskRestoration(program, options)
 		}
 		return pending.join
-	}, retained)
+	}, retained, func(options semantic.AnalyzeOptions) (*ast.File, bool) {
+		if pending != nil && pending.checkpointCandidate {
+			pending.join()
+			if pending.build != nil && pending.build.build.SourceParseRecorded &&
+				validateAnalysisDiskBuildCheckpoint(pending.artifact, program, options, pending.build) == nil {
+				return nil, true
+			}
+		}
+		return parseLoadedProgramSource(program, stderr)
+	})
+}
+
+func parseLoadedProgramSource(program *loadedProgram, stderr io.Writer) (*ast.File, bool) {
+	program.parseNotices = nil
+	return parseProgramRecordingNotices(program.filename, program.source, stderr, program.tokenCache, &program.parseNotices)
 }
 
 // Keep provenance/options handling identical for the normal analyzer and
@@ -151,10 +166,10 @@ func analyzeLoadedProgramUsing(program *loadedProgram, stderr io.Writer, options
 }
 
 func analyzeLoadedProgramUsingPreparation(program *loadedProgram, stderr io.Writer, options semantic.AnalyzeOptions, analyze func(*ast.File, semantic.AnalyzeOptions) *semantic.Result, prepare func(semantic.AnalyzeOptions) func()) (*ast.File, *semantic.Result, bool) {
-	return analyzeLoadedProgramUsingPreparationWithRetained(program, stderr, options, analyze, prepare, nil)
+	return analyzeLoadedProgramUsingPreparationWithRetained(program, stderr, options, analyze, prepare, nil, nil)
 }
 
-func analyzeLoadedProgramUsingPreparationWithRetained(program *loadedProgram, stderr io.Writer, options semantic.AnalyzeOptions, analyze func(*ast.File, semantic.AnalyzeOptions) *semantic.Result, prepare func(semantic.AnalyzeOptions) func(), retained *retainedRuntime) (*ast.File, *semantic.Result, bool) {
+func analyzeLoadedProgramUsingPreparationWithRetained(program *loadedProgram, stderr io.Writer, options semantic.AnalyzeOptions, analyze func(*ast.File, semantic.AnalyzeOptions) *semantic.Result, prepare func(semantic.AnalyzeOptions) func(), retained *retainedRuntime, parse func(semantic.AnalyzeOptions) (*ast.File, bool)) (*ast.File, *semantic.Result, bool) {
 	if program == nil {
 		fmt.Fprintf(stderr, "error: missing program input\n")
 		return nil, nil, false
@@ -215,8 +230,11 @@ func analyzeLoadedProgramUsingPreparationWithRetained(program *loadedProgram, st
 			program.tokenCache.releaseRequestTokens()
 		}
 	}()
-	file, result, ok := analyzeProgramWithAnalyzerAndTokens(program.filename, program.source, stderr, options, program.tokenCache, retained, func(file *ast.File, options semantic.AnalyzeOptions) *semantic.Result {
-		return analyze(file, options)
+	file, result, ok := analyzeProgramWithParser(program.filename, program.source, stderr, options, retained, analyze, func() (*ast.File, bool) {
+		if parse != nil {
+			return parse(options)
+		}
+		return parseLoadedProgramSource(program, stderr)
 	})
 	if ok && result != nil {
 		result.EASMModules = append([]*easm.Module(nil), program.easm...)

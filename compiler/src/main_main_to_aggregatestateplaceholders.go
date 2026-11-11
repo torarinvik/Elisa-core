@@ -136,6 +136,10 @@ func parseProgram(filename string, src []byte, stderr io.Writer) (*ast.File, boo
 }
 
 func parseProgramWithTokenCache(filename string, src []byte, stderr io.Writer, cache *sourceTokenCache) (*ast.File, bool) {
+	return parseProgramRecordingNotices(filename, src, stderr, cache, nil)
+}
+
+func parseProgramRecordingNotices(filename string, src []byte, stderr io.Writer, cache *sourceTokenCache, notices *[]string) (*ast.File, bool) {
 	var key sourceTokenKey
 	wantTrace := false
 	if cache != nil {
@@ -144,6 +148,9 @@ func parseProgramWithTokenCache(filename string, src []byte, stderr io.Writer, c
 		file, ok, trace := cache.parsedFileWithKey(key, src)
 		wantTrace = trace
 		if ok {
+			if notices != nil {
+				*notices = []string{} // cached parses are admitted only without notices
+			}
 			frontendTimingLog("parse", replayStart)
 			return file, true
 		}
@@ -191,20 +198,16 @@ func parseProgramWithTokenCache(filename string, src []byte, stderr io.Writer, c
 		file = p.ParseFile(filename)
 	}
 	frontendTimingLog("parse", parseStart)
-	if warns := p.Notices(); len(warns) > 0 {
-		for _, w := range warns {
-			if shouldSuppressDeprecatedWarningsForTests(w) {
-				continue
-			}
-			fmt.Fprintf(stderr, "%s\n", w)
-		}
-	}
+	writeParserNotices(stderr, p.Notices())
 	if errs := p.Errors(); len(errs) > 0 {
 		lexer.DropParitySource(filename)
 		for _, e := range errs {
 			fmt.Fprintf(stderr, "%s\n", e)
 		}
 		return nil, false
+	}
+	if notices != nil {
+		*notices = append([]string{}, p.Notices()...)
 	}
 	if cache != nil {
 		cache.rememberParsedWithKey(key, file, p.SyntaxTrace(), len(p.Notices()) == 0)
@@ -224,6 +227,12 @@ func analyzeProgramWithAnalyzer(filename string, src []byte, stderr io.Writer, o
 }
 
 func analyzeProgramWithAnalyzerAndTokens(filename string, src []byte, stderr io.Writer, options semantic.AnalyzeOptions, cache *sourceTokenCache, retained *retainedRuntime, analyze func(*ast.File, semantic.AnalyzeOptions) *semantic.Result) (*ast.File, *semantic.Result, bool) {
+	return analyzeProgramWithParser(filename, src, stderr, options, retained, analyze, func() (*ast.File, bool) {
+		return parseProgramWithTokenCache(filename, src, stderr, cache)
+	})
+}
+
+func analyzeProgramWithParser(filename string, src []byte, stderr io.Writer, options semantic.AnalyzeOptions, retained *retainedRuntime, analyze func(*ast.File, semantic.AnalyzeOptions) *semantic.Result, parse func() (*ast.File, bool)) (*ast.File, *semantic.Result, bool) {
 	if retained != nil {
 		retained.prefetchSource(filename, src)
 		// A non-retained analyzer may not consume the prefetch. The retained
@@ -231,7 +240,7 @@ func analyzeProgramWithAnalyzerAndTokens(filename string, src []byte, stderr io.
 		// covers parse errors, direct analyzers, and early returns.
 		defer retained.dropPrefetch()
 	}
-	file, ok := parseProgramWithTokenCache(filename, src, stderr, cache)
+	file, ok := parse()
 	if !ok {
 		return nil, nil, false
 	}
@@ -302,4 +311,12 @@ func shouldSuppressDeprecatedWarningsForTests(warning string) bool {
 		return false
 	}
 	return strings.Contains(warning, "deprecated")
+}
+
+func writeParserNotices(stderr io.Writer, notices []string) {
+	for _, warning := range notices {
+		if !shouldSuppressDeprecatedWarningsForTests(warning) {
+			fmt.Fprintln(stderr, warning)
+		}
+	}
 }

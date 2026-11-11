@@ -102,10 +102,16 @@ func TestDefaultDiskCheckpointStatusResumeAndCorruptRejection(t *testing.T) {
 	if code != analysisIncompleteExitCode || !strings.Contains(rejected, "declined checkpoint") || strings.Contains(rejected, "bootstrap restore") {
 		t.Fatalf("corrupt checkpoint admitted: %d %s", code, rejected)
 	}
+	if strings.Contains(rejected, "reuse exact checkpoint parse") {
+		t.Fatalf("rejected checkpoint reused parser state: %s", rejected)
+	}
 	env["ELISACORE_ANALYSIS_BOOTSTRAP_DECLS"] = ""
 	resumed, code := runDiskCLIChildResult(t, env, "-emit", "llvm", "-o", out, source)
 	if code != 0 || !strings.Contains(resumed, "bootstrap restore") || !strings.Contains(resumed, "bootstrap complete") {
 		t.Fatalf("normal command failed to auto-resume exact checkpoint: %d %s", code, resumed)
+	}
+	if !strings.Contains(resumed, "reuse exact checkpoint parse") {
+		t.Fatalf("checkpoint did not reuse parser state: %s", resumed)
 	}
 	if _, err := os.Stat(out); err != nil {
 		t.Fatal(err)

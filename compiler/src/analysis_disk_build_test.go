@@ -75,6 +75,32 @@ func analysisDiskBuildTestCheckpoint(t *testing.T, filename string, source []byt
 	return data
 }
 
+func TestAnalysisDiskBootstrapReplaysParserNotice(t *testing.T) {
+	t.Setenv("ELISAC_BUILD_CACHE_DIR", t.TempDir())
+	t.Setenv("ELISACORE_ANALYSIS_CACHE", "1")
+	t.Setenv("ELISACORE_ANALYSIS_BOOTSTRAP", "1")
+	t.Setenv("ELISACORE_ANALYSIS_BOOTSTRAP_DECLS", "1")
+	t.Setenv("ELISACORE_ANALYSIS_CACHE_DEBUG", "1")
+	t.Setenv("ELISACORE_SUPPRESS_DEPRECATED_WARNINGS", "0")
+	previous := processStartTime
+	processStartTime = time.Now()
+	t.Cleanup(func() { processStartTime = previous })
+	source := retainedCodegenBase + "\ndef notice_fixture() -> i64:\n    value: i64 = do:\n        42\n    return value\n"
+	const warning = "`do:` expression blocks are deprecated"
+	filename := filepath.Join(t.TempDir(), "program.elisa")
+	for attempt := 0; attempt < 2; attempt++ {
+		program := &loadedProgram{filename: filename, source: []byte(source)}
+		var output bytes.Buffer
+		analyzeLoadedProgramWithSession(program, &output, semantic.AnalyzeOptions{}, nil)
+		if strings.Count(output.String(), warning) != 1 {
+			t.Fatalf("attempt %d did not emit exactly one parser notice: %s", attempt, &output)
+		}
+		if reused := strings.Contains(output.String(), "reuse exact checkpoint parse"); reused != (attempt == 1) {
+			t.Fatalf("attempt %d reuse=%v: %s", attempt, reused, &output)
+		}
+	}
+}
+
 func TestAnalysisBootstrapStepLimitIsolatesKnownSlowDeclaration(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -147,7 +173,7 @@ func TestAnalysisDiskBootstrapAcrossProcesses(t *testing.T) {
 	paused := 0
 	for step := 0; step < 50; step++ {
 		output, code := runDiskCLIChildResult(t, env, args...)
-		wantParses := 1
+		wantParses := 0
 		if step == 0 {
 			wantParses = 2
 		}
