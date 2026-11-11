@@ -33,7 +33,7 @@ func (a *Analyzer) functionReturnsRegionAllocatedValue(fn *ast.FuncDecl) bool {
 	// local's storage: the local itself, a field/element of it, or its address. A call
 	// that receives such an argument can return a value sharing that storage — a darray
 	// field copied out (`return E.X(p.items)`) copies the HEADER, not the buffer.
-	rootedInRegionLocal := func(arg ast.Expr) bool {
+	regionLocalRoot := func(arg ast.Expr) *ast.Ident {
 		for {
 			switch e := unwrapParenForRegionPoly(arg).(type) {
 			case *ast.AddrOfExpr:
@@ -46,8 +46,12 @@ func (a *Analyzer) functionReturnsRegionAllocatedValue(fn *ast.FuncDecl) bool {
 			break
 		}
 		root := rootIdentExpr(unwrapParenForRegionPoly(arg))
-		return root != nil && regionLocals[root.Name]
+		if root != nil && regionLocals[root.Name] {
+			return root
+		}
+		return nil
 	}
+	rootedInRegionLocal := func(arg ast.Expr) bool { return regionLocalRoot(arg) != nil }
 	// callSharesRegionLocal: an ordinary call whose receiver or argument is rooted in a
 	// region-fed local may return that local's storage. The callee's own classification
 	// cannot see this — the callee allocates nothing (`def f(p: P&) -> E: return
@@ -55,79 +59,25 @@ func (a *Analyzer) functionReturnsRegionAllocatedValue(fn *ast.FuncDecl) bool {
 	// while the returned payload still pointed into it: element reads came back zero, a
 	// silent wrong answer in safe code. Gated on a region-carrying return type; a false
 	// match only threads the caller's region, which is sound.
-	// viewElementLocals: locals whose every declaration spells `darray[sview]` (and that no
-	// tuple bind or parameter also names). Such a container's own storage holds only view
-	// HEADERS — no bytes a view can point into — so when nothing in this function's return
-	// type can hold a `darray[sview]` header, a reference or a generic view, a callee handed
-	// that container can return copies of its elements, never its storage. The
-	// element's backing is whatever the pushed view already pointed at, which this call does
-	// not change; treating the container as sharing its region with the result made every
-	// caller of a `path_text(names, table)`-style helper adopt a region it never touched.
-	viewElementLocals := map[string]bool{}
-	if retCarriesRegionStorage {
-		blocked := map[string]bool{}
-		for _, param := range fn.Params {
-			blocked[param.Name] = true
-		}
-		reachesStorage := map[string]bool{}
-		fillMayAdoptWalk(reflect.ValueOf(fn.Body), func(node any) {
-			switch s := node.(type) {
-			case *ast.VarDeclStmt:
-				if elem, ok := headerOnlyDarrayElemName(s.Type); ok {
-					reaches, known := reachesStorage[elem]
-					if !known {
-						reaches = typeMayReachDarrayStorage(returnType, elem)
-						reachesStorage[elem] = reaches
-					}
-					if !reaches {
-						viewElementLocals[s.Name] = true
-						return
-					}
-				}
-				blocked[s.Name] = true
-			case *ast.TupleBindStmt:
-				for _, nm := range s.Names {
-					blocked[nm.Name] = true
-				}
-			}
-		})
-		for name := range blocked {
-			delete(viewElementLocals, name)
-		}
-	}
+	// Only calls that can share a local argument need the whole-body
+	// header-only binding analysis. A receiver is handled independently.
+	var viewElementLocals map[string]bool
 	callSharesRegionLocal := func(callee ast.Expr, args []ast.Expr) bool {
-		if !retCarriesRegionStorage {
+		if !retCarriesRegionStorage || len(regionLocals) == 0 {
 			return false
-		}
-		if len(viewElementLocals) > 0 {
-			kept := make([]ast.Expr, 0, len(args))
-			for _, arg := range args {
-				inner := arg
-				for {
-					switch e := unwrapParenForRegionPoly(inner).(type) {
-					case *ast.AddrOfExpr:
-						inner = e.Operand
-						continue
-					case *ast.MoveExpr:
-						inner = e.Operand
-						continue
-					}
-					break
-				}
-				// The container itself, an element copy (`names[i]`) or a scalar field
-				// (`names.count`): none of them is the container's storage.
-				if id := rootIdentExpr(unwrapParenForRegionPoly(inner)); id != nil && viewElementLocals[id.Name] {
-					continue
-				}
-				kept = append(kept, arg)
-			}
-			args = kept
 		}
 		if fe, ok := unwrapParenForRegionPoly(callee).(*ast.FieldExpr); ok && fe != nil && rootedInRegionLocal(fe.Object) {
 			return true
 		}
 		for _, arg := range args {
-			if arg != nil && rootedInRegionLocal(arg) {
+			root := regionLocalRoot(arg)
+			if root == nil {
+				continue
+			}
+			if viewElementLocals == nil {
+				viewElementLocals = regionHeaderOnlyElementLocals(fn, returnType)
+			}
+			if !viewElementLocals[root.Name] {
 				return true
 			}
 		}
@@ -449,4 +399,46 @@ func (a *Analyzer) functionReturnsRegionAllocatedValue(fn *ast.FuncDecl) bool {
 	}
 	walk(fn.Body)
 	return found
+}
+
+// regionHeaderOnlyElementLocals finds locals whose every declaration spells `darray[sview]` (and that no
+// tuple bind or parameter also names). Such a container's own storage holds only view
+// HEADERS — no bytes a view can point into — so when nothing in this function's return
+// type can hold a `darray[sview]` header, a reference or a generic view, a callee handed
+// that container can return copies of its elements, never its storage. The
+// element's backing is whatever the pushed view already pointed at, which this call does
+// not change; treating the container as sharing its region with the result made every
+// caller of a `path_text(names, table)`-style helper adopt a region it never touched.
+func regionHeaderOnlyElementLocals(fn *ast.FuncDecl, returnType Type) map[string]bool {
+	viewElementLocals := map[string]bool{}
+	blocked := map[string]bool{}
+	for _, param := range fn.Params {
+		blocked[param.Name] = true
+	}
+	reachesStorage := map[string]bool{}
+	fillMayAdoptWalk(reflect.ValueOf(fn.Body), func(node any) {
+		switch s := node.(type) {
+		case *ast.VarDeclStmt:
+			if elem, ok := headerOnlyDarrayElemName(s.Type); ok {
+				reaches, known := reachesStorage[elem]
+				if !known {
+					reaches = typeMayReachDarrayStorage(returnType, elem)
+					reachesStorage[elem] = reaches
+				}
+				if !reaches {
+					viewElementLocals[s.Name] = true
+					return
+				}
+			}
+			blocked[s.Name] = true
+		case *ast.TupleBindStmt:
+			for _, nm := range s.Names {
+				blocked[nm.Name] = true
+			}
+		}
+	})
+	for name := range blocked {
+		delete(viewElementLocals, name)
+	}
+	return viewElementLocals
 }
