@@ -8,5 +8,5 @@ import "embed"
 // inputs part of the native package's build key and the Stage0 receipt.
 // The variable is never read, so the linker drops it from the executable.
 //
-//go:embed llvm_wrappers/*.cpp llvm_wrappers/*.h
+//go:embed llvm_wrappers/*.cpp
 var llvmWrapperInputs embed.FS

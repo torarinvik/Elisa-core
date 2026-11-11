@@ -51,7 +51,7 @@ int main(int argc,char **argv) {
 '''
 with tempfile.TemporaryDirectory(prefix='elisa-even-range-') as tmp:
     d=Path(tmp);bindir=Path(run([CONFIG,'--bindir']));libdir=run([CONFIG,'--libdir']);(d/'driver.cpp').write_text(DRIVER)
-    run([bindir/'clang++',*flags('--cxxflags'),d/'driver.cpp',ROOT/'src/backend/llvmnative/llvm_wrappers/llvm_even_range.cpp',*flags('--ldflags','--libs','--system-libs'),'-Wl,-rpath,'+libdir,'-o',d/'driver'])
+    run([bindir/'clang++',*flags('--cxxflags'),d/'driver.cpp',ROOT/'src/backend/llvmnative/looptransforms/passes/llvm_even_range.cpp',*flags('--ldflags','--libs','--system-libs'),'-Wl,-rpath,'+libdir,'-o',d/'driver'])
     src=fixture();cases={
       'eligible':(src,'1 0'),
       'different input':(src.replace('%odd = trunc i64 %x','%odd = trunc i64 %y'),'0 0'),

@@ -23,6 +23,9 @@ unsigned elisacoreBiasValidationReturns(LLVMModuleRef);
 import "C"
 
 import (
+	_ "elisacore/src/backend/llvmnative/divisionloops"
+	_ "elisacore/src/backend/llvmnative/looptransforms"
+	_ "elisacore/src/backend/llvmnative/storagepasses"
 	// The bounded-division pass calls the radix-width matcher.
 	_ "elisacore/src/backend/llvmnative/digitcounts"
 	"unsafe"
