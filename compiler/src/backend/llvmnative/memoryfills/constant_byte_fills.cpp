@@ -2,6 +2,7 @@
 // Expand bounded constant-byte fills without writing outside their range.
 #include <cstdint>
 #include <llvm-c/Core.h>
+#include <llvm/Config/llvm-config.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/IRBuilder.h>
@@ -14,13 +15,15 @@
 
 using namespace llvm;
 
+#include "llvm_word_pattern_fill.h"
+
 extern "C" unsigned elisacoreExpandSmallZeroFills(LLVMModuleRef ref) {
   if (!ref) return 0;
   Module &M = *unwrap(ref);
   if (M.getTargetTriple().getArch() != Triple::aarch64 || !M.getDataLayout().isLittleEndian() || M.getNamedValue("__elisacore_smallzero_fill")) return 0;
   // Inline medium, aligned fixed-size fills on Apple AArch64. LLVM otherwise
   // lowers these to a library call. Keep the size bounded to control code growth.
-  unsigned fixedChanged = 0;
+  unsigned fixedChanged = inlineStackWordPatternFills(M);
   if (M.getTargetTriple().isMacOSX()) {
     SmallVector<MemSetInst *, 8> fixed;
     for (Function &F : M) {
