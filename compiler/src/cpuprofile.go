@@ -76,6 +76,13 @@ func startMemProfile() func() {
 	var once sync.Once
 	write := func() {
 		once.Do(func() {
+			// Allocation profiles can lag two collection cycles. Explicitly
+			// synchronize them when investigating a short, allocation-heavy run;
+			// this observer mode is unsuitable for measuring normal build time.
+			if os.Getenv("ELISACORE_MEMPROFILE_GC") == "1" {
+				runtime.GC()
+				runtime.GC()
+			}
 			f, err := os.Create(path)
 			if err != nil {
 				return
