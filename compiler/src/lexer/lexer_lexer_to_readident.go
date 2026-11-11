@@ -166,11 +166,6 @@ func (l *Lexer) match(expected byte) bool {
 	}
 	return false
 }
-func (l *Lexer) skipLineComment() {
-	for l.sourceHas(l.pos) && l.peek() != '\n' {
-		l.advance()
-	}
-}
 
 // isBlockCommentStart reports whether the lexer is positioned at a triple
 // double-quote (`"""`), which opens a multi-line comment.

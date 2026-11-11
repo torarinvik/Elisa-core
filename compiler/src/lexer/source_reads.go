@@ -1,6 +1,9 @@
 package lexer
 
-import "unicode/utf8"
+import (
+	"bytes"
+	"unicode/utf8"
+)
 
 // A failed existence probe records the missing byte too. Appending after a
 // previously observed EOF must invalidate a checkpoint that depended on it.
@@ -40,4 +43,16 @@ func (l *Lexer) sourceIdentifierEnd(start int) int {
 	// dependency. Multi-byte lookahead is recorded by peekRuneAt.
 	l.noteRead(end + 1)
 	return end
+}
+
+func (l *Lexer) skipLineComment() {
+	remaining := l.src[l.pos:]
+	length := bytes.IndexByte(remaining, '\n')
+	if length < 0 {
+		length = len(remaining)
+	}
+	l.pos += length
+	l.col += length
+	// Include the newline or failed EOF probe in the incremental dependency.
+	l.noteRead(l.pos + 1)
 }

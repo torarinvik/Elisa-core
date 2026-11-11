@@ -8,8 +8,15 @@ import (
 )
 
 // NextToken returns the next token from the source.
-func (l *Lexer) NextToken() (result Token) {
-	defer func() { l.lastTokenKind = result.Kind }()
+func (l *Lexer) NextToken() Token {
+	token := l.nextToken()
+	l.lastTokenKind = token.Kind
+	return token
+}
+
+func (l *Lexer) nextToken() Token {
+	// Skipped input leaves lastTokenKind pointing to the preceding token.
+restart:
 	for len(l.pendingPatternBlocks) > 0 && l.pendingPatternBlocks[len(l.pendingPatternBlocks)-1].ParenDepth > l.parenDepth {
 		l.pendingPatternBlocks = l.pendingPatternBlocks[:len(l.pendingPatternBlocks)-1]
 	}
@@ -71,7 +78,7 @@ func (l *Lexer) NextToken() (result Token) {
 				l.advance()
 			}
 			l.atLineStart = false
-			return l.NextToken()
+			goto restart
 		}
 		// Skip consecutive blank lines
 		for l.sourceHas(l.pos) && l.peek() == '\n' {
@@ -79,7 +86,7 @@ func (l *Lexer) NextToken() (result Token) {
 		}
 		if l.parenDepth > 0 && !l.activeGroupedBlockContext() {
 			// Inside ordinary grouped expressions, skip newlines silently.
-			return l.NextToken()
+			goto restart
 		}
 		return l.finishToken(Token{Kind: TOKEN_NEWLINE, Pos: p})
 	}
@@ -87,14 +94,14 @@ func (l *Lexer) NextToken() (result Token) {
 	// Comments
 	if ch == '#' {
 		l.skipLineComment()
-		return l.NextToken()
+		goto restart
 	}
 
 	// Triple-quote (`"""`) multi-line comments. Checked before string literals so a
 	// `"""` is not mis-lexed as an empty string `""` followed by a `"`.
 	if l.isBlockCommentStart() {
 		l.skipBlockComment()
-		return l.NextToken()
+		goto restart
 	}
 
 	// f-string interpolation: `f"...{EXPR}..."` — only when the `f` is IMMEDIATELY followed by a
