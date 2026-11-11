@@ -65,6 +65,7 @@ func (a *Analyzer) computeTransitiveStoreNeeds(funcs []*ast.FuncDecl, regionBack
 	fieldOrders := map[*StructType][]string{}
 	emptyTypeRoots := make(map[Type]bool)
 	packedSignatures := make(map[[2]Type]map[string]*EnumType)
+	bareVariantNames := a.packedStoreBareVariantNames()
 	var order []*FuncType
 	sig := make(map[string]*EnumType)
 	for _, fn := range funcs {
@@ -91,7 +92,7 @@ func (a *Analyzer) computeTransitiveStoreNeeds(funcs []*ast.FuncDecl, regionBack
 			}
 			clear(sig)
 		}
-		constructors, bareVariants := a.scanPackedStoreBody(fn, callees[ft])
+		constructors, bareVariants := a.scanPackedStoreBody(fn, callees[ft], bareVariantNames)
 		for name, et := range constructors {
 			if regionBacked[name] && et.HandleIsPointer() {
 				if needs[ft] == nil {

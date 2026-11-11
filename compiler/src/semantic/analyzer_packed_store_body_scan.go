@@ -4,7 +4,7 @@ import "elisacore/src/ast"
 
 // scanPackedStoreBody collects construction roots and direct callees in one
 // traversal. The AST walker visits shared argument nodes only once.
-func (a *Analyzer) scanPackedStoreBody(fn *ast.FuncDecl, callees map[*FuncType]bool) (constructors map[string]*EnumType, bareVariants map[string]bool) {
+func (a *Analyzer) scanPackedStoreBody(fn *ast.FuncDecl, callees map[*FuncType]bool, bareVariantNames map[string]bool) (constructors map[string]*EnumType, bareVariants map[string]bool) {
 	walkStoreScanNodes(fn.Body, func(node any) {
 		var constructed *EnumType
 		switch n := node.(type) {
@@ -27,7 +27,7 @@ func (a *Analyzer) scanPackedStoreBody(fn *ast.FuncDecl, callees map[*FuncType]b
 				a.regionPolyFn = previous
 			}
 		case *ast.FieldExpr:
-			if n != nil {
+			if n != nil && (bareVariantNames == nil || bareVariantNames[n.Field]) {
 				if root := a.barePackedVariantRoot(n); root != nil {
 					if bareVariants == nil {
 						bareVariants = make(map[string]bool)
@@ -44,6 +44,27 @@ func (a *Analyzer) scanPackedStoreBody(fn *ast.FuncDecl, callees map[*FuncType]b
 		}
 	})
 	return constructors, bareVariants
+}
+
+// Only named packed enums can resolve a bare constructor. Their variant
+// spellings are fixed for the duration of the pre-body store analysis.
+func (a *Analyzer) packedStoreBareVariantNames() map[string]bool {
+	if a.lookupTrace != nil {
+		return nil // preserve recorded type lookups, including misses
+	}
+	names := map[string]bool{}
+	for _, typ := range a.namedTypes {
+		enum, ok := typ.(*EnumType)
+		if !ok || enum == nil || !enum.Packed {
+			continue
+		}
+		for name, variant := range enum.VariantMap {
+			if variant != nil && len(variant.Payload) == 0 {
+				names[name] = true
+			}
+		}
+	}
+	return names
 }
 
 // A payload-less packed variant used as a value allocates a fresh node.

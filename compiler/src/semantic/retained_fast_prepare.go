@@ -261,7 +261,7 @@ func (r *RetainedAnalysis) localFactDigest(a *Analyzer, live, fn *ast.FuncDecl, 
 		backed := a.collectRegionBackedPackedEnums([]*ast.FuncDecl{fn})
 		fmt.Fprintf(&b, "backed=%v;", slices.Sorted(maps.Keys(backed)))
 		callees := map[*FuncType]bool{}
-		constructors, bareVariants := a.scanPackedStoreBody(fn, callees)
+		constructors, bareVariants := a.scanPackedStoreBody(fn, callees, nil)
 		fmt.Fprintf(&b, "builds=%v;bare=%v;", slices.Sorted(maps.Keys(constructors)), slices.Sorted(maps.Keys(bareVariants)))
 		names := []string{}
 		for c := range callees {
