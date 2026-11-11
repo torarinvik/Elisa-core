@@ -504,6 +504,8 @@ extern "C" unsigned elisacoreUnrollNestedScans(LLVMModuleRef ref) {
   return changed;
 }
 
+#include "llvm_nested_vector_unroll.h"
+
 static bool shouldRevisitNestedVectorLoops(Module &M) {
   if (M.getNamedMetadata("llvm.dbg.cu") || !M.getTargetTriple().isAArch64())
     return false;
@@ -517,18 +519,20 @@ static bool shouldRevisitNestedVectorLoops(Module &M) {
         F.hasFnAttribute(Attribute::SanitizeThread) ||
         F.hasFnAttribute(Attribute::SanitizeHWAddress)) return false;
   }
+  bool Found = false;
   for (Function &F : M) {
     if (F.isDeclaration()) continue;
     DominatorTree DT(F); LoopInfo LI(DT);
     for (Loop *L : LI.getLoopsInPreorder()) {
       if (!L->getParentLoop()) continue;
+      if (M.getTargetTriple().isMacOSX()) unrollNestedVectorRecurrence(*L);
       for (BasicBlock *B : L->blocks())
         for (Instruction &I : *B)
           if (auto *Load = dyn_cast<LoadInst>(&I))
-            if (Load->getType()->isVectorTy()) return true;
+            if (Load->getType()->isVectorTy()) Found = true;
     }
   }
-  return false;
+  return Found;
 }
 
 extern "C" unsigned elisacoreShouldRevisitNestedVectors(LLVMModuleRef R) { return R && shouldRevisitNestedVectorLoops(*unwrap(R)); }
