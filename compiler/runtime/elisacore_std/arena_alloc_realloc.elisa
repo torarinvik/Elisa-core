@@ -164,7 +164,7 @@ def arena_region_is_tail_allocation(r: heap Region&, ptr: void&, size_bytes: usi
 def arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz: usize) -> mutable heap void&:
     can Abort.Panic, Atomics{Exchange,Load,Store}, Memory.Allocate, Unsafe{Alias,PointerCast,RawExtern}:
         if newsz <= oldsz:
-            return arena_heap_void_from_mutable(oldptr) can Unsafe.PointerCast
+            return arena_heap_void_from_mutable(oldptr)
 
         old_slots: usize = arena_size_bytes_to_slots(oldsz)
         new_slots: usize = arena_size_bytes_to_slots(newsz)
@@ -189,7 +189,7 @@ def arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz:
                     a.cast[uintptr],
                     a.end_index
                 ) can Global{Read,Write}, Atomics{Exchange,Load,Store}
-                return arena_heap_void_from_mutable(oldptr) can Unsafe.PointerCast
+                return arena_heap_void_from_mutable(oldptr)
 
         # RESERVE_COMMIT / FIXED grow in place: the base must never move (interior-pointer
         # stability, docs/68 §4). When oldptr is the region's tail allocation we just advance
@@ -215,7 +215,7 @@ def arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz:
                     a.cast[uintptr],
                     a.end_index
                 ) can Global{Read,Write}, Atomics{Exchange,Load,Store}
-                return arena_heap_void_from_mutable(oldptr) can Unsafe.PointerCast
+                return arena_heap_void_from_mutable(oldptr)
             panic("reserve_commit/fixed array cannot grow in place: not the tail allocation")
 
         newptr: mutable heap void& = (arena_alloc(a, newsz) can Global{Read,Write}, Atomics.Load)

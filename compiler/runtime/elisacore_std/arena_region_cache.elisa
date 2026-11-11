@@ -119,7 +119,7 @@ def arena_free_hint_set(owner: uintptr, region: mutable heap Region&?):
             hint.owner <- owner
             hint.region <- region
     published_owner: uintptr = owner if region != null else 0.uintptr()
-    can Global{Read,Write}:
+    can Global{Read,Write}, Atomics.Store:
         arena_free_hint_fast_owner_publish(published_owner)
     __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
 
@@ -135,7 +135,7 @@ def arena_free_hint_update(owner: uintptr, region: mutable heap Region&?):
                 matched <- true
     if matched:
         published_owner: uintptr = owner if region != null else 0.uintptr()
-        can Global{Read,Write}:
+        can Global{Read,Write}, Atomics.Store:
             arena_free_hint_fast_owner_publish(published_owner)
     __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
 
@@ -156,7 +156,7 @@ def arena_free_hint_clear(owner: uintptr):
                 hint.region <- null
                 matched <- true
     if matched:
-        can Global{Read,Write}:
+        can Global{Read,Write}, Atomics.Store:
             arena_free_hint_fast_owner_publish(0.uintptr())
     __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
 
@@ -172,7 +172,7 @@ def arena_free_hint_transfer(child: uintptr, parent: uintptr, child_region: muta
                 hint.region <- child_region
                 transferred <- true
     if transferred:
-        can Global{Read,Write}:
+        can Global{Read,Write}, Atomics.Store:
             arena_free_hint_fast_owner_publish(parent)
     __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
 
@@ -189,7 +189,7 @@ def arena_cache_record_reclaim(owner: uintptr, region: mutable heap Region&?):
             hint.owner <- owner
             hint.region <- region
     published_owner: uintptr = owner if region != null else 0.uintptr()
-    can Global{Read,Write}:
+    can Global{Read,Write}, Atomics.Store:
         arena_free_hint_fast_owner_publish(published_owner)
     __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
 

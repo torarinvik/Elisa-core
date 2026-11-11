@@ -98,7 +98,7 @@ def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap R
             r: mutable heap Region& = arena_region_from_raw(raw)
 
         static elif ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
-            r: mutable heap Region& = arena_mmap_owned_region(capacity) can Memory.Allocate, Abort.Panic
+            r: mutable heap Region& = arena_mmap_owned_region(capacity)
 
         static elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
             raw: mutable heap void&? = null
