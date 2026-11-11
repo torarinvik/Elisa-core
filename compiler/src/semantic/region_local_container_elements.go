@@ -395,15 +395,17 @@ func (s *localContainerElementScan) walkNode(node ast.Node, parent ast.Node, fie
 		return
 	}
 	s.visited[v.Pointer()] = true
-	if call, ok := node.(*ast.CallExpr); ok {
-		for index, arg := range call.Args {
+	switch n := node.(type) {
+	case *ast.Ident:
+		// An identifier has no children that can contribute element facts.
+		s.classifyIdent(n, parent, field)
+		return
+	case *ast.CallExpr:
+		for index, arg := range n.Args {
 			if addr, isAddr := arg.(*ast.AddrOfExpr); isAddr && addr != nil {
-				s.addrArgs[addr] = addrArgSite{call: call, index: index}
+				s.addrArgs[addr] = addrArgSite{call: n, index: index}
 			}
 		}
-	}
-	if ident, ok := node.(*ast.Ident); ok {
-		s.classifyIdent(ident, parent, field)
 	}
 	s.markChildren(node)
 	isLoop := isElementScanLoop(node)
