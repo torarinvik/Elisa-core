@@ -329,6 +329,13 @@ func TestAnalyzeAcceptsAllocatorOwnershipFixturePatterns(t *testing.T) {
 	_, errs := parseAndAnalyze(t, "allocator_ownership.elisa", src)
 	requireNoErrors(t, errs)
 }
+
+// The arena's parked-region cache synchronizes access to shared state. Pin the
+// inferred effects as well as the allocator's declared C contracts.
+var arenaRegionEffects = []string{"Abort.Panic", "Atomics.Exchange", "Atomics.Store", "Global.Read", "Global.Write", "Memory.Allocate", "Unsafe.Alias"}
+var arenaAllocationEffects = []string{"Abort.Panic", "Atomics.Exchange", "Atomics.Load", "Atomics.Store", "Global.Read", "Global.Write", "Memory.Allocate", "Unsafe.Alias", "Unsafe.PointerCast", "Unsafe.RawExtern"}
+var arenaReleaseEffects = []string{"Abort.Panic", "Atomics.Exchange", "Atomics.Load", "Atomics.Store", "Global.Read", "Global.Write", "Memory.Release", "Unsafe.Alias", "Unsafe.PointerCast", "Unsafe.RawExtern", "Unsafe.UncheckedIndex"}
+
 func TestAnalyzePinsArenaBuiltinPermissionContracts(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
 	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "arena.elisa"), map[string]bool{})
@@ -338,14 +345,14 @@ func TestAnalyzePinsArenaBuiltinPermissionContracts(t *testing.T) {
 	requireDeclaredFunctionPermissionRefs(t, result, "malloc", "Memory.Allocate")
 	requireDeclaredFunctionPermissionRefs(t, result, "free", "Memory.Release")
 	requireFunctionPermissionRefs(t, result, "sfree", "Memory.Release")
-	requireFunctionPermissionRefs(t, result, "new_region_with_owner", "Memory.Allocate", "Abort.Panic")
-	requireFunctionPermissionRefs(t, result, "new_region", "Memory.Allocate", "Abort.Panic")
-	requireFunctionPermissionRefs(t, result, "free_region", "Memory.Release", "Abort.Panic")
-	requireFunctionPermissionRefs(t, result, "arena_alloc", "Memory.Allocate", "Abort.Panic")
-	requireFunctionPermissionRefs(t, result, "arena_realloc", "Memory.Allocate", "Abort.Panic")
-	requireFunctionPermissionRefs(t, result, "arena_free", "Memory.Release", "Abort.Panic")
-	requireFunctionPermissionRefs(t, result, "arena_trim", "Memory.Release", "Abort.Panic")
-	requireFunctionPermissionRefs(t, result, "arena_vsprintf", "Memory.Allocate", "Console.Format", "Abort.Panic")
+	requireFunctionPermissionRefs(t, result, "new_region_with_owner", arenaRegionEffects...)
+	requireFunctionPermissionRefs(t, result, "new_region", arenaRegionEffects...)
+	requireFunctionPermissionRefs(t, result, "free_region", "Abort.Panic", "Atomics.Exchange", "Atomics.Store", "Global.Read", "Global.Write", "Memory.Release")
+	requireFunctionPermissionRefs(t, result, "arena_alloc", arenaAllocationEffects...)
+	requireFunctionPermissionRefs(t, result, "arena_realloc", arenaAllocationEffects...)
+	requireFunctionPermissionRefs(t, result, "arena_free", arenaReleaseEffects...)
+	requireFunctionPermissionRefs(t, result, "arena_trim", arenaReleaseEffects...)
+	requireFunctionPermissionRefs(t, result, "arena_vsprintf", append([]string{"Console.Format"}, arenaAllocationEffects...)...)
 }
 
 // The std float formatter reads f64 bits through the elisa.f64_to_bits builtin, so no
@@ -377,20 +384,20 @@ func TestAnalyzePinsStdFloatParsePermissionContracts(t *testing.T) {
 	}
 }
 
-func TestAnalyzeStrictUnsafePinsArenaPointerCastsAsTrustedInternals(t *testing.T) {
+func TestAnalyzeStrictUnsafePinsArenaPermissionContracts(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
 	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "arena.elisa"), map[string]bool{})
 	result, errs := parseAndAnalyzeWithOptions(t, "arena.elisa", src, semantic.AnalyzeOptions{EnforceUnsafePermissions: true})
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionPermissionRefs(t, result, "sfree", "Memory.Release")
-	requireFunctionPermissionRefs(t, result, "new_region_with_owner", "Memory.Allocate", "Abort.Panic")
-	requireFunctionPermissionRefs(t, result, "arena_alloc", "Memory.Allocate", "Abort.Panic")
-	requireFunctionPermissionRefs(t, result, "arena_realloc", "Memory.Allocate", "Abort.Panic")
+	requireFunctionPermissionRefs(t, result, "new_region_with_owner", arenaRegionEffects...)
+	requireFunctionPermissionRefs(t, result, "arena_alloc", arenaAllocationEffects...)
+	requireFunctionPermissionRefs(t, result, "arena_realloc", arenaAllocationEffects...)
 	requireFunctionPermissionRefs(t, result, "arena_memcpy")
 	requireFunctionPermissionRefs(t, result, "arena_memeq")
-	requireFunctionPermissionRefs(t, result, "arena_strdup", "Memory.Allocate", "Abort.Panic")
-	requireFunctionPermissionRefs(t, result, "arena_memdup", "Memory.Allocate", "Abort.Panic")
+	requireFunctionPermissionRefs(t, result, "arena_strdup", arenaAllocationEffects...)
+	requireFunctionPermissionRefs(t, result, "arena_memdup", arenaAllocationEffects...)
 }
 func TestAnalyzePinsArenaHeapPointerContracts(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
