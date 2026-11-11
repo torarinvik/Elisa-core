@@ -95,9 +95,11 @@ func AllocationIsIterationLocal(name string, body []Stmt) bool {
 // transform must not apply.
 func LoopBodyGrowsOuterContainer(body []Stmt) bool {
 	declared := map[string]bool{}
-	var collectDecls func(v reflect.Value)
-	collectDecls = func(v reflect.Value) {
-		if !v.IsValid() || !v.CanInterface() {
+	var inlineReceivers [8]string
+	receivers := inlineReceivers[:0]
+	var scan func(reflect.Value)
+	scan = func(v reflect.Value) {
+		if !v.CanInterface() {
 			return
 		}
 		switch v.Kind() {
@@ -105,64 +107,39 @@ func LoopBodyGrowsOuterContainer(body []Stmt) bool {
 			if v.IsNil() {
 				return
 			}
-			if vd, ok := v.Interface().(*VarDeclStmt); ok {
-				declared[vd.Name] = true
-			}
-			collectDecls(v.Elem())
-		case reflect.Interface:
-			if v.IsNil() {
-				return
-			}
-			collectDecls(v.Elem())
-		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
-				collectDecls(v.Field(i))
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				collectDecls(v.Index(i))
-			}
-		}
-	}
-	collectDecls(reflect.ValueOf(body))
-
-	found := false
-	var rec func(v reflect.Value)
-	rec = func(v reflect.Value) {
-		if found || !v.IsValid() || !v.CanInterface() {
-			return
-		}
-		switch v.Kind() {
-		case reflect.Pointer:
-			if v.IsNil() {
-				return
-			}
-			if call, ok := v.Interface().(*CallExpr); ok {
-				if fe, ok := call.Func.(*FieldExpr); ok && containerGrowthMethod(fe.Field) {
-					if id, ok := fe.Object.(*Ident); ok && !declared[id.Name] {
-						found = true
-						return
+			switch node := v.Interface().(type) {
+			case *VarDeclStmt:
+				declared[node.Name] = true
+			case *CallExpr:
+				if field, ok := node.Func.(*FieldExpr); ok && containerGrowthMethod(field.Field) {
+					if ident, ok := field.Object.(*Ident); ok {
+						receivers = append(receivers, ident.Name)
 					}
 				}
 			}
-			rec(v.Elem())
+			scan(v.Elem())
 		case reflect.Interface:
-			if v.IsNil() {
-				return
+			if !v.IsNil() {
+				scan(v.Elem())
 			}
-			rec(v.Elem())
 		case reflect.Struct:
 			for i := 0; i < v.NumField(); i++ {
-				rec(v.Field(i))
+				scan(v.Field(i))
 			}
 		case reflect.Slice, reflect.Array:
 			for i := 0; i < v.Len(); i++ {
-				rec(v.Index(i))
+				scan(v.Index(i))
 			}
 		}
 	}
-	rec(reflect.ValueOf(body))
-	return found
+	scan(reflect.ValueOf(body))
+	// A declaration anywhere in the body classifies that name as local.
+	for _, name := range receivers {
+		if !declared[name] {
+			return true
+		}
+	}
+	return false
 }
 
 func containerGrowthMethod(name string) bool {
