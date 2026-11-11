@@ -27,6 +27,8 @@
 #include <utility>
 #include <llvm/Config/llvm-config.h>
 #include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/PatternMatch.h>
+
 #include <llvm/IR/Instructions.h>
 #include <llvm/Support/CBindingWrapping.h>
 #include <optional>
@@ -189,6 +191,9 @@ namespace wrap_llvm_special_epilogue {
 namespace wrap_llvm_split_half_add {
 #include "llvm_wrappers/llvm_split_half_add.cpp"
 }  // namespace wrap_llvm_split_half_add
+namespace wrap_llvm_masked_split_multiply {
+#include "llvm_wrappers/llvm_masked_split_multiply.cpp"
+}  // namespace wrap_llvm_masked_split_multiply
 namespace wrap_llvm_sqrt_proof {
 #include "llvm_wrappers/llvm_sqrt_proof.cpp"
 }  // namespace wrap_llvm_sqrt_proof

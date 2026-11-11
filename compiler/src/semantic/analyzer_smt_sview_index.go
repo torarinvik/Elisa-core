@@ -224,6 +224,10 @@ func (tr *smtTranslator) sliceLengthTerm(obj ast.Expr, env map[string]string) (s
 // local declared before the slice local (so a later shadowing binding declines), and it contains
 // only side-effect-free shapes.
 func (a *Analyzer) immutableSliceLocalInit(id *ast.Ident) (*ast.SliceExpr, bool) {
+	return a.immutableLocalSliceInit(id, false)
+}
+
+func (a *Analyzer) immutableLocalSliceInit(id *ast.Ident, fixedArrayView bool) (*ast.SliceExpr, bool) {
 	if a == nil || a.currentScope == nil || a.currentFuncDecl == nil {
 		return nil, false
 	}
@@ -231,7 +235,11 @@ func (a *Analyzer) immutableSliceLocalInit(id *ast.Ident) (*ast.SliceExpr, bool)
 	if !found || sym == nil || sym.Kind != SymbolLocal || symbolRootMutable(sym) {
 		return nil, false
 	}
-	if _, ok := sym.Type.(*SViewType); !ok {
+	if fixedArrayView {
+		if _, ok := sym.Type.(*ViewType); !ok {
+			return nil, false
+		}
+	} else if _, ok := sym.Type.(*SViewType); !ok {
 		return nil, false
 	}
 	// One of the initializer's inputs was written after the slice was taken.

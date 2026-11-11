@@ -204,6 +204,9 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			if c, ok := tr.a.constIntValue(n); ok && !boundRoot {
 				return tr.constIntTerm(n, c), true
 			}
+			if term, ok := tr.fixedArraySliceLengthTerm(n.Object, env); ok {
+				return term, true
+			}
 			// An sview slice's `.len` is modeled exactly (string_view_slice clamps).
 			if term, ok := tr.sliceLengthTerm(n.Object, env); ok {
 				return term, true

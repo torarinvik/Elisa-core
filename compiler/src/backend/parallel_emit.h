@@ -35,6 +35,7 @@ unsigned elisacoreBoundedLoopUnswitch(LLVMModuleRef);
 unsigned elisacoreFastCheckedMul(LLVMModuleRef, LLVMTargetMachineRef);
 unsigned elisacoreSpecializeShortTrips(LLVMModuleRef, LLVMTargetMachineRef);
 unsigned elisacoreExpandSmallZeroFills(LLVMModuleRef module);
+unsigned elisacoreFoldMaskedSplitMultiplies(LLVMModuleRef);
 unsigned elisacoreElideArrayRoundTrips(LLVMModuleRef module);
 unsigned elisacoreAggregateCopiesToMemcpy(LLVMModuleRef module);
 unsigned elisacoreUnrollGuardedReductions(LLVMModuleRef module);

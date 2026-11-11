@@ -136,6 +136,11 @@ func (tr *smtTranslator) bindSMTLengthOnlyArg(env map[string]string, name string
 		return false
 	}
 	tr.lenDecls[lenTerm] = true
+	tr.bindSMTLengthOnlyTerm(env, name, lenTerm)
+	return true
+}
+
+func (tr *smtTranslator) bindSMTLengthOnlyTerm(env map[string]string, name, lenTerm string) {
 	fresh := smtVar("@lenonly$" + strconv.Itoa(tr.sviewArgCount))
 	tr.sviewArgCount++
 	if tr.lengthOnly == nil {
@@ -145,7 +150,6 @@ func (tr *smtTranslator) bindSMTLengthOnlyArg(env map[string]string, name string
 	tr.lenDecls[fresh+smtArrayLenSuffix] = true
 	tr.enumDecls["~lenonly_"+fresh] = "(assert (= " + fresh + smtArrayLenSuffix + " " + lenTerm + "))\n"
 	env[name] = fresh
-	return true
 }
 
 // fieldProjectionKey names the symbol for a field-chain read `root.f.g` that the env did not bind

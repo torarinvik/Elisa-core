@@ -18,6 +18,7 @@ type Registry struct {
 	types           []reflect.Type
 	ids             map[reflect.Type]uint64
 	fields          map[reflect.Type][]int
+	fieldMasks      map[reflect.Type]uint64
 	scanFields      map[reflect.Type][]int
 	hasObjects      map[reflect.Type]bool
 	fingerprint     [32]byte
@@ -71,6 +72,7 @@ func New(roots []reflect.Type, policy FieldPolicy, access FieldAccess) *Registry
 	// in the encoding pass; traversing them adds no owners or aliases.
 	r.hasObjects = make(map[reflect.Type]bool)
 	r.scanFields = make(map[reflect.Type][]int)
+	r.fieldMasks = make(map[reflect.Type]uint64)
 	var hasObjects func(reflect.Type) bool
 	hasObjects = func(t reflect.Type) bool {
 		if result, ok := r.hasObjects[t]; ok {
@@ -94,6 +96,14 @@ func New(roots []reflect.Type, policy FieldPolicy, access FieldAccess) *Registry
 		return result
 	}
 	for t := range seen {
+		fields := r.fields[t]
+		if len(fields) != 0 && fields[len(fields)-1] < 64 {
+			var mask uint64
+			for _, field := range fields {
+				mask |= uint64(1) << field
+			}
+			r.fieldMasks[t] = mask
+		}
 		hasObjects(t)
 		r.types = append(r.types, t)
 	}

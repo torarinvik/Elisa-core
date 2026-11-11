@@ -139,8 +139,8 @@ func (d *decoder) value(v reflect.Value) error {
 }
 
 func (d *decoder) valueAtDepth(v reflect.Value) error {
-	t := v.Type()
-	switch v.Kind() {
+	kind := v.Kind()
+	switch kind {
 	case reflect.Interface:
 		id, err := d.uint()
 		if err != nil {
@@ -153,6 +153,7 @@ func (d *decoder) valueAtDepth(v reflect.Value) error {
 		if err != nil {
 			return err
 		}
+		t := v.Type()
 		// A cached interface word also certifies assignability for this type pair.
 		key := [2]reflect.Type{typ, t}
 		entry := &d.ifaceWordCache[id%uint64(len(d.ifaceWordCache))]
@@ -204,15 +205,19 @@ func (d *decoder) valueAtDepth(v reflect.Value) error {
 		if id == 0 {
 			return nil
 		}
-		if id >= uint64(len(d.objects)) || d.objects[id].Type() != t {
+		if id >= uint64(len(d.objects)) || d.objects[id].Type() != v.Type() {
 			return fmt.Errorf("invalid state reference")
 		}
 		v.Set(d.objects[id])
 
 	case reflect.Struct:
 		n, err := d.count()
-		if err != nil {
+		if err != nil || n == 0 {
 			return err
+		}
+		t := v.Type()
+		if allowed := d.registry.fieldMasks[t]; allowed != 0 {
+			return d.maskedStructFields(v, t, n, allowed)
 		}
 		allowed := d.registry.fields[t]
 		// The encoder emits nonzero fields in increasing schema order. Walk
@@ -260,7 +265,7 @@ func (d *decoder) valueAtDepth(v reflect.Value) error {
 		if err != nil {
 			return err
 		}
-		switch v.Kind() {
+		switch kind {
 		case reflect.Bool:
 			if x > 1 {
 				return fmt.Errorf("invalid boolean")
@@ -272,7 +277,7 @@ func (d *decoder) valueAtDepth(v reflect.Value) error {
 				return fmt.Errorf("state integer overflow")
 			}
 			// A checked, addressable int has the same representation for named types.
-			if v.Kind() == reflect.Int && v.CanAddr() && v.CanSet() {
+			if kind == reflect.Int && v.CanAddr() && v.CanSet() {
 				*(*int)(unsafe.Pointer(v.UnsafeAddr())) = int(n)
 			} else {
 				v.SetInt(n)
@@ -294,7 +299,7 @@ func (d *decoder) valueAtDepth(v reflect.Value) error {
 				return fmt.Errorf("process-local state is forbidden")
 			}
 		default:
-			return fmt.Errorf("unsupported state type %s", t)
+			return fmt.Errorf("unsupported state type %s", v.Type())
 		}
 	}
 	return nil
@@ -387,4 +392,24 @@ func (d *decoder) setInterface(v, x reflect.Value, word unsafe.Pointer, cached b
 	}
 	slot := (*[2]unsafe.Pointer)(unsafe.Pointer(v.UnsafeAddr()))
 	slot[0], slot[1] = word, x.UnsafePointer()
+}
+
+// Small schemas can check membership and wire order in a single mask.
+// Clearing fields through the current ID rejects duplicates and descending IDs.
+func (d *decoder) maskedStructFields(v reflect.Value, t reflect.Type, n int, allowed uint64) error {
+	for i := 0; i < n; i++ {
+		field, err := d.uint()
+		if err != nil {
+			return err
+		}
+		bit := uint64(1) << field
+		if allowed&bit == 0 {
+			return fmt.Errorf("invalid state field for %s", t)
+		}
+		allowed &^= bit | (bit - 1)
+		if err := d.value(d.registry.access(v, int(field))); err != nil {
+			return fmt.Errorf("%s.%s: %w", t, t.Field(int(field)).Name, err)
+		}
+	}
+	return nil
 }

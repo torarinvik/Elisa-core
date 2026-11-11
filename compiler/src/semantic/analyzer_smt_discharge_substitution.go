@@ -294,6 +294,12 @@ func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name 
 		}
 		return true
 	}
+	if _, view := stripRefForBounds(a.exprType(argExpr)).(*ViewType); view {
+		if length, ok := tr.fixedArraySliceLengthTerm(argExpr, argEnv); ok {
+			tr.bindSMTLengthOnlyTerm(env, name, length)
+			return true
+		}
+	}
 	if a.smtEquationStructType(a.exprType(argExpr)) {
 		return a.bindSMTStructEnvArg(tr, env, name, argExpr, argEnv, requireBinding)
 	}
