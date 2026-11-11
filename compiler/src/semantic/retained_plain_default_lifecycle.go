@@ -173,8 +173,8 @@ func plainDefaultProgramInputs(a *Analyzer) string {
 	return "plain-default-program-v1\n" + inputs.String()
 }
 
-func capturePlainHeaderContributions(a *Analyzer, keys map[*ast.FuncDecl]string) (map[string]retainedPlainHeaderContribution, string, *retainedPlainIdentityLedger) {
-	if plainDefaultProgramInputs(a) == "" {
+func capturePlainHeaderContributions(a *Analyzer, keys map[*ast.FuncDecl]string, programInputs, globalFingerprint string) (map[string]retainedPlainHeaderContribution, string, *retainedPlainIdentityLedger) {
+	if programInputs == "" {
 		return nil, "", nil
 	}
 	products := map[string]retainedPlainHeaderContribution{}
@@ -212,7 +212,7 @@ func capturePlainHeaderContributions(a *Analyzer, keys map[*ast.FuncDecl]string)
 	for key, entry := range prefixRows {
 		ledger.Entries[key] = entry
 	}
-	return products, plainHeaderResidue(a.preBodyGlobalFingerprint(), products, ledger), ledger
+	return products, plainHeaderResidue(globalFingerprint, products, ledger), ledger
 }
 
 // Subtract only inventoried AST-keyed rows of certified owners. Registrations,

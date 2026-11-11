@@ -78,10 +78,12 @@ func captureRetainedPlainDefaultProductPhase(a *Analyzer, fn *ast.FuncDecl, head
 		return nil, err
 	}
 	nodes := append([]ast.Node(nil), syntax.prepared...)
-	source := unparse.FormatDecl(fn)
+	var source string
 	if header {
 		nodes = append([]ast.Node{fn}, nodes...)
 		source = retainedHeader(fn)
+	} else {
+		source = unparse.FormatDecl(fn)
 	}
 	product := &retainedPlainDefaultProduct{Owner: fn, Nodes: nodes, Rows: map[string]int{}, AuxiliaryRows: map[string]int{}, Symbols: map[*Symbol]string{}, ExprIdentities: map[ast.Expr]string{}, IdentityObservations: map[string]string{}, GlobalDependencies: map[string]string{}, Syntax: source}
 	encoder := &plainDefaultProductEncoder{analyzer: a, product: product, anchors: map[ast.Node]string{}, owned: map[ast.Node]bool{}, tokens: map[string]string{}, tokenSymbols: map[string]*Symbol{}, tokenExprs: map[string]ast.Expr{}, seen: map[specializationPointer]int{}}
@@ -164,9 +166,9 @@ func captureRetainedPlainDefaultProductPhase(a *Analyzer, fn *ast.FuncDecl, head
 	var certificate strings.Builder
 	for _, node := range product.Nodes {
 		key := reflect.ValueOf(node)
-		for _, path := range specializationASTMapPaths() {
-			table := specializationField(reflect.ValueOf(a).Elem(), path)
-			if table.IsNil() || !key.Type().AssignableTo(table.Type().Key()) {
+		for _, path := range specializationASTMapPathsForNode(key.Type()) {
+			table := specializationField(analyzerFields, path)
+			if table.IsNil() {
 				continue
 			}
 			value := table.MapIndex(key)
@@ -283,14 +285,11 @@ func captureRetainedPlainDefaultProductPhase(a *Analyzer, fn *ast.FuncDecl, head
 func plainDefaultClosedFields(value reflect.Value, allowed map[string]bool) error {
 	for i := 0; i < value.NumField(); i++ {
 		field := value.Field(i)
+		if field.IsZero() || (field.Kind() == reflect.Slice || field.Kind() == reflect.Map) && field.Len() == 0 {
+			continue
+		}
 		name := value.Type().Field(i).Name
-		if allowed[name] {
-			continue
-		}
-		if (field.Kind() == reflect.Slice || field.Kind() == reflect.Map) && field.Len() == 0 {
-			continue
-		}
-		if !field.IsZero() {
+		if !allowed[name] {
 			return fmt.Errorf("unsupported nonzero %s.%s", value.Type(), name)
 		}
 	}
@@ -307,6 +306,7 @@ func plainDefaultProductShape(a *Analyzer, fn *ast.FuncDecl) error {
 	for _, decl := range a.file.Decls {
 		if decl == fn {
 			found = true
+			break
 		}
 	}
 	if !found {

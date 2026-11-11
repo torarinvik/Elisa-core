@@ -109,7 +109,7 @@ func capturePreBody(a *Analyzer, decls []scopedDecl) *preBodyState {
 	p.proofPrefix, p.proofPrefixError = a.captureProofPrefix()
 	p.global = a.preBodyGlobalFingerprint()
 	p.plainInputs = plainDefaultProgramInputs(a)
-	p.plainHeaders, p.plainGlobal, p.plainIdentities = capturePlainHeaderContributions(a, p.keyOf)
+	p.plainHeaders, p.plainGlobal, p.plainIdentities = capturePlainHeaderContributions(a, p.keyOf, p.plainInputs, p.global)
 	return p
 }
 
