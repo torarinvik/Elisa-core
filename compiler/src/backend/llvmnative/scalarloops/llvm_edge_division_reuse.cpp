@@ -102,6 +102,65 @@ static bool reuseJoinedQuotient(BasicBlock &Block) {
   return false;
 }
 
+// A guarded factor-removal loop can start at the quotient already carried
+// by its caller. The entering equality guarantees its first step continues.
+static bool skipRedundantFactorDivision(BasicBlock &Loop) {
+  if (Loop.size() != 5) return false;
+  auto *Remaining = dyn_cast<PHINode>(&Loop.front());
+  auto *Div = Remaining ? dyn_cast<BinaryOperator>(Remaining->getNextNode()) : nullptr;
+  if (!Div || Remaining->getNumIncomingValues() != 2 ||
+      Div->getOpcode() != Instruction::UDiv || Div->isExact() ||
+      !Div->getType()->isIntegerTy(64) || Div->getOperand(0) != Remaining)
+    return false;
+  int Backedge = Remaining->getBasicBlockIndex(&Loop);
+  if (Backedge < 0 || Remaining->getIncomingValue(Backedge) != Div) return false;
+
+  auto IsFactorTest = [](BasicBlock &Block, Value *Dividend, Value *Factor,
+                         Value *Quotient, BasicBlock &Continue) {
+    auto *Branch = dyn_cast<CondBrInst>(Block.getTerminator());
+    auto *Cmp = Branch ? dyn_cast<ICmpInst>(Branch->getCondition()) : nullptr;
+    if (!Cmp || Cmp->getPredicate() != ICmpInst::ICMP_EQ ||
+        Branch->getSuccessor(0) != &Continue || Branch->getSuccessor(1) == &Continue ||
+        Cmp->getOperand(0) != Dividend)
+      return false;
+    auto *Product = dyn_cast<BinaryOperator>(Cmp->getOperand(1));
+    return Product && Product->getOpcode() == Instruction::Mul &&
+           ((Product->getOperand(0) == Factor && Product->getOperand(1) == Quotient) ||
+            (Product->getOperand(1) == Factor && Product->getOperand(0) == Quotient));
+  };
+
+  Value *Factor = Div->getOperand(1);
+  if (!IsFactorTest(Loop, Remaining, Factor, Div, Loop) ||
+      (isa<Instruction>(Factor) && cast<Instruction>(Factor)->getParent() == &Loop))
+    return false;
+  BasicBlock *Entry = Remaining->getIncomingBlock(1 - Backedge);
+  Value *Dividend = Remaining->getIncomingValueForBlock(Entry);
+  for (PHINode &Quotient : Entry->phis()) {
+    if (Quotient.getType() != Div->getType() ||
+        !IsFactorTest(*Entry, Dividend, Factor, &Quotient, Loop))
+      continue;
+    for (unsigned I = 0; I < Quotient.getNumIncomingValues(); ++I) {
+      BasicBlock *Pred = Quotient.getIncomingBlock(I);
+      Value *N = divisionOperandOnEdge(Dividend, *Entry, Pred);
+      Value *D = divisionOperandOnEdge(Factor, *Entry, Pred);
+      auto *Op = dyn_cast<BinaryOperator>(Quotient.getIncomingValue(I));
+      if (!N || !D || !Op || Op->isExact() || Op->getOperand(0) != N) break;
+      bool Matches = Op->getOpcode() == Instruction::UDiv && Op->getOperand(1) == D;
+      if (auto *K = dyn_cast<ConstantInt>(D); !Matches && K && K->getValue().isPowerOf2() &&
+          Op->getOpcode() == Instruction::LShr) {
+        auto *Shift = dyn_cast<ConstantInt>(Op->getOperand(1));
+        Matches = Shift && Shift->equalsInt(K->getValue().exactLogBase2());
+      }
+      if (!Matches) break;
+      if (I + 1 == Quotient.getNumIncomingValues()) {
+        Remaining->setIncomingValueForBlock(Entry, &Quotient);
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 static bool reuseEdgeDivision(BasicBlock &Join) {
   auto *Div = dyn_cast<BinaryOperator>(&*Join.getFirstNonPHIIt());
   if (!Div || (Div->getOpcode() != Instruction::SDiv &&
@@ -176,7 +235,7 @@ static bool reuseEdgeDivision(BasicBlock &Join) {
 extern "C" bool elisacoreReuseEdgeDivisionsInFunction(LLVMValueRef Ref) {
   auto &F = *cast<Function>(unwrap(Ref));
   for (BasicBlock &B : F) {
-    if (reuseJoinedQuotient(B) || reuseEdgeDivision(B)) return true;
+    if (skipRedundantFactorDivision(B) || reuseJoinedQuotient(B) || reuseEdgeDivision(B)) return true;
   }
   return false;
 }
