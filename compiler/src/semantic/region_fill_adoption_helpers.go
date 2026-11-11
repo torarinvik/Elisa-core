@@ -150,20 +150,28 @@ func fillMayAdoptStmtLists(v reflect.Value, visit func([]ast.Stmt)) {
 	state := fillMayAdoptSeenPool.Get().(*fillWalkSeen)
 	seen := state.values
 	walk = func(v reflect.Value) {
-		if !v.IsValid() {
-			return
+		if v.Kind() == reflect.Interface {
+			if v.IsNil() {
+				return
+			}
+			switch v.Interface().(type) {
+			case *ast.Ident, *ast.IntLit, *ast.FloatLit, *ast.StringLit,
+				*ast.CharLit, *ast.BoolLit, *ast.NullLit, *ast.ZeroedLit:
+				return // these leaves cannot contain a statement list
+			}
+			v = v.Elem()
 		}
 		switch v.Kind() {
 		case reflect.Pointer:
-			if v.IsNil() || seen[v.Pointer()] {
+			if v.IsNil() {
 				return
 			}
-			seen[v.Pointer()] = true
-			walk(v.Elem())
-		case reflect.Interface:
-			if !v.IsNil() {
-				walk(v.Elem())
+			key := v.Pointer()
+			if seen[key] {
+				return
 			}
+			seen[key] = true
+			walk(v.Elem())
 		case reflect.Struct:
 			for _, i := range fillMayAdoptExportedFields(v.Type()) {
 				walk(v.Field(i))
