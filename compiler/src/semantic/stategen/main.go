@@ -97,7 +97,7 @@ func main() {
 		}
 		fmt.Fprintf(&out, ")\nfunc %s() []reflect.Type { return []reflect.Type{\n", function)
 		for _, name := range items {
-			fmt.Fprintf(&out, "reflect.TypeFor[%s](),\n", name)
+			fmt.Fprintf(&out, "reflect.TypeOf((*%s)(nil)).Elem(),\n", name)
 		}
 		out.WriteString("}}\n")
 		formatted, err := format.Source(out.Bytes())
