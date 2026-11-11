@@ -44,7 +44,7 @@ func TestSMTDeclineCacheRejectsLegacyIncompleteModelRecords(t *testing.T) {
 	if err := os.WriteFile(path, legacyPayload, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := cache.declined(query); ok {
+	if _, ok := cache.declined(cache.declineKey(query, "")); ok {
 		t.Fatal("legacy SAT decline with potentially incomplete model was reused")
 	}
 }
@@ -239,8 +239,8 @@ func TestResetSMTForRetainedUpdateRefreshesSolverAndBudgetState(t *testing.T) {
 	if oldCache == nil {
 		t.Fatal("could not establish old cache identity")
 	}
-	oldCache.publishResourceDeclined(query)
-	if _, ok := oldCache.declined(query); !ok {
+	oldCache.publishResourceDeclined(oldCache.declineKey(query, ""))
+	if _, ok := oldCache.declined(oldCache.declineKey(query, "")); !ok {
 		t.Fatal("fixture did not publish a resource decline")
 	}
 

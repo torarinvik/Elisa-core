@@ -64,7 +64,7 @@ func TestHistoryCertifiedUnknownDoesNotEnterQueryCache(t *testing.T) {
 	if _, ok := a.smtQueryCache[query]; ok {
 		t.Fatal("history-dependent decline entered query memory cache")
 	}
-	if _, ok := cache.declined(query); ok {
+	if _, ok := cache.declined(cache.declineKey(query, "")); ok {
 		t.Fatal("history-dependent decline entered persistent query cache")
 	}
 }
@@ -103,14 +103,14 @@ func TestUnknownTransientRetriesButCertifiedResourceDeclineCaches(t *testing.T) 
 		if a.smtSnapshotTainted == certified {
 			t.Fatalf("snapshot taint=%v, want %v for certified=%v", a.smtSnapshotTainted, !certified, certified)
 		}
-		if _, ok := cache.declined(query); ok != certified {
+		if _, ok := cache.declined(cache.declineKey(query, "")); ok != certified {
 			t.Fatalf("disk certificate mismatch: %v", ok)
 		}
 		tr, _ = smtQueryForCacheTest(a, "", "true")
 		proven, _ := a.smtCheckQuery(tr, "", "true")
 		if certified {
 			smtIndependent = false
-			if _, ok := cache.declined(query); ok {
+			if _, ok := cache.declined(cache.declineKey(query, "")); ok {
 				t.Fatal("session mode reused independent resource decline")
 			}
 			smtIndependent = true

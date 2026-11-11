@@ -196,7 +196,7 @@ func (a *Analyzer) smtCheckQueryWithLogLabel(tr *smtTranslator, hyps string, obl
 	if res == smt.Sat {
 		ce := tr.counterexample(model)
 		a.cacheSMTQuery(key, smtQueryResult{proven: false, ce: ce})
-		a.smtProofCache.publishDeclined(key, res, ce)
+		a.smtProofCache.publishDeclined(proofKeys.decline, res, ce)
 		return false, ce
 	}
 	resourceAfter, transientAfter, _ := smtUnknownCacheEpoch(solver)
@@ -204,7 +204,7 @@ func (a *Analyzer) smtCheckQueryWithLogLabel(tr *smtTranslator, hyps string, obl
 	stableHistory := snapshotClassified && snapshotAfter > snapshotBefore
 	resourceCertified := smtIndependent && canCertify && resourceAfter > resourceBefore && transientAfter == transientBefore && !stableHistory
 	if resourceCertified {
-		a.smtProofCache.publishResourceDeclined(key)
+		a.smtProofCache.publishResourceDeclined(proofKeys.decline)
 		a.cacheSMTQuery(key, smtQueryResult{proven: false})
 	} else if smtIndependent && canCertify && stableHistory && transientAfter == transientBefore {
 		// The whole program snapshot binds the history, unlike a query-only key.
@@ -368,7 +368,8 @@ func (a *Analyzer) smtCachedQuery(query string) (smtQueryResult, bool, *smtFligh
 		a.cacheSMTQuery(query, result)
 		return result, true, nil, smtProofKeys{}
 	}
-	if ce, ok := a.smtProofCache.declined(query); ok {
+	proofKeys.decline = a.smtProofCache.declineKey(query, proofKeys.exact)
+	if ce, ok := a.smtProofCache.declined(proofKeys.decline); ok {
 		a.recordSMTAttempt(query)
 		a.smtStats.CacheHits++
 		a.smtStats.PersistentCacheHits++

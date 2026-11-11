@@ -218,7 +218,13 @@ func (c *smtProofCache) proofID() string {
 	return c.identity
 }
 
-func (c *smtProofCache) declineKey(query string) string {
+func (c *smtProofCache) declineKey(query string, exact string) string {
+	if c == nil || !smtDeclineCacheEnabled {
+		return ""
+	}
+	if exact != "" && c.identity == c.proofID() {
+		return exact
+	}
 	return smtProofCacheKey(c.identity, query)
 }
 
@@ -249,8 +255,9 @@ func (c *smtProofCache) path(key string) string {
 }
 
 type smtProofKeys struct {
-	exact string
-	alpha string
+	exact   string
+	alpha   string
+	decline string
 }
 
 func (c *smtProofCache) contains(query string) bool {
@@ -369,11 +376,10 @@ func (c *smtProofCache) declinePath(key string) string {
 }
 
 // declined returns a cached declined verdict's counterexample text.
-func (c *smtProofCache) declined(query string) (string, bool) {
-	if c == nil || !smtDeclineCacheEnabled {
+func (c *smtProofCache) declined(key string) (string, bool) {
+	if key == "" || !smtDeclineCacheEnabled {
 		return "", false
 	}
-	key := c.declineKey(query)
 	f, err := os.Open(c.declinePath(key))
 	if err != nil {
 		return "", false
@@ -397,23 +403,22 @@ func (c *smtProofCache) declined(query string) (string, bool) {
 	return record.Counterexample, true
 }
 
-func (c *smtProofCache) publishDeclined(query string, res smt.Result, counterexample string) {
+func (c *smtProofCache) publishDeclined(key string, res smt.Result, counterexample string) {
 	if res != smt.Sat {
 		return
 	}
-	c.publishDeclineVerdict(query, "sat", counterexample)
+	c.publishDeclineVerdict(key, "sat", counterexample)
 }
 
 // Call only after every Unknown in the independent compound check is certified.
-func (c *smtProofCache) publishResourceDeclined(query string) {
-	c.publishDeclineVerdict(query, "resource-unknown", "")
+func (c *smtProofCache) publishResourceDeclined(key string) {
+	c.publishDeclineVerdict(key, "resource-unknown", "")
 }
 
-func (c *smtProofCache) publishDeclineVerdict(query, verdict, counterexample string) {
-	if c == nil || !smtDeclineCacheEnabled {
+func (c *smtProofCache) publishDeclineVerdict(key string, verdict, counterexample string) {
+	if key == "" || !smtDeclineCacheEnabled {
 		return
 	}
-	key := c.declineKey(query)
 	payload, err := json.Marshal(smtDeclineCacheRecord{smtDeclineCacheSchema, key, verdict, counterexample, smtDeclineChecksum(key, verdict, counterexample)})
 	if err == nil && len(payload) <= 1<<20 {
 		writeSMTCacheRecord(c.declinePath(key), ".decline-*", payload)

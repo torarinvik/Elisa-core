@@ -50,9 +50,9 @@ func TestSMTAlphaDeclinesRemainExact(t *testing.T) {
 	smtDeclineCacheEnabled = true
 	defer func() { smtDeclineCacheEnabled = prior }()
 	q := "(declare-const v_old Int)(assert (> v_old 0))"
-	c.publishDeclined(q, smt.Sat, "v_old = 0")
+	c.publishDeclined(c.declineKey(q, ""), smt.Sat, "v_old = 0")
 	moved := strings.ReplaceAll(q, "v_old", "v_new")
-	if _, ok := c.declined(moved); ok {
+	if _, ok := c.declined(c.declineKey(moved, "")); ok {
 		t.Fatal("renamed counterexample hit")
 	}
 	if c.contains(moved) {
