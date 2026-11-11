@@ -64,7 +64,7 @@ func (a *Analyzer) computeTransitiveStoreNeeds(funcs []*ast.FuncDecl, regionBack
 	// All signatures in this pass read the same declaration shapes.
 	fieldRoots := map[*StructType][]Type{}
 	emptyTypeRoots := make(map[Type]bool)
-	packedSignatures := make(map[[2]Type]map[string]*EnumType)
+	var packedSignatures packedStoreSignatureCache
 	bareVariantNames := a.packedStoreBareVariantNames()
 	var order []*FuncType
 	sig := make(map[string]*EnumType)
@@ -76,7 +76,7 @@ func (a *Analyzer) computeTransitiveStoreNeeds(funcs []*ast.FuncDecl, regionBack
 		if _, seen := callees[ft]; !seen {
 			callees[ft] = map[*FuncType]bool{}
 			order = append(order, ft)
-			collectPackedStoreSignature(ft, sig, fieldRoots, emptyTypeRoots, packedSignatures)
+			collectPackedStoreSignature(ft, sig, fieldRoots, emptyTypeRoots, &packedSignatures)
 			for name, et := range sig {
 				// Pointer handles are self-contained for reads. Construction
 				// can still require a store, which is recorded below.

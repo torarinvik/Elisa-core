@@ -1,13 +1,21 @@
 package semantic
 
-import "maps"
+import (
+	"maps"
+	"slices"
+)
+
+type packedStoreSignatureCache struct {
+	short map[[2]Type]map[string]*EnumType
+	long  map[[4]Type]map[string]*EnumType
+}
 
 // Cache complete positive signatures while declaration shapes are fixed. A
 // type walk shares depth and first-witness state across roots, so only reuse
 // an exact ordered sequence. Keep larger signatures on the ordinary path.
 // The caller supplies an empty output map.
-func collectPackedStoreSignature(ft *FuncType, out map[string]*EnumType, fieldRoots map[*StructType][]Type, emptyRoots map[Type]bool, signatures map[[2]Type]map[string]*EnumType) {
-	var key [2]Type
+func collectPackedStoreSignature(ft *FuncType, out map[string]*EnumType, fieldRoots map[*StructType][]Type, emptyRoots map[Type]bool, signatures *packedStoreSignatureCache) {
+	var key [4]Type
 	count := 0
 	explicit := min(funcTypeExplicitParamCount(ft), len(ft.Params))
 	for i := 0; i <= explicit; i++ {
@@ -16,7 +24,9 @@ func collectPackedStoreSignature(ft *FuncType, out map[string]*EnumType, fieldRo
 			t = ft.Params[i]
 		}
 		root := packedStoreSignatureRoot(t)
-		if root == nil || emptyRoots[root] {
+		// Each root is visited at depth zero. Revisiting the same type
+		// cannot expose a shallower path or change the first root witness.
+		if root == nil || emptyRoots[root] || slices.Contains(key[:count], root) {
 			continue
 		}
 		if count == len(key) {
@@ -41,7 +51,13 @@ func collectPackedStoreSignature(ft *FuncType, out map[string]*EnumType, fieldRo
 	if count == 0 {
 		return
 	}
-	if cached := signatures[key]; cached != nil {
+	var cached map[string]*EnumType
+	if count <= 2 {
+		cached = signatures.short[[2]Type(key[:2])]
+	} else {
+		cached = signatures.long[key]
+	}
+	if cached != nil {
 		maps.Copy(out, cached)
 		return
 	}
@@ -52,7 +68,18 @@ func collectPackedStoreSignature(ft *FuncType, out map[string]*EnumType, fieldRo
 	if walk.seen != nil {
 		releasePackedTypeSeen(walk.seen)
 	}
-	if len(out) != 0 {
-		signatures[key] = maps.Clone(out)
+	if len(out) == 0 {
+		return
+	}
+	if count <= 2 {
+		if signatures.short == nil {
+			signatures.short = make(map[[2]Type]map[string]*EnumType)
+		}
+		signatures.short[[2]Type(key[:2])] = maps.Clone(out)
+	} else {
+		if signatures.long == nil {
+			signatures.long = make(map[[4]Type]map[string]*EnumType)
+		}
+		signatures.long[key] = maps.Clone(out)
 	}
 }
