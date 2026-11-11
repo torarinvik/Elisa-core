@@ -201,11 +201,18 @@ func (a *Analyzer) walkParamStores(body []ast.Stmt, pidx map[string]int, out map
 			return
 		}
 		switch v.Kind() {
-		case reflect.Pointer, reflect.Interface:
+		case reflect.Interface:
+			// Dispatch on the concrete pointer so a call or store reached
+			// through an interface is transferred only once.
+			walk(v.Elem())
+		case reflect.Pointer:
 			if v.IsNil() {
 				return
 			}
 			switch n := v.Interface().(type) {
+			case *ast.Ident, *ast.IntLit, *ast.FloatLit, *ast.StringLit,
+				*ast.CharLit, *ast.BoolLit, *ast.NullLit, *ast.ZeroedLit:
+				return
 			case *ast.IterForStmt:
 				walk(reflect.ValueOf(n.Source))
 				names := parallelForMoveBindNames(n.Pattern)
@@ -282,7 +289,7 @@ func (a *Analyzer) walkParamStores(body []ast.Stmt, pidx map[string]int, out map
 			}
 		}
 	}
-	walk(reflect.ValueOf(body))
+	list(body, nil)
 }
 
 // relayParamStores propagates a callee's param→param store relationships back to the caller's params:

@@ -155,3 +155,38 @@ func TestParamStoreTargetDeclarationOrderAndExprBlockTail(t *testing.T) {
 		})
 	}
 }
+
+func TestWalkParamStoresTransfersInterfaceNodesOnce(t *testing.T) {
+	callee := &ast.FuncDecl{Name: "retain"}
+	a := &Analyzer{globalScope: NewScope(nil)}
+	a.globalScope.Define(&Symbol{Name: callee.Name, Node: callee})
+	var absent *ast.CallExpr
+	body := []ast.Stmt{&ast.IfStmt{Then: []ast.Stmt{
+		&ast.ExprStmt{Expr: absent},
+		&ast.ExprStmt{Expr: &ast.CallExpr{
+			Func: &ast.Ident{Name: callee.Name}, Args: []ast.Expr{&ast.Ident{Name: "value"}},
+		}},
+		&ast.AssignStmt{Target: &ast.Ident{Name: "sink"}, Value: &ast.Ident{Name: "value"}},
+	}}}
+	observed, stores, globals := 0, 0, 0
+	a.walkParamStores(body, nil, map[*ast.FuncDecl][]map[int]bool{callee: {{storeTargetGlobal: true}}},
+		func(src, target string) {
+			if src != "value" || target != "sink" {
+				t.Fatalf("unexpected store %s -> %s", src, target)
+			}
+			stores++
+		}, func(src string) {
+			if src != "value" {
+				t.Fatalf("unexpected retained argument %s", src)
+			}
+			globals++
+		}, func(fn *ast.FuncDecl) {
+			if fn != callee {
+				t.Fatal("unexpected callee")
+			}
+			observed++
+		})
+	if observed != 1 || stores != 1 || globals != 1 {
+		t.Fatalf("observed %d calls, %d stores, %d global stores", observed, stores, globals)
+	}
+}
