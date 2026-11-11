@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"maps"
 	"strings"
 )
 
@@ -29,6 +30,9 @@ func (a *Analyzer) cloneAliasAccesses() map[string]aliasAccessState {
 	if len(a.currentAliasAccesses) == 0 {
 		return map[string]aliasAccessState{}
 	}
+	if len(a.currentAliasAccesses) >= 16 {
+		return maps.Clone(a.currentAliasAccesses)
+	}
 	clone := make(map[string]aliasAccessState, len(a.currentAliasAccesses))
 	for root, state := range a.currentAliasAccesses {
 		clone[root] = state
@@ -39,6 +43,9 @@ func (a *Analyzer) cloneAliasAccesses() map[string]aliasAccessState {
 func (a *Analyzer) cloneAliasBindings() map[*Symbol]aliasAccessBinding {
 	if len(a.currentAliasBindings) == 0 {
 		return map[*Symbol]aliasAccessBinding{}
+	}
+	if len(a.currentAliasBindings) >= 16 {
+		return maps.Clone(a.currentAliasBindings)
 	}
 	clone := make(map[*Symbol]aliasAccessBinding, len(a.currentAliasBindings))
 	for sym, binding := range a.currentAliasBindings {
