@@ -69,3 +69,25 @@ func BenchmarkPackedStoreSharedTypeGraph(b *testing.B) {
 		collectPackedEnumsInType(typ, map[string]*EnumType{})
 	}
 }
+
+func TestPackedStoreSignatureCachePreservesRootOrder(t *testing.T) {
+	first := &EnumType{Name: "Shared", Packed: true}
+	second := &EnumType{Name: "Shared", Packed: true}
+	scalar := &BuiltinType{Name: "i64"}
+	cache := map[[2]Type]map[string]*EnumType{}
+	empty := map[Type]bool{}
+	out := map[string]*EnumType{}
+	for range 2 {
+		for _, pair := range [][2]*EnumType{{first, second}, {second, first}} {
+			signature := &FuncType{Params: []Type{scalar, pair[0]}, Return: pair[1]}
+			collectPackedStoreSignature(signature, out, nil, empty, cache)
+			if out["Shared"] != pair[0] {
+				t.Fatal("cached signature changed the first root witness")
+			}
+			clear(out)
+		}
+	}
+	if len(cache) != 2 {
+		t.Fatalf("cached %d signatures, want 2", len(cache))
+	}
+}

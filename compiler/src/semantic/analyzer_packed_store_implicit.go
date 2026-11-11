@@ -64,6 +64,7 @@ func (a *Analyzer) computeTransitiveStoreNeeds(funcs []*ast.FuncDecl, regionBack
 	// All signatures in this pass read the same declaration shapes.
 	fieldOrders := map[*StructType][]string{}
 	emptyTypeRoots := make(map[Type]bool)
+	packedSignatures := make(map[[2]Type]map[string]*EnumType)
 	var order []*FuncType
 	sig := make(map[string]*EnumType)
 	for _, fn := range funcs {
@@ -74,7 +75,7 @@ func (a *Analyzer) computeTransitiveStoreNeeds(funcs []*ast.FuncDecl, regionBack
 		if _, seen := callees[ft]; !seen {
 			callees[ft] = map[*FuncType]bool{}
 			order = append(order, ft)
-			collectPackedEnumsInSignatureWithOrder(ft, true, sig, fieldOrders, emptyTypeRoots)
+			collectPackedStoreSignature(ft, sig, fieldOrders, emptyTypeRoots, packedSignatures)
 			for name, et := range sig {
 				// Pointer handles are self-contained for reads. Construction
 				// can still require a store, which is recorded below.
@@ -372,14 +373,22 @@ func collectPackedEnumsInSignatureWithOrder(ft *FuncType, includeReturn bool, ou
 	}
 }
 
+func packedStoreSignatureRoot(t Type) Type {
+	t = StripAggregateStateType(t)
+	switch t.(type) {
+	case *RefType, *OptionalType, *ErrorUnionType, *EnumType, *PackedVariantViewType, *DArrayType, *StructType, *TupleType:
+		return t
+	default:
+		return nil
+	}
+}
+
 // Only cache an empty root when it was walked without earlier roots
 // pruning its graph. Nonempty roots still share traversal state within
 // the signature so depth limits and first-witness selection are unchanged.
 func (walk *packedTypeWalk) collectSignatureRoot(t Type, out map[string]*EnumType, emptyTypeRoots map[Type]bool) {
-	t = StripAggregateStateType(t)
-	switch t.(type) {
-	case *RefType, *OptionalType, *ErrorUnionType, *EnumType, *PackedVariantViewType, *DArrayType, *StructType, *TupleType:
-	default:
+	t = packedStoreSignatureRoot(t)
+	if t == nil {
 		return
 	}
 	if emptyTypeRoots[t] {
