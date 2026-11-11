@@ -117,8 +117,13 @@ func (l *Lexer) NextToken() (result Token) {
 	}
 
 	// Identifiers and keywords
-	if r, _ := l.peekRune(); isIdentStartRune(r) {
+	if isASCIIIdentStart(ch) {
 		return l.readIdent()
+	}
+	if ch >= 0x80 {
+		if r, _ := l.peekRune(); isIdentStartRune(r) {
+			return l.readIdent()
+		}
 	}
 
 	// Multi-character operators

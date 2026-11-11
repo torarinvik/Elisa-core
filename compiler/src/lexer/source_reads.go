@@ -16,3 +16,28 @@ func (l *Lexer) runeBytes(index int) []byte {
 	l.noteRead(index + utf8.UTFMax)
 	return l.src[index:min(len(l.src), index+utf8.UTFMax)]
 }
+
+// sourceIdentifierEnd scans ASCII bytes in bulk and records one dependency for
+// the whole span. Unicode uses the normal tracked rune lookahead.
+func (l *Lexer) sourceIdentifierEnd(start int) int {
+	end := start
+	for end < len(l.src) {
+		ch := l.src[end]
+		if ch < utf8.RuneSelf {
+			if !isASCIIIdentStart(ch) && !isDigit(ch) {
+				break
+			}
+			end++
+			continue
+		}
+		r, size := l.peekRuneAt(end)
+		if !isIdentCharRune(r) {
+			break
+		}
+		end += size
+	}
+	// Include the terminator or the failed EOF probe in the incremental
+	// dependency. Multi-byte lookahead is recorded by peekRuneAt.
+	l.noteRead(end + 1)
+	return end
+}

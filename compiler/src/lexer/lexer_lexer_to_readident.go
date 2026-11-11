@@ -112,10 +112,13 @@ func (l *Lexer) peek() byte {
 	return l.sourceByte(l.pos)
 }
 func (l *Lexer) peekRune() (rune, int) {
-	if !l.sourceHas(l.pos) {
+	return l.peekRuneAt(l.pos)
+}
+func (l *Lexer) peekRuneAt(index int) (rune, int) {
+	if !l.sourceHas(index) {
 		return 0, 0
 	}
-	lookahead := l.runeBytes(l.pos)
+	lookahead := l.runeBytes(index)
 	if lookahead[0] < utf8.RuneSelf {
 		return rune(lookahead[0]), 1
 	}

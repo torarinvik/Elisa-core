@@ -4,20 +4,17 @@ import (
 	"unicode/utf8"
 )
 
+func isASCIIIdentStart(ch byte) bool {
+	return (ch|0x20)-'a' <= 'z'-'a' || ch == '_' || ch == '$'
+}
+
 func (l *Lexer) readIdent() Token {
 	p := l.curPos()
 	start := l.pos
-	for l.sourceHas(l.pos) {
-		r, size := l.peekRune()
-		if !isIdentCharRune(r) {
-			break
-		}
-		// The peek recorded the bytes used by this rune. Identifiers
-		// cannot contain a newline, and columns count source bytes.
-		l.pos += size
-		l.col += size
-	}
-	text := bytesToStringView(l.sourceSlice(start, l.pos))
+	end := l.sourceIdentifierEnd(start)
+	l.pos = end
+	l.col += end - start
+	text := bytesToStringView(l.sourceSlice(start, end))
 	kind := LookupKeyword(text)
 	l.pendingGroupedBlock = kind == TOKEN_IDENT && isImmediateGroupedBlockIntroducer(text)
 	if l.parenDepth > 0 && (kind == TOKEN_MATCH || (kind == TOKEN_IDENT && text == "when" && l.patternScrutineeFollows())) {
