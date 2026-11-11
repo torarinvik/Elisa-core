@@ -168,13 +168,20 @@ func typeCarriesRegionStorage(t Type) bool {
 }
 
 func typeCarriesRegionStorageRec(t Type, seen map[Type]bool) bool {
-	if t == nil || seen[t] {
+	switch t.(type) {
+	case *DArrayType, *DictType, *SetType, *CStrType, *SViewType, *ViewType:
+		return true
+	case *RefType, *TupleType, *OptionalType, *ErrorUnionType, *ArrayType,
+		*GenericInstanceType, *AggregateStateType, *StructType, *EnumType:
+		// Only recursive types need cycle tracking.
+	default:
+		return false
+	}
+	if seen[t] {
 		return false
 	}
 	seen[t] = true
 	switch tt := t.(type) {
-	case *DArrayType, *DictType, *SetType, *CStrType, *SViewType, *ViewType:
-		return true
 	case *RefType:
 		if tt == nil {
 			return false
