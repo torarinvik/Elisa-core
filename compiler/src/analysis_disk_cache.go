@@ -434,7 +434,7 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 					return analyzeUncachedProgramSource(program, file, options, stderr)
 				}
 			}
-			result, state = advanceAnalysisDiskBuildWithCheckpoint(program, file, pristine, options, artifact, stderr, analysisDiskResumeCheckpoint(buildCheckpoint, pending), checkpointTried)
+			result, state = advanceAnalysisDiskBuildWithCheckpoint(program, file, options, artifact, stderr, analysisDiskResumeCheckpoint(buildCheckpoint, pending), checkpointTried)
 		} else {
 			if pristine == nil {
 				pristine, _ = parseAnalysisBuildPristine(program)

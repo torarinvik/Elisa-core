@@ -142,10 +142,10 @@ func parseAnalysisBuildPristine(program *loadedProgram) (*ast.File, bool) {
 // progress, never a semantic error or artifact. The same normal command resumes
 // in a fresh process; no background worker or child orchestration is started.
 func advanceAnalysisDiskBuild(program *loadedProgram, file *ast.File, options semantic.AnalyzeOptions, complete analysisDiskArtifact, stderr io.Writer) (*semantic.Result, *semantic.RetainedAnalysis) {
-	return advanceAnalysisDiskBuildWithCheckpoint(program, file, nil, options, complete, stderr, nil, false)
+	return advanceAnalysisDiskBuildWithCheckpoint(program, file, options, complete, stderr, nil, false)
 }
 
-func advanceAnalysisDiskBuildWithCheckpoint(program *loadedProgram, file, pristine *ast.File, options semantic.AnalyzeOptions, complete analysisDiskArtifact, stderr io.Writer, checkpoint *analysisDiskBuildCheckpoint, checkpointTried bool) (*semantic.Result, *semantic.RetainedAnalysis) {
+func advanceAnalysisDiskBuildWithCheckpoint(program *loadedProgram, file *ast.File, options semantic.AnalyzeOptions, complete analysisDiskArtifact, stderr io.Writer, checkpoint *analysisDiskBuildCheckpoint, checkpointTried bool) (*semantic.Result, *semantic.RetainedAnalysis) {
 	artifact := analysisBuildArtifact(complete, program.source)
 	// Snapshot the cache-identity inputs. The publish check recomputes the
 	// identity after analysis; if it drifts, these snapshots say which input
@@ -193,8 +193,7 @@ func advanceAnalysisDiskBuildWithCheckpoint(program *loadedProgram, file, pristi
 		reportAnalysisIncomplete(stderr, "initial analysis encountered a transient solver outcome; rerun to retry from the last clean boundary or from source")
 		return nil, nil
 	}
-	// A new build needs an independent syntax tree, but it can borrow the
-	// primary parse's tokens. The restoration future has already joined.
+	// A checkpoint owns its working syntax. The restoration future has already joined.
 	if build != nil && file == nil {
 		writeParserNotices(stderr, build.SourceParseNotices)
 		debugAnalysisDisk(stderr, "reuse exact checkpoint parse")
@@ -206,18 +205,12 @@ func advanceAnalysisDiskBuildWithCheckpoint(program *loadedProgram, file, pristi
 			return nil, nil
 		}
 	}
-	if build == nil && pristine == nil {
-		pristine, _ = parseAnalysisBuildPristine(program)
-	}
 	// Neither declaration analysis nor checkpoint restoration needs tokens.
 	// Let GC reclaim the request's token array during the semantic phases.
 	program.tokenCache.releaseRequestTokens()
 	if build == nil {
-		if pristine == nil {
-			return semantic.AnalyzeWithOptions(file, options), nil
-		}
 		var err error
-		build, err = semantic.BeginAnalysisBuild(file, pristine, program.source, options)
+		build, err = semantic.BeginAnalysisBuild(file, nil, program.source, options)
 		if err != nil {
 			return incomplete(err), nil
 		}

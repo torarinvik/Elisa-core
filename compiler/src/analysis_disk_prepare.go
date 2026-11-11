@@ -107,8 +107,8 @@ func startAnalysisDiskRestoration(program *loadedProgram, options semantic.Analy
 		}
 		if err != nil {
 			pending.err = err
-			if !pending.loaded && os.IsNotExist(err) {
-				// No state to replay. Parse the independent tree alongside
+			if !analysisDiskBootstrapEnabled() && !pending.loaded && os.IsNotExist(err) {
+				// No state to replay in one-shot retained analysis. Parse the independent tree alongside
 				// the caller's primary parse, borrowing the same tokens.
 				pending.coldPristine, _ = parseAnalysisBuildPristine(program)
 			}

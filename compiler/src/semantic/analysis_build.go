@@ -46,9 +46,10 @@ type AnalysisBuildStats struct {
 }
 
 // BeginAnalysisBuild completes the declaration phase and stops before bodies.
-// The two ASTs must be independent parses of src. They become owned by the build.
+// The build owns file and any supplied independent comparison parse of src.
+// Pass nil for pristine to defer that parse until a completed baseline needs it.
 func BeginAnalysisBuild(file, pristine *ast.File, src []byte, options AnalyzeOptions) (*AnalysisBuild, error) {
-	if file == nil || pristine == nil {
+	if file == nil {
 		return nil, fmt.Errorf("missing build AST")
 	}
 	r := &RetainedAnalysis{options: options, pristine: pristine, src: src, windows: map[*ast.FuncDecl][2]int{}, rbDeps: map[*ast.FuncDecl]map[*ast.FuncDecl]bool{}, frameDiags: map[*ast.FuncDecl][]Diagnostic{}}
@@ -158,8 +159,7 @@ func (b *AnalysisBuild) AdvanceBefore(maxDeclarations int, budget time.Duration,
 	if completed > 0 && (maxDeclarations > 0 && completed >= maxDeclarations || budget > 0 && time.Since(started) >= budget) {
 		return nil, nil, nil
 	}
-	// Unfinished checkpoints can reconstruct their comparison parse from the
-	// exact expanded source. Only the published retained baseline needs it.
+	// Only a completed retained baseline needs its independent comparison parse.
 	if r.pristine == nil {
 		pristine, why := proofReportBindingSource(b.file.Filename, r.src)
 		if why != "" {
