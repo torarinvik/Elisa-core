@@ -1,5 +1,5 @@
 {
-  "purpose": "Diagnostic-only closed source inventory; not a cache authority. All remaining direct Body selectors were reviewed as statement/lambda/static-declaration branches, except the one FuncDecl wrapper. New or modified sites require renewed type/context review. Reflection and semantic summary coverage remain open.",
+  "purpose": "Diagnostic-only closed source inventory; not a cache authority. All remaining direct Body selectors were reviewed as statement/lambda/static-declaration branches, except the FuncDecl wrapper and the partition scheduling estimate. New or modified sites require renewed type/context review. Reflection and semantic summary coverage remain open.",
   "files": {
     "llvm_autovec_verify.go": {
       "sha256": "975cb4115699842d6465159f32dd8c326cf8e67c55fc0777cf265424ac0e846b",
@@ -12,22 +12,22 @@
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
     "llvm_bodies_clonecapturedcodegenscope_to_emitstmt.go": {
-      "sha256": "ab6900d0675300acf04e3a6c832dbe7cf3e7afa544ba8052b5ad9dbc44c82a99",
+      "sha256": "0ea03ab5811d34e35a08032753f824fa2face0fd33bfd897e343cba11bd81f67",
       "selectors": 2,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
     "llvm_bodies_emitenummatch_to_emitmatchexpr.go": {
-      "sha256": "3fc321698d62279fa88fcdd25a179e80f57f1b5f78f1e4a32e9b90294b8e1299",
+      "sha256": "dfb5c9dba713f9cf7971c192ed8dbe7b091f020169e2a8d27da58cf02e3a9ab8",
       "selectors": 5,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
     "llvm_bodies_emitenummatchexpr_to_treevisitrelevantarms.go": {
-      "sha256": "0596e8997a7947c16000e9984e348c5ef2a14e9288134924a4af6023f6ab9344",
+      "sha256": "4d038664dd8733e716060bc104e79ba3416472bcd82595a8d44a9fc76605b4b8",
       "selectors": 5,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
     "llvm_bodies_emititerlooppatternbindings_to_emitpoolstmt.go": {
-      "sha256": "7b3f99f9b94abe955823bd2ed6ffdb158fca3f94df6e2f85b81708957603b479",
+      "sha256": "a6d05d450589f76b3ee76932f3634900ce830205829dcb8f11781daa10ceda87",
       "selectors": 2,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
@@ -37,22 +37,22 @@
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
     "llvm_bodies_emitstringmatchexpr_to_countmatchpatternexpectedlen.go": {
-      "sha256": "fdb49c8b1fc2820ca8b745588836b139ec26b8634000cc2913cd3329d539937e",
+      "sha256": "28184683a2750fdfdd5881515ad0ca55bd220ba1b75266b5f6f93ebc5ed07c3f",
       "selectors": 6,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
     "llvm_bodies_emittuplebindstmt_to_emittreevariantstructuralchildcount.go": {
-      "sha256": "afabddfea02ccaf53af56384f89e854b85baff33a8ea3eb36567add74a3fe29f",
+      "sha256": "b27025284520b7d5a753ed9d70cfee0c649d8c28e1c800b3bc6120773ea9ad9e",
       "selectors": 4,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
     "llvm_bodies_enumtagconstant_to_activestmtbranch.go": {
-      "sha256": "7f53b3aff9131243142c6e1b45c94c459b8a800b809003956ecc2fb5d2ee428b",
+      "sha256": "d3bf0434ea2f56d25c6c4112fc34cb8c6a1f335766aeaf9297f013ba3c603e8d",
       "selectors": 4,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
     "llvm_bodies_invertbranchhint_to_emitexpectpatternstmt.go": {
-      "sha256": "608074f21ec917ab08886bbeeadd8467484be883e73655918e228ab718079fb2",
+      "sha256": "e976e2b4c99ebc858a93d1d0f44592f454925ca89bf1cee26d5263f4057ced29",
       "selectors": 4,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
@@ -62,27 +62,27 @@
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
     "llvm_bodies_store_pool_scope.go": {
-      "sha256": "e7ac6f04af4877b46671edbd454bbff8fb5f58e8681ffca770c417c5fdde81ac",
+      "sha256": "02b22fae8deedc263526125ec867d8f15786fabf2988a5fdb369fc7fedb53355",
       "selectors": 9,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
     "llvm_bodies_treevisitrelevantexactarms_to_emitstringmatch.go": {
-      "sha256": "03fadcbb1d7c93763dbc865911815d911596ec9c2e2b5cf14ffa6f69f1669b0a",
+      "sha256": "4a6e529c6b53a09793e21dfc43824bf0d0ed2df90a06fdc132a98815c2bfde49",
       "selectors": 1,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
     "llvm_consteval_consts_to_cstringfree.go": {
-      "sha256": "1e991ad73020d6cde720bb771305ed5d8e3562a0a51f8fa7530c63f812c5d1fa",
+      "sha256": "3edeceda75d77e119a8b2580a48be79e63ce2063d957e03b86e9d4e17a2f7e5c",
       "selectors": 1,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
     "llvm_exprs_catch_unwrap.go": {
-      "sha256": "0921616830d52c9c7bd2cf20fe2e4864daa96a6d55b790a7a2974034ac822c42",
+      "sha256": "1764f2c31627f79646f78db6d1cf497d6f385f1e0ddd9742778073bebb230ee3",
       "selectors": 3,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
     "llvm_exprs_emiterrortagexpr_to_emitcharliteral.go": {
-      "sha256": "3d0ce10857ab1207a08e2e8c0fc4b53779d23597976fb2bb1aa40a023827f28f",
+      "sha256": "38c2d02a93d1f95012676616c17c911a2668df3d682005cabbb828c76176af79",
       "selectors": 1,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
@@ -102,12 +102,12 @@
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
     "llvm_module_declarations.go": {
-      "sha256": "b464f39b365f6e116546eb1ef34a9b1135ff99ff709df2c9be5e5440cd613fad",
+      "sha256": "3a79316b4dafc688d595b541bda7d593d871c185789d2c8021c851682fcfc129",
       "selectors": 1,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
     "llvm_partition_ir.go": {
-      "sha256": "8a3071ddbc0b7c2a5ec1cd7fb389fe5920ec236185b8ce1d8f54b08eaa65cab1",
+      "sha256": "0d62e1a5a9b1753dee6f2ecbe12d211414e2c8b07ddbf824b56f75793e53b913",
       "selectors": 2,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
@@ -116,8 +116,13 @@
       "selectors": 1,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
+    "llvm_partition_work_weights.go": {
+      "sha256": "ce48203e18f780c36537d1ab43752eb9df84bfe021fe11fe825de3e24c9d971a",
+      "selectors": 5,
+      "classification": "scheduling-only-function-span-and-static-declaration-reads"
+    },
     "llvm_region_stack_codegen.go": {
-      "sha256": "9ffb665178a8eba1ff143a11ecf2891c0b7518ca49a7bb71f68a18ba2c8685e9",
+      "sha256": "7d06152b4aed41f44a3b028754ef6298d4c6635bbc20321263941141ae9f62fe",
       "selectors": 1,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
@@ -132,7 +137,7 @@
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
     "llvm_stmt_dispatch.go": {
-      "sha256": "f21a903df9a5075696c92db0da60373ded72edf8203c4f230c9a0a1e0aafb4e6",
+      "sha256": "e9ea78e043f5ab654fd57ade95d36add623b536c13a0e178df531da63c70ea51",
       "selectors": 4,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },

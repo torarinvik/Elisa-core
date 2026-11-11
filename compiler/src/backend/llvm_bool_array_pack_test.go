@@ -49,10 +49,29 @@ func TestPrivateBoolArrayPackingAndPoisonIsolation(t *testing.T) {
 	}
 }
 
+func TestPrivateBoolArrayPackingUsesWideWord(t *testing.T) {
+	source := strings.ReplaceAll(boolArrayProbe, "[4 x i1]", "[128 x i1]")
+	source = strings.Replace(source, "store i32 0, ptr %a, align 4", "store i1 false, ptr %a, align 1", 1)
+	g, err := parseLLVMIRForSplitHalfTest(boolArrayHeader + source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.dispose()
+	if status := packPrivateBoolArrays(g); status != 1 {
+		t.Fatalf("packing status %d", status)
+	}
+	if err := g.verify(); err != nil {
+		t.Fatal(err)
+	}
+	if ir := g.printModule(); !strings.Contains(ir, "i128") || strings.Contains(ir, "alloca [128 x i1]") {
+		t.Fatalf("expected wide-word packing:\n%s", ir)
+	}
+}
+
 func TestPrivateBoolArrayPackingDeclinesObservableMemory(t *testing.T) {
 	cases := map[string]string{
 		"debug module":       boolArrayProbe + "\n!llvm.dbg.cu = !{}\n!llvm.module.flags = !{!0}\n!0 = !{i32 2, !\"Debug Info Version\", i32 3}\n",
-		"too many elements":  strings.ReplaceAll(strings.Replace(boolArrayProbe, "store i32 0, ptr %a, align 4", "store i1 false, ptr %a, align 1", 1), "[4 x i1]", "[65 x i1]"),
+		"too many elements":  strings.ReplaceAll(strings.Replace(boolArrayProbe, "store i32 0, ptr %a, align 4", "store i1 false, ptr %a, align 1", 1), "[4 x i1]", "[129 x i1]"),
 		"dynamic memset":     strings.Replace(boolArrayProbe, " store i32 0, ptr %a, align 4", " call void @llvm.memset.p0.i64(ptr %a, i8 0, i64 %write, i1 false)", 1) + "declare void @llvm.memset.p0.i64(ptr, i8, i64, i1 immarg)\n",
 		"escape":             strings.Replace(boolArrayProbe, " store i32 0,", " call void @escape(ptr %a)\n store i32 0,", 1) + "declare void @escape(ptr)\n",
 		"volatile":           strings.Replace(boolArrayProbe, "load i1,", "load volatile i1,", 1),

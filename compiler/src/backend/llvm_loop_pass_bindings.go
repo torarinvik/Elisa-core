@@ -9,6 +9,7 @@ package backend
 unsigned elisacoreSpecializeShortTrips(LLVMModuleRef, LLVMTargetMachineRef);
 int elisacoreBoundedDivisionUnrollSupported(void);
 unsigned elisacoreOptimizeBoundedDivisionLoops(LLVMModuleRef, LLVMTargetMachineRef);
+unsigned elisacoreUnrollLaggedRecurrences(LLVMModuleRef);
 unsigned elisacoreBoundedLoopUnswitch(LLVMModuleRef);
 unsigned elisacoreGroupRemainderReductions(LLVMModuleRef ModuleRef);
 unsigned elisacorePeelRemainderTail(LLVMModuleRef);
@@ -21,6 +22,10 @@ func specializeShortTrips(g *llvmGenerator) int {
 
 func unrollBoundedDivisionLoops(g *llvmGenerator) int {
 	return int(C.elisacoreOptimizeBoundedDivisionLoops(g.module, g.targetMachine))
+}
+
+func unrollLaggedRecurrences(g *llvmGenerator) int {
+	return int(C.elisacoreUnrollLaggedRecurrences(g.module))
 }
 
 func boundedDivisionUnrollSupported() bool {

@@ -63,7 +63,18 @@ func TestAffineLaggedRecurrencePreservesOverflowContract(t *testing.T) {
 	})
 	t.Run("no signed wrap", func(t *testing.T) {
 		source := strings.ReplaceAll(source, "add i64 %current, 1", "add nsw i64 %current, 1")
-		testLaggedRecurrenceUnroll(t, source, false)
+		if !boundedDivisionUnrollSupported() {
+			t.Skip("requires LLVM 23")
+		}
+		g, err := parseLLVMIRForSplitHalfTest(source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer g.dispose()
+		before := g.printModule()
+		if changed := unrollLaggedRecurrences(g); changed != 0 || g.printModule() != before {
+			t.Fatalf("affine rebase changed a recurrence with a signed overflow contract (status %d)", changed)
+		}
 	})
 }
 
