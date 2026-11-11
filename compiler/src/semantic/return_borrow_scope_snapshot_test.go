@@ -17,7 +17,7 @@ func TestReturnBorrowScopeSnapshotKeepsShadowingAndOwnsBindings(t *testing.T) {
 		outer.Define(&Symbol{Name: fmt.Sprintf("outer%d", i)})
 	}
 	a := &Analyzer{currentScope: inner, globalScope: global}
-	snapshot, ok := a.snapshotReturnBorrowScope()
+	snapshot, ok := a.snapshotReturnBorrowScope(nil)
 	if !ok || snapshot.Parent != global || len(snapshot.Symbols) != 25 || snapshot.Symbols["shadowed"] != shadow {
 		t.Fatal("snapshot lost lexical shadowing")
 	}
@@ -30,7 +30,7 @@ func TestReturnBorrowScopeSnapshotKeepsShadowingAndOwnsBindings(t *testing.T) {
 		t.Fatalf("snapshot version = %d", snapshot.symbolsVersion)
 	}
 	a.currentScope = NewScope(nil)
-	if _, ok := a.snapshotReturnBorrowScope(); ok {
+	if _, ok := a.snapshotReturnBorrowScope(nil); ok {
 		t.Fatal("scope outside the analyzer's global chain was accepted")
 	}
 	deep := global
@@ -39,8 +39,34 @@ func TestReturnBorrowScopeSnapshotKeepsShadowingAndOwnsBindings(t *testing.T) {
 		deep.Define(&Symbol{Name: fmt.Sprintf("deep%d", i)})
 	}
 	a.currentScope = deep
-	if snapshot, ok := a.snapshotReturnBorrowScope(); !ok || len(snapshot.Symbols) != 12 || snapshot.Parent != global {
+	if snapshot, ok := a.snapshotReturnBorrowScope(nil); !ok || len(snapshot.Symbols) != 12 || snapshot.Parent != global {
 		t.Fatal("deep scope chain lost bindings after overflowing the inline stack")
+	}
+}
+
+func TestReturnBorrowScopeSnapshotReusesUnchangedScope(t *testing.T) {
+	global := NewScope(nil)
+	outer := NewScope(global)
+	inner := NewScope(outer)
+	outer.Define(&Symbol{Name: "before"})
+	a := &Analyzer{currentScope: inner, globalScope: global}
+	frame := &returnBorrowDeferFrame{}
+	first, ok := a.snapshotReturnBorrowScope(frame)
+	if !ok || !frame.matchesSnapshotScopes([]*Scope{inner, outer}, global) {
+		t.Fatal("unchanged scope was not cached")
+	}
+	second, ok := a.snapshotReturnBorrowScope(frame)
+	if !ok {
+		t.Fatal("unchanged scope could not be captured")
+	}
+	first.Define(&Symbol{Name: "private"})
+	if second.Symbols["private"] != nil || frame.snapshotSymbols["private"] != nil {
+		t.Fatal("defining a symbol mutated the shared snapshot")
+	}
+	outer.Define(&Symbol{Name: "later"})
+	third, ok := a.snapshotReturnBorrowScope(frame)
+	if !ok || third.Symbols["later"] == nil || second.Symbols["later"] != nil {
+		t.Fatal("an enclosing declaration did not invalidate the snapshot")
 	}
 }
 
@@ -67,9 +93,10 @@ func BenchmarkReturnBorrowScopeSnapshot(b *testing.B) {
 			}
 			a := &Analyzer{currentScope: current, globalScope: global}
 			b.ReportAllocs()
+			frame := &returnBorrowDeferFrame{}
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				snapshot, ok := a.snapshotReturnBorrowScope()
+				snapshot, ok := a.snapshotReturnBorrowScope(frame)
 				if !ok || len(snapshot.Symbols) != want {
 					b.Fatal("bad snapshot")
 				}

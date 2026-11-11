@@ -1,6 +1,8 @@
 package semantic
 
 import (
+	"maps"
+
 	"elisacore/src/ast"
 )
 
@@ -72,7 +74,10 @@ type Scope struct {
 	// symbolsVersion changes whenever Symbols gains, loses or replaces an entry, or an entry's
 	// Type is reassigned; caches derived from a scope's symbols are valid while it is unchanged.
 	symbolsVersion uint64
-	Refinements    map[string]Type
+	// Deferred borrow checks share a flattened symbol map until a check
+	// defines a symbol in its private scope.
+	sharedSymbols bool
+	Refinements   map[string]Type
 	// narrowedOptionals records, for a place whose refinement narrowed `T?` down to `T`
 	// (recordAssignmentRefinement, after `x <- 5`), the DECLARED optional type. The
 	// narrowing is a useful fact -- `x` reads as a plain T afterwards -- but it must not
@@ -161,6 +166,10 @@ func NewScope(parent *Scope) *Scope {
 func (s *Scope) Define(sym *Symbol) (*Symbol, bool) {
 	if existing, ok := s.Symbols[sym.Name]; ok {
 		return existing, false
+	}
+	if s.sharedSymbols {
+		s.Symbols = maps.Clone(s.Symbols)
+		s.sharedSymbols = false
 	}
 	s.Symbols[sym.Name] = sym
 	s.symbolsVersion++

@@ -57,7 +57,11 @@ type returnBorrowDeferFrame struct {
 	fn         *ast.FuncDecl
 	pending    []pendingLocalBorrowStore
 	// binders are the non-declaration local bindings the body's analysis defined, by name.
-	binders map[string][]*Symbol
+	binders          map[string][]*Symbol
+	snapshotScopes   []*Scope
+	snapshotVersions []uint64
+	snapshotSymbols  map[string]*Symbol
+	snapshotGlobal   *Scope
 }
 
 func (a *Analyzer) pushReturnBorrowDeferFrame(fn *ast.FuncDecl) {
@@ -90,6 +94,10 @@ func (a *Analyzer) popReturnBorrowDeferFrame(fn *ast.FuncDecl) {
 	}
 	frame := a.returnBorrowDeferFrames[count-1]
 	frame.collecting = false
+	frame.snapshotScopes = nil
+	frame.snapshotVersions = nil
+	frame.snapshotSymbols = nil
+	frame.snapshotGlobal = nil
 	a.returnBorrowDeferFrames = a.returnBorrowDeferFrames[:count-1]
 	if frame.fn != fn || len(frame.pending) == 0 {
 		return
@@ -270,7 +278,7 @@ func (a *Analyzer) deferLocalBorrowCheck(check pendingLocalBorrowStore) bool {
 	if frame.fn != a.currentFuncDecl {
 		return false
 	}
-	scope, ok := a.snapshotReturnBorrowScope()
+	scope, ok := a.snapshotReturnBorrowScope(frame)
 	if !ok {
 		return false
 	}
@@ -281,40 +289,6 @@ func (a *Analyzer) deferLocalBorrowCheck(check pendingLocalBorrowStore) bool {
 	check.scope, check.valueBindings = scope, bindings
 	frame.pending = append(frame.pending, check)
 	return true
-}
-
-// snapshotReturnBorrowScope flattens the function-local scope levels into one scope over the global
-// scope, so a name declared later in the same block cannot capture a deferred check's lookups.
-func (a *Analyzer) snapshotReturnBorrowScope() (*Scope, bool) {
-	var inlineLevels [8]*Scope
-	levels := inlineLevels[:0]
-	symbolCapacity := 0
-	cur := a.currentScope
-	for cur != nil && cur != a.globalScope {
-		levels = append(levels, cur)
-		if len(cur.Symbols) > symbolCapacity {
-			symbolCapacity = len(cur.Symbols)
-		}
-		cur = cur.Parent
-	}
-	if cur != a.globalScope {
-		return nil, false
-	}
-	flat := NewScope(a.globalScope)
-	if symbolCapacity > 8 {
-		// The largest scope is a lower bound on the unique binding count.
-		// It avoids initial growth without overallocating for shadowed names.
-		flat.Symbols = make(map[string]*Symbol, symbolCapacity)
-	}
-	for _, level := range levels { // innermost first: the first definition wins
-		for name, sym := range level.Symbols {
-			if _, exists := flat.Symbols[name]; !exists {
-				flat.Symbols[name] = sym
-				flat.symbolsVersion++
-			}
-		}
-	}
-	return flat, true
 }
 
 // returnBorrowRecordingActive reports that the walker is walking the function whose environment is
