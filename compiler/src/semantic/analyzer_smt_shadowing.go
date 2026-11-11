@@ -156,23 +156,16 @@ func (a *Analyzer) mentionsShadowedParam(clause ast.Expr) bool {
 // name the initializer mentions must denote, from the proof point, the binding it denoted at the
 // declaration — not the local itself (`y: i64 = y + 1` reads the OUTER y), not a binding declared
 // later in the declaring scope, and not one shadowed between the proof point and that scope.
-func (a *Analyzer) immutableLocalDefinitionCurrent(declScope *Scope, sym *Symbol, value ast.Expr) bool {
-	if a == nil || a.currentScope == nil || declScope == nil || sym == nil || value == nil {
+func (a *Analyzer) immutableLocalDefinitionCurrent(declScope *Scope, sym *Symbol, vd *ast.VarDeclStmt) bool {
+	if a == nil || a.currentScope == nil || declScope == nil || sym == nil || vd == nil || vd.Value == nil {
 		return false
 	}
 	// The initializer captured its inputs' values at the declaration; one of them was written since.
 	if a.smtStaleLocalDefs[sym] {
 		return false
 	}
-	declPos := sym.Node.Pos()
-	names := map[string]bool{}
-	for name := range smtFactDeps(value) {
-		names[name] = true
-	}
-	for _, name := range exprIdentNames(value) {
-		names[name] = true
-	}
-	for name := range names {
+	declPos := vd.Pos()
+	for _, name := range a.smtLocalDefinitionDeps(sym, vd) {
 		if name == sym.Name {
 			return false
 		}
@@ -304,21 +297,20 @@ func (a *Analyzer) smtLocalDefinitionDeps(sym *Symbol, vd *ast.VarDeclStmt) []st
 		}
 	}
 	depSet := smtFactDeps(vd.Value)
-	allNames := exprIdentNames(vd.Value)
-	deps := make([]string, 0, len(depSet)+len(allNames))
+	deps := make([]string, 0, len(depSet))
 	for name := range depSet {
 		deps = append(deps, name)
 	}
-	for _, name := range allNames {
+	visitExprIdentNames(vd.Value, func(name string) {
 		if depSet[name] {
-			continue
+			return
 		}
 		if depSet == nil {
 			depSet = map[string]bool{}
 		}
 		depSet[name] = true
 		deps = append(deps, name)
-	}
+	})
 	if a.smtLocalDefDeps == nil {
 		a.smtLocalDefDeps = map[*Symbol][]string{}
 	}

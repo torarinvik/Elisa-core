@@ -95,7 +95,7 @@ func (a *Analyzer) smtImmutableLocalHypotheses(tr *smtTranslator) string {
 			a.smtCallLocalResultOnlyEnsures(tr, &b, name, sym, vd.Value)
 			// The initializer is translated with the proof point's names: skip it when any of them
 			// (or the local itself, `y: i64 = y + 1`) now denotes a different binding.
-			if !a.immutableLocalDefinitionCurrent(sc, sym, vd.Value) {
+			if !a.immutableLocalDefinitionCurrent(sc, sym, vd) {
 				continue
 			}
 			eterm, ok := tr.termEnv(a.implicitIntConversion(vd.Value, a.exprType(vd.Value), sym.Type), nil)

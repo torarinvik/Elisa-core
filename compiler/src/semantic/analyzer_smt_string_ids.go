@@ -189,7 +189,7 @@ func (tr *smtTranslator) stringLocalCallID(id *ast.Ident, env map[string]string)
 		return "", false
 	}
 	call, ok := stripOptimizationParens(vd.Value).(*ast.CallExpr)
-	if !ok || call == nil || !a.immutableLocalDefinitionCurrent(declScope, sym, vd.Value) {
+	if !ok || call == nil || !a.immutableLocalDefinitionCurrent(declScope, sym, vd) {
 		return "", false
 	}
 	return tr.stringCallID(call, nil)

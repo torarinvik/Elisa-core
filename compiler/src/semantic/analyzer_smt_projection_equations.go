@@ -258,7 +258,7 @@ func (a *Analyzer) smtAggregateCallLocalEnsures(tr *smtTranslator, declScope *Sc
 	if !direct || decl == nil || len(decl.EnsureValues) == 0 {
 		return
 	}
-	if !aggregateCallResultType(a.exprType(call)) || !a.immutableLocalDefinitionCurrent(declScope, sym, vd.Value) {
+	if !aggregateCallResultType(a.exprType(call)) || !a.immutableLocalDefinitionCurrent(declScope, sym, vd) {
 		return
 	}
 	args := proofCallArgs(call)
@@ -308,7 +308,7 @@ func (tr *smtTranslator) immutableLiteralLocal(id *ast.Ident, env map[string]str
 	default:
 		return nil, false
 	}
-	if !tr.a.immutableLocalDefinitionCurrent(declScope, sym, vd.Value) {
+	if !tr.a.immutableLocalDefinitionCurrent(declScope, sym, vd) {
 		return nil, false
 	}
 	return stripOptimizationParens(vd.Value), true

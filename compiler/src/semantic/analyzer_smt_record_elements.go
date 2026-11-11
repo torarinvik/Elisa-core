@@ -248,7 +248,7 @@ func (tr *smtTranslator) immutableIndexedRecordLocal(id *ast.Ident, env map[stri
 			return nil, false
 		}
 		index, ok := stripOptimizationParens(decl.Value).(*ast.IndexExpr)
-		if !ok || !tr.a.immutableLocalDefinitionCurrent(scope, sym, decl.Value) {
+		if !ok || !tr.a.immutableLocalDefinitionCurrent(scope, sym, decl) {
 			return nil, false
 		}
 		return index, true
