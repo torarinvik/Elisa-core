@@ -81,14 +81,15 @@ func (a *Analyzer) activeDeclBranch(n *ast.StaticIfDecl) []ast.Decl {
 			return n.Then
 		}
 	} else {
+		// An unresolved condition cannot publish declarations or import aliases.
 		a.errorf(n.Pos(), "static if condition must be a compile-time bool")
-		return n.Then
+		return nil
 	}
 	for _, elif := range n.Elifs {
 		selected, ok := a.evalConstBoolExpr(elif.Cond)
 		if !ok {
 			a.errorf(elif.Position, "static elif condition must be a compile-time bool")
-			continue
+			return nil
 		}
 		if selected {
 			return elif.Body
