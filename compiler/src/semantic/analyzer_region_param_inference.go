@@ -274,7 +274,7 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, 
 	}
 	for i := range fn.Params {
 		p := &fn.Params[i]
-		var stamp func(string)
+		var stamp *string
 		if cstamp, ok := regionlessRefContainer(p.Type); ok {
 			// A grown / literal-reassigned container ref param, OR one merely FORWARDED to a callee that
 			// requires a region there (so the region must thread through this function too).
@@ -342,7 +342,7 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, 
 		// Param names are unique within a function, so the per-param suffix yields a unique,
 		// deterministic region-param name (no Date/random — must stay resume-stable).
 		name := inferredRegionParamName(fn, p.Name)
-		stamp(name)
+		*stamp = name
 		fn.RegionParams = append(fn.RegionParams, name)
 		fn.InferredRegionParams = append(fn.InferredRegionParams, name)
 		inferred[p.Name] = name

@@ -330,7 +330,7 @@ func functionReturnsSliceOfParam(stmts []ast.Stmt, name string) bool {
 // in the caller — a by-value container param copies the header, so growth would be lost (the S1
 // footgun). An existing `@r` anywhere (on the ref or the container) means the user is already
 // managing the region: leave it alone.
-func regionlessRefContainer(typ ast.TypeExpr) (func(region string), bool) {
+func regionlessRefContainer(typ ast.TypeExpr) (*string, bool) {
 	var ref *ast.RefType
 	for {
 		switch t := typ.(type) {
@@ -350,7 +350,7 @@ func regionlessRefContainer(typ ast.TypeExpr) (func(region string), bool) {
 			}
 			switch t.Name {
 			case "darray", "dict", "set":
-				return func(region string) { t.Region = region }, true
+				return &t.Region, true
 			}
 			return nil, false
 		case *ast.NamedType:
@@ -359,8 +359,7 @@ func regionlessRefContainer(typ ast.TypeExpr) (func(region string), bool) {
 			}
 			// dstr has no region surface of its own; stamp the ref, which resolveType
 			// pushes down onto the resolved DArrayType.
-			r := ref
-			return func(region string) { r.Region = region }, true
+			return &ref.Region, true
 		default:
 			return nil, false
 		}
@@ -369,7 +368,7 @@ func regionlessRefContainer(typ ast.TypeExpr) (func(region string), bool) {
 
 // regionlessRefStruct reports whether a parameter type is a by-reference (`&`) region-less STRUCT
 // (a *ast.NamedType that is NOT a region-carrying container — those go through regionlessRefContainer),
-// and if so returns a closure that stamps a region name onto the enclosing *ast.RefType. A struct
+// and if so returns the region field on the enclosing *ast.RefType for stamping. A struct
 // has no `@r` surface of its own; the region rides on the ref, and the field-region propagation in
 // analyzeFieldExpr (plus the backend's containerRegionName reading RefType.Region for struct refs)
 // pushes it onto the resolved container field — the same normalization the dstr path relies on.
@@ -377,7 +376,7 @@ func regionlessRefContainer(typ ast.TypeExpr) (func(region string), bool) {
 // The `&` is required for the same reason as containers: only a reference makes the callee's field
 // growth (header realloc + count) visible in the caller. An existing `@r` on the ref means the user
 // already manages the region: leave it alone (Stage 0's explicit form).
-func regionlessRefStruct(typ ast.TypeExpr) (func(region string), bool) {
+func regionlessRefStruct(typ ast.TypeExpr) (*string, bool) {
 	var ref *ast.RefType
 	for {
 		switch t := typ.(type) {
@@ -395,16 +394,14 @@ func regionlessRefStruct(typ ast.TypeExpr) (func(region string), bool) {
 			if ref == nil || t.Name == "dstr" {
 				return nil, false
 			}
-			r := ref
-			return func(region string) { r.Region = region }, true
+			return &ref.Region, true
 		case *ast.GenericType:
 			// A by-ref generic struct instantiation (`v: mutable Vector[T]&`) whose container
 			// field is grown needs the same caller-threaded region as a concrete struct ref.
 			if ref == nil || t.Region != "" {
 				return nil, false
 			}
-			r := ref
-			return func(region string) { r.Region = region }, true
+			return &ref.Region, true
 		default:
 			return nil, false
 		}
