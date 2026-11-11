@@ -288,13 +288,22 @@ func (e *encoder) valueAtDepth(v reflect.Value) error {
 		return e.body(v)
 
 	case reflect.Struct:
+		var fields []int
+		if e.scanning {
+			fields = e.registry.scanFields[t]
+			if len(fields) == 0 {
+				return nil
+			}
+		} else {
+			fields = e.registry.fields[t]
+		}
 		if !v.CanAddr() {
 			copy := reflect.New(t).Elem()
 			copy.Set(v)
 			v = copy
 		}
 		if e.scanning {
-			for _, i := range e.registry.scanFields[t] {
+			for _, i := range fields {
 				f := e.registry.access(v, i)
 				if !f.IsZero() {
 					if err := e.value(f); err != nil {
@@ -304,7 +313,6 @@ func (e *encoder) valueAtDepth(v reflect.Value) error {
 			}
 			return nil
 		}
-		fields := e.registry.fields[t]
 		var small [32]reflect.Value
 		present := small[:0]
 		if len(fields) > len(small) {

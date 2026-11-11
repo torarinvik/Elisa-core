@@ -1,9 +1,10 @@
 package statecache
 
 import (
+	"cmp"
 	"fmt"
 	"reflect"
-	"sort"
+	"slices"
 )
 
 type pathStep struct {
@@ -57,16 +58,23 @@ func (e *encoder) bindAliases() error {
 		e.recordAllocation(node.value, uint64(i+1))
 	}
 
-	sort.Slice(e.allocations, func(i, j int) bool {
-		a, b := e.allocations[i], e.allocations[j]
-		if a.start != b.start {
-			return a.start < b.start
+	slices.SortFunc(e.allocations, func(a, b allocation) int {
+		if order := cmp.Compare(a.start, b.start); order != 0 {
+			return order
 		}
-		if a.end != b.end {
-			return a.end > b.end
+		if order := cmp.Compare(b.end, a.end); order != 0 {
+			return order
 		}
 		// Prefer a backing slice to a pointer to its only element.
-		return e.nodes.at(int(a.id-1)).value.Kind() == reflect.Slice && e.nodes.at(int(b.id-1)).value.Kind() != reflect.Slice
+		aSlice := e.nodes.at(int(a.id-1)).value.Kind() == reflect.Slice
+		bSlice := e.nodes.at(int(b.id-1)).value.Kind() == reflect.Slice
+		if aSlice == bSlice {
+			return 0
+		}
+		if aSlice {
+			return -1
+		}
+		return 1
 	})
 	var active []allocation
 	for _, current := range e.allocations {
