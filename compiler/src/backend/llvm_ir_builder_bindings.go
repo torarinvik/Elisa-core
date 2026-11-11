@@ -95,3 +95,28 @@ func llvmBuildRetVoid(builder llvmIRBuilderRef) llvmIRValueRef { return C.LLVMBu
 func llvmBuildPtrToInt(builder llvmIRBuilderRef, value llvmIRValueRef, typ llvmIRTypeRef, name *llvmIRChar) llvmIRValueRef {
 	return C.LLVMBuildPtrToInt(builder, value, typ, name)
 }
+
+func llvmBuildAdd(builder llvmIRBuilderRef, left, right llvmIRValueRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildAdd(builder, left, right, name)
+}
+func llvmBuildMul(builder llvmIRBuilderRef, left, right llvmIRValueRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildMul(builder, left, right, name)
+}
+func llvmBuildOr(builder llvmIRBuilderRef, left, right llvmIRValueRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildOr(builder, left, right, name)
+}
+func llvmBuildShl(builder llvmIRBuilderRef, left, right llvmIRValueRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildShl(builder, left, right, name)
+}
+func llvmBuildPhi(builder llvmIRBuilderRef, typ llvmIRTypeRef, name *llvmIRChar) llvmIRValueRef {
+	return C.LLVMBuildPhi(builder, typ, name)
+}
+func llvmAddIncoming(phi llvmIRValueRef, values *llvmIRValueRef, blocks *llvmIRBlockRef, count llvmIRUnsigned) {
+	C.LLVMAddIncoming(phi, values, blocks, count)
+}
+func llvmBuildSwitch(builder llvmIRBuilderRef, value llvmIRValueRef, fallback llvmIRBlockRef, count llvmIRUnsigned) llvmIRValueRef {
+	return C.LLVMBuildSwitch(builder, value, fallback, count)
+}
+func llvmAddCase(branch, value llvmIRValueRef, block llvmIRBlockRef) {
+	C.LLVMAddCase(branch, value, block)
+}

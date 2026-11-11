@@ -2,19 +2,13 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
 )
 
-func (s *functionState) emitPackedEnumConstructorAlloc(callExpr *ast.CallExpr, storeValue C.LLVMValueRef, enumType *semantic.EnumType, variant *semantic.EnumVariant, args []ast.Expr, argNames []string) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitPackedEnumConstructorAlloc(callExpr *ast.CallExpr, storeValue llvmIRValueRef, enumType *semantic.EnumType, variant *semantic.EnumVariant, args []ast.Expr, argNames []string) (llvmIRValueRef, semantic.Type, error) {
 	if enumType == nil || variant == nil || !enumType.Packed {
 		return nil, nil, fmt.Errorf("missing packed enum constructor metadata")
 	}
@@ -30,7 +24,7 @@ func (s *functionState) emitPackedEnumConstructorAlloc(callExpr *ast.CallExpr, s
 		return nil, nil, err
 	}
 	if s.canInlinePackedEnumVariant(enumType, variant) {
-		var payloadValue C.LLVMValueRef
+		var payloadValue llvmIRValueRef
 		var payloadType semantic.Type
 		if len(orderedArgs) == 1 {
 			payloadType = variant.Payload[0]
@@ -61,9 +55,9 @@ func (s *functionState) emitPackedEnumConstructorAlloc(callExpr *ast.CallExpr, s
 	if err != nil {
 		return nil, nil, err
 	}
-	rowValue := C.LLVMConstNull(rowType)
-	rowValue = C.LLVMBuildInsertValue(s.builder, rowValue, tagValue, 0, cStringFree("packed.enum.tag.ins"))
-	commonValues := make(map[string]C.LLVMValueRef, len(enumType.Root().Decl.Common))
+	rowValue := llvmConstNull(rowType)
+	rowValue = llvmBuildInsertValue(s.builder, rowValue, tagValue, 0, cStringFree("packed.enum.tag.ins"))
+	commonValues := make(map[string]llvmIRValueRef, len(enumType.Root().Decl.Common))
 	for _, commonDecl := range enumType.Root().Decl.Common { // docs/77: common(...) lives on the root
 		arg, ok := commonArgs[commonDecl.Name]
 		if !ok {
@@ -79,17 +73,17 @@ func (s *functionState) emitPackedEnumConstructorAlloc(callExpr *ast.CallExpr, s
 		}
 		commonValues[commonDecl.Name] = fieldValue
 		if layout.StoredInline {
-			rowValue = C.LLVMBuildInsertValue(s.builder, rowValue, fieldValue, C.unsigned(layout.RowFieldIndex), cStringFree("packed.enum.common.ins"))
+			rowValue = llvmBuildInsertValue(s.builder, rowValue, fieldValue, llvmIRUnsigned(layout.RowFieldIndex), cStringFree("packed.enum.common.ins"))
 		}
 	}
-	rowStore := C.LLVMBuildStore(s.builder, rowValue, allocPtr)
+	rowStore := llvmBuildStore(s.builder, rowValue, allocPtr)
 	s.g.setInstrAlignment(rowStore, s.g.payloadSlotBytes(enumType))
 	if len(variant.Payload) > 0 {
 		payloadPtr, err := s.enumPayloadPtr(allocPtr, enumType)
 		if err != nil {
 			return nil, nil, err
 		}
-		var tailDataPtr C.LLVMValueRef
+		var tailDataPtr llvmIRValueRef
 		if tailPlan != nil {
 			tailDataPtr, err = s.emitPackedEnumTailDataPtr(allocPtr, rowSizeValue)
 			if err != nil {
@@ -102,7 +96,7 @@ func (s *functionState) emitPackedEnumConstructorAlloc(callExpr *ast.CallExpr, s
 				return nil, nil, err
 			}
 			if !llvmValueIsZeroConstant(argValue) {
-				st := C.LLVMBuildStore(s.builder, argValue, payloadPtr)
+				st := llvmBuildStore(s.builder, argValue, payloadPtr)
 				s.g.setInstrAlignment(st, s.g.payloadSlotBytes(enumType))
 			}
 		} else {
@@ -110,7 +104,7 @@ func (s *functionState) emitPackedEnumConstructorAlloc(callExpr *ast.CallExpr, s
 			if err != nil {
 				return nil, nil, err
 			}
-			aggregate := C.LLVMGetUndef(payloadType)
+			aggregate := llvmGetUndef(payloadType)
 			allZero := true
 			for i, payload := range variant.Payload {
 				_ = payload
@@ -121,10 +115,10 @@ func (s *functionState) emitPackedEnumConstructorAlloc(callExpr *ast.CallExpr, s
 				if !llvmValueIsZeroConstant(argValue) {
 					allZero = false
 				}
-				aggregate = C.LLVMBuildInsertValue(s.builder, aggregate, argValue, C.unsigned(i), cStringFree("packed.enum.payload.ins"))
+				aggregate = llvmBuildInsertValue(s.builder, aggregate, argValue, llvmIRUnsigned(i), cStringFree("packed.enum.payload.ins"))
 			}
 			if !allZero {
-				st := C.LLVMBuildStore(s.builder, aggregate, payloadPtr)
+				st := llvmBuildStore(s.builder, aggregate, payloadPtr)
 				s.g.setInstrAlignment(st, s.g.payloadSlotBytes(enumType))
 			}
 		}
@@ -144,7 +138,7 @@ func (s *functionState) emitPackedEnumConstructorAlloc(callExpr *ast.CallExpr, s
 		if err != nil {
 			return nil, nil, err
 		}
-		C.LLVMBuildStore(s.builder, C.LLVMConstNull(sideBufferLLVMType), sideBufferPtr)
+		llvmBuildStore(s.builder, llvmConstNull(sideBufferLLVMType), sideBufferPtr)
 		for _, commonDecl := range enumType.Root().Decl.Common { // docs/77: common(...) lives on the root
 			layout, err := s.g.packedEnumCommonFieldLayout(enumType, commonDecl.Name)
 			if err != nil {
@@ -179,21 +173,21 @@ func (s *functionState) emitPackedEnumConstructorAlloc(callExpr *ast.CallExpr, s
 func (s *functionState) canInlinePackedEnumVariant(enumType *semantic.EnumType, variant *semantic.EnumVariant) bool {
 	return false
 }
-func (s *functionState) buildInlinePackedEnumHandle(tagValue C.LLVMValueRef, payloadValue C.LLVMValueRef, payloadType semantic.Type) (C.LLVMValueRef, error) {
+func (s *functionState) buildInlinePackedEnumHandle(tagValue llvmIRValueRef, payloadValue llvmIRValueRef, payloadType semantic.Type) (llvmIRValueRef, error) {
 	uintptrLLVMType, err := s.g.lowerBuiltin("uintptr")
 	if err != nil {
 		return nil, err
 	}
-	handleValue := C.LLVMBuildZExt(s.builder, tagValue, uintptrLLVMType, cStringFree("packed.inline.tag.zext"))
-	handleValue = C.LLVMBuildShl(s.builder, handleValue, C.LLVMConstInt(uintptrLLVMType, 49, 0), cStringFree("packed.inline.tag.shift"))
+	handleValue := llvmBuildZExt(s.builder, tagValue, uintptrLLVMType, cStringFree("packed.inline.tag.zext"))
+	handleValue = llvmBuildShl(s.builder, handleValue, llvmConstInt(uintptrLLVMType, 49, 0), cStringFree("packed.inline.tag.shift"))
 	if payloadValue != nil && payloadType != nil {
-		payloadBits := C.LLVMBuildZExt(s.builder, payloadValue, uintptrLLVMType, cStringFree("packed.inline.payload.zext"))
-		payloadBits = C.LLVMBuildShl(s.builder, payloadBits, C.LLVMConstInt(uintptrLLVMType, 1, 0), cStringFree("packed.inline.payload.shift"))
-		handleValue = C.LLVMBuildOr(s.builder, handleValue, payloadBits, cStringFree("packed.inline.payload.or"))
+		payloadBits := llvmBuildZExt(s.builder, payloadValue, uintptrLLVMType, cStringFree("packed.inline.payload.zext"))
+		payloadBits = llvmBuildShl(s.builder, payloadBits, llvmConstInt(uintptrLLVMType, 1, 0), cStringFree("packed.inline.payload.shift"))
+		handleValue = llvmBuildOr(s.builder, handleValue, payloadBits, cStringFree("packed.inline.payload.or"))
 	}
-	return C.LLVMBuildOr(s.builder, handleValue, C.LLVMConstInt(uintptrLLVMType, 1, 0), cStringFree("packed.inline.handle")), nil
+	return llvmBuildOr(s.builder, handleValue, llvmConstInt(uintptrLLVMType, 1, 0), cStringFree("packed.inline.handle")), nil
 }
-func (s *functionState) emitPackedStoreRecordTag(storeValue C.LLVMValueRef, storeType *semantic.PackedEnumStoreType, tagValue C.LLVMValueRef) error {
+func (s *functionState) emitPackedStoreRecordTag(storeValue llvmIRValueRef, storeType *semantic.PackedEnumStoreType, tagValue llvmIRValueRef) error {
 	if storeType == nil {
 		return fmt.Errorf("missing packed store type for tag record")
 	}
@@ -204,10 +198,10 @@ func (s *functionState) emitPackedStoreRecordTag(storeValue C.LLVMValueRef, stor
 type packedEnumTailPayloadPlan struct {
 	index         int
 	viewType      *semantic.ViewType
-	elemSizeValue C.LLVMValueRef
-	lenValue      C.LLVMValueRef
-	byteCount     C.LLVMValueRef
-	sourceData    C.LLVMValueRef
+	elemSizeValue llvmIRValueRef
+	lenValue      llvmIRValueRef
+	byteCount     llvmIRValueRef
+	sourceData    llvmIRValueRef
 	literal       *ast.ListLitExpr
 }
 
@@ -235,11 +229,11 @@ func (s *functionState) preparePackedEnumTailPayloadPlan(variant *semantic.EnumV
 	if err != nil {
 		return nil, err
 	}
-	elemSizeValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(elemSize), 0)
+	elemSizeValue := llvmConstInt(usizeLLVMType, llvmIRUnsignedLongLong(elemSize), 0)
 	arg := orderedArgs[tailIndex]
 	if literal, ok := arg.(*ast.ListLitExpr); ok {
-		lenValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(len(literal.Elems)), 0)
-		byteCount := C.LLVMConstInt(usizeLLVMType, C.ulonglong(uint64(len(literal.Elems))*elemSize), 0)
+		lenValue := llvmConstInt(usizeLLVMType, llvmIRUnsignedLongLong(len(literal.Elems)), 0)
+		byteCount := llvmConstInt(usizeLLVMType, llvmIRUnsignedLongLong(uint64(len(literal.Elems))*elemSize), 0)
 		return &packedEnumTailPayloadPlan{index: tailIndex, viewType: viewType, elemSizeValue: elemSizeValue, lenValue: lenValue, byteCount: byteCount, literal: literal}, nil
 	}
 	sourceType := s.exprType(arg)
@@ -252,23 +246,23 @@ func (s *functionState) preparePackedEnumTailPayloadPlan(variant *semantic.EnumV
 	if err != nil {
 		return nil, err
 	}
-	lenValue := C.LLVMBuildExtractValue(s.builder, viewValue, 1, cStringFree("packed.tail.src.len"))
-	sourceData := C.LLVMBuildExtractValue(s.builder, viewValue, 0, cStringFree("packed.tail.src.data"))
+	lenValue := llvmBuildExtractValue(s.builder, viewValue, 1, cStringFree("packed.tail.src.len"))
+	sourceData := llvmBuildExtractValue(s.builder, viewValue, 0, cStringFree("packed.tail.src.data"))
 	byteCount, err := s.emitCheckedElemByteCount(lenValue, elemSize, "packed.tail")
 	if err != nil {
 		return nil, err
 	}
 	return &packedEnumTailPayloadPlan{index: tailIndex, viewType: viewType, elemSizeValue: elemSizeValue, lenValue: lenValue, byteCount: byteCount, sourceData: sourceData}, nil
 }
-func (s *functionState) emitPackedEnumTailDataPtr(allocPtr C.LLVMValueRef, rowSizeValue C.LLVMValueRef) (C.LLVMValueRef, error) {
+func (s *functionState) emitPackedEnumTailDataPtr(allocPtr llvmIRValueRef, rowSizeValue llvmIRValueRef) (llvmIRValueRef, error) {
 	i8Type, err := s.g.lowerBuiltin("u8")
 	if err != nil {
 		return nil, err
 	}
-	indices := []C.LLVMValueRef{rowSizeValue}
-	return C.LLVMBuildGEP2(s.builder, i8Type, allocPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("packed.tail.data")), nil
+	indices := []llvmIRValueRef{rowSizeValue}
+	return llvmBuildGEP2(s.builder, i8Type, allocPtr, llvmValueSlicePtr(indices), llvmIRUnsigned(len(indices)), cStringFree("packed.tail.data")), nil
 }
-func (s *functionState) emitPackedEnumConstructorPayloadValue(variant *semantic.EnumVariant, index int, arg ast.Expr, tailPlan *packedEnumTailPayloadPlan, tailDataPtr C.LLVMValueRef, storeValue C.LLVMValueRef, enumType *semantic.EnumType) (C.LLVMValueRef, error) {
+func (s *functionState) emitPackedEnumConstructorPayloadValue(variant *semantic.EnumVariant, index int, arg ast.Expr, tailPlan *packedEnumTailPayloadPlan, tailDataPtr llvmIRValueRef, storeValue llvmIRValueRef, enumType *semantic.EnumType) (llvmIRValueRef, error) {
 	if tailPlan != nil && index == tailPlan.index {
 		return s.emitPackedEnumTailPayloadValue(tailPlan, tailDataPtr)
 	}
@@ -295,7 +289,7 @@ func (s *functionState) emitPackedEnumConstructorPayloadValue(variant *semantic.
 // count — a later grow re-allocates in the ambient region instead of writing the store arena.
 // Elements are copied SHALLOWLY: handle/scalar/sview elements (every AST side-table today) are
 // self-contained; an element type that itself owns region storage still needs its own adoption.
-func (s *functionState) emitPackedEnumPayloadDArrayAdopt(argValue C.LLVMValueRef, payloadType semantic.Type, storeValue C.LLVMValueRef, enumType *semantic.EnumType) (C.LLVMValueRef, error) {
+func (s *functionState) emitPackedEnumPayloadDArrayAdopt(argValue llvmIRValueRef, payloadType semantic.Type, storeValue llvmIRValueRef, enumType *semantic.EnumType) (llvmIRValueRef, error) {
 	darrayType, ok := payloadType.(*semantic.DArrayType)
 	if !ok || darrayType == nil {
 		return argValue, nil
@@ -307,8 +301,8 @@ func (s *functionState) emitPackedEnumPayloadDArrayAdopt(argValue C.LLVMValueRef
 	if err != nil {
 		return nil, err
 	}
-	countValue := C.LLVMBuildExtractValue(s.builder, argValue, 1, cStringFree("packed.payload.adopt.count"))
-	oldData := C.LLVMBuildExtractValue(s.builder, argValue, 0, cStringFree("packed.payload.adopt.src"))
+	countValue := llvmBuildExtractValue(s.builder, argValue, 1, cStringFree("packed.payload.adopt.count"))
+	oldData := llvmBuildExtractValue(s.builder, argValue, 0, cStringFree("packed.payload.adopt.src"))
 	byteCount, err := s.emitCheckedElemByteCount(countValue, elemSize, "packed.payload.adopt")
 	if err != nil {
 		return nil, err
@@ -333,7 +327,7 @@ func (s *functionState) emitPackedEnumPayloadDArrayAdopt(argValue C.LLVMValueRef
 	if err != nil {
 		return nil, err
 	}
-	newData := s.buildCall(allocLLVMType, allocCallee, []C.LLVMValueRef{arenaValue, byteCount}, "packed.payload.adopt.alloc")
+	newData := s.buildCall(allocLLVMType, allocCallee, []llvmIRValueRef{arenaValue, byteCount}, "packed.payload.adopt.alloc")
 	if err := s.emitPackedEnumTailMemcpy(newData, oldData, byteCount); err != nil {
 		return nil, err
 	}
@@ -345,7 +339,7 @@ func (s *functionState) emitPackedEnumPayloadDArrayAdopt(argValue C.LLVMValueRef
 	if err := s.emitDeepAdoptElementContainers(newData, countValue, darrayType.Elem, arenaValue, allocLLVMType, allocCallee); err != nil {
 		return nil, err
 	}
-	adopted := C.LLVMBuildInsertValue(s.builder, argValue, newData, 0, cStringFree("packed.payload.adopt.data"))
-	adopted = C.LLVMBuildInsertValue(s.builder, adopted, countValue, 2, cStringFree("packed.payload.adopt.cap"))
+	adopted := llvmBuildInsertValue(s.builder, argValue, newData, 0, cStringFree("packed.payload.adopt.data"))
+	adopted = llvmBuildInsertValue(s.builder, adopted, countValue, 2, cStringFree("packed.payload.adopt.cap"))
 	return adopted, nil
 }

@@ -2,19 +2,13 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
 )
 
-func (s *functionState) prepareSafeIndexFallback(expr *ast.IndexExpr, indexValue C.LLVMValueRef) (C.LLVMValueRef, func() (C.LLVMValueRef, semantic.Type, error), error) {
+func (s *functionState) prepareSafeIndexFallback(expr *ast.IndexExpr, indexValue llvmIRValueRef) (llvmIRValueRef, func() (llvmIRValueRef, semantic.Type, error), error) {
 	objectType := s.exprType(expr.Object)
 	if objectType == nil {
 		return nil, nil, fmt.Errorf("missing semantic type for safe index operand")
@@ -29,7 +23,7 @@ func (s *functionState) prepareSafeIndexFallback(expr *ast.IndexExpr, indexValue
 			return nil, nil, err
 		}
 		ops := &packedStoreOps{s: s, storeValue: storeValue, storeType: storeType}
-		return countValue, func() (C.LLVMValueRef, semantic.Type, error) {
+		return countValue, func() (llvmIRValueRef, semantic.Type, error) {
 			return ops.storeValueAt(indexValue, "safe.index.value")
 		}, nil
 	}
@@ -43,7 +37,7 @@ func (s *functionState) prepareSafeIndexFallback(expr *ast.IndexExpr, indexValue
 		if err != nil {
 			return nil, nil, err
 		}
-		return countValue, func() (C.LLVMValueRef, semantic.Type, error) {
+		return countValue, func() (llvmIRValueRef, semantic.Type, error) {
 			return s.loadArrayIndexValue(arrayPtr, t, indexValue, "safe.index.value")
 		}, nil
 	case *semantic.DArrayType:
@@ -55,7 +49,7 @@ func (s *functionState) prepareSafeIndexFallback(expr *ast.IndexExpr, indexValue
 		if err != nil {
 			return nil, nil, err
 		}
-		return countValue, func() (C.LLVMValueRef, semantic.Type, error) {
+		return countValue, func() (llvmIRValueRef, semantic.Type, error) {
 			ptr, elemType, err := s.emitRuntimeIndexedAddress(containerPtr, t, t.Elem, indexValue)
 			if err != nil {
 				return nil, nil, err
@@ -72,7 +66,7 @@ func (s *functionState) prepareSafeIndexFallback(expr *ast.IndexExpr, indexValue
 		if err != nil {
 			return nil, nil, err
 		}
-		return countValue, func() (C.LLVMValueRef, semantic.Type, error) {
+		return countValue, func() (llvmIRValueRef, semantic.Type, error) {
 			ptr, elemType, err := s.emitRuntimeIndexedAddress(containerPtr, t, t.Elem, indexValue)
 			if err != nil {
 				return nil, nil, err
@@ -91,7 +85,7 @@ func (s *functionState) prepareSafeIndexFallback(expr *ast.IndexExpr, indexValue
 			if err != nil {
 				return nil, nil, err
 			}
-			return countValue, func() (C.LLVMValueRef, semantic.Type, error) {
+			return countValue, func() (llvmIRValueRef, semantic.Type, error) {
 				return s.loadArrayIndexValue(arrayPtr, elem, indexValue, "safe.index.value")
 			}, nil
 		case *semantic.DArrayType:
@@ -103,7 +97,7 @@ func (s *functionState) prepareSafeIndexFallback(expr *ast.IndexExpr, indexValue
 			if err != nil {
 				return nil, nil, err
 			}
-			return countValue, func() (C.LLVMValueRef, semantic.Type, error) {
+			return countValue, func() (llvmIRValueRef, semantic.Type, error) {
 				ptr, elemType, err := s.emitRuntimeIndexedAddress(containerPtr, elem, elem.Elem, indexValue)
 				if err != nil {
 					return nil, nil, err
@@ -120,7 +114,7 @@ func (s *functionState) prepareSafeIndexFallback(expr *ast.IndexExpr, indexValue
 			if err != nil {
 				return nil, nil, err
 			}
-			return countValue, func() (C.LLVMValueRef, semantic.Type, error) {
+			return countValue, func() (llvmIRValueRef, semantic.Type, error) {
 				ptr, elemType, err := s.emitRuntimeIndexedAddress(containerPtr, elem, elem.Elem, indexValue)
 				if err != nil {
 					return nil, nil, err
@@ -132,7 +126,7 @@ func (s *functionState) prepareSafeIndexFallback(expr *ast.IndexExpr, indexValue
 	}
 	return nil, nil, fmt.Errorf("safe index fallback is not implemented for %s", objectType.String())
 }
-func (s *functionState) safeIndexArrayCountValue(arrayType *semantic.ArrayType) (C.LLVMValueRef, error) {
+func (s *functionState) safeIndexArrayCountValue(arrayType *semantic.ArrayType) (llvmIRValueRef, error) {
 	if arrayType == nil || !arrayType.HasConstSize || arrayType.ConstSize < 0 {
 		return nil, fmt.Errorf("safe index fallback requires a concrete array bound")
 	}
@@ -140,25 +134,25 @@ func (s *functionState) safeIndexArrayCountValue(arrayType *semantic.ArrayType) 
 	if err != nil {
 		return nil, err
 	}
-	return C.LLVMConstInt(usizeLLVMType, C.ulonglong(arrayType.ConstSize), 0), nil
+	return llvmConstInt(usizeLLVMType, llvmIRUnsignedLongLong(arrayType.ConstSize), 0), nil
 }
-func (s *functionState) loadArrayIndexValue(arrayPtr C.LLVMValueRef, arrayType *semantic.ArrayType, indexValue C.LLVMValueRef, name string) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) loadArrayIndexValue(arrayPtr llvmIRValueRef, arrayType *semantic.ArrayType, indexValue llvmIRValueRef, name string) (llvmIRValueRef, semantic.Type, error) {
 	arrayLLVMType, err := s.g.lowerType(arrayType)
 	if err != nil {
 		return nil, nil, err
 	}
-	zero := C.LLVMConstInt(C.LLVMInt32TypeInContext(s.g.context), 0, 0)
-	indices := []C.LLVMValueRef{zero, indexValue}
-	ptr := C.LLVMBuildGEP2(s.builder, arrayLLVMType, arrayPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree(name+".ptr"))
+	zero := llvmConstInt(llvmInt32TypeInContext(s.g.context), 0, 0)
+	indices := []llvmIRValueRef{zero, indexValue}
+	ptr := llvmBuildGEP2(s.builder, arrayLLVMType, arrayPtr, llvmValueSlicePtr(indices), llvmIRUnsigned(len(indices)), cStringFree(name+".ptr"))
 	value, err := s.loadValue(ptr, arrayType.Elem, name)
 	return value, arrayType.Elem, err
 }
-func (s *functionState) emitContainerCountValue(containerPtr C.LLVMValueRef, containerType semantic.Type, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitContainerCountValue(containerPtr llvmIRValueRef, containerType semantic.Type, name string) (llvmIRValueRef, error) {
 	containerLLVMType, err := s.g.lowerType(containerType)
 	if err != nil {
 		return nil, err
 	}
-	countPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, containerPtr, 1, cStringFree(name+".ptr"))
+	countPtr := llvmBuildStructGEP2(s.builder, containerLLVMType, containerPtr, 1, cStringFree(name+".ptr"))
 	usizeType := s.g.namedType("usize")
 	count, err := s.loadValue(countPtr, usizeType, name)
 	if err != nil {
@@ -172,7 +166,7 @@ func (s *functionState) emitContainerCountValue(containerPtr C.LLVMValueRef, con
 	}
 	return count, nil
 }
-func (s *functionState) emitChunksExactIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+func (s *functionState) emitChunksExactIndexExpr(expr *ast.IndexExpr) (llvmIRValueRef, semantic.Type, bool, error) {
 	chunkType, ok := semantic.ChunksExactViewItemType(s.exprType(expr.Object))
 	if !ok || chunkType == nil {
 		return nil, nil, false, nil
@@ -190,17 +184,17 @@ func (s *functionState) emitChunksExactIndexExpr(expr *ast.IndexExpr) (C.LLVMVal
 	if err != nil {
 		return nil, nil, true, err
 	}
-	sourceValue := C.LLVMBuildExtractValue(s.builder, objectValue, 0, cStringFree("chunks.source"))
-	chunkSizeValue := C.LLVMBuildExtractValue(s.builder, objectValue, 1, cStringFree("chunks.chunk_size"))
-	startValue := C.LLVMBuildMul(s.builder, indexValue, chunkSizeValue, cStringFree("chunks.start"))
-	endValue := C.LLVMBuildAdd(s.builder, startValue, chunkSizeValue, cStringFree("chunks.end"))
+	sourceValue := llvmBuildExtractValue(s.builder, objectValue, 0, cStringFree("chunks.source"))
+	chunkSizeValue := llvmBuildExtractValue(s.builder, objectValue, 1, cStringFree("chunks.chunk_size"))
+	startValue := llvmBuildMul(s.builder, indexValue, chunkSizeValue, cStringFree("chunks.start"))
+	endValue := llvmBuildAdd(s.builder, startValue, chunkSizeValue, cStringFree("chunks.end"))
 	value, err := s.emitArenaViewSliceValue(sourceValue, chunkType, startValue, endValue, "chunks.item")
 	if err != nil {
 		return nil, nil, true, err
 	}
 	return value, chunkType, true, nil
 }
-func (s *functionState) emitRuntimeStringIndexExpr(expr *ast.IndexExpr, helperName string, operandType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitRuntimeStringIndexExpr(expr *ast.IndexExpr, helperName string, operandType semantic.Type) (llvmIRValueRef, semantic.Type, error) {
 	stringValue, _, err := s.emitExpr(expr.Object, operandType)
 	if err != nil {
 		return nil, nil, err
@@ -228,7 +222,7 @@ func (s *functionState) emitRuntimeStringIndexExpr(expr *ast.IndexExpr, helperNa
 	if err != nil {
 		return nil, nil, err
 	}
-	args := []C.LLVMValueRef{stringValue, indexValue}
+	args := []llvmIRValueRef{stringValue, indexValue}
 	call := s.buildCall(llvmFnType, callee, args, "stridx")
 	return call, resultType, nil
 }
@@ -249,7 +243,7 @@ func semanticStringArrayType(t semantic.Type) (*semantic.ArrayType, bool) {
 	}
 	return arrayType, true
 }
-func (s *functionState) emitStaticStringIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitStaticStringIndexExpr(expr *ast.IndexExpr) (llvmIRValueRef, semantic.Type, error) {
 	ptr, _, err := s.emitIndexAddress(expr, false)
 	if err != nil {
 		return nil, nil, err
@@ -264,7 +258,7 @@ func (s *functionState) emitStaticStringIndexExpr(expr *ast.IndexExpr) (C.LLVMVa
 	if err != nil {
 		return nil, nil, err
 	}
-	return C.LLVMBuildZExt(s.builder, loaded, llvmResultType, cStringFree("stridx.zext")), resultType, nil
+	return llvmBuildZExt(s.builder, loaded, llvmResultType, cStringFree("stridx.zext")), resultType, nil
 }
 func runtimeStringIndexedOperand(t semantic.Type) (string, semantic.Type, bool) {
 	if _, ok := t.(*semantic.CStrType); ok {

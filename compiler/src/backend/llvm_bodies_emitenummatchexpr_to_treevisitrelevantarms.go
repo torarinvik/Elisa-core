@@ -2,14 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-
-void elisa_coreSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigned trueWeight, unsigned falseWeight);
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -50,20 +42,20 @@ func findEnumRefinementNamed(root *semantic.EnumType, name string) *semantic.Enu
 	return nil
 }
 
-func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semantic.Type, enumType *semantic.EnumType) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semantic.Type, enumType *semantic.EnumType) (llvmIRValueRef, semantic.Type, error) {
 	resultSize, err := s.g.abiSizeOfType(resultType)
 	if err != nil {
 		return nil, nil, err
 	}
 	spillLargeResult := resultSize >= largeCompilerTempHeapThresholdBytes && !semantic.IsNeverType(resultType)
-	var resultSlot C.LLVMValueRef
+	var resultSlot llvmIRValueRef
 	if spillLargeResult {
 		resultSlot, err = s.createTempStorage("match.expr.result", resultType)
 		if err != nil {
 			return nil, nil, err
 		}
 	}
-	recordIncoming := func(value C.LLVMValueRef, block C.LLVMBasicBlockRef, values *[]C.LLVMValueRef, blocks *[]C.LLVMBasicBlockRef) error {
+	recordIncoming := func(value llvmIRValueRef, block llvmIRBlockRef, values *[]llvmIRValueRef, blocks *[]llvmIRBlockRef) error {
 		if spillLargeResult {
 			if storeErr := s.storeValue(resultSlot, value, resultType, "match.expr.result.store"); storeErr != nil {
 				return storeErr
@@ -73,7 +65,7 @@ func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semant
 		*blocks = append(*blocks, block)
 		return nil
 	}
-	finishResult := func(values []C.LLVMValueRef, blocks []C.LLVMBasicBlockRef) (C.LLVMValueRef, semantic.Type, error) {
+	finishResult := func(values []llvmIRValueRef, blocks []llvmIRBlockRef) (llvmIRValueRef, semantic.Type, error) {
 		if spillLargeResult {
 			value, loadErr := s.loadValue(resultSlot, resultType, "match.expr.result.load")
 			return value, resultType, loadErr
@@ -85,8 +77,8 @@ func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semant
 		if lowerErr != nil {
 			return nil, nil, lowerErr
 		}
-		phi := C.LLVMBuildPhi(s.builder, llvmType, cStringFree("match.expr.phi"))
-		C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
+		phi := llvmBuildPhi(s.builder, llvmType, cStringFree("match.expr.phi"))
+		llvmAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), llvmIRUnsigned(len(values)))
 		return phi, resultType, nil
 	}
 	storeBinding, err := s.resolvePackedMatchStoreBinding(enumType, expr.Value, expr.Store)
@@ -97,7 +89,7 @@ func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semant
 	if err != nil {
 		return nil, nil, err
 	}
-	var decodedMatchValue C.LLVMValueRef
+	var decodedMatchValue llvmIRValueRef
 	if enumType.Packed && packedMatchShouldEagerDecode(s.g.semanticReadView(), s.g.packedModeForEnum(enumType), enumType, expr.Value, storeBinding, expr.Arms) {
 		decodedMatchValue, err = s.decodePackedEnumHandleWithStore(enumValue, enumType, storeBinding)
 		if err != nil {
@@ -115,10 +107,10 @@ func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semant
 	if _, err := s.prepareNonPackedEnumMatchTemp(enumValue, enumType); err != nil {
 		return nil, nil, err
 	}
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.end"))
-	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.fail"))
-	incomingValues := make([]C.LLVMValueRef, 0, len(expr.Arms)+1)
-	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, len(expr.Arms)+1)
+	mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.end"))
+	failBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.fail"))
+	incomingValues := make([]llvmIRValueRef, 0, len(expr.Arms)+1)
+	incomingBlocks := make([]llvmIRBlockRef, 0, len(expr.Arms)+1)
 	valuePath, hasValuePath := s.packedEnumStoragePath(expr.Value)
 	valueIdent, hasValueIdent := expr.Value.(*ast.Ident)
 	exhaustive := s.matchIsExhaustive(enumType, expr.Arms)
@@ -133,13 +125,13 @@ func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semant
 				wildcardIndex = i
 			}
 		}
-		var wildcardBB C.LLVMBasicBlockRef
+		var wildcardBB llvmIRBlockRef
 		defaultBB := failBB
 		if wildcardIndex >= 0 {
-			wildcardBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.wildcard"))
+			wildcardBB = llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.wildcard"))
 			defaultBB = wildcardBB
 		}
-		switchInst := C.LLVMBuildSwitch(s.builder, matchTagValue, defaultBB, C.unsigned(variantArmCount))
+		switchInst := llvmBuildSwitch(s.builder, matchTagValue, defaultBB, llvmIRUnsigned(variantArmCount))
 		for _, arm := range expr.Arms {
 			pattern, ok := arm.Pattern.(*ast.MatchVariantPattern)
 			if !ok {
@@ -150,11 +142,11 @@ func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semant
 			if err != nil {
 				return nil, nil, err
 			}
-			dispatchBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.dispatch"))
-			bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.arm"))
-			C.LLVMAddCase(switchInst, tagConst, dispatchBB)
+			dispatchBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.dispatch"))
+			bodyBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.arm"))
+			llvmAddCase(switchInst, tagConst, dispatchBB)
 
-			C.LLVMPositionBuilderAtEnd(s.builder, dispatchBB)
+			llvmPositionBuilderAtEnd(s.builder, dispatchBB)
 			patternFailureBB := failBB
 			if wildcardBB != nil {
 				patternFailureBB = wildcardBB
@@ -164,7 +156,7 @@ func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semant
 				return nil, nil, err
 			}
 
-			C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
+			llvmPositionBuilderAtEnd(s.builder, bodyBB)
 			s.pushScope()
 			if hasValueIdent && enumType.Packed && armDecodedValue != nil {
 				s.bindPackedEnumStorage(valueIdent.Name, enumType, armDecodedValue)
@@ -182,18 +174,18 @@ func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semant
 				return nil, nil, err
 			}
 			if reachable && !s.currentBlockTerminated() {
-				armEnd := C.LLVMGetInsertBlock(s.builder)
+				armEnd := llvmGetInsertBlock(s.builder)
 				if err := recordIncoming(armValue, armEnd, &incomingValues, &incomingBlocks); err != nil {
 					s.popScope()
 					return nil, nil, err
 				}
-				C.LLVMBuildBr(s.builder, mergeBB)
+				llvmBuildBr(s.builder, mergeBB)
 			}
 			s.popScope()
 		}
 		if wildcardIndex >= 0 {
 			arm := expr.Arms[wildcardIndex]
-			C.LLVMPositionBuilderAtEnd(s.builder, wildcardBB)
+			llvmPositionBuilderAtEnd(s.builder, wildcardBB)
 			s.pushScope()
 			if hasValueIdent && enumType.Packed && decodedMatchValue != nil {
 				s.bindPackedEnumStorage(valueIdent.Name, enumType, decodedMatchValue)
@@ -211,52 +203,52 @@ func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semant
 				return nil, nil, err
 			}
 			if reachable && !s.currentBlockTerminated() {
-				armEnd := C.LLVMGetInsertBlock(s.builder)
+				armEnd := llvmGetInsertBlock(s.builder)
 				if err := recordIncoming(armValue, armEnd, &incomingValues, &incomingBlocks); err != nil {
 					s.popScope()
 					return nil, nil, err
 				}
-				C.LLVMBuildBr(s.builder, mergeBB)
+				llvmBuildBr(s.builder, mergeBB)
 			}
 			s.popScope()
 		}
 
-		C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+		llvmPositionBuilderAtEnd(s.builder, failBB)
 		if semantic.IsNeverType(resultType) || exhaustive {
-			C.LLVMBuildUnreachable(s.builder)
+			llvmBuildUnreachable(s.builder)
 		} else {
 			llvmType, err := s.g.lowerType(resultType)
 			if err != nil {
 				return nil, nil, err
 			}
-			undefValue := C.LLVMGetUndef(llvmType)
-			failEnd := C.LLVMGetInsertBlock(s.builder)
+			undefValue := llvmGetUndef(llvmType)
+			failEnd := llvmGetInsertBlock(s.builder)
 			incomingValues = append(incomingValues, undefValue)
 			incomingBlocks = append(incomingBlocks, failEnd)
-			C.LLVMBuildBr(s.builder, mergeBB)
+			llvmBuildBr(s.builder, mergeBB)
 		}
 
-		C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+		llvmPositionBuilderAtEnd(s.builder, mergeBB)
 		if len(incomingValues) == 0 {
-			C.LLVMBuildUnreachable(s.builder)
+			llvmBuildUnreachable(s.builder)
 			return nil, resultType, nil
 		}
 		return finishResult(incomingValues, incomingBlocks)
 	}
 	for i, arm := range expr.Arms {
-		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.arm"))
-		var nextBB C.LLVMBasicBlockRef
+		bodyBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.arm"))
+		var nextBB llvmIRBlockRef
 		if i == len(expr.Arms)-1 {
 			nextBB = failBB
 		} else {
-			nextBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.next"))
+			nextBB = llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.next"))
 		}
 		armDecodedValue, armPayloadValues, err := s.emitMatchPatternTest(arm.Pattern, enumValue, decodedMatchValue, enumType, storeBinding, expr.Value, matchTagValue, bodyBB, nextBB)
 		if err != nil {
 			return nil, nil, err
 		}
 
-		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
+		llvmPositionBuilderAtEnd(s.builder, bodyBB)
 		s.pushScope()
 		if hasValueIdent && enumType.Packed && armDecodedValue != nil {
 			s.bindPackedEnumStorage(valueIdent.Name, enumType, armDecodedValue)
@@ -278,43 +270,43 @@ func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semant
 			return nil, nil, err
 		}
 		if reachable && !s.currentBlockTerminated() {
-			armEnd := C.LLVMGetInsertBlock(s.builder)
+			armEnd := llvmGetInsertBlock(s.builder)
 			if err := recordIncoming(armValue, armEnd, &incomingValues, &incomingBlocks); err != nil {
 				s.popScope()
 				return nil, nil, err
 			}
-			C.LLVMBuildBr(s.builder, mergeBB)
+			llvmBuildBr(s.builder, mergeBB)
 		}
 		s.popScope()
 
 		if nextBB != mergeBB {
-			C.LLVMPositionBuilderAtEnd(s.builder, nextBB)
+			llvmPositionBuilderAtEnd(s.builder, nextBB)
 		}
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+	llvmPositionBuilderAtEnd(s.builder, failBB)
 	if semantic.IsNeverType(resultType) || exhaustive {
-		C.LLVMBuildUnreachable(s.builder)
+		llvmBuildUnreachable(s.builder)
 	} else {
 		llvmType, err := s.g.lowerType(resultType)
 		if err != nil {
 			return nil, nil, err
 		}
-		undefValue := C.LLVMGetUndef(llvmType)
-		failEnd := C.LLVMGetInsertBlock(s.builder)
+		undefValue := llvmGetUndef(llvmType)
+		failEnd := llvmGetInsertBlock(s.builder)
 		incomingValues = append(incomingValues, undefValue)
 		incomingBlocks = append(incomingBlocks, failEnd)
-		C.LLVMBuildBr(s.builder, mergeBB)
+		llvmBuildBr(s.builder, mergeBB)
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	llvmPositionBuilderAtEnd(s.builder, mergeBB)
 	if len(incomingValues) == 0 {
-		C.LLVMBuildUnreachable(s.builder)
+		llvmBuildUnreachable(s.builder)
 		return nil, resultType, nil
 	}
 	return finishResult(incomingValues, incomingBlocks)
 }
-func (s *functionState) emitConstEnumMatchExpr(expr *ast.MatchExpr, resultType semantic.Type, constEnumType *semantic.ConstEnumType) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitConstEnumMatchExpr(expr *ast.MatchExpr, resultType semantic.Type, constEnumType *semantic.ConstEnumType) (llvmIRValueRef, semantic.Type, error) {
 	if constEnumType == nil {
 		return nil, nil, fmt.Errorf("match requires a const enum value")
 	}
@@ -326,24 +318,24 @@ func (s *functionState) emitConstEnumMatchExpr(expr *ast.MatchExpr, resultType s
 	if err != nil {
 		return nil, nil, err
 	}
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.end"))
-	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.fail"))
-	incomingValues := make([]C.LLVMValueRef, 0, len(expr.Arms)+1)
-	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, len(expr.Arms)+1)
+	mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.end"))
+	failBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.fail"))
+	incomingValues := make([]llvmIRValueRef, 0, len(expr.Arms)+1)
+	incomingBlocks := make([]llvmIRBlockRef, 0, len(expr.Arms)+1)
 	exhaustive := constEnumMatchIsExhaustive(constEnumType, expr.Arms)
 	for i, arm := range expr.Arms {
-		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.arm"))
-		var nextBB C.LLVMBasicBlockRef
+		bodyBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.arm"))
+		var nextBB llvmIRBlockRef
 		if i == len(expr.Arms)-1 {
 			nextBB = failBB
 		} else {
-			nextBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.next"))
+			nextBB = llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.next"))
 		}
 		if _, _, err := s.emitMatchPatternTest(arm.Pattern, value, nil, actualType, nil, expr.Value, nil, bodyBB, nextBB); err != nil {
 			return nil, nil, err
 		}
 
-		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
+		llvmPositionBuilderAtEnd(s.builder, bodyBB)
 		s.pushScope()
 		if err := s.emitMatchArmGuard(arm.Guard, nextBB); err != nil {
 			s.popScope()
@@ -355,36 +347,36 @@ func (s *functionState) emitConstEnumMatchExpr(expr *ast.MatchExpr, resultType s
 			return nil, nil, err
 		}
 		if reachable && !s.currentBlockTerminated() {
-			armEnd := C.LLVMGetInsertBlock(s.builder)
+			armEnd := llvmGetInsertBlock(s.builder)
 			incomingValues = append(incomingValues, armValue)
 			incomingBlocks = append(incomingBlocks, armEnd)
-			C.LLVMBuildBr(s.builder, mergeBB)
+			llvmBuildBr(s.builder, mergeBB)
 		}
 		s.popScope()
 
 		if nextBB != mergeBB {
-			C.LLVMPositionBuilderAtEnd(s.builder, nextBB)
+			llvmPositionBuilderAtEnd(s.builder, nextBB)
 		}
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+	llvmPositionBuilderAtEnd(s.builder, failBB)
 	if exhaustive || semantic.IsNeverType(resultType) {
-		C.LLVMBuildUnreachable(s.builder)
+		llvmBuildUnreachable(s.builder)
 	} else {
 		llvmType, err := s.g.lowerType(resultType)
 		if err != nil {
 			return nil, nil, err
 		}
-		undefValue := C.LLVMGetUndef(llvmType)
-		failEnd := C.LLVMGetInsertBlock(s.builder)
+		undefValue := llvmGetUndef(llvmType)
+		failEnd := llvmGetInsertBlock(s.builder)
 		incomingValues = append(incomingValues, undefValue)
 		incomingBlocks = append(incomingBlocks, failEnd)
-		C.LLVMBuildBr(s.builder, mergeBB)
+		llvmBuildBr(s.builder, mergeBB)
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	llvmPositionBuilderAtEnd(s.builder, mergeBB)
 	if len(incomingValues) == 0 {
-		C.LLVMBuildUnreachable(s.builder)
+		llvmBuildUnreachable(s.builder)
 		return nil, resultType, nil
 	}
 	if len(incomingValues) == 1 || semantic.IsNeverType(resultType) {
@@ -394,11 +386,11 @@ func (s *functionState) emitConstEnumMatchExpr(expr *ast.MatchExpr, resultType s
 	if err != nil {
 		return nil, nil, err
 	}
-	phi := C.LLVMBuildPhi(s.builder, llvmType, cStringFree("match.expr.phi"))
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
+	phi := llvmBuildPhi(s.builder, llvmType, cStringFree("match.expr.phi"))
+	llvmAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), llvmIRUnsigned(len(incomingValues)))
 	return phi, resultType, nil
 }
-func (s *functionState) emitErrorSetMatchExpr(expr *ast.MatchExpr, resultType semantic.Type, errorSetType *semantic.ErrorSetType) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitErrorSetMatchExpr(expr *ast.MatchExpr, resultType semantic.Type, errorSetType *semantic.ErrorSetType) (llvmIRValueRef, semantic.Type, error) {
 	if errorSetType == nil {
 		return nil, nil, fmt.Errorf("match requires an error set value")
 	}
@@ -410,24 +402,24 @@ func (s *functionState) emitErrorSetMatchExpr(expr *ast.MatchExpr, resultType se
 	if err != nil {
 		return nil, nil, err
 	}
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.end"))
-	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.fail"))
-	incomingValues := make([]C.LLVMValueRef, 0, len(expr.Arms)+1)
-	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, len(expr.Arms)+1)
+	mergeBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.end"))
+	failBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.fail"))
+	incomingValues := make([]llvmIRValueRef, 0, len(expr.Arms)+1)
+	incomingBlocks := make([]llvmIRBlockRef, 0, len(expr.Arms)+1)
 	exhaustive := errorSetMatchIsExhaustive(errorSetType, expr.Arms)
 	for i, arm := range expr.Arms {
-		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.arm"))
-		var nextBB C.LLVMBasicBlockRef
+		bodyBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.arm"))
+		var nextBB llvmIRBlockRef
 		if i == len(expr.Arms)-1 {
 			nextBB = failBB
 		} else {
-			nextBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.next"))
+			nextBB = llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.next"))
 		}
 		if _, _, err := s.emitMatchPatternTest(arm.Pattern, value, nil, actualType, nil, expr.Value, nil, bodyBB, nextBB); err != nil {
 			return nil, nil, err
 		}
 
-		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
+		llvmPositionBuilderAtEnd(s.builder, bodyBB)
 		s.pushScope()
 		if err := s.emitMatchArmGuard(arm.Guard, nextBB); err != nil {
 			s.popScope()
@@ -439,36 +431,36 @@ func (s *functionState) emitErrorSetMatchExpr(expr *ast.MatchExpr, resultType se
 			return nil, nil, err
 		}
 		if reachable && !s.currentBlockTerminated() {
-			armEnd := C.LLVMGetInsertBlock(s.builder)
+			armEnd := llvmGetInsertBlock(s.builder)
 			incomingValues = append(incomingValues, armValue)
 			incomingBlocks = append(incomingBlocks, armEnd)
-			C.LLVMBuildBr(s.builder, mergeBB)
+			llvmBuildBr(s.builder, mergeBB)
 		}
 		s.popScope()
 
 		if nextBB != mergeBB {
-			C.LLVMPositionBuilderAtEnd(s.builder, nextBB)
+			llvmPositionBuilderAtEnd(s.builder, nextBB)
 		}
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+	llvmPositionBuilderAtEnd(s.builder, failBB)
 	if exhaustive || semantic.IsNeverType(resultType) {
-		C.LLVMBuildUnreachable(s.builder)
+		llvmBuildUnreachable(s.builder)
 	} else {
 		llvmType, err := s.g.lowerType(resultType)
 		if err != nil {
 			return nil, nil, err
 		}
-		undefValue := C.LLVMGetUndef(llvmType)
-		failEnd := C.LLVMGetInsertBlock(s.builder)
+		undefValue := llvmGetUndef(llvmType)
+		failEnd := llvmGetInsertBlock(s.builder)
 		incomingValues = append(incomingValues, undefValue)
 		incomingBlocks = append(incomingBlocks, failEnd)
-		C.LLVMBuildBr(s.builder, mergeBB)
+		llvmBuildBr(s.builder, mergeBB)
 	}
 
-	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	llvmPositionBuilderAtEnd(s.builder, mergeBB)
 	if len(incomingValues) == 0 {
-		C.LLVMBuildUnreachable(s.builder)
+		llvmBuildUnreachable(s.builder)
 		return nil, resultType, nil
 	}
 	if len(incomingValues) == 1 || semantic.IsNeverType(resultType) {
@@ -478,7 +470,7 @@ func (s *functionState) emitErrorSetMatchExpr(expr *ast.MatchExpr, resultType se
 	if err != nil {
 		return nil, nil, err
 	}
-	phi := C.LLVMBuildPhi(s.builder, llvmType, cStringFree("match.expr.phi"))
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
+	phi := llvmBuildPhi(s.builder, llvmType, cStringFree("match.expr.phi"))
+	llvmAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), llvmIRUnsigned(len(incomingValues)))
 	return phi, resultType, nil
 }
