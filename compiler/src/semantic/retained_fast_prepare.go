@@ -276,7 +276,7 @@ func (r *RetainedAnalysis) localFactDigest(a *Analyzer, live, fn *ast.FuncDecl, 
 		fmt.Fprintf(&b, "callees=%v;", names)
 		fmt.Fprintf(&b, "storeHost=%v;", a.bodyCallsStoreNeedingOutsideRegion(fn.Body, r.classify.storeNeeds, r.classify.regionBacked))
 		a.regionPolyFn = nil
-		fwd := collectRegionParamForwarding([]*ast.FuncDecl{fn}, tables.funcByName)[fn]
+		fwd := collectRegionParamForwarding([]*ast.FuncDecl{fn}, tables.funcByName, nil)[fn]
 		for _, p := range fn.Params {
 			fmt.Fprintf(&b, "p:%s=%v,%v,%v,%v,%v,%v,%v,%v,%v;", p.Name,
 				paramContainerIsGrownNeedingRegion(fn.Body, p.Name, tables.permRoots), paramContainerReassignedFromLiteral(fn.Body, p.Name),

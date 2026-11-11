@@ -5,24 +5,35 @@ import (
 )
 
 // collectRegionParamForwarding summarizes syntactic parameter-to-call forwarding once per
-// function. The inference fixpoint can revisit every function multiple times as callees gain
+// function, recording reverse dependencies in the same walk when requested. The inference fixpoint can revisit every function multiple times as callees gain
 // inferred region parameters, so reflect-walking the body in each pass made region-heavy inputs
 // scale with both AST size and fixpoint iterations.
-func collectRegionParamForwarding(cands []*ast.FuncDecl, funcByName map[string]*ast.FuncDecl) map[*ast.FuncDecl]regionParamForwarding {
+func collectRegionParamForwarding(cands []*ast.FuncDecl, funcByName map[string]*ast.FuncDecl, callers map[*ast.FuncDecl][]*ast.FuncDecl) map[*ast.FuncDecl]regionParamForwarding {
 	byFunc := make(map[*ast.FuncDecl]regionParamForwarding, len(cands))
 	for _, fn := range cands {
-		if fn == nil || len(fn.Body) == 0 || len(fn.Params) == 0 {
+		if fn == nil || len(fn.Body) == 0 || (len(fn.Params) == 0 && callers == nil) {
 			continue
 		}
-		forwarding := regionParamForwarding{
-			direct: map[string][]regionForwardTarget{},
-			fields: map[string][]regionForwardTarget{},
+		var forwarding regionParamForwarding
+		noteCaller := func(callee *ast.FuncDecl) {
+			if callers == nil || callee == nil {
+				return
+			}
+			previous := callers[callee]
+			if len(previous) == 0 || previous[len(previous)-1] != fn {
+				callers[callee] = append(previous, fn)
+			}
 		}
 		walkStoreScanNodes(fn.Body, func(node any) {
 			// The walker also reaches the call inside any parenthesized
 			// expression, so inspect its underlying node only once.
 			var expr ast.Expr
 			switch n := node.(type) {
+			case *ast.Ident:
+				if callers != nil {
+					noteCaller(funcByName[n.Name])
+				}
+				return
 			case *ast.CallExpr:
 				expr = n
 			case *ast.StructLitExpr:
@@ -33,6 +44,10 @@ func collectRegionParamForwarding(cands []*ast.FuncDecl, funcByName map[string]*
 			calleeName, args, isCall := ast.PrepassCallShape(expr)
 			callee := funcByName[calleeName]
 			if !isCall || callee == nil {
+				return
+			}
+			noteCaller(callee)
+			if len(fn.Params) == 0 {
 				return
 			}
 			for argPos, arg := range args {
@@ -54,13 +69,21 @@ func collectRegionParamForwarding(cands []*ast.FuncDecl, funcByName map[string]*
 				}
 				target := regionForwardTarget{callee: callee, argPos: argPos}
 				if isField {
+					if forwarding.fields == nil {
+						forwarding.fields = make(map[string][]regionForwardTarget)
+					}
 					forwarding.fields[name] = appendUniqueRegionForwardTarget(forwarding.fields[name], target)
 				} else {
+					if forwarding.direct == nil {
+						forwarding.direct = make(map[string][]regionForwardTarget)
+					}
 					forwarding.direct[name] = appendUniqueRegionForwardTarget(forwarding.direct[name], target)
 				}
 			}
 		})
-		byFunc[fn] = forwarding
+		if forwarding.direct != nil || forwarding.fields != nil {
+			byFunc[fn] = forwarding
+		}
 	}
 	return byFunc
 }

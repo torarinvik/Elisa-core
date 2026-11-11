@@ -127,7 +127,8 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 			a.prepareCollectionAppends(fn)
 		})
 	}
-	forwardingByFunc := collectRegionParamForwarding(cands, funcByName)
+	callers := make(map[*ast.FuncDecl][]*ast.FuncDecl)
+	forwardingByFunc := collectRegionParamForwarding(cands, funcByName, callers)
 	// These facts depend only on a function body and parameter name. Bodies stop
 	// changing after prepareCollectionAppends, while the worklist may revisit a
 	// function after a callee gains a region parameter.
@@ -137,7 +138,6 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 	// pass only the callers of a function that just changed can gain a param (a recursive
 	// function is its own caller). Each per-function pass is idempotent, so a function that
 	// changed is complete until a callee changes. Rescanning every candidate per round cost ~0.6 s each on the seed.
-	callers := regionInferenceCallers(cands, funcByName)
 	pending := cands
 	for len(pending) != 0 {
 		queued := map[*ast.FuncDecl]bool{}

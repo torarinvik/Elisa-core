@@ -463,32 +463,3 @@ func (a *Analyzer) paramStructHasExplicitBackingIn(scoped scopedDecl, fn *ast.Fu
 	})
 	return result
 }
-
-// regionInferenceCallers maps each candidate to the candidates whose bodies name it, through any
-// expression funcByName resolves: a call shape or a bare function reference.
-func regionInferenceCallers(cands []*ast.FuncDecl, funcByName map[string]*ast.FuncDecl) map[*ast.FuncDecl][]*ast.FuncDecl {
-	callers := map[*ast.FuncDecl][]*ast.FuncDecl{}
-	for _, fn := range cands {
-		if fn == nil || len(fn.Body) == 0 {
-			continue
-		}
-		seen := map[*ast.FuncDecl]bool{}
-		note := func(name string) {
-			if callee := funcByName[name]; callee != nil && !seen[callee] {
-				seen[callee] = true
-				callers[callee] = append(callers[callee], fn)
-			}
-		}
-		walkStoreScanNodes(fn.Body, func(node any) {
-			switch n := node.(type) {
-			case *ast.Ident:
-				note(n.Name)
-			case ast.Expr:
-				if name, _, ok := ast.PrepassCallShape(n); ok {
-					note(name)
-				}
-			}
-		})
-	}
-	return callers
-}
