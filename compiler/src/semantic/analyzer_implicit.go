@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -164,16 +165,15 @@ func sanitizeImplicitTempBase(name string) string {
 	if name == "" {
 		return "value"
 	}
-	runes := make([]rune, 0, len(name))
-	for _, r := range name {
+	first, _ := utf8.DecodeRuneInString(name)
+	base := strings.Map(func(r rune) rune {
 		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' {
-			runes = append(runes, r)
-			continue
+			return r
 		}
-		runes = append(runes, '_')
+		return '_'
+	}, name)
+	if unicode.IsDigit(first) {
+		return "v_" + base
 	}
-	if len(runes) == 0 || unicode.IsDigit(runes[0]) {
-		runes = append([]rune{'v', '_'}, runes...)
-	}
-	return string(runes)
+	return base
 }
