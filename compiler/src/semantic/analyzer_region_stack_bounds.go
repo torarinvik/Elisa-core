@@ -83,34 +83,39 @@ func identReducesTo(expr ast.Expr, name string) bool {
 
 // subtreeReferencesIdent reports whether any *ast.Ident named `name` appears anywhere in node.
 func subtreeReferencesIdent(node ast.Node, name string) bool {
-	found := false
-	var walk func(v reflect.Value)
-	walk = func(v reflect.Value) {
-		if found || !v.IsValid() || !v.CanInterface() {
-			return
+	return reflectSubtreeHasIdent(reflect.ValueOf(node), func(candidate string) bool { return candidate == name })
+}
+
+func reflectSubtreeHasIdent(value reflect.Value, matches func(string) bool) bool {
+	for value.Kind() == reflect.Interface {
+		value = value.Elem()
+	}
+	if !value.IsValid() || !value.CanInterface() {
+		return false
+	}
+	switch value.Kind() {
+	case reflect.Pointer:
+		if value.IsNil() {
+			return false
 		}
-		switch v.Kind() {
-		case reflect.Pointer, reflect.Interface:
-			if v.IsNil() {
-				return
+		if id, ok := value.Interface().(*ast.Ident); ok {
+			return matches(id.Name)
+		}
+		return reflectSubtreeHasIdent(value.Elem(), matches)
+	case reflect.Struct:
+		for _, index := range syntaxWalkFields(value.Type()) {
+			if reflectSubtreeHasIdent(value.Field(index), matches) {
+				return true
 			}
-			if id, ok := v.Interface().(*ast.Ident); ok && id.Name == name {
-				found = true
-				return
-			}
-			walk(v.Elem())
-		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
-				walk(v.Field(i))
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				walk(v.Index(i))
+		}
+	case reflect.Slice, reflect.Array:
+		for i := 0; i < value.Len(); i++ {
+			if reflectSubtreeHasIdent(value.Index(i), matches) {
+				return true
 			}
 		}
 	}
-	walk(reflect.ValueOf(node))
-	return found
+	return false
 }
 
 // collectInteriorRefNames returns the tracked container names that have an interior reference

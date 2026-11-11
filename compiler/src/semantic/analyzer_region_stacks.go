@@ -334,19 +334,16 @@ func earlyFreeableObject(topLevel []ast.Stmt, name string) (int, bool) {
 	// tuple holding such a view, a closure capturing it) may still point into its buffer: the
 	// object is live until the last use of ANY such derived local, not just its own last mention.
 	derived := earlyFreeDerivedNames(topLevel, name)
-	lastRef := -1
-	for i, stmt := range topLevel {
-		for n := range derived {
-			if subtreeReferencesIdent(stmt, n) {
-				lastRef = i
-				break
+	mentions := func(name string) bool { return derived[name] }
+	for i := len(topLevel) - 1; i >= 0; i-- {
+		if reflectSubtreeHasIdent(reflect.ValueOf(topLevel[i]), mentions) {
+			if i == len(topLevel)-1 {
+				break // Still live at region exit.
 			}
+			return topLevel[i].Pos().Offset, true
 		}
 	}
-	if lastRef < 0 || lastRef >= len(topLevel)-1 {
-		return 0, false // unused, or still live in the final statement (dies at region exit)
-	}
-	return topLevel[lastRef].Pos().Offset, true
+	return 0, false
 }
 
 // earlyFreeDerivedNames returns name plus every local (transitively) bound or assigned from a value
@@ -354,17 +351,8 @@ func earlyFreeableObject(topLevel []ast.Stmt, name string) (int, bool) {
 // only delays the early free, while a missed borrow (`v = buf.as_sview()`) frees a live buffer.
 func earlyFreeDerivedNames(body []ast.Stmt, name string) map[string]bool {
 	derived := map[string]bool{name: true}
-	mentions := func(v reflect.Value) bool {
-		if !v.IsValid() {
-			return false
-		}
-		for n := range derived {
-			if reflectSubtreeReferencesIdent(v, n) {
-				return true
-			}
-		}
-		return false
-	}
+	matches := func(name string) bool { return derived[name] }
+	mentions := func(v reflect.Value) bool { return reflectSubtreeHasIdent(v, matches) }
 	for changed := true; changed; {
 		changed = false
 		var walk func(v reflect.Value)
@@ -484,36 +472,4 @@ func earlyFreeBoundNames(v reflect.Value) []string {
 	}
 	walk(v, "Name")
 	return out
-}
-
-// reflectSubtreeReferencesIdent is subtreeReferencesIdent over an arbitrary reflected value.
-func reflectSubtreeReferencesIdent(root reflect.Value, name string) bool {
-	found := false
-	var walk func(v reflect.Value)
-	walk = func(v reflect.Value) {
-		if found || !v.IsValid() || !v.CanInterface() {
-			return
-		}
-		switch v.Kind() {
-		case reflect.Pointer, reflect.Interface:
-			if v.IsNil() {
-				return
-			}
-			if id, ok := v.Interface().(*ast.Ident); ok && id.Name == name {
-				found = true
-				return
-			}
-			walk(v.Elem())
-		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
-				walk(v.Field(i))
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				walk(v.Index(i))
-			}
-		}
-	}
-	walk(root)
-	return found
 }
