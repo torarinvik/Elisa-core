@@ -3,6 +3,7 @@ package statecache
 import (
 	"encoding/binary"
 	"runtime"
+	"slices"
 	"sync"
 	"sync/atomic"
 )
@@ -49,7 +50,7 @@ func (e *encoder) writeFramedBodies(framing int) error {
 	// disjoint range of these slots, and e.data is not otherwise modified until
 	// all workers finish, so write body lengths there directly instead of making
 	// and later copying a second per-object size array.
-	bodySizes := e.data.Bytes()[framing+8 : framing+8*(count+1)]
+	bodySizes := e.data[framing+8 : framing+8*(count+1)]
 	interner := &stringInterner{}
 	var next atomic.Int64
 	var failed atomic.Bool
@@ -67,9 +68,9 @@ func (e *encoder) writeFramedBodies(framing int) error {
 				if k >= chunks {
 					return
 				}
-				worker.data.Reset()
+				worker.data = worker.data[:0]
 				for i := k * framedEncodeChunk; i < min((k+1)*framedEncodeChunk, count); i++ {
-					before := worker.data.Len()
+					before := len(worker.data)
 					node := e.nodes.at(i)
 					if node.alias == nil {
 						if err := worker.body(node.value); err != nil {
@@ -78,9 +79,9 @@ func (e *encoder) writeFramedBodies(framing int) error {
 							return
 						}
 					}
-					binary.LittleEndian.PutUint64(bodySizes[8*i:], uint64(worker.data.Len()-before))
+					binary.LittleEndian.PutUint64(bodySizes[8*i:], uint64(len(worker.data)-before))
 				}
-				buffers[k] = append([]byte(nil), worker.data.Bytes()...)
+				buffers[k] = append([]byte(nil), worker.data...)
 			}
 		}()
 	}
@@ -92,9 +93,9 @@ func (e *encoder) writeFramedBodies(framing int) error {
 	for _, b := range buffers {
 		total += len(b)
 	}
-	e.data.Grow(total)
+	e.data = slices.Grow(e.data, total)
 	for _, b := range buffers {
-		e.data.Write(b)
+		e.data = append(e.data, b...)
 	}
 	// The root and later strings continue the shared dictionary.
 	e.interner = interner

@@ -1,12 +1,12 @@
 package statecache
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"math"
 	"reflect"
+	"slices"
 )
 
 type identity struct {
@@ -57,7 +57,7 @@ func (index *pointerObjectIndex) add(address uintptr, typ reflect.Type, id uint6
 
 type encoder struct {
 	registry        *Registry
-	data            bytes.Buffer
+	data            []byte
 	objects         map[identity]uint64
 	pointerObjects  pointerObjectIndex
 	depth           int
@@ -123,15 +123,15 @@ func (r *Registry) encode(root any, framed bool, capacity int) ([]byte, error) {
 		return nil, err
 	}
 	if capacity > 0 {
-		e.data.Grow(capacity)
+		e.data = make([]byte, 0, capacity)
 	}
 	e.scanning = false
 	if framed {
-		e.data.WriteString("ELISTATE4")
+		e.data = append(e.data, "ELISTATE4"...)
 	} else {
-		e.data.WriteString("ELISTATE3")
+		e.data = append(e.data, "ELISTATE3"...)
 	}
-	e.data.Write(r.fingerprint[:])
+	e.data = append(e.data, r.fingerprint[:]...)
 	e.uint(r.ids[v.Type()])
 	e.uint(uint64(e.nodes.count))
 	for i := 0; i < e.nodes.count; i++ {
@@ -140,15 +140,14 @@ func (r *Registry) encode(root any, framed bool, capacity int) ([]byte, error) {
 			return nil, err
 		}
 	}
-	framing := e.data.Len()
+	framing := len(e.data)
 	if framed {
 		// Reserve the frame table in the output buffer rather than allocating
 		// and copying a second, potentially large, zero-filled byte slice.
 		size := 8 * (e.nodes.count + 2)
-		e.data.Grow(size)
-		padding := e.data.AvailableBuffer()[:size]
-		clear(padding)
-		e.data.Write(padding)
+		e.data = slices.Grow(e.data, size)
+		e.data = e.data[:framing+size]
+		clear(e.data[framing:])
 	}
 	if framed && r.parallelDecode && e.nodes.count >= parallelFramedEncodeMin {
 		if err := e.writeFramedBodies(framing); err != nil {
@@ -156,7 +155,7 @@ func (r *Registry) encode(root any, framed bool, capacity int) ([]byte, error) {
 		}
 	} else {
 		for i := 0; i < e.nodes.count; i++ {
-			before := e.data.Len()
+			before := len(e.data)
 			node := e.nodes.at(i)
 			if node.alias == nil {
 				if err := e.body(node.value); err != nil {
@@ -164,17 +163,17 @@ func (r *Registry) encode(root any, framed bool, capacity int) ([]byte, error) {
 				}
 			}
 			if framed {
-				binary.LittleEndian.PutUint64(e.data.Bytes()[framing+8*(i+1):], uint64(e.data.Len()-before))
+				binary.LittleEndian.PutUint64(e.data[framing+8*(i+1):], uint64(len(e.data)-before))
 			}
 		}
 	}
-	before := e.data.Len()
+	before := len(e.data)
 	if err := e.value(v); err != nil {
 		return nil, err
 	}
 	if framed {
-		binary.LittleEndian.PutUint64(e.data.Bytes()[framing+8*(e.nodes.count+1):], uint64(e.data.Len()-before))
-		binary.LittleEndian.PutUint64(e.data.Bytes()[framing:], uint64(e.data.Len()))
+		binary.LittleEndian.PutUint64(e.data[framing+8*(e.nodes.count+1):], uint64(len(e.data)-before))
+		binary.LittleEndian.PutUint64(e.data[framing:], uint64(len(e.data)))
 		table := e.stringTable
 		if e.interner != nil {
 			table = e.interner.table
@@ -182,20 +181,18 @@ func (r *Registry) encode(root any, framed bool, capacity int) ([]byte, error) {
 		e.uint(uint64(len(table)))
 		for _, value := range table {
 			e.uint(uint64(len(value)))
-			e.data.WriteString(value)
+			e.data = append(e.data, value...)
 		}
 	}
-	digest := sha256.Sum256(e.data.Bytes())
-	e.data.Write(digest[:])
-	return e.data.Bytes(), nil
+	digest := sha256.Sum256(e.data)
+	e.data = append(e.data, digest[:]...)
+	return e.data, nil
 }
 func (e *encoder) uint(v uint64) {
 	if e.scanning {
 		return
 	}
-	var b [10]byte
-	n := binary.PutUvarint(b[:], v)
-	e.data.Write(b[:n])
+	e.data = binary.AppendUvarint(e.data, v)
 }
 func (e *encoder) str(v string) {
 	if e.scanning {
@@ -232,7 +229,7 @@ func (e *encoder) str(v string) {
 	}
 	e.strings[v] = uint64(len(e.strings) + 1)
 	e.uint(uint64(len(v))<<1 | 1)
-	e.data.WriteString(v)
+	e.data = append(e.data, v...)
 }
 func (e *encoder) value(v reflect.Value) error {
 	e.depth++
@@ -400,7 +397,7 @@ func (e *encoder) body(v reflect.Value) error {
 		}
 		if v.Type().Elem().Kind() == reflect.Uint8 {
 			if !e.scanning {
-				e.data.Write(full.Bytes())
+				e.data = append(e.data, full.Bytes()...)
 			}
 			return nil
 		}
