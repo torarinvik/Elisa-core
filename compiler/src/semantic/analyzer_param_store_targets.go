@@ -34,11 +34,9 @@ func (a *Analyzer) computeParamStoreTargets(funcs []*ast.FuncDecl) map[*ast.Func
 			continue
 		}
 		params := a.readOnlyExpandedFuncDeclParams(fn)
-		targets := make([]map[int]bool, len(params))
-		for i := range targets {
-			targets[i] = map[int]bool{}
-		}
-		out[fn] = targets
+		// Empty target sets have no edges to store. Materialize them on the
+		// first write while preserving the expanded parameter positions.
+		out[fn] = make([]map[int]bool, len(params))
 		// Every emitted relationship passes markTarget's source-storage gate.
 		// Scalar-only signatures keep their empty summaries without building a
 		// parameter-name index or scheduling a body scan.
@@ -99,7 +97,11 @@ func (a *Analyzer) computeParamStoreTargets(funcs []*ast.FuncDecl) map[*ast.Func
 			if !typeCarriesRegionStorage(a.paramStorageType(fn, si)) {
 				return
 			}
-			out[fn][si][ti] = true
+			targets := out[fn]
+			if targets[si] == nil {
+				targets[si] = make(map[int]bool)
+			}
+			targets[si][ti] = true
 			changed = true
 		}
 		add := func(srcName, tgtName string) {

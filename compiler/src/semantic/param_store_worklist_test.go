@@ -3,10 +3,17 @@ package semantic
 import (
 	"elisacore/src/ast"
 	"fmt"
+	"maps"
 	"math/rand"
-	"reflect"
+	"slices"
 	"testing"
 )
+
+func equalParamStoreTargetSummaries(left, right map[*ast.FuncDecl][]map[int]bool) bool {
+	return maps.EqualFunc(left, right, func(a, b []map[int]bool) bool {
+		return slices.EqualFunc(a, b, maps.Equal[map[int]bool, map[int]bool])
+	})
+}
 
 func BenchmarkParamStoreTargetsChain(b *testing.B) {
 	for _, n := range []int{16, 64, 256} {
@@ -67,7 +74,7 @@ func TestParamStoreTargetsWorklistParity(t *testing.T) {
 		rng.Shuffle(len(funcs), func(i, j int) { funcs[i], funcs[j] = funcs[j], funcs[i] })
 		want := a.computeParamStoreTargetsFixedPoint(funcs)
 		got := a.computeParamStoreTargets(funcs)
-		if !reflect.DeepEqual(got, want) {
+		if !equalParamStoreTargetSummaries(got, want) {
 			t.Fatalf("round%d: worklist summaries differ", round)
 		}
 	}
@@ -115,7 +122,7 @@ func TestParamStoreTargetsWorklistMatrixParity(t *testing.T) {
 				sequence = append(sequence, nil, funcs[0], funcs[n-1], funcs[0])
 			}
 			got := a.computeParamStoreTargets(sequence)
-			if !reflect.DeepEqual(got, want) {
+			if !equalParamStoreTargetSummaries(got, want) {
 				t.Fatalf("round%d order%d full matrix differs", round, order)
 			}
 		}
