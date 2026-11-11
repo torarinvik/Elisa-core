@@ -314,7 +314,15 @@ func (b *AnalysisBuild) MarshalStateWithCapacity(capacity int) ([]byte, error) {
 	// it before releasing the retained-analysis lock, including on error.
 	pristine := r.pristine
 	r.pristine = nil
-	defer func() { r.pristine = pristine }()
+	// Store-scan indexes are derived from declaration syntax. Rebuild them
+	// on demand after restore instead of saving the index for every body
+	// visited so far. Preserve the live indexes for an in-process advance.
+	storeScanIndexes := a.storeScanIndexCache
+	a.storeScanIndexCache = nil
+	defer func() {
+		r.pristine = pristine
+		a.storeScanIndexCache = storeScanIndexes
+	}()
 	return semanticStateRegistry().EncodeFramedWithCapacity(b, capacity)
 }
 

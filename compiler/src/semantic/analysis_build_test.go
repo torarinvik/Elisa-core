@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"elisacore/src/ast"
 )
 
 func TestAnalysisBuildRoundTripAndFinish(t *testing.T) {
@@ -109,6 +111,42 @@ def caller() -> i64:
 			t.Fatal("fixture never stopped between declarations")
 		}
 	}
+}
+
+func TestAnalysisBuildReconstructsStoreScanIndex(t *testing.T) {
+	const source = `def caller(x: i64) -> i64:
+    local: i64 = x + 1
+    return local
+`
+	b, err := BeginAnalysisBuild(retainedParse(t, source), retainedParse(t, source), []byte(source), AnalyzeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decl := b.retained.decls[0].Decl.(*ast.FuncDecl)
+	index := b.retained.a.storeScanIndex(decl)
+	data, err := b.MarshalState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.retained.a.storeScanIndexCache[decl] != index {
+		t.Fatal("checkpoint changed the live index")
+	}
+	restored, err := RestoreAnalysisBuild(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(restored.retained.a.storeScanIndexCache) != 0 {
+		t.Fatal("checkpoint stored a reconstructible index")
+	}
+	restoredDecl := restored.retained.decls[0].Decl.(*ast.FuncDecl)
+	if rebuilt := restored.retained.a.storeScanIndex(restoredDecl); len(rebuilt.flat) != len(index.flat) {
+		t.Fatal("rebuilt index has a different number of nodes")
+	}
+	result, _, err := restored.Advance(0, 0)
+	if err != nil || result == nil {
+		t.Fatalf("could not finish restored analysis: %v", err)
+	}
+	assertIncrementalResultParity(t, AnalyzeWithOptions(retainedParse(t, source), AnalyzeOptions{}), result)
 }
 
 func TestAnalysisBuildRejectsActiveJournal(t *testing.T) {
