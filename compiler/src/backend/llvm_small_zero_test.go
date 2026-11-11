@@ -44,8 +44,9 @@ func TestSmallZeroFillsPreserveFallbackAndAreIdempotent(t *testing.T) {
 }
 func TestSmallZeroFillsDeclineUnsupportedOperations(t *testing.T) {
 	cases := map[string]string{
-		"volatile":       strings.Replace(smallZeroIR, "i1 false)", "i1 true)", 1),
-		"nonzero":        strings.Replace(smallZeroIR, "i8 0,", "i8 7,", 1),
+		"volatile": strings.Replace(smallZeroIR, "i1 false)", "i1 true)", 1),
+		"sanitized": strings.Replace(strings.Replace(smallZeroIR, "i8 0,", "i8 7,", 1),
+			"i64 %n) {", "i64 %n) sanitize_address {", 1),
 		"constant":       strings.Replace(smallZeroIR, "i64 %n, i1", "i64 32, i1", 1),
 		"other target":   strings.Replace(smallZeroIR, "aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu", 1),
 		"size optimized": strings.Replace(smallZeroIR, "i64 %n) {", "i64 %n) optsize {", 1),
@@ -77,25 +78,29 @@ func TestSmallZeroFillsNativeBoundaries(t *testing.T) {
 	if err != nil {
 		t.Skip("clang unavailable")
 	}
-	g, err := parseLLVMIRForSplitHalfTest(smallZeroIR)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer g.dispose()
-	if n := expandSmallZeroFills(g.module); n != 1 {
-		t.Fatalf("expanded %d fills", n)
-	}
-	dir := t.TempDir()
-	obj := filepath.Join(dir, "fill.o")
-	bin := filepath.Join(dir, "check")
-	if err := g.writeObjectFile(obj, OptimizationLevel0); err != nil {
-		t.Fatal(err)
-	}
-	if out, err := exec.Command(clang, "-O2", filepath.Join("testdata", "small_zero_bounds.c"), obj, "-o", bin).CombinedOutput(); err != nil {
-		t.Fatalf("link: %v\n%s", err, out)
-	}
-	if out, err := exec.Command(bin).CombinedOutput(); err != nil {
-		t.Fatalf("boundaries: %v\n%s", err, out)
+	for _, fill := range []string{"0", "42", "255"} {
+		t.Run(fill, func(t *testing.T) {
+			g, err := parseLLVMIRForSplitHalfTest(strings.Replace(smallZeroIR, "i8 0,", "i8 "+fill+",", 1))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer g.dispose()
+			if n := expandSmallZeroFills(g.module); n != 1 {
+				t.Fatalf("expanded %d fills", n)
+			}
+			dir := t.TempDir()
+			obj := filepath.Join(dir, "fill.o")
+			bin := filepath.Join(dir, "check")
+			if err := g.writeObjectFile(obj, OptimizationLevel0); err != nil {
+				t.Fatal(err)
+			}
+			if out, err := exec.Command(clang, "-O2", "-DFILL_BYTE="+fill, filepath.Join("testdata", "small_zero_bounds.c"), obj, "-o", bin).CombinedOutput(); err != nil {
+				t.Fatalf("link: %v\n%s", err, out)
+			}
+			if out, err := exec.Command(bin).CombinedOutput(); err != nil {
+				t.Fatalf("boundaries: %v\n%s", err, out)
+			}
+		})
 	}
 }
 

@@ -1,5 +1,5 @@
 //go:build cgo
-// Expand small dynamic zero fills without accessing bytes outside their range.
+// Expand small dynamic constant-byte fills without writing outside their range.
 #include <llvm-c/Core.h>
 #include <llvm/Config/llvm-config.h>
 #include <llvm/Analysis/CFG.h>
@@ -257,6 +257,7 @@ extern "C" unsigned elisacoreExpandSmallZeroFills(LLVMModuleRef ref) {
     }
   }
   SmallVector<MemSetInst *, 16> work;
+  SmallVector<MemSetInst *, 17> nonzeroFills;
   for (Function &F : M) {
     if (F.hasOptNone() || F.hasOptSize() || F.hasMinSize()) continue;
     for (BasicBlock &B : F) for (Instruction &I : B) {
@@ -264,25 +265,45 @@ extern "C" unsigned elisacoreExpandSmallZeroFills(LLVMModuleRef ref) {
       if (S && !S->hasOperandBundles() && !S->getMetadata("elisa.smallzero.fallback") && !S->isVolatile() && S->getDestAddressSpace() == 0 &&
           S->getLength()->getType()->isIntegerTy(64) && !isa<ConstantInt>(S->getLength())) {
         auto *V = dyn_cast<ConstantInt>(S->getValue());
-        if (V && V->isZero()) work.push_back(S);
+        if (!V) continue;
+        if (!V->isZero()) {
+          // Each inline expansion adds several branches. Bound code growth
+          // for the additional nonzero-fill sites.
+          if (nonzeroFills.size() <= 16 &&
+              !S->getMetadata(LLVMContext::MD_nontemporal) &&
+              !F.hasFnAttribute(Attribute::SanitizeAddress) &&
+              !F.hasFnAttribute(Attribute::SanitizeHWAddress) &&
+              !F.hasFnAttribute(Attribute::SanitizeMemory) &&
+              !F.hasFnAttribute(Attribute::SanitizeThread))
+            nonzeroFills.push_back(S);
+        } else {
+          work.push_back(S);
+        }
       }
     }
   }
+  if (nonzeroFills.size() <= 16) work.append(nonzeroFills);
   if (work.empty()) return fixedChanged;
   SMDiagnostic error;
   // The assembly parser needs local names to resolve the helper's operands.
   // Native object contexts discard names; restore that policy immediately.
   bool discardNames = M.getContext().shouldDiscardValueNames();
   M.getContext().setDiscardValueNames(false);
-  auto helper = parseAssemblyString(R"ELISA(define void @__elisacore_smallzero_fill(ptr %p, i64 %n) alwaysinline {
+  auto helper = parseAssemblyString(R"ELISA(define void @__elisacore_smallzero_fill(ptr %p, i64 %n, i64 %pattern) alwaysinline {
 entry:
+ %byte = trunc i64 %pattern to i8
+ %word = trunc i64 %pattern to i16
+ %dword = trunc i64 %pattern to i32
+ %half = zext i64 %pattern to i128
+ %high = shl i128 %half, 64
+ %vector = or i128 %high, %half
  %empty = icmp eq i64 %n, 0
  br i1 %empty, label %exit, label %choose
 choose:
  %small = icmp ule i64 %n, 64
  br i1 %small, label %size8, label %large
 large:
- call void @llvm.memset.p0.i64(ptr %p, i8 0, i64 %n, i1 false), !elisa.smallzero.fallback !0
+ call void @llvm.memset.p0.i64(ptr %p, i8 %byte, i64 %n, i1 false), !elisa.smallzero.fallback !0
  br label %exit
 size8:
  %eight = icmp uge i64 %n, 8
@@ -293,8 +314,8 @@ size16:
 fill8:
  %off8 = sub i64 %n, 8
  %end8 = getelementptr i8, ptr %p, i64 %off8
- store i64 0, ptr %p, align 1
- store i64 0, ptr %end8, align 1
+ store i64 %pattern, ptr %p, align 1
+ store i64 %pattern, ptr %end8, align 1
  br label %exit
 size32:
  %big = icmp ugt i64 %n, 32
@@ -302,8 +323,8 @@ size32:
 fill16:
  %off16 = sub i64 %n, 16
  %end16 = getelementptr i8, ptr %p, i64 %off16
- store i128 0, ptr %p, align 1
- store i128 0, ptr %end16, align 1
+ store i128 %vector, ptr %p, align 1
+ store i128 %vector, ptr %end16, align 1
  br label %exit
 fill64:
  %p16 = getelementptr i8, ptr %p, i64 16
@@ -311,10 +332,10 @@ fill64:
  %end32 = getelementptr i8, ptr %p, i64 %off32
  %offlast = sub i64 %n, 16
  %last = getelementptr i8, ptr %p, i64 %offlast
- store i128 0, ptr %p, align 1
- store i128 0, ptr %p16, align 1
- store i128 0, ptr %end32, align 1
- store i128 0, ptr %last, align 1
+ store i128 %vector, ptr %p, align 1
+ store i128 %vector, ptr %p16, align 1
+ store i128 %vector, ptr %end32, align 1
+ store i128 %vector, ptr %last, align 1
  br label %exit
 size4:
  %four = icmp uge i64 %n, 4
@@ -322,8 +343,8 @@ size4:
 fill4:
  %off4 = sub i64 %n, 4
  %end4 = getelementptr i8, ptr %p, i64 %off4
- store i32 0, ptr %p, align 1
- store i32 0, ptr %end4, align 1
+ store i32 %dword, ptr %p, align 1
+ store i32 %dword, ptr %end4, align 1
  br label %exit
 size2:
  %two = icmp uge i64 %n, 2
@@ -331,11 +352,11 @@ size2:
 fill2:
  %off2 = sub i64 %n, 2
  %end2 = getelementptr i8, ptr %p, i64 %off2
- store i16 0, ptr %p, align 1
- store i16 0, ptr %end2, align 1
+ store i16 %word, ptr %p, align 1
+ store i16 %word, ptr %end2, align 1
  br label %exit
 fill1:
- store i8 0, ptr %p, align 1
+ store i8 %byte, ptr %p, align 1
  br label %exit
 exit:
  ret void
@@ -355,7 +376,9 @@ declare void @llvm.memset.p0.i64(ptr, i8, i64, i1 immarg)
   unsigned changed = 0;
   for (MemSetInst *S : work) {
     IRBuilder<> builder(S);
-    auto *call = builder.CreateCall(F, {S->getDest(), S->getLength()});
+    uint64_t byte = cast<ConstantInt>(S->getValue())->getZExtValue();
+    Value *pattern = builder.getInt64(byte * 0x0101010101010101ULL);
+    auto *call = builder.CreateCall(F, {S->getDest(), S->getLength(), pattern});
     call->setDebugLoc(S->getDebugLoc());
     InlineFunctionInfo info;
     if (InlineFunction(*call, info).isSuccess()) {
