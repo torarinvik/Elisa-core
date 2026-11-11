@@ -197,11 +197,12 @@ func buildCacheEnvKey() []string {
 	return entries
 }
 
-// compilerCacheEnvKey excludes settings consumed only by the Stage1 wrapper.
+// compilerCacheEnvKey excludes settings consumed only by compiler wrappers.
 // Test-result caching deliberately keeps them: executed programs may read their
 // environment even when the compiler itself does not.
 func compilerCacheEnvKey() []string {
 	ignored := map[string]bool{
+		"ELISA_REBUILD_SUPERVISED":     true,
 		"ELISA_STAGE1_SEED_MAX_RSS_KB": true, "ELISA_STAGE1_SEED_OPT_LEVEL": true,
 		"ELISA_STAGE1_RSS_POLL_SECONDS": true, "ELISA_STAGE1_SEED_TIMEOUT_WRAPPED": true,
 		"ELISA_STAGE1_SEED_BOOTSTRAP_BIN": true, "ELISA_STAGE1_SEED_BOOTSTRAP_KIND": true,

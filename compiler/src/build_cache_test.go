@@ -235,7 +235,7 @@ func TestBuildObjectCacheIgnoresSeedWrapperSettings(t *testing.T) {
 	if stderr := emitObjForCacheTest(t, src, out1); !strings.Contains(stderr, "build-object miss-store") {
 		t.Fatalf("initial miss: %s", stderr)
 	}
-	for _, name := range []string{"ELISA_STAGE1_SEED_MAX_RSS_KB", "ELISA_STAGE1_RSS_POLL_SECONDS", "ELISA_STAGE1_SEED_TIMEOUT_WRAPPED", "ELISA_STAGE1_SEED_OPT_LEVEL", "ELISA_STAGE1_SEED_BOOTSTRAP_BIN", "ELISA_STAGE1_SEED_BOOTSTRAP_KIND", "ELISA_STAGE1_SEED_CLANG", "ELISA_STAGE0_SOURCE_ROOT", "ELISA_STAGE1_BIN", "ELISA_STAGE1_OBJECT", "ELISA_RUNTIME_OBJ"} {
+	for _, name := range []string{"ELISA_REBUILD_SUPERVISED", "ELISA_STAGE1_SEED_MAX_RSS_KB", "ELISA_STAGE1_RSS_POLL_SECONDS", "ELISA_STAGE1_SEED_TIMEOUT_WRAPPED", "ELISA_STAGE1_SEED_OPT_LEVEL", "ELISA_STAGE1_SEED_BOOTSTRAP_BIN", "ELISA_STAGE1_SEED_BOOTSTRAP_KIND", "ELISA_STAGE1_SEED_CLANG", "ELISA_STAGE0_SOURCE_ROOT", "ELISA_STAGE1_BIN", "ELISA_STAGE1_OBJECT", "ELISA_RUNTIME_OBJ"} {
 		t.Setenv(name, "changed-wrapper-setting")
 	}
 	if !strings.Contains(strings.Join(buildCacheEnvKey(), "\n"), "ELISA_STAGE1_SEED_MAX_RSS_KB=changed-wrapper-setting") {
