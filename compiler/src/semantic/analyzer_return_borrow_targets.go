@@ -1,9 +1,11 @@
 package semantic
 
 import (
+	"reflect"
+	"sync"
+
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
-	"reflect"
 )
 
 // returnBorrowMayTarget reports whether a value of type holder may hold a borrow into storage of
@@ -53,31 +55,63 @@ func (a *Analyzer) computeReturnBorrowMayTarget(holder Type, referent Type) bool
 	return a.computeReturnBorrowTargetsReach(holder, referent, true)
 }
 
+// Target and component walks are sequential. Reuse their cycle guard and
+// result storage across queries, clearing references before returning scratch.
+type returnBorrowTargetScratch struct {
+	seen         map[Type]bool
+	targets      []Type
+	components   []Type
+	componentIDs []canonicalTypeIDResult
+}
+
+var returnBorrowTargetScratchPool = sync.Pool{New: func() any {
+	return &returnBorrowTargetScratch{seen: make(map[Type]bool, 32)}
+}}
+
+var returnBorrowByteTargets = [...]BuiltinType{{Name: "u8"}, {Name: "i8"}}
+
 func (a *Analyzer) computeReturnBorrowTargetsReach(holder Type, referent Type, inlineOnly bool) bool {
-	targets, opaque := []Type{}, false
-	a.collectReturnBorrowTargets(holder, &targets, &opaque, map[Type]bool{})
+	scratch := returnBorrowTargetScratchPool.Get().(*returnBorrowTargetScratch)
+	defer func() {
+		if len(scratch.seen) > 4096 || cap(scratch.targets) > 4096 || cap(scratch.components) > 4096 {
+			return
+		}
+		clear(scratch.seen)
+		clear(scratch.targets)
+		clear(scratch.components)
+		clear(scratch.componentIDs)
+		scratch.targets = scratch.targets[:0]
+		scratch.components = scratch.components[:0]
+		scratch.componentIDs = scratch.componentIDs[:0]
+		returnBorrowTargetScratchPool.Put(scratch)
+	}()
+	opaque := false
+	a.collectReturnBorrowTargets(holder, &scratch.targets, &opaque, scratch.seen)
 	if opaque {
 		return true
 	}
 	// A holder with no reference or view inside can hold no borrow of anything.
-	if len(targets) == 0 {
+	if len(scratch.targets) == 0 {
 		return false
 	}
-	components, opaque := []Type{}, false
-	collectReturnBorrowComponents(referent, inlineOnly, &components, &opaque, map[Type]bool{})
+	if len(scratch.seen) > 4096 {
+		scratch.seen = make(map[Type]bool, 32)
+	} else {
+		clear(scratch.seen)
+	}
+	collectReturnBorrowComponents(referent, inlineOnly, &scratch.components, &opaque, scratch.seen)
 	if opaque {
 		return true
 	}
-	// SameType keys both sides by canonical type ID; computing each side's ID once instead of once
-	// per pair removed ~9% of the compiler's CPU (the key is a string walk of the whole type).
-	componentIDs := make([]canonicalTypeIDResult, len(components))
-	for index, component := range components {
-		componentIDs[index] = tryCanonicalTypeIDResult(component)
+	// Computing each side's canonical ID once avoids repeating the type walk
+	// for every target/component pair.
+	for _, component := range scratch.components {
+		scratch.componentIDs = append(scratch.componentIDs, tryCanonicalTypeIDResult(component))
 	}
-	for _, target := range targets {
+	for _, target := range scratch.targets {
 		targetID := tryCanonicalTypeIDResult(target)
-		for index, component := range components {
-			if sameTypeWithCanonicalIDs(target, targetID, component, componentIDs[index]) {
+		for index, component := range scratch.components {
+			if sameTypeWithCanonicalIDs(target, targetID, component, scratch.componentIDs[index]) {
 				return true
 			}
 		}
@@ -115,7 +149,7 @@ func (a *Analyzer) collectReturnBorrowTargets(t Type, out *[]Type, opaque *bool,
 		*out = append(*out, tt.Elem)
 		a.collectReturnBorrowTargets(tt.Elem, out, opaque, seen)
 	case *SViewType, *CStrType:
-		*out = append(*out, &BuiltinType{Name: "u8"}, &BuiltinType{Name: "i8"})
+		*out = append(*out, &returnBorrowByteTargets[0], &returnBorrowByteTargets[1])
 	case *BuiltinType, *BitIntType, *ConstEnumType, *BitGroupType:
 	case *OpaqueType:
 		// An `extern` handle type (LLVMValueRef, ...) is a foreign pointer the language cannot
