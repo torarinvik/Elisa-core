@@ -125,3 +125,50 @@ exit:
 		})
 	}
 }
+
+func TestSqrtDomainFromOrderedBranch(t *testing.T) {
+	if !boundedDivisionUnrollSupported() {
+		t.Skip("requires LLVM 23")
+	}
+	const source = `
+declare double @sqrt(double)
+define double @root(double %x, i1 %bypass) {
+entry:
+  br i1 %bypass, label %fallback, label %guard
+guard:
+  %ok = fcmp ogt double %x, 0.0
+  br i1 %ok, label %calculate, label %fallback
+calculate:
+  %answer = call double @sqrt(double %x)
+  ret double %answer
+fallback:
+  ret double 0.0
+}
+`
+	for _, tc := range []struct {
+		name, old, replacement string
+		want                   int
+	}{
+		{"ordered positive", "", "", 1},
+		{"unordered admits NaN", "fcmp ogt", "fcmp ugt", 0},
+		{"negative values", "fcmp ogt double %x, 0.0", "fcmp ogt double %x, -1.0", 0},
+		{"reversed operands", "fcmp ogt double %x, 0.0", "fcmp ole double 0.0, %x", 1},
+		{"alternate predecessor", "%bypass, label %fallback", "%bypass, label %calculate", 0},
+		{"opposite edge", "%ok, label %calculate, label %fallback", "%ok, label %fallback, label %calculate", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ir := strings.Replace(source, tc.old, tc.replacement, 1)
+			g, err := parseLLVMIRForSplitHalfTest(ir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer g.dispose()
+			if got := proveSqrtNonNaN(g); got != tc.want {
+				t.Fatalf("changed %d, want %d", got, tc.want)
+			}
+			if err := g.verify(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

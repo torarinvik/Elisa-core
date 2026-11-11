@@ -41,6 +41,37 @@ static bool SQ_IntConversion(Value *V) {
   return Src->isIntegerTy() && Src->getIntegerBitWidth() <= 64 &&
          (Dst->isFloatTy() || Dst->isDoubleTy());
 }
+// A dominating ordered comparison can establish sqrt's domain even
+// when the argument's arithmetic (for example a discriminant) cannot.
+static bool SQ_GuardedDomain(Value *Arg, Instruction *At, DominatorTree &DT) {
+  unsigned Steps = 0;
+  for (auto *Node = DT.getNode(At->getParent()); Node && Steps < 16;
+       Node = Node->getIDom(), ++Steps) {
+    auto *Block = Node->getBlock();
+    auto *Branch = dyn_cast<CondBrInst>(Block->getTerminator());
+    if (!Branch || Branch->getSuccessor(0) == Branch->getSuccessor(1)) continue;
+    auto *Compare = dyn_cast<FCmpInst>(Branch->getCondition());
+    if (!Compare) continue;
+    Value *Bound = Compare->getOperand(1);
+    auto Predicate = Compare->getPredicate();
+    if (Compare->getOperand(0) != Arg) {
+      if (Compare->getOperand(1) != Arg) continue;
+      Bound = Compare->getOperand(0);
+      Predicate = FCmpInst::getSwappedPredicate(Predicate);
+    }
+    auto *Constant = dyn_cast<ConstantFP>(Bound);
+    if (!Constant || Constant->isNaN() ||
+        (Constant->isNegative() && !Constant->isZero())) continue;
+    for (unsigned Edge = 0; Edge < 2; ++Edge) {
+      auto Taken = Edge == 0 ? Predicate : FCmpInst::getInversePredicate(Predicate);
+      if (Taken != FCmpInst::FCMP_OGE && Taken != FCmpInst::FCMP_OGT) continue;
+      if (DT.dominates(BasicBlockEdge(Block, Branch->getSuccessor(Edge)),
+                       At->getParent()))
+        return true;
+    }
+  }
+  return false;
+}
 static bool SQ_Prove(Value *V, unsigned Want, Instruction *At, SqrtProof &C,
                      const PHINode *Hyp = nullptr, unsigned HypFacts = 0,
                      unsigned Depth = 0) {
@@ -178,7 +209,8 @@ extern "C" unsigned elisacoreProveSqrtNonNaN(LLVMModuleRef Ref) {
       LibFunc LF;
       if (!TLI.getLibFunc(*CI,LF) || LF!=LibFunc_sqrt || !TLI.has(LF)) continue;
       SqrtProof C{DT,LI,LVI};
-      if (!SQ_Prove(CI->getArgOperand(0),SQ_NN|SQ_NONNEG,CI,C)) continue;
+      Value *Arg = CI->getArgOperand(0);
+      if (!SQ_GuardedDomain(Arg, CI, DT) && !SQ_Prove(Arg,SQ_NN|SQ_NONNEG,CI,C)) continue;
       CI->setHasNoNaNs(true);
       ++Changed;
     }
