@@ -14,20 +14,22 @@ type nodeInventory struct {
 
 func (s *nodeInventory) add(node stateNode) {
 	index := s.count >> nodeBlockShift
+	offset := s.count & (nodeBlockSize - 1)
 	if index == len(s.blocks) {
-		capacity := nodeBlockSize
+		size := nodeBlockSize
 		if index == 0 {
-			capacity = 8
+			size = 8
 		}
-		s.blocks = append(s.blocks, make([]stateNode, 0, capacity))
+		s.blocks = append(s.blocks, make([]stateNode, size))
 	}
 	block := s.blocks[index]
-	if len(block) == cap(block) {
-		grown := make([]stateNode, len(block), min(cap(block)*2, nodeBlockSize))
+	if offset == len(block) {
+		grown := make([]stateNode, len(block)*2)
 		copy(grown, block)
+		s.blocks[index] = grown
 		block = grown
 	}
-	s.blocks[index] = append(block, node)
+	block[offset] = node
 	s.count++
 }
 
