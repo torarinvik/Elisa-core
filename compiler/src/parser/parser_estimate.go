@@ -13,6 +13,9 @@ const (
 	// Nested tokens add no capacity to the enclosing block. Bound the
 	// lookahead past an indent separately from the flat-item sample.
 	maxNestedEstimateTokens = 96
+	// Nested call and literal lists otherwise rescan the same token suffix
+	// once per containing list. Capacity hints never need the whole suffix.
+	maxCommaEstimateTokens = 128
 )
 
 func boundedEstimate(value int) int {
@@ -85,7 +88,8 @@ func (p *Parser) estimateCommaSeparatedCount(close lexer.TokenKind) int {
 	}
 	count := 1
 	depth := 0
-	for i := p.pos; i < len(p.tokens); i++ {
+	end := p.pos + min(len(p.tokens)-p.pos, maxCommaEstimateTokens)
+	for i := p.pos; i < end; i++ {
 		switch p.tokens[i].Kind {
 		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_LBRACE:
 			depth++

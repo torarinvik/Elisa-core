@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"strings"
 	"testing"
 
 	"elisacore/src/lexer"
@@ -28,5 +29,19 @@ func TestUnbracketedPermissionRefsDoNotEstimateToEOF(t *testing.T) {
 	}
 	if p.peek() != lexer.TOKEN_COLON {
 		t.Fatalf("unbracketed permission parser consumed the body delimiter: got %s", p.cur())
+	}
+}
+
+func TestBoundedCommaEstimateStillParsesLongCall(t *testing.T) {
+	const argumentCount = 256
+	source := strings.Repeat("value, ", argumentCount-1) + "value)"
+	p := New(lexer.New("long_call.elisa", []byte(source)).Tokenize())
+
+	if got := p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN); got >= argumentCount {
+		t.Fatalf("capacity estimate scanned the complete call: got %d", got)
+	}
+	args, _, _, _, _, _ := p.parseCallArgs()
+	if len(args) != argumentCount || p.peek() != lexer.TOKEN_RPAREN || len(p.Errors()) != 0 {
+		t.Fatalf("parsed %d arguments before %v, errors: %v", len(args), p.cur(), p.Errors())
 	}
 }
