@@ -58,15 +58,21 @@ func (a *Analyzer) havocLoopWrittenFacts(body []ast.Stmt, cond ast.Expr) {
 }
 
 func collectLoopWrittenRoots(v reflect.Value, roots map[string]bool) {
-	if !v.IsValid() {
-		return
+	if v.Kind() == reflect.Interface {
+		if v.IsNil() {
+			return
+		}
+		v = v.Elem()
 	}
 	switch v.Kind() {
-	case reflect.Interface, reflect.Pointer:
+	case reflect.Pointer:
 		if v.IsNil() {
 			return
 		}
 		switch n := v.Interface().(type) {
+		case *ast.Ident, *ast.IntLit, *ast.FloatLit, *ast.StringLit,
+			*ast.CharLit, *ast.BoolLit, *ast.NullLit, *ast.ZeroedLit:
+			return
 		case *ast.AssignStmt:
 			addLoopWrittenRoot(n.Target, roots)
 		case *ast.AugAssignStmt:
@@ -82,7 +88,7 @@ func collectLoopWrittenRoots(v reflect.Value, roots map[string]bool) {
 		}
 		collectLoopWrittenRoots(v.Elem(), roots)
 	case reflect.Struct:
-		for i := 0; i < v.NumField(); i++ {
+		for _, i := range syntaxWalkFields(v.Type()) {
 			collectLoopWrittenRoots(v.Field(i), roots)
 		}
 	case reflect.Slice, reflect.Array:
