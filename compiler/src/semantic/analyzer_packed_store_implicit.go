@@ -359,7 +359,7 @@ type packedTypeWalk struct {
 }
 
 func collectPackedEnumsInSignatureWithOrder(ft *FuncType, includeReturn bool, out map[string]*EnumType, fieldOrders map[*StructType][]string, emptyTypeRoots map[Type]bool) {
-	walk := packedTypeWalk{seen: packedTypeSeenPool.Get().(map[Type]int), fieldOrders: fieldOrders}
+	walk := packedTypeWalk{fieldOrders: fieldOrders}
 	explicitCount := min(funcTypeExplicitParamCount(ft), len(ft.Params))
 	for i := 0; i < explicitCount; i++ {
 		walk.collectSignatureRoot(ft.Params[i], out, emptyTypeRoots)
@@ -367,17 +367,15 @@ func collectPackedEnumsInSignatureWithOrder(ft *FuncType, includeReturn bool, ou
 	if includeReturn {
 		walk.collectSignatureRoot(ft.Return, out, emptyTypeRoots)
 	}
-	releasePackedTypeSeen(walk.seen)
+	if walk.seen != nil {
+		releasePackedTypeSeen(walk.seen)
+	}
 }
 
 // Only cache an empty root when it was walked without earlier roots
 // pruning its graph. Nonempty roots still share traversal state within
 // the signature so depth limits and first-witness selection are unchanged.
-func (walk packedTypeWalk) collectSignatureRoot(t Type, out map[string]*EnumType, emptyTypeRoots map[Type]bool) {
-	if emptyTypeRoots == nil {
-		walk.collect(t, out, 0)
-		return
-	}
+func (walk *packedTypeWalk) collectSignatureRoot(t Type, out map[string]*EnumType, emptyTypeRoots map[Type]bool) {
 	t = StripAggregateStateType(t)
 	switch t.(type) {
 	case *RefType, *OptionalType, *ErrorUnionType, *EnumType, *PackedVariantViewType, *DArrayType, *StructType, *TupleType:
@@ -387,7 +385,11 @@ func (walk packedTypeWalk) collectSignatureRoot(t Type, out map[string]*EnumType
 	if emptyTypeRoots[t] {
 		return
 	}
-	isolated := len(walk.seen) == 0 && len(out) == 0
+	// Scalar-only and already-classified signatures need no traversal map.
+	if walk.seen == nil {
+		walk.seen = packedTypeSeenPool.Get().(map[Type]int)
+	}
+	isolated := emptyTypeRoots != nil && len(walk.seen) == 0 && len(out) == 0
 	walk.collect(t, out, 0)
 	if isolated && len(out) == 0 {
 		emptyTypeRoots[t] = true
