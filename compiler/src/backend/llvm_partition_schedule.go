@@ -2,18 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Analysis.h>
-#include <llvm-c/BitWriter.h>
-#include <llvm-c/Core.h>
-#include <llvm-c/TargetMachine.h>
-#include "parallel_emit.h"
-
-extern void elisacorePruneObjectDeclarations(LLVMModuleRef m);
-*/
-import "C"
-
 import (
 	"elisacore/src/semantic"
 	"errors"

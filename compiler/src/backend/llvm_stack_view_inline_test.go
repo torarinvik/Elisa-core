@@ -3,9 +3,11 @@
 package backend
 
 import (
+	"elisacore/src/backend/llvmnative/stackviews"
 	"fmt"
 	"strings"
 	"testing"
+	"unsafe"
 )
 
 func TestStackViewInliningRequiresLocalArraysAndLiteralFlag(t *testing.T) {
@@ -63,5 +65,68 @@ entry:
 	}
 	if ir := g.printModule(); strings.Count(ir, "call void @view_helper(") != 2 {
 		t.Fatalf("expected the dynamic and nonlocal calls to remain:\n%s", ir)
+	}
+}
+
+func TestSeparateStorageRequiresDisjointViewsAtEveryCall(t *testing.T) {
+	if !boundedDivisionUnrollSupported() {
+		t.Skip("requires LLVM 23")
+	}
+	const source = `
+target triple = "arm64-apple-macosx"
+%view = type { ptr, i64 }
+
+define internal void @copy_view(%view %a, %view %b, i1 %flag) nounwind {
+entry:
+  %from = extractvalue %view %a, 0
+  %to = extractvalue %view %b, 0
+  %value = load i32, ptr %from
+  %delta = zext i1 %flag to i32
+  %result = add i32 %value, %delta
+  store i32 %result, ptr %to
+  ret void
+}
+
+define void @caller(i32 %value) {
+entry:
+  %a = alloca [8 x i32]
+  %b = alloca [8 x i32]
+  store i32 %value, ptr %a
+  %va = insertvalue %view { ptr poison, i64 8 }, ptr %a, 0
+  %vb = insertvalue %view { ptr poison, i64 8 }, ptr %b, 0
+  call void @copy_view(%view %va, %view %vb, i1 true)
+  call void @copy_view(%view %va, %view %vb, i1 false)
+  ret void
+}
+`
+	for _, test := range []struct {
+		name string
+		ir   string
+		want bool
+	}{
+		{"distinct arrays", source, true},
+		{"one aliased call", strings.Replace(source, "%view %vb, i1 false", "%view %va, i1 false", 1), false},
+		{"address taken", source + "@address = global ptr @copy_view\n", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			g, err := parseLLVMIRForSplitHalfTest(test.ir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer g.dispose()
+			if err := g.ensureTargetMachine(); err != nil {
+				t.Fatal(err)
+			}
+			if status := stackviews.ExposeDisjointStorage(unsafe.Pointer(g.module), unsafe.Pointer(g.targetMachine)); status == 2 {
+				t.Fatal("LLVM cleanup failed")
+			}
+			if err := g.verify(); err != nil {
+				t.Fatal(err)
+			}
+			ir := g.printModule()
+			if strings.Contains(ir, `"separate_storage"`) != test.want {
+				t.Fatalf("unexpected view separation:\n%s", ir)
+			}
+		})
 	}
 }

@@ -86,6 +86,34 @@ unsigned elisacoreSinkPrivateInitializations(LLVMModuleRef Module);
 int elisacoreUnrollConstantTableLoops(LLVMModuleRef Module, LLVMTargetMachineRef Target);
 
 
+// Stamp "target-cpu"/"target-features" on every defined function that lacks them, the
+// way clang's frontend does. A non-LTO object gets its CPU from the TargetMachine that
+// emits it; LTO bitcode is code-generated later by the LINKER, which only sees what the
+// bitcode carries, so without these attributes `-flto` would silently drop the host
+// tuning (`-mcpu=native`) that the in-process object path applies.
+static void elisacoreStampTargetAttributes(LLVMModuleRef M, LLVMTargetMachineRef TM) {
+	char *cpu = LLVMGetTargetMachineCPU(TM);
+	char *features = LLVMGetTargetMachineFeatureString(TM);
+	LLVMContextRef ctx = LLVMGetModuleContext(M);
+	for (LLVMValueRef fn = LLVMGetFirstFunction(M); fn != NULL; fn = LLVMGetNextFunction(fn)) {
+		if (LLVMIsDeclaration(fn)) {
+			continue;
+		}
+		if (cpu != NULL && cpu[0] != '\0' &&
+			LLVMGetStringAttributeAtIndex(fn, LLVMAttributeFunctionIndex, "target-cpu", 10) == NULL) {
+			LLVMAttributeRef a = LLVMCreateStringAttribute(ctx, "target-cpu", 10, cpu, (unsigned)strlen(cpu));
+			LLVMAddAttributeAtIndex(fn, LLVMAttributeFunctionIndex, a);
+		}
+		if (features != NULL && features[0] != '\0' &&
+			LLVMGetStringAttributeAtIndex(fn, LLVMAttributeFunctionIndex, "target-features", 15) == NULL) {
+			LLVMAttributeRef a = LLVMCreateStringAttribute(ctx, "target-features", 15, features, (unsigned)strlen(features));
+			LLVMAddAttributeAtIndex(fn, LLVMAttributeFunctionIndex, a);
+		}
+	}
+	LLVMDisposeMessage(cpu);
+	LLVMDisposeMessage(features);
+}
+
 */
 import "C"
 
@@ -93,6 +121,7 @@ import (
 	"elisacore/src/backend/llvmnative"
 	// Link scalar loop matchers used by the bounded division pass.
 	"elisacore/src/backend/llvmnative/scalarloops"
+	"elisacore/src/backend/llvmnative/stackviews"
 	"elisacore/src/semantic"
 	"fmt"
 	"os"
@@ -404,6 +433,9 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 				return err
 			}
 		}
+		if stackviews.ExposeDisjointStorage(unsafe.Pointer(g.module), unsafe.Pointer(g.targetMachine)) == 2 {
+			return fmt.Errorf("stack view alias cleanup failed")
+		}
 		if specializeShortTrips(g) == 2 {
 			return fmt.Errorf("short-trip specialization cleanup failed")
 		}
@@ -545,4 +577,8 @@ func simplifyLateLoopFacts(g *llvmGenerator) error {
 		return fmt.Errorf("late loop fact cleanup failed: %s", disposeLLVMErrorMessage(message, "unknown LLVM pass pipeline error"))
 	}
 	return nil
+}
+
+func (g *llvmGenerator) stampTargetAttributes() {
+	C.elisacoreStampTargetAttributes(g.module, g.targetMachine)
 }

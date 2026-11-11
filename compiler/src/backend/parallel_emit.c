@@ -437,6 +437,11 @@ static int part_optimize(LLVMModuleRef m, LLVMTargetMachineRef tm, const char *p
 		*error = strdup("checked multiplication versioning cleanup failed");
 		return 0;
 	}
+	if (err == NULL && strstr(pipeline, "O3") != NULL && elisacoreExposeDisjointStackViews(m, tm) == 2) {
+		LLVMDisposePassBuilderOptions(options);
+		*error = strdup("stack view alias cleanup failed");
+		return 0;
+	}
 	if (err == NULL && strstr(pipeline, "O3") != NULL && elisacoreSpecializeShortTrips(m, tm) == 2) {
 		LLVMDisposePassBuilderOptions(options);
 		*error = strdup("short-trip specialization cleanup failed");

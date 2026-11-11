@@ -2,42 +2,6 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <string.h>
-#include <llvm-c/Core.h>
-#include <llvm-c/TargetMachine.h>
-
-// Stamp "target-cpu"/"target-features" on every defined function that lacks them, the
-// way clang's frontend does. A non-LTO object gets its CPU from the TargetMachine that
-// emits it; LTO bitcode is code-generated later by the LINKER, which only sees what the
-// bitcode carries, so without these attributes `-flto` would silently drop the host
-// tuning (`-mcpu=native`) that the in-process object path applies.
-static void elisacoreStampTargetAttributes(LLVMModuleRef M, LLVMTargetMachineRef TM) {
-	char *cpu = LLVMGetTargetMachineCPU(TM);
-	char *features = LLVMGetTargetMachineFeatureString(TM);
-	LLVMContextRef ctx = LLVMGetModuleContext(M);
-	for (LLVMValueRef fn = LLVMGetFirstFunction(M); fn != NULL; fn = LLVMGetNextFunction(fn)) {
-		if (LLVMIsDeclaration(fn)) {
-			continue;
-		}
-		if (cpu != NULL && cpu[0] != '\0' &&
-			LLVMGetStringAttributeAtIndex(fn, LLVMAttributeFunctionIndex, "target-cpu", 10) == NULL) {
-			LLVMAttributeRef a = LLVMCreateStringAttribute(ctx, "target-cpu", 10, cpu, (unsigned)strlen(cpu));
-			LLVMAddAttributeAtIndex(fn, LLVMAttributeFunctionIndex, a);
-		}
-		if (features != NULL && features[0] != '\0' &&
-			LLVMGetStringAttributeAtIndex(fn, LLVMAttributeFunctionIndex, "target-features", 15) == NULL) {
-			LLVMAttributeRef a = LLVMCreateStringAttribute(ctx, "target-features", 15, features, (unsigned)strlen(features));
-			LLVMAddAttributeAtIndex(fn, LLVMAttributeFunctionIndex, a);
-		}
-	}
-	LLVMDisposeMessage(cpu);
-	LLVMDisposeMessage(features);
-}
-*/
-import "C"
-
 import (
 	"fmt"
 	"strings"
@@ -82,7 +46,7 @@ func WriteLLVMLTOBitcodeFile(result *semantic.Result, outputPath string, options
 	if err := g.optimizeModule(options.OptLevel); err != nil {
 		return nil, err
 	}
-	C.elisacoreStampTargetAttributes(g.module, g.targetMachine)
+	g.stampTargetAttributes()
 	if err := g.writeBitcodeFile(outputPath); err != nil {
 		return nil, err
 	}

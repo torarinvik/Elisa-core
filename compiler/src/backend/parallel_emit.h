@@ -42,6 +42,7 @@ unsigned elisacoreElideScratchPrefixInitializers(LLVMModuleRef module);
 unsigned elisacoreScratchPrefixSupported(void);
 unsigned elisacorePackPrivateBoolArrays(LLVMModuleRef, LLVMTargetMachineRef);
 unsigned elisacoreCsscAbsoluteRangeChecks(LLVMModuleRef, LLVMTargetMachineRef);
+unsigned elisacoreExposeDisjointStackViews(LLVMModuleRef, LLVMTargetMachineRef);
 unsigned elisacoreInlineSmallRecursiveFunctions(LLVMModuleRef, LLVMTargetMachineRef);
 
 // Clone and restrict a verified module to one post-optimization partition. The
