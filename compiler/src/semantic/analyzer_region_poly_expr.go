@@ -2,7 +2,7 @@ package semantic
 
 import (
 	"elisacore/src/ast"
-	"strings"
+	"elisacore/src/regionframesyntax"
 )
 
 // exprResultIsRegionAllocated reports whether the RESULT of an expression is a fresh region
@@ -131,15 +131,7 @@ func funcTypeReturnTypeNamed(ft *FuncType, name string) bool {
 
 // simpleTypeNameSegment returns the last segment of a possibly namespace-qualified
 // name, handling both `::` (source) and `.` (internal) separators.
-func simpleTypeNameSegment(n string) string {
-	if i := strings.LastIndex(n, "::"); i >= 0 {
-		n = n[i+2:]
-	}
-	if i := strings.LastIndex(n, "."); i >= 0 {
-		n = n[i+1:]
-	}
-	return n
-}
+func simpleTypeNameSegment(name string) string { return regionframesyntax.SimpleTypeNameSegment(name) }
 
 // regionBackedEnumConstructor reports the enum if a call is a bare constructor of a region-backed
 // (recursive-plain) enum — `Expr.Add(...)` where Expr is a promoted plain enum. Explicit `packed
@@ -181,27 +173,5 @@ func (a *Analyzer) callIsInlineEnumConstructor(call *ast.CallExpr) bool {
 }
 
 func unwrapParenForRegionPoly(value ast.Expr) ast.Expr {
-	for {
-		switch wrapped := value.(type) {
-		case *ast.ParenExpr:
-			if wrapped == nil {
-				return value
-			}
-			value = wrapped.Inner
-		case *ast.CanExpr:
-			if wrapped == nil {
-				return value
-			}
-			value = wrapped.Expr
-		case *ast.MoveExpr:
-			if wrapped == nil {
-				return value
-			}
-			// Moving transfers ownership without changing the backing arena.
-			// A moved local return must adopt exactly as its value would.
-			value = wrapped.Operand
-		default:
-			return value
-		}
-	}
+	return regionframesyntax.UnwrapRegionValue(value)
 }
