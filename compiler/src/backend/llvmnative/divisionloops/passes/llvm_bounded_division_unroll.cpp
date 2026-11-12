@@ -343,6 +343,7 @@ static unsigned elisacoreReuseEdgeDivisions(Module &M) {
 #include "llvm_remainder_recurrence.cpp"
 #include "llvm_constant_paths.cpp"
 #include "llvm_literal_divisor_specialization.cpp"
+#include "llvm_reverse_byte_fold.cpp"
 #include "llvm_stack_view_inline.cpp"
 #include "llvm_bounded_quotient_sum.cpp"
 #include "llvm_bounded_carry.cpp"
@@ -390,6 +391,7 @@ extern "C" unsigned elisacoreOptimizeBoundedDivisionLoops(LLVMModuleRef M, LLVMT
     unsigned Inlined = elisacoreInlineStackViewHelpers(*llvm::unwrap(M), T);
     if (Inlined == 2) return 2;
     Changed += Inlined;
+    Changed += elisacoreFoldReverseByteReductions(*llvm::unwrap(M));
     Changed += elisacoreVersionBoundedQuotientSums(*llvm::unwrap(M));
   }
 #endif
