@@ -19,6 +19,6 @@ import "C"
 import "unsafe"
 
 // Fold reduces proven bounded integer remainders in the optimized module.
-func Fold(module unsafe.Pointer) {
+func FoldBoundedRemainders(module unsafe.Pointer) {
 	C.elisacoreFoldBoundedRemainders(C.LLVMModuleRef(module))
 }
