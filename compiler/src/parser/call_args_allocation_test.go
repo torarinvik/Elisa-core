@@ -9,9 +9,11 @@ import (
 )
 
 func TestMixedCallArgumentMetadataPreservesOrder(t *testing.T) {
-	l := lexer.New("mixed.elisa", []byte("def f():\n    consume(a, second: b, c)\n"))
+	source := "def f():\n    consume(a, second: b, c)\n"
+	l := lexer.New("mixed.elisa", []byte(source))
 	p := New(l.Tokenize())
 	file := p.ParseFile("mixed.elisa")
+	recordParserParityCase(t, source, len(p.Errors()), len(p.Notices()))
 	if len(l.Errors()) != 0 || len(p.Errors()) != 0 {
 		t.Fatal(l.Errors(), p.Errors())
 	}

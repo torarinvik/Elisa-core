@@ -17,6 +17,7 @@ func TestLargeBorrowedParsePreservesExpressionTree(t *testing.T) {
 		t.Fatal("input did not enable batched allocation")
 	}
 	want := plain.ParseFile(filename)
+	recordParserParityCase(t, source, len(plain.Errors()), len(plain.Notices()))
 	got := batched.ParseFile(filename)
 	if len(plain.Errors()) != 0 || len(batched.Errors()) != 0 {
 		t.Fatalf("parse errors: plain %v, batched %v", plain.Errors(), batched.Errors())

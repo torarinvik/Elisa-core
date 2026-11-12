@@ -19,6 +19,7 @@ func TestBorrowedTokenParseParityAndRecoveryIsolation(t *testing.T) {
 		pristine := previous.CopyTokens()
 		owned := New(previous.CopyTokens())
 		expected := owned.ParseFile("borrowed.elisa")
+		recordParserParityCase(t, source, len(owned.Errors()), len(owned.Notices()))
 		for _, traced := range []bool{false, true} {
 			var p *Parser
 			if traced {
@@ -44,7 +45,11 @@ func TestBorrowedTokenParseParityAndRecoveryIsolation(t *testing.T) {
 }
 
 func TestBorrowedTokenConcurrentRecovery(t *testing.T) {
-	previous := lexer.TokenizeSource("concurrent.elisa", []byte("def work():\n    to <- 1\n    for tail in [1, 2]:\n        pass\n"), nil)
+	source := "def work():\n    to <- 1\n    for tail in [1, 2]:\n        pass\n"
+	previous := lexer.TokenizeSource("concurrent.elisa", []byte(source), nil)
+	oracle := New(previous.CopyTokens())
+	oracle.ParseFile("concurrent.elisa")
+	recordParserParityCase(t, source, len(oracle.Errors()), len(oracle.Notices()))
 	pristine := previous.CopyTokens()
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {

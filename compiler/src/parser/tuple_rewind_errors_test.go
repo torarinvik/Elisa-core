@@ -16,6 +16,7 @@ func TestRewoundTupleParseDoesNotDuplicateDiagnostics(t *testing.T) {
 	p := New(lexer.New("commas.elisa", []byte(src)).Tokenize())
 	p.ParseFile("commas.elisa")
 	errs := p.Errors()
+	recordParserParityCase(t, src, len(errs), len(p.Notices()))
 	seen := map[string]bool{}
 	for _, e := range errs {
 		if seen[e] {
