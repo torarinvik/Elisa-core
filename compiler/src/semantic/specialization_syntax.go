@@ -123,7 +123,7 @@ func (s *specializationSyntax) prepare(v reflect.Value) {
 	}
 }
 
-func (s *specializationSyntax) validate() error {
+func (s *specializationSyntax) validate(ordered ...*[]*specializationSlice) error {
 	if s.err != nil {
 		return s.err
 	}
@@ -170,10 +170,13 @@ func (s *specializationSyntax) validate() error {
 	if overlap {
 		return fmt.Errorf("specialization syntax has unsupported partially overlapping slice backing")
 	}
+	if len(ordered) != 0 {
+		*ordered[0] = ranges
+	}
 	return nil
 }
 
-func (s *specializationSyntax) copy(v reflect.Value) reflect.Value {
+func (s *specializationSyntax) copy(v reflect.Value, ordered ...[]*specializationSlice) reflect.Value {
 	switch v.Kind() {
 	case reflect.Pointer:
 		if v.IsNil() || v.Type().Elem().PkgPath() != astGraphPkgPath {
@@ -186,13 +189,9 @@ func (s *specializationSyntax) copy(v reflect.Value) reflect.Value {
 		// An AST pointer may refer into an AST-struct slice. Bind it to that
 		// copied element before filling either root, preserving interior identity.
 		var out reflect.Value
-		for _, r := range s.slices {
-			size := r.typ.Elem().Size()
-			if size != 0 && r.typ.Elem() == v.Type().Elem() && v.Pointer() >= r.start && v.Pointer() < r.start+uintptr(r.capacity)*size && (v.Pointer()-r.start)%size == 0 {
-				s.allocateSlice(r)
-				out = r.copy.Index(int((v.Pointer() - r.start) / size)).Addr()
-				break
-			}
+		if r := s.backingSlice(key, ordered); r != nil {
+			s.allocateSlice(r)
+			out = r.copy.Index(int((key.ptr - r.start) / r.typ.Elem().Size())).Addr()
 		}
 		if !out.IsValid() {
 			out = reflect.New(v.Type().Elem())
@@ -201,14 +200,14 @@ func (s *specializationSyntax) copy(v reflect.Value) reflect.Value {
 		if original, ok := v.Interface().(ast.Node); ok {
 			s.nodes[original] = out.Interface().(ast.Node)
 		}
-		out.Elem().Set(s.copy(v.Elem()))
+		out.Elem().Set(s.copy(v.Elem(), ordered...))
 		return out
 	case reflect.Interface:
 		if v.IsNil() {
 			return v
 		}
 		out := reflect.New(v.Type()).Elem()
-		out.Set(s.copy(v.Elem()))
+		out.Set(s.copy(v.Elem(), ordered...))
 		return out
 	case reflect.Struct:
 		if v.Type().PkgPath() != astGraphPkgPath {
@@ -217,7 +216,7 @@ func (s *specializationSyntax) copy(v reflect.Value) reflect.Value {
 		out := reflect.New(v.Type()).Elem()
 		out.Set(v)
 		for _, i := range astCopyTraversalFields(v.Type()) {
-			settable(out.Field(i)).Set(s.copy(settable(v.Field(i))))
+			settable(out.Field(i)).Set(s.copy(settable(v.Field(i)), ordered...))
 		}
 		return out
 	case reflect.Slice:
@@ -235,7 +234,7 @@ func (s *specializationSyntax) copy(v reflect.Value) reflect.Value {
 		if !r.copied && !r.copying {
 			r.copying = true
 			for i := 0; i < r.length; i++ {
-				r.copy.Index(i).Set(s.copy(r.source.Index(i)))
+				r.copy.Index(i).Set(s.copy(r.source.Index(i), ordered...))
 			}
 			r.copying = false
 			r.copied = true
@@ -254,7 +253,7 @@ func (s *specializationSyntax) copy(v reflect.Value) reflect.Value {
 		s.pointers[key] = out
 		it := v.MapRange()
 		for it.Next() {
-			out.SetMapIndex(s.copy(it.Key()), s.copy(it.Value()))
+			out.SetMapIndex(s.copy(it.Key(), ordered...), s.copy(it.Value(), ordered...))
 		}
 		return out
 	}
@@ -277,4 +276,27 @@ func (s *specializationSyntax) allocateSlice(r *specializationSlice) {
 			}
 		}
 	}
+}
+
+func (s *specializationSyntax) backingSlice(pointer specializationPointer, ordered [][]*specializationSlice) *specializationSlice {
+	matches := func(r *specializationSlice) bool {
+		elem := r.typ.Elem()
+		size := elem.Size()
+		return size != 0 && elem == pointer.typ.Elem() && pointer.ptr >= r.start &&
+			pointer.ptr-r.start < uintptr(r.capacity)*size && (pointer.ptr-r.start)%size == 0
+	}
+	if len(ordered) != 0 {
+		ranges := ordered[0]
+		i := sort.Search(len(ranges), func(i int) bool { return ranges[i].start > pointer.ptr }) - 1
+		if i >= 0 && matches(ranges[i]) {
+			return ranges[i]
+		}
+		return nil
+	}
+	for _, r := range s.slices {
+		if matches(r) {
+			return r
+		}
+	}
+	return nil
 }

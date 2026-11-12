@@ -294,7 +294,8 @@ func (c *specializationContext) copyDecl(fn *ast.FuncDecl) *ast.FuncDecl {
 			}
 		}
 	}
-	if err := syntax.validate(); err != nil {
+	var orderedSlices []*specializationSlice
+	if err := syntax.validate(&orderedSlices); err != nil {
 		c.err = fmt.Errorf("cannot isolate generic specialization %s: %w", fn.Name, err)
 		// Foreign quiet analysis has no error return. Keep even the declined
 		// path private, then reject the whole product before any IR consumes it.
@@ -304,11 +305,11 @@ func (c *specializationContext) copyDecl(fn *ast.FuncDecl) *ast.FuncDecl {
 		c.worker.rekeyFuncDeclEntries(fn, copied, false)
 		return copied
 	}
-	copied := syntax.copy(reflect.ValueOf(fn)).Interface().(*ast.FuncDecl)
+	copied := syntax.copy(reflect.ValueOf(fn), orderedSlices).Interface().(*ast.FuncDecl)
 	// Fact-held synthetic syntax must have private identities before the first
 	// node-keyed table is rekeyed, irrespective of Analyzer field order.
 	for _, node := range syntax.prepared[first:] {
-		syntax.copy(reflect.ValueOf(node))
+		syntax.copy(reflect.ValueOf(node), orderedSlices)
 	}
 	c.declarations[fn] = copied
 	for original, private := range syntax.nodes {

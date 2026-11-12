@@ -181,3 +181,20 @@ func BenchmarkSpecializationSyntaxValidationIntervals(b *testing.B) {
 		})
 	}
 }
+
+func TestSpecializationSyntaxOrderedCopyKeepsInteriorPointer(t *testing.T) {
+	args := []ast.CallArgItem{{}, {}}
+	original := &ast.CallExpr{ArgItemOrder: args}
+	syntax := newSpecializationSyntax()
+	syntax.prepare(reflect.ValueOf(original))
+	syntax.prepare(reflect.ValueOf(&args[1]))
+	var ordered []*specializationSlice
+	if err := syntax.validate(&ordered); err != nil {
+		t.Fatal(err)
+	}
+	item := syntax.copy(reflect.ValueOf(&args[1]), ordered).Interface().(*ast.CallArgItem)
+	copy := syntax.copy(reflect.ValueOf(original), ordered).Interface().(*ast.CallExpr)
+	if item != &copy.ArgItemOrder[1] || item == &args[1] {
+		t.Fatal("copied pointer lost its slice owner")
+	}
+}
