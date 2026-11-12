@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/taskgroupsyntax"
 	"path/filepath"
 )
 
@@ -243,14 +244,7 @@ func genericInstanceTypeName(instance *GenericInstanceType) string {
 	return ""
 }
 
-func taskGroupAPIName(name string) bool {
-	switch name {
-	case "task_group_new", "task_group_add", "task_group_wait_all", "pool_submit1":
-		return true
-	default:
-		return false
-	}
-}
+func taskGroupAPIName(name string) bool { return taskgroupsyntax.IsAPIName(name) }
 
 func taskGroupConstructorDecl(stmt *ast.VarDeclStmt) bool {
 	if stmt == nil {
