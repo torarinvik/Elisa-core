@@ -272,7 +272,7 @@ def arena_take_free_block(r: mutable heap Region&, need_slots: usize, exhaustive
         probes_left: mutable usize = 32
         previous: mutable heap ArenaFreeBlock&? = null
         current: mutable heap ArenaFreeBlock&? = r.free_list
-        while current != null and (exhaustive == true or probes_left > 0):
+        while current != null and (exhaustive or probes_left > 0):
             probes_left <- probes_left - 1 if not exhaustive
             if current.slots >= need_slots:
                 block: mutable heap ArenaFreeBlock& = current

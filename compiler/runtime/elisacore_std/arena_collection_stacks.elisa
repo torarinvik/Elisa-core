@@ -333,7 +333,7 @@ def collection_stack_acquire(a: mutable Arena&, live_table: void&?, needed_slots
                 capacity <- arena_checked_mul_usize(needed_slots, 2)
             fresh: mutable heap Region& = (new_region_backend(capacity, a.strategy) can Global{Read,Write})
             fresh.owner_tag <- ARENA_OWNER_TAG_COLLECTION.uintptr()
-            (collection_stack_link(a, fresh) can Global{Read,Write}, Atomics.Load)
+            (collection_stack_link(a, fresh) can Global{Read,Write})
             arena_profile_allocation_event(
                 ELISA_PROFILE_ALLOCATION_REGION_CREATE,
                 fresh.cast[uintptr],
