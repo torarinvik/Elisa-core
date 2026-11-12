@@ -16,30 +16,5 @@ func smtIteTerm(condition, yes, no string) string              { return smtquery
 
 // smtFoldCompare evaluates a comparison of two Int literals; ok=false when either side is not ground.
 func smtFoldCompare(op lexer.TokenKind, l, r string) (string, bool) {
-	lv, rv, ok := smtIntPair(l, r)
-	if !ok {
-		return "", false
-	}
-	c := lv.Cmp(rv)
-	var v bool
-	switch op {
-	case lexer.TOKEN_GT:
-		v = c > 0
-	case lexer.TOKEN_GTEQ:
-		v = c >= 0
-	case lexer.TOKEN_LT:
-		v = c < 0
-	case lexer.TOKEN_LTEQ:
-		v = c <= 0
-	case lexer.TOKEN_EQEQ:
-		v = c == 0
-	case lexer.TOKEN_BANGEQ:
-		v = c != 0
-	default:
-		return "", false
-	}
-	if v {
-		return "true", true
-	}
-	return "false", true
+	return smtquery.FoldCompare(op, l, r)
 }
