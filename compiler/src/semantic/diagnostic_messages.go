@@ -64,5 +64,5 @@ func UndefinedIdentifierMessage(name string) string {
 }
 
 func PrivateNameMessage(qualifiedName string, owner string) string {
-	return fmt.Sprintf("%q is private to module %q", visiblePrivateName(qualifiedName), owner)
+	return fmt.Sprintf("%q is private to module %q", visibleCallableName(qualifiedName), owner)
 }

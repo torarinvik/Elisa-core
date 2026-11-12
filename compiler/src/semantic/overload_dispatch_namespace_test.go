@@ -65,6 +65,22 @@ module B:
 	}
 }
 
+func TestOverloadedCallArgumentDiagnosticUsesSourceName(t *testing.T) {
+	src := `module Provider:
+    def choose[T](value: T, marker: bool) -> i64:
+        return 1
+    def choose(value: i64, marker: i64) -> i64:
+        return 2
+def call() -> i64:
+    return Provider::choose(1, true)
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "overload_diagnostic.elisa", src, AnalyzeOptions{})
+	joined := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(joined, `argument 2 to "Provider.choose" expects i64, got bool`) || strings.Contains(joined, `__ovl__`) {
+		t.Fatalf("expected the selected source-level overload name: %s", joined)
+	}
+}
+
 func TestPrivateSelectiveImportDiagnosticRequiresMatchingArguments(t *testing.T) {
 	src := `module A:
     private:

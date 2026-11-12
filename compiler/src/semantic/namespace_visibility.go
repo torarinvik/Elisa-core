@@ -234,9 +234,9 @@ func (a *Analyzer) lookupVisibleGlobal(name string) (*Symbol, string, bool) {
 	return nil, "", false
 }
 
-// visiblePrivateName removes the internal dispatch suffix used by overloaded and
-// extension functions so visibility diagnostics use the source-level name.
-func visiblePrivateName(name string) string {
+// visibleCallableName removes internal overload and extension dispatch suffixes
+// when presenting a callable name in a diagnostic.
+func visibleCallableName(name string) string {
 	for _, prefix := range [...]string{"__ovl__", "__ext__"} {
 		if rest, ok := strings.CutPrefix(name, prefix); ok {
 			if end := strings.Index(rest, "__"); end > 0 {
@@ -250,7 +250,7 @@ func visiblePrivateName(name string) string {
 
 func privateOwnerNamespace(name string) string {
 	// The last dot of a mangled dispatch symbol may sit inside its suffix.
-	name = visiblePrivateName(name)
+	name = visibleCallableName(name)
 	if idx := strings.LastIndex(name, "."); idx >= 0 {
 		return name[:idx]
 	}

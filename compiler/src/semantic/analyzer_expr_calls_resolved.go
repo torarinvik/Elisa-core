@@ -16,6 +16,7 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 	if expr == nil || ft == nil {
 		return invalidType
 	}
+	diagnosticName := visibleCallableName(ft.Name)
 	if decl, ok := a.resolveDirectCallFuncDecl(expr); ok && decl != nil && decl.IsGhost {
 		a.ghostReadSeen = true
 		if a.ghostReadAllowed == 0 {
@@ -23,18 +24,18 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 		}
 	}
 	if ft.Static && a.staticContextDepth == 0 {
-		a.errorf(expr.Pos(), "static function %q can only be called from a static context", ft.Name)
+		a.errorf(expr.Pos(), "static function %q can only be called from a static context", diagnosticName)
 		return invalidType
 	}
 	explicitParamCount := funcTypeExplicitParamCount(ft)
 	argumentMismatch := false
 	if !ft.Variadic && len(orderedArgs) != explicitParamCount {
 		argumentMismatch = true
-		a.errorf(expr.Pos(), "function %q expects %d arguments, got %d%s", ft.Name, explicitParamCount, len(orderedArgs), boundsLengthHint(ft))
+		a.errorf(expr.Pos(), "function %q expects %d arguments, got %d%s", diagnosticName, explicitParamCount, len(orderedArgs), boundsLengthHint(ft))
 	}
 	if ft.Variadic && len(orderedArgs) < explicitParamCount {
 		argumentMismatch = true
-		a.errorf(expr.Pos(), "variadic function %q expects at least %d arguments, got %d", ft.Name, explicitParamCount, len(orderedArgs))
+		a.errorf(expr.Pos(), "variadic function %q expects at least %d arguments, got %d", diagnosticName, explicitParamCount, len(orderedArgs))
 	}
 	bindings := map[string]Type{}
 	shapeBindings := map[string]Shape{}
@@ -109,7 +110,7 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 			}
 			if !storeCapture && !AssignableTo(expectedType, argType) && !assignableThreadingRegionParam(expectedType, argType, regionParams) && !a.assignableArenaRegionParam(ft.Params[i], argType, orderedArgs[i], regionParams) {
 				argumentMismatch = true
-				a.errorf(orderedArgs[i].Pos(), "argument %d to %q expects %s, got %s", i+1, ft.Name, expectedType, argType)
+				a.errorf(orderedArgs[i].Pos(), "argument %d to %q expects %s, got %s", i+1, diagnosticName, expectedType, argType)
 				if !writableRefAssignableIgnoringMutability(expectedType, argType) || !a.reportRebindableReadOnlyRefNote(orderedArgs[i].Pos(), orderedArgs[i]) {
 					a.reportMutableRefArgumentNote(orderedArgs[i].Pos(), expectedType, argType)
 				}
