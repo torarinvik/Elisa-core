@@ -2,7 +2,6 @@ package statecache
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -47,7 +46,11 @@ func (r *Registry) Decode(data []byte) (any, error) {
 
 // DecodeWithLimit bounds container storage before allocating from a cache file.
 func (r *Registry) DecodeWithLimit(data []byte, maxBytes uint64) (any, error) {
-	if len(data) < 9+32+1+32 || (string(data[:9]) != "ELISTATE3" && string(data[:9]) != "ELISTATE4") || !bytes.Equal(data[9:41], r.fingerprint[:]) {
+	if len(data) < 9+32+1+32 || !bytes.Equal(data[9:41], r.fingerprint[:]) {
+		return nil, fmt.Errorf("state schema mismatch")
+	}
+	format := string(data[:9])
+	if format != "ELISTATE3" && format != "ELISTATE4" && format != parallelChecksumFormat {
 		return nil, fmt.Errorf("state schema mismatch")
 	}
 	payload := data[:len(data)-32]
@@ -55,7 +58,7 @@ func (r *Registry) DecodeWithLimit(data []byte, maxBytes uint64) (any, error) {
 	// goes, so a corrupt payload fails closed either way; the result is used only if it holds.
 	checked := make(chan bool, 1)
 	go func() {
-		digest := sha256.Sum256(payload)
+		digest := stateChecksum(payload)
 		checked <- bytes.Equal(digest[:], data[len(data)-32:])
 	}()
 	value, err := r.decodePayload(payload, data, maxBytes)
@@ -66,7 +69,7 @@ func (r *Registry) DecodeWithLimit(data []byte, maxBytes uint64) (any, error) {
 }
 
 func (r *Registry) decodePayload(payload, data []byte, maxBytes uint64) (any, error) {
-	d := &decoder{registry: r, data: payload, at: 41, objects: []reflect.Value{{}}, budget: maxBytes, strings: []string{""}, framed: string(data[:9]) == "ELISTATE4"}
+	d := &decoder{registry: r, data: payload, at: 41, objects: []reflect.Value{{}}, budget: maxBytes, strings: []string{""}, framed: string(data[:9]) != "ELISTATE3"}
 	id, err := d.uint()
 	if err != nil {
 		return nil, err

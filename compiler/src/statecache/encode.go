@@ -1,7 +1,6 @@
 package statecache
 
 import (
-	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -131,8 +130,8 @@ func (r *Registry) EncodeWithCapacity(root any, capacity int) ([]byte, error) {
 // Decode accepts both this format and the preceding sequential format.
 func (r *Registry) EncodeFramed(root any) ([]byte, error) { return r.encode(root, true, 0) }
 
-// EncodeFramedWithCapacity reserves output space without changing the framed
-// format. Positive hints must be bounded to the caller's allocation budget.
+// EncodeFramedWithCapacity reserves output space. Large reservations select
+// the parallel checksum format. Positive hints must fit the caller's allocation budget.
 func (r *Registry) EncodeFramedWithCapacity(root any, capacity int) ([]byte, error) {
 	return r.encode(root, true, capacity)
 }
@@ -170,7 +169,9 @@ func (r *Registry) encode(root any, framed bool, capacity int) ([]byte, error) {
 		e.data = make([]byte, 0, capacity)
 	}
 	e.scanning = false
-	if framed {
+	if framed && capacity >= parallelChecksumMin {
+		e.data = append(e.data, parallelChecksumFormat...)
+	} else if framed {
 		e.data = append(e.data, "ELISTATE4"...)
 	} else {
 		e.data = append(e.data, "ELISTATE3"...)
@@ -228,7 +229,7 @@ func (r *Registry) encode(root any, framed bool, capacity int) ([]byte, error) {
 			e.data = append(e.data, value...)
 		}
 	}
-	digest := sha256.Sum256(e.data)
+	digest := stateChecksum(e.data)
 	e.data = append(e.data, digest[:]...)
 	return e.data, nil
 }
