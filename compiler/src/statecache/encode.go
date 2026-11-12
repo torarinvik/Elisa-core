@@ -24,29 +24,73 @@ type pointerIdentity struct {
 }
 
 type pointerObject struct {
+	address uintptr
 	typ reflect.Type
 	id  uint64
 }
 
 type pointerObjectIndex struct {
-	byAddress map[uintptr]pointerObject
+	objects []pointerObject
+	count int
 	aliases   map[pointerIdentity]uint64
 }
 
-func (index *pointerObjectIndex) lookup(address uintptr, typ reflect.Type) uint64 {
-	object := index.byAddress[address]
-	if object.typ == typ {
-		return object.id
+func newPointerObjectIndex(capacity int) pointerObjectIndex {
+	var index pointerObjectIndex
+	if capacity > 0 {
+		index.grow(capacity)
 	}
-	if object.id != 0 {
-		return index.aliases[pointerIdentity{typ, address}]
-	}
-	return 0
+	return index
 }
 
-func (index *pointerObjectIndex) add(address uintptr, typ reflect.Type, id uint64) {
-	if index.byAddress[address].id == 0 {
-		index.byAddress[address] = pointerObject{typ, id}
+func (index *pointerObjectIndex) slot(address uintptr) int {
+	mask := uintptr(len(index.objects) - 1)
+	hash := uint64(address)
+	hash ^= hash >> 16
+	hash *= 0x9e3779b97f4a7c15
+	hash ^= hash >> 32
+	for slot := uintptr(hash) & mask; ; slot = (slot + 1) & mask {
+		if index.objects[slot].address == 0 || index.objects[slot].address == address {
+			return int(slot)
+		}
+	}
+}
+
+func (index *pointerObjectIndex) grow(capacity int) {
+	size := 8
+	for size*3/4 < capacity {
+		size *= 2
+	}
+	objects := index.objects
+	index.objects = make([]pointerObject, size)
+	for _, object := range objects {
+		if object.address != 0 {
+			index.objects[index.slot(object.address)] = object
+		}
+	}
+}
+
+// lookup returns the address slot so an insertion on a miss can reuse it.
+func (index *pointerObjectIndex) lookup(address uintptr, typ reflect.Type) (uint64, int) {
+	if len(index.objects) == 0 {
+		return 0, -1
+	}
+	slot := index.slot(address)
+	object := index.objects[slot]
+	if object.id == 0 || object.typ == typ {
+		return object.id, slot
+	}
+	return index.aliases[pointerIdentity{typ, address}], slot
+}
+
+func (index *pointerObjectIndex) add(address uintptr, typ reflect.Type, id uint64, slot int) {
+	if slot < 0 || index.objects[slot].address == 0 {
+		if index.count >= len(index.objects)*3/4 {
+			index.grow(index.count + 1)
+			slot = index.slot(address)
+		}
+		index.objects[slot] = pointerObject{address, typ, id}
+		index.count++
 		return
 	}
 	if index.aliases == nil {
@@ -109,7 +153,7 @@ func (r *Registry) encode(root any, framed bool, capacity int) ([]byte, error) {
 	}
 	e := &encoder{
 		registry: r, objects: make(map[identity]uint64, sliceCapacity), scanning: true,
-		pointerObjects: pointerObjectIndex{byAddress: make(map[uintptr]pointerObject, pointerCapacity)},
+		pointerObjects: newPointerObjectIndex(pointerCapacity),
 		strings:        map[string]uint64{}, framed: framed,
 	}
 	v := reflect.ValueOf(root)
@@ -271,11 +315,12 @@ func (e *encoder) valueAtDepth(v reflect.Value) error {
 		address := uintptr(v.UnsafePointer())
 		var key identity
 		var prior uint64
+		var slot int
 		if kind == reflect.Slice {
 			key = identity{typ: t, pointer: address, length: v.Len(), capacity: v.Cap()}
 			prior = e.objects[key]
 		} else {
-			prior = e.pointerObjects.lookup(address, t)
+			prior, slot = e.pointerObjects.lookup(address, t)
 		}
 		if prior != 0 {
 			e.uint(prior)
@@ -288,7 +333,7 @@ func (e *encoder) valueAtDepth(v reflect.Value) error {
 		if kind == reflect.Slice {
 			e.objects[key] = id
 		} else {
-			e.pointerObjects.add(address, t, id)
+			e.pointerObjects.add(address, t, id, slot)
 		}
 		e.nodes.add(stateNode{value: v})
 		if allocationSize(v) != 0 {
