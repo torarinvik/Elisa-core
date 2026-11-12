@@ -16,11 +16,42 @@ func CallArg(call *ast.CallExpr, index int) (ast.Expr, bool) {
 
 func FieldMatches(expr ast.Expr, object ast.Expr, field string) bool {
 	fieldExpr, ok := StripParens(expr).(*ast.FieldExpr)
-	if !ok || fieldExpr.Field != field {
+	if !ok || fieldExpr == nil || fieldExpr.Safe || fieldExpr.Field != field ||
+		!identitySupported(fieldExpr.Object, 0) || !identitySupported(object, 0) {
 		return false
 	}
 	left, right := String(fieldExpr.Object), String(object)
 	return left != "" && right != "" && left == right
+}
+
+// Field matching justifies optimization facts, so a partially rendered or
+// effectful receiver must never serve as evidence of expression identity.
+func identitySupported(expr ast.Expr, depth int) bool {
+	if expr == nil || depth >= 64 {
+		return false
+	}
+	switch n := expr.(type) {
+	case *ast.Ident:
+		return n != nil && n.Name != ""
+	case *ast.IntLit:
+		return n != nil && n.Value != ""
+	case *ast.StringLit:
+		return n != nil
+	case *ast.BoolLit:
+		return n != nil
+	case *ast.ParenExpr:
+		return n != nil && identitySupported(n.Inner, depth+1)
+	case *ast.FieldExpr:
+		return n != nil && !n.Safe && n.Field != "" && identitySupported(n.Object, depth+1)
+	case *ast.IndexExpr:
+		if n == nil || n.Fallback != nil || n.AsOverlayCall != nil || n.AsBuiltinDictGet != nil || n.AsSpecialize != nil {
+			return false
+		}
+		return identitySupported(n.Object, depth+1) && identitySupported(n.Index, depth+1) &&
+			(n.Index2 == nil || identitySupported(n.Index2, depth+1))
+	default:
+		return false
+	}
 }
 
 func IsZero(expr ast.Expr) bool {

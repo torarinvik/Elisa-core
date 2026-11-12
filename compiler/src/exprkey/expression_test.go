@@ -30,4 +30,17 @@ func TestFieldMatchDeclinesUnsupportedReceivers(t *testing.T) {
 	if !FieldMatches(&ast.FieldExpr{Object: &ast.Ident{Name: "x"}, Field: "value"}, &ast.Ident{Name: "x"}, "value") {
 		t.Fatal("known receiver did not match")
 	}
+	nestedA := &ast.FieldExpr{Object: &ast.MatchExpr{}, Field: "inner"}
+	nestedB := &ast.FieldExpr{Object: &ast.MatchExpr{}, Field: "inner"}
+	if FieldMatches(&ast.FieldExpr{Object: nestedA, Field: "value"}, nestedB, "value") {
+		t.Fatal("partially rendered nested receivers must not match")
+	}
+	callA := &ast.CallExpr{Func: &ast.Ident{Name: "next"}}
+	callB := &ast.CallExpr{Func: &ast.Ident{Name: "next"}}
+	if FieldMatches(&ast.FieldExpr{Object: callA, Field: "value"}, callB, "value") {
+		t.Fatal("effectful receivers must not match by spelling")
+	}
+	if FieldMatches(&ast.FieldExpr{Object: &ast.Ident{Name: "x"}, Field: "value", Safe: true}, &ast.Ident{Name: "x"}, "value") {
+		t.Fatal("safe field access must not be matched as ordinary access")
+	}
 }
