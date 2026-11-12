@@ -48,3 +48,39 @@ func TestErrorSetAbsentTagStillReported(t *testing.T) {
 		t.Fatalf("an absent tag must still be reported, got:\n%s", strings.Join(r.Errors(), "\n"))
 	}
 }
+
+func TestErrorSetSubsetThroughNestedModuleAlias(t *testing.T) {
+	src := `module Outer:
+    module Right:
+        module Nested:
+            error Fault:
+                Available
+                Busy
+using Outer as First
+using First::Right as Second
+def available() -> i64 error[Second::Nested::Fault{Available}]:
+    return 1
+def full() -> i64 error[Second::Nested::Fault]:
+    return available()
+`
+	r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "nested_error_alias.elisa", src, AnalyzeOptions{})
+	if errs := r.Errors(); len(errs) != 0 {
+		t.Fatalf("valid nested alias rejected: %s", strings.Join(errs, "\n"))
+	}
+	invalid := strings.Replace(src, "Fault{Available}", "Fault{Missing}", 1)
+	r = analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "nested_error_alias_missing.elisa", invalid, AnalyzeOptions{})
+	if errs := strings.Join(r.Errors(), "\n"); !strings.Contains(errs, `has no tag "Missing"`) {
+		t.Fatalf("missing tag accepted through alias: %s", errs)
+	}
+	mismatch := src + `
+def wrap[errorset R](callback: fn() -> i64 error[R]) -> i64 error[R]:
+    return try callback()
+def wrong() -> i64 error[Second::Nested::Fault{Busy}]:
+    return wrap(available)
+`
+	r = analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "nested_error_alias_mismatch.elisa", mismatch, AnalyzeOptions{})
+	errs := strings.Join(r.Errors(), "\n")
+	if !strings.Contains(errs, "return type expects") || strings.Contains(errs, "has no tag") {
+		t.Fatalf("wrong subset was not rejected after alias resolution: %s", errs)
+	}
+}

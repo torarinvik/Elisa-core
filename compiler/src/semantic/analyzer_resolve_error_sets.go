@@ -217,14 +217,18 @@ func (a *Analyzer) findErrorVariantOwners(shortName string) []string {
 }
 
 // normalizeErrorTag canonicalizes one error[...] item: qualified `Set.Tag` and
-// explicit `*Set` pass through; a bare `Name` is a whole family if Name is a
+// explicit `*Set` use the resolved family's name; a bare `Name` is a whole family if Name is a
 // declared set, otherwise the single variant `Name` searched across all sets
 // (an ambiguous bare variant must be qualified `Set.Name`).
 func (a *Analyzer) normalizeErrorTag(tag ast.ErrorTagExpr) (ast.ErrorTagExpr, bool) {
 	if tag.Tag != "" {
+		if errSet, ok := a.errorSetTypeQuiet(tag.SetName); ok && errSet != nil {
+			tag.SetName = errSet.Name
+		}
 		return tag, true
 	}
-	if _, ok := a.errorSetTypeQuiet(tag.SetName); ok {
+	if errSet, ok := a.errorSetTypeQuiet(tag.SetName); ok && errSet != nil {
+		tag.SetName = errSet.Name
 		return tag, true
 	}
 	if tag.Family {
