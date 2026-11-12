@@ -2,6 +2,7 @@
 // This runs after LLVM has inlined callees and exposed the scalar recurrence.
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/Analysis/ConstantFolding.h>
+#include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/IntrinsicInst.h>
 #include <llvm/Transforms/Utils/Local.h>
 using namespace llvm;
@@ -35,6 +36,29 @@ static Constant *evaluatePathInstruction(Instruction &I, const PathValues &Value
       Operands.push_back(C);
     }
     return ConstantFoldIntrinsic(Call->getIntrinsicID(), Operands, Call->getType());
+  }
+
+  if (auto *GEP = dyn_cast<GetElementPtrInst>(&I)) {
+    auto *Global = dyn_cast<GlobalVariable>(GEP->getPointerOperand());
+    if (!Global || !Global->isConstant() || !Global->hasDefinitiveInitializer())
+      return nullptr;
+    Operands.push_back(Global);
+    for (Value *Index : GEP->indices()) {
+      auto *C = dyn_cast_or_null<ConstantInt>(pathValue(Index, Values));
+      if (!C) return nullptr;
+      Operands.push_back(C);
+    }
+    return ConstantFoldInstOperands(GEP, Operands, DL);
+  }
+  if (auto *Load = dyn_cast<LoadInst>(&I)) {
+    Constant *Pointer = pathValue(Load->getPointerOperand(), Values);
+    if (!Load->isSimple() || !Load->getType()->isIntegerTy() || !Pointer)
+      return nullptr;
+    auto *Global = dyn_cast<GlobalVariable>(getUnderlyingObject(Pointer));
+    if (!Global || !Global->isConstant() || !Global->hasDefinitiveInitializer())
+      return nullptr;
+    return dyn_cast_or_null<ConstantInt>(
+        ConstantFoldLoadFromConstPtr(Pointer, Load->getType(), DL));
   }
 
   if (!I.getType()->isIntegerTy() ||
@@ -73,6 +97,11 @@ static ConstantInt *evaluateIntegerPath(BasicBlock *Block, BasicBlock *Previous,
       if (auto *Ret = dyn_cast<ReturnInst>(&I))
         return dyn_cast_or_null<ConstantInt>(pathValue(Ret->getReturnValue(), Values));
       if (I.isTerminator()) break;
+      if (auto *Assume = dyn_cast<AssumeInst>(&I)) {
+        auto *Condition = dyn_cast_or_null<ConstantInt>(pathValue(Assume->getArgOperand(0), Values));
+        if (Assume->hasOperandBundles() || !Condition || !Condition->isOne()) return nullptr;
+        continue;
+      }
       Constant *C = evaluatePathInstruction(I, Values, DL);
       if (!C) return nullptr;
       Values[&I] = C;
@@ -97,8 +126,8 @@ static ConstantInt *evaluateIntegerPath(BasicBlock *Block, BasicBlock *Previous,
 static bool foldSmallIntegerDomain(CondBrInst &Entry, ICmpInst &Test,
                                    ConstantInt &Bound, unsigned &Budget) {
   Function &F = *Entry.getFunction();
-  constexpr unsigned MaxDomain = 128;
-  constexpr unsigned MaxTableBytes = 768;
+  constexpr unsigned MaxDomain = 160;
+  constexpr unsigned MaxTableBytes = 1280;
   Value *Key = Test.getOperand(0);
   auto *ReturnType = dyn_cast<IntegerType>(F.getReturnType());
   if (F.arg_size() != 1 || !Key->getType()->isIntegerTy(64) ||
@@ -255,7 +284,7 @@ static bool foldZeroProductBypass(BasicBlock &Guard) {
 
 static unsigned elisacoreFoldConstantIntegerPaths(Module &M) {
   if (!M.getTargetTriple().isAArch64()) return 0;
-  unsigned Changed = 0, Budget = 32000;
+  unsigned Changed = 0, Budget = 48000;
   for (Function &F : M) {
     if (!Budget) break;
     if (F.size() < 3 || F.size() > 128 || !F.getReturnType()->isIntegerTy() ||
