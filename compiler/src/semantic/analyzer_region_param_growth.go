@@ -119,25 +119,5 @@ func (a *Analyzer) containerParamGrownWithRegionValue(fn *ast.FuncDecl, name str
 		return baseRegionValued(arg)
 	}
 
-	// Scan for `name.<growth>(ARG…)` where any inserted ARG is region-valued.
-	found := false
-	walkPruned(fn.Body, func(node any) bool {
-		if found {
-			return false
-		}
-		if call, ok := node.(*ast.CallExpr); ok && call != nil {
-			if field, ok := call.Func.(*ast.FieldExpr); ok && field != nil && containerGrowthMethods[field.Field] {
-				if id, ok := field.Object.(*ast.Ident); ok && id != nil && id.Name == name {
-					for _, arg := range call.Args {
-						if argIsRegionValued(arg) {
-							found = true
-							return false
-						}
-					}
-				}
-			}
-		}
-		return true
-	})
-	return found
+	return regionframesyntax.ContainerGrowthHasArgument(fn.Body, name, containerGrowthMethods, argIsRegionValued)
 }
