@@ -88,11 +88,15 @@ func CloneExpr(expr Expr) Expr {
 		return &SliceExpr{Position: n.Position, Object: object, Start: start, End: end}
 	case *ListLitExpr:
 		elems := cloneExprs(n.Elems)
+		keys := cloneExprs(n.Keys)
 		owner := CloneExpr(n.Owner)
-		if (len(n.Elems) != 0 && elems == nil) || (n.Owner != nil && owner == nil) {
+		if (len(n.Elems) != 0 && elems == nil) || (len(n.Keys) != 0 && keys == nil) || (n.Owner != nil && owner == nil) {
 			return nil
 		}
-		return &ListLitExpr{Position: n.Position, Elems: elems, Spreads: append([]bool(nil), n.Spreads...), Brace: n.Brace, Owner: owner}
+		if n.Keys != nil && keys == nil {
+			keys = []Expr{}
+		}
+		return &ListLitExpr{Position: n.Position, Elems: elems, Keys: keys, Spreads: append([]bool(nil), n.Spreads...), Brace: n.Brace, Owner: owner}
 	case *CallExpr:
 		fn := CloneExpr(n.Func)
 		safeReceiver := CloneExpr(n.SafeReceiver)
@@ -108,17 +112,20 @@ func CloneExpr(expr Expr) Expr {
 			}
 		}
 		return &CallExpr{
-			Position:        n.Position,
-			Func:            fn,
-			SafeReceiver:    safeReceiver,
-			FStringLowering: n.FStringLowering,
-			HasArgForward:   n.HasArgForward,
-			ArgForwardPos:   n.ArgForwardPos,
-			Args:            args,
-			ArgNames:        append([]string(nil), n.ArgNames...),
-			ArgShorthand:    append([]bool(nil), n.ArgShorthand...),
-			ArgItemOrder:    argItems,
-			Safe:            n.Safe,
+			Position:             n.Position,
+			Func:                 fn,
+			SafeReceiver:         safeReceiver,
+			FStringLowering:      n.FStringLowering,
+			HasArgForward:        n.HasArgForward,
+			ArgForwardPos:        n.ArgForwardPos,
+			Args:                 args,
+			ArgNames:             append([]string(nil), n.ArgNames...),
+			ArgShorthand:         append([]bool(nil), n.ArgShorthand...),
+			ArgItemOrder:         argItems,
+			Safe:                 n.Safe,
+			SafeConcurrencySugar: n.SafeConcurrencySugar,
+			LmutThreadEffect:     n.LmutThreadEffect,
+			LmutRebindClaims:     append([]LmutRebindClaim(nil), n.LmutRebindClaims...),
 		}
 	case *CastExpr:
 		operand := CloneExpr(n.Operand)
@@ -205,6 +212,30 @@ func CloneExprSubst(expr Expr, subst map[string]Expr) Expr {
 			return nil
 		}
 		return &UnaryExpr{Position: n.Position, Op: n.Op, Operand: operand}
+	case *MoveExpr:
+		operand := CloneExprSubst(n.Operand, subst)
+		if n.Operand != nil && operand == nil {
+			return nil
+		}
+		return &MoveExpr{Position: n.Position, Operand: operand}
+	case *AddrOfExpr:
+		operand := CloneExprSubst(n.Operand, subst)
+		if n.Operand != nil && operand == nil {
+			return nil
+		}
+		return &AddrOfExpr{Position: n.Position, Operand: operand}
+	case *CastExpr:
+		operand := CloneExprSubst(n.Operand, subst)
+		if n.Operand != nil && operand == nil {
+			return nil
+		}
+		return &CastExpr{Position: n.Position, Operand: operand, Target: n.Target, Origin: n.Origin}
+	case *SpecializeExpr:
+		operand := CloneExprSubst(n.Operand, subst)
+		if n.Operand != nil && operand == nil {
+			return nil
+		}
+		return &SpecializeExpr{Position: n.Position, Operand: operand, TypeArgs: append([]TypeExpr(nil), n.TypeArgs...)}
 	case *BinaryExpr:
 		left := CloneExprSubst(n.Left, subst)
 		right := CloneExprSubst(n.Right, subst)
@@ -235,6 +266,14 @@ func CloneExprSubst(expr Expr, subst map[string]Expr) Expr {
 		cloned.AsOverlayCall = n.AsOverlayCall
 		cloned.AsBuiltinDictGet, _ = dictGet.(*CallExpr)
 		return cloned
+	case *SliceExpr:
+		object := CloneExprSubst(n.Object, subst)
+		start := CloneExprSubst(n.Start, subst)
+		end := CloneExprSubst(n.End, subst)
+		if (n.Object != nil && object == nil) || (n.Start != nil && start == nil) || (n.End != nil && end == nil) {
+			return nil
+		}
+		return &SliceExpr{Position: n.Position, Object: object, Start: start, End: end}
 	case *TernaryExpr:
 		value := CloneExprSubst(n.Value, subst)
 		cond := CloneExprSubst(n.Cond, subst)
@@ -243,9 +282,42 @@ func CloneExprSubst(expr Expr, subst map[string]Expr) Expr {
 			return nil
 		}
 		return &TernaryExpr{Position: n.Position, Value: value, Cond: cond, Alt: alt}
+	case *TupleExpr:
+		elems := make([]Expr, 0, len(n.Elems))
+		for _, elem := range n.Elems {
+			cloned := CloneExprSubst(elem, subst)
+			if elem != nil && cloned == nil {
+				return nil
+			}
+			elems = append(elems, cloned)
+		}
+		return &TupleExpr{Position: n.Position, Elems: elems}
+	case *ListLitExpr:
+		cloneItems := func(items []Expr) ([]Expr, bool) {
+			if items == nil {
+				return nil, true
+			}
+			result := make([]Expr, 0, len(items))
+			for _, item := range items {
+				cloned := CloneExprSubst(item, subst)
+				if item != nil && cloned == nil {
+					return nil, false
+				}
+				result = append(result, cloned)
+			}
+			return result, true
+		}
+		elems, elemsOK := cloneItems(n.Elems)
+		keys, keysOK := cloneItems(n.Keys)
+		owner := CloneExprSubst(n.Owner, subst)
+		if !elemsOK || !keysOK || (n.Owner != nil && owner == nil) {
+			return nil
+		}
+		return &ListLitExpr{Position: n.Position, Elems: elems, Keys: keys, Spreads: append([]bool(nil), n.Spreads...), Brace: n.Brace, Owner: owner}
 	case *CallExpr:
 		fn := CloneExprSubst(n.Func, subst)
-		if n.Func != nil && fn == nil {
+		safeReceiver := CloneExprSubst(n.SafeReceiver, subst)
+		if (n.Func != nil && fn == nil) || (n.SafeReceiver != nil && safeReceiver == nil) {
 			return nil
 		}
 		args := make([]Expr, 0, len(n.Args))
@@ -256,7 +328,16 @@ func CloneExprSubst(expr Expr, subst map[string]Expr) Expr {
 			}
 			args = append(args, next)
 		}
-		return &CallExpr{Position: n.Position, Func: fn, Args: args, ArgNames: append([]string(nil), n.ArgNames...), FStringLowering: n.FStringLowering}
+		return &CallExpr{
+			Position: n.Position, Func: fn, SafeReceiver: safeReceiver,
+			ArgForwardPos: n.ArgForwardPos, Args: args,
+			ArgNames:         append([]string(nil), n.ArgNames...),
+			ArgShorthand:     append([]bool(nil), n.ArgShorthand...),
+			ArgItemOrder:     append([]CallArgItem(nil), n.ArgItemOrder...),
+			LmutRebindClaims: append([]LmutRebindClaim(nil), n.LmutRebindClaims...),
+			FStringLowering:  n.FStringLowering, HasArgForward: n.HasArgForward,
+			Safe: n.Safe, SafeConcurrencySugar: n.SafeConcurrencySugar, LmutThreadEffect: n.LmutThreadEffect,
+		}
 	default:
 		// Non-substituting fallback for the remaining literal/leaf shapes (no idents to replace).
 		return CloneExpr(expr)
