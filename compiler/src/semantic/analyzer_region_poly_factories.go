@@ -3,7 +3,6 @@ package semantic
 import (
 	"elisacore/src/ast"
 	"elisacore/src/regionframesyntax"
-	"reflect"
 )
 
 // functionBuildsAndReturnsLocalContainer detects the build-local-return shape (Stage 1 of the
@@ -56,48 +55,9 @@ func structFactoryLeavesRegionFieldsFresh(body []ast.Stmt, constructed map[strin
 	if st == nil {
 		return false
 	}
-	ok := true
-	var visit func(v reflect.Value)
-	visit = func(v reflect.Value) {
-		if !ok || !v.IsValid() || !v.CanInterface() {
-			return
-		}
-		switch v.Kind() {
-		case reflect.Pointer:
-			if v.IsNil() {
-				return
-			}
-			switch n := v.Interface().(type) {
-			case *ast.VarDeclStmt:
-				if constructed[n.Name] {
-					if lit, isLit := unwrapParenForRegionPoly(n.Value).(*ast.StructLitExpr); isLit && !structLiteralLeavesRegionFieldsFresh(lit, st) {
-						ok = false
-						return
-					}
-				}
-			case *ast.AssignStmt:
-				if !assignmentLeavesRegionFieldsFresh(n.Target, constructed, st) {
-					ok = false
-					return
-				}
-			}
-			visit(v.Elem())
-		case reflect.Interface:
-			if !v.IsNil() {
-				visit(v.Elem())
-			}
-		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
-				visit(v.Field(i))
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				visit(v.Index(i))
-			}
-		}
-	}
-	visit(reflect.ValueOf(body))
-	return ok
+	return regionframesyntax.StructFieldsRemainFresh(body, constructed, unwrapParenForRegionPoly,
+		func(lit *ast.StructLitExpr) bool { return structLiteralLeavesRegionFieldsFresh(lit, st) },
+		func(target ast.Expr) bool { return assignmentLeavesRegionFieldsFresh(target, constructed, st) })
 }
 
 // structLiteralLeavesRegionFieldsFresh: every argument for a region-carrying field of st is an
