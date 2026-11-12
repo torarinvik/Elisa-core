@@ -57,3 +57,19 @@ func BenchmarkRegionForwardingRepeatedCalls(b *testing.B) {
 		collectRegionParamForwarding(cands, byName, make(map[*ast.FuncDecl][]*ast.FuncDecl))
 	}
 }
+
+func TestRegionForwardingGrowthPrefilterMatchesBodyWalk(t *testing.T) {
+	file := retainedParse(t, `def grow(first: mutable darray[i64]&, second: mutable darray[i64]&, untouched: mutable darray[i64]&):
+    if true:
+        first.push(1)
+    in perm:
+        second.extend([2, 3])
+`)
+	fn := file.Decls[0].(*ast.FuncDecl)
+	forwarding := collectRegionParamForwarding([]*ast.FuncDecl{fn}, nil, nil)[fn]
+	for _, name := range []string{"first", "second", "untouched"} {
+		if got, want := forwarding.grownContainers[name], paramContainerIsGrown(fn.Body, name); got != want {
+			t.Errorf("growth prefilter for %s: got %v, want %v", name, got, want)
+		}
+	}
+}

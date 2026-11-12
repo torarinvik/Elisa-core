@@ -13,8 +13,9 @@ type regionForwardTarget struct {
 }
 
 type regionParamForwarding struct {
-	direct map[string][]regionForwardTarget
-	fields map[string][]regionForwardTarget
+	direct          map[string][]regionForwardTarget
+	fields          map[string][]regionForwardTarget
+	grownContainers map[string]bool
 }
 
 // containerGrowthMethods are the by-reference container operations that ALLOCATE into the
@@ -287,7 +288,10 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, 
 		if cstamp, ok := regionlessRefContainer(p.Type); ok {
 			// A grown / literal-reassigned container ref param, OR one merely FORWARDED to a callee that
 			// requires a region there (so the region must thread through this function too).
-			grownWithRegionValue := a.containerParamGrownWithRegionValue(fn, p.Name, funcByName, funcScopes)
+			grownWithRegionValue := false
+			if forwarding.grownContainers[p.Name] {
+				grownWithRegionValue = a.containerParamGrownWithRegionValue(fn, p.Name, funcByName, funcScopes)
+			}
 			facts := bodyFactsForParam(bodyFacts, fn, p.Name)
 			if !facts.containerGrownKnown {
 				facts.containerGrown = paramContainerIsGrownNeedingRegion(fn.Body, p.Name, permRoots)

@@ -35,6 +35,24 @@ func collectRegionParamForwarding(cands []*ast.FuncDecl, funcByName map[string]*
 				}
 				return
 			case *ast.CallExpr:
+				// The region-valued growth probe matches this exact receiver shape.
+				// Record it during the existing walk so parameters with no matching
+				// call do not trigger another whole-body scan on every fixpoint pass.
+				if n != nil {
+					if field, ok := n.Func.(*ast.FieldExpr); ok && field != nil && containerGrowthMethods[field.Field] {
+						if id, ok := field.Object.(*ast.Ident); ok && id != nil {
+							for _, param := range fn.Params {
+								if param.Name == id.Name {
+									if forwarding.grownContainers == nil {
+										forwarding.grownContainers = make(map[string]bool)
+									}
+									forwarding.grownContainers[id.Name] = true
+									break
+								}
+							}
+						}
+					}
+				}
 				expr = n
 			case *ast.StructLitExpr:
 				expr = n
@@ -81,7 +99,7 @@ func collectRegionParamForwarding(cands []*ast.FuncDecl, funcByName map[string]*
 				}
 			}
 		})
-		if forwarding.direct != nil || forwarding.fields != nil {
+		if forwarding.direct != nil || forwarding.fields != nil || forwarding.grownContainers != nil {
 			byFunc[fn] = forwarding
 		}
 	}
