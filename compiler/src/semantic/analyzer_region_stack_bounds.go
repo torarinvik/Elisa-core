@@ -2,7 +2,7 @@ package semantic
 
 import (
 	"elisacore/src/ast"
-	"elisacore/src/lexer"
+	"elisacore/src/regionframesyntax"
 	"fmt"
 	"os"
 	"reflect"
@@ -14,71 +14,7 @@ import (
 // (`name.x`) or an index base (`name[i]`) — e.g. a bare value use, an assignment source, or a call
 // argument, all of which can copy the buffer pointer out.
 func objectMayEscape(body []ast.Stmt, name string) bool {
-	okBase := map[*ast.Ident]bool{}
-	allRefs := []*ast.Ident{}
-	addrTaken := false
-	var walk func(v reflect.Value)
-	walk = func(v reflect.Value) {
-		if addrTaken || !v.IsValid() || !v.CanInterface() {
-			return
-		}
-		switch v.Kind() {
-		case reflect.Pointer, reflect.Interface:
-			if v.IsNil() {
-				return
-			}
-			switch e := v.Interface().(type) {
-			case *ast.Ident:
-				if e.Name == name {
-					allRefs = append(allRefs, e)
-				}
-			case *ast.FieldExpr:
-				if id, ok := stripParenExpr(e.Object).(*ast.Ident); ok && id.Name == name {
-					okBase[id] = true
-				}
-			case *ast.IndexExpr:
-				if id, ok := stripParenExpr(e.Object).(*ast.Ident); ok && id.Name == name {
-					okBase[id] = true
-				}
-			case *ast.AddrOfExpr:
-				if identReducesTo(e.Operand, name) {
-					addrTaken = true
-				}
-			}
-			walk(v.Elem())
-		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
-				walk(v.Field(i))
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				walk(v.Index(i))
-			}
-		}
-	}
-	walk(reflect.ValueOf(body))
-	if addrTaken {
-		return true
-	}
-	for _, id := range allRefs {
-		if !okBase[id] {
-			return true // a bare / aliasing use
-		}
-	}
-	return false
-}
-
-// identReducesTo reports whether expr is `name` or `name[...]` (the targets of an address-of that
-// would alias into the object's buffer).
-func identReducesTo(expr ast.Expr, name string) bool {
-	switch e := stripParenExpr(expr).(type) {
-	case *ast.Ident:
-		return e.Name == name
-	case *ast.IndexExpr:
-		id, ok := stripParenExpr(e.Object).(*ast.Ident)
-		return ok && id.Name == name
-	}
-	return false
+	return regionframesyntax.ObjectMayEscape(body, name)
 }
 
 // subtreeReferencesIdent reports whether any *ast.Ident named `name` appears anywhere in node.
@@ -87,72 +23,14 @@ func subtreeReferencesIdent(node ast.Node, name string) bool {
 }
 
 func reflectSubtreeHasIdent(value reflect.Value, matches func(string) bool) bool {
-	for value.Kind() == reflect.Interface {
-		value = value.Elem()
-	}
-	if !value.IsValid() || !value.CanInterface() {
-		return false
-	}
-	switch value.Kind() {
-	case reflect.Pointer:
-		if value.IsNil() {
-			return false
-		}
-		if id, ok := value.Interface().(*ast.Ident); ok {
-			return matches(id.Name)
-		}
-		return reflectSubtreeHasIdent(value.Elem(), matches)
-	case reflect.Struct:
-		for _, index := range syntaxWalkFields(value.Type()) {
-			if reflectSubtreeHasIdent(value.Field(index), matches) {
-				return true
-			}
-		}
-	case reflect.Slice, reflect.Array:
-		for i := 0; i < value.Len(); i++ {
-			if reflectSubtreeHasIdent(value.Index(i), matches) {
-				return true
-			}
-		}
-	}
-	return false
+	return regionframesyntax.SubtreeHasIdent(value, matches, syntaxWalkFields)
 }
 
 // collectInteriorRefNames returns the tracked container names that have an interior reference
 // taken into them anywhere in body — i.e. `&name[...]` (an address-of an index expression). These
 // are the darrays whose backing must not relocate for the reference to stay valid (Phase C).
 func collectInteriorRefNames(body []ast.Stmt, tracked map[string]bool) map[string]bool {
-	names := map[string]bool{}
-	var walk func(v reflect.Value)
-	walk = func(v reflect.Value) {
-		if !v.IsValid() || !v.CanInterface() {
-			return
-		}
-		switch v.Kind() {
-		case reflect.Pointer, reflect.Interface:
-			if v.IsNil() {
-				return
-			}
-			if addr, ok := v.Interface().(*ast.AddrOfExpr); ok {
-				if idx, ok := stripParenExpr(addr.Operand).(*ast.IndexExpr); ok {
-					if id, ok := stripParenExpr(idx.Object).(*ast.Ident); ok && tracked[id.Name] {
-						names[id.Name] = true
-					}
-				}
-			}
-			walk(v.Elem())
-		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
-				walk(v.Field(i))
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				walk(v.Index(i))
-			}
-		}
-	}
-	walk(reflect.ValueOf(body))
-	return names
+	return regionframesyntax.InteriorRefNames(body, tracked)
 }
 
 // hardBoundForName returns the provable maximum element count N for a fresh darray `name` when its
@@ -210,14 +88,7 @@ func (s *hardBoundScan) checkCall(call *ast.CallExpr) {
 }
 
 func hardBoundPushElementCount(call *ast.CallExpr) int {
-	if call == nil || len(call.Args) != 1 {
-		return 1
-	}
-	list, ok := call.Args[0].(*ast.ListLitExpr)
-	if !ok || list == nil || list.Brace || len(list.Elems) == 0 {
-		return 1
-	}
-	return len(list.Elems)
+	return regionframesyntax.HardBoundPushElementCount(call)
 }
 
 func (s *hardBoundScan) walk(v reflect.Value) {
@@ -276,36 +147,12 @@ func (s *hardBoundScan) walk(v reflect.Value) {
 // the region body is not yet in scope there, so it does not qualify for reserve_commit (the darray
 // stays chained — a sound, graceful fallback; deferring the reservation to the darray's first use
 // to support local bounds is a follow-up).
-func boundInScopeAtRegionEntry(bound ast.Expr, paramNames map[string]bool) bool {
-	switch b := bound.(type) {
-	case *ast.IntLit:
-		return true
-	case *ast.Ident:
-		return paramNames[b.Name]
-	case *ast.BinaryExpr:
-		switch b.Op {
-		case lexer.TOKEN_STAR, lexer.TOKEN_PLUS:
-			return boundInScopeAtRegionEntry(b.Left, paramNames) && boundInScopeAtRegionEntry(b.Right, paramNames)
-		}
-	}
-	return false
+func boundInScopeAtRegionEntry(bound ast.Expr, params map[string]bool) bool {
+	return regionframesyntax.BoundInScopeAtRegionEntry(bound, params)
 }
 
-// countingLoopBound returns the exclusive end N of a `for _ in 0..<N` loop with a pure ident/int
-// bound (the same shape auto-reservation uses), or ok=false for any other loop.
 func countingLoopBound(node ast.Node) (ast.Expr, bool) {
-	loop, ok := node.(*ast.ForStmt)
-	if !ok || loop.Reverse || loop.Op != lexer.TOKEN_RANGE_LT || loop.Step != nil {
-		return nil, false
-	}
-	if start, ok := loop.Start.(*ast.IntLit); !ok || start.Value != "0" {
-		return nil, false
-	}
-	switch loop.End.(type) {
-	case *ast.Ident, *ast.IntLit:
-		return loop.End, true
-	}
-	return nil, false
+	return regionframesyntax.CountingLoopBound(node)
 }
 
 func stripParenExpr(e ast.Expr) ast.Expr {

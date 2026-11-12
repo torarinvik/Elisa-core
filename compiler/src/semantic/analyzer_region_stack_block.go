@@ -2,11 +2,10 @@ package semantic
 
 import (
 	"reflect"
-	"strconv"
-	"strings"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
+	"elisacore/src/regionframesyntax"
 )
 
 // Frame-block backing for small default reserve_commit stacks.
@@ -275,49 +274,11 @@ func (a *Analyzer) recordStackBlockUpperBound(site ast.Expr, bound ast.Expr) {
 }
 
 func parseStackBlockIntLit(text string) (int64, bool) {
-	v, err := strconv.ParseInt(strings.ReplaceAll(text, "_", ""), 0, 64)
-	return v, err == nil
+	return regionframesyntax.ParseStackBlockIntLit(text)
 }
-
-// stackBlockBoundEvaluable accepts the bound shapes codegen evaluates without trapping:
-// integer literals, parameters, `+`/`*`, parentheses, and integer conversions of those.
-func stackBlockBoundEvaluable(e ast.Expr, paramNames map[string]bool) bool {
-	switch b := e.(type) {
-	case *ast.IntLit:
-		return true
-	case *ast.Ident:
-		return paramNames[b.Name]
-	case *ast.ParenExpr:
-		return stackBlockBoundEvaluable(b.Inner, paramNames)
-	case *ast.BinaryExpr:
-		if b.Op != lexer.TOKEN_STAR && b.Op != lexer.TOKEN_PLUS {
-			return false
-		}
-		return stackBlockBoundEvaluable(b.Left, paramNames) && stackBlockBoundEvaluable(b.Right, paramNames)
-	case *ast.CastExpr:
-		return StackBlockIntegerTypeName(b.Target) != "" && stackBlockBoundEvaluable(b.Operand, paramNames)
-	case *ast.CallExpr:
-		field, ok := b.Func.(*ast.FieldExpr)
-		if !ok || len(b.Args) != 0 || !stackBlockIntegerName(field.Field) {
-			return false
-		}
-		return stackBlockBoundEvaluable(field.Object, paramNames)
-	}
-	return false
+func stackBlockBoundEvaluable(expr ast.Expr, params map[string]bool) bool {
+	return regionframesyntax.StackBlockBoundEvaluable(expr, params)
 }
-
-func stackBlockIntegerName(name string) bool {
-	switch name {
-	case "int", "i8", "i16", "i32", "i64", "isize", "u8", "u16", "u32", "u64", "usize", "uintptr":
-		return true
-	}
-	return false
-}
-
-// StackBlockIntegerTypeName returns the builtin integer name a cast target spells, or "".
 func StackBlockIntegerTypeName(t ast.TypeExpr) string {
-	if nt, ok := t.(*ast.NamedType); ok && stackBlockIntegerName(nt.Name) {
-		return nt.Name
-	}
-	return ""
+	return regionframesyntax.StackBlockIntegerTypeName(t)
 }
