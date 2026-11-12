@@ -1,6 +1,7 @@
 package lexer
 
 import (
+	"slices"
 	"unicode/utf8"
 )
 
@@ -92,17 +93,13 @@ func (l *Lexer) Errors() []string {
 	return out
 }
 
-// Reuse the backing array after the final pending indentation token. Most
-// lines enqueue a single token, so advancing the slice on every drain used to
-// allocate a new array at the next indentation change.
+// Pending indentation tokens are stored in reverse emission order so popping
+// preserves the backing capacity even after a run of consecutive dedents.
 func (l *Lexer) takePendingToken() Token {
-	tok := l.pendingToks[0]
-	if len(l.pendingToks) == 1 {
-		l.pendingToks[0] = Token{}
-		l.pendingToks = l.pendingToks[:0]
-	} else {
-		l.pendingToks = l.pendingToks[1:]
-	}
+	last := len(l.pendingToks) - 1
+	tok := l.pendingToks[last]
+	l.pendingToks[last] = Token{}
+	l.pendingToks = l.pendingToks[:last]
 	return tok
 }
 func (l *Lexer) peek() byte {
@@ -366,5 +363,6 @@ func (l *Lexer) handleIndentation() {
 				Pos:  l.curPos(),
 			}))
 		}
+		slices.Reverse(l.pendingToks)
 	}
 }
