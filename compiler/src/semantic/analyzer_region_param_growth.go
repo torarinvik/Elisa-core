@@ -82,59 +82,10 @@ func paramStoresBodyLocal(fn *ast.FuncDecl, name string) bool {
 // ambient-allocated container storage -- a container, a named/generic aggregate, or a literal /
 // call-built value. Scalars, pointers and references allocate nothing in the ambient region.
 func localMayOwnContainer(v *ast.VarDeclStmt) bool {
-	typ := v.Type
-	for {
-		if m, ok := typ.(*ast.MutableType); ok && m != nil {
-			typ = m.Elem
-			continue
-		}
-		break
-	}
-	switch t := typ.(type) {
-	case *ast.BuiltinTypeExpr:
-		return t != nil && (t.Name == "darray" || t.Name == "dstr" || t.Name == "dict" || t.Name == "set")
-	case *ast.NamedType:
-		if t == nil {
-			return false
-		}
-		switch t.Name {
-		case "dstr":
-			return true
-		case "bool", "u8", "u16", "u32", "u64", "usize", "i8", "i16", "i32", "i64", "isize", "f32", "f64", "char", "sview", "cstr", "uintptr", "void":
-			return false
-		}
-		return true
-	case *ast.GenericType, *ast.TupleTypeExpr:
-		return true
-	case nil:
-		switch storeScanUnwrap(v.Value).(type) {
-		case *ast.StructLitExpr, *ast.ListLitExpr, *ast.ListComprehensionExpr, *ast.CallExpr:
-			return true
-		}
-	}
-	return false
+	return regionframesyntax.LocalMayOwnContainer(v, storeScanUnwrap)
 }
-
-// paramIsWritableStructRef: a `mutable T&` / `lmut T` / `T mutable&` parameter (a place the body
-// can store into).
 func paramIsWritableStructRef(p *ast.ParamDecl) bool {
-	typ := p.Type
-	writable := p.Mutable
-	for {
-		switch t := typ.(type) {
-		case *ast.MutableType:
-			writable = true
-			typ = t.Elem
-			continue
-		case *ast.OwnedType:
-			typ = t.Elem
-			continue
-		case *ast.RefType:
-			_, mutableElem := t.Elem.(*ast.MutableType)
-			return writable || mutableElem
-		}
-		return false
-	}
+	return regionframesyntax.ParamIsWritableStructRef(p)
 }
 
 // hasOtherFreshFieldTarget reports whether fn has a by-reference parameter other than name.
@@ -148,23 +99,8 @@ func (a *Analyzer) hasOtherFreshFieldTarget(fn *ast.FuncDecl, name string) bool 
 		}
 		// Only a MUTABLE reference can receive a stored value; a read-only `darray[T]&` is never a
 		// second target (same rule as containerParamCount).
-		typ := fn.Params[i].Type
-		writable := fn.Params[i].Mutable
-		for {
-			switch t := typ.(type) {
-			case *ast.MutableType:
-				writable = true
-				typ = t.Elem
-				continue
-			case *ast.OwnedType:
-				typ = t.Elem
-				continue
-			case *ast.RefType:
-				if _, mutableElem := t.Elem.(*ast.MutableType); writable || mutableElem {
-					return true
-				}
-			}
-			break
+		if paramIsWritableStructRef(&fn.Params[i]) {
+			return true
 		}
 	}
 	return false
