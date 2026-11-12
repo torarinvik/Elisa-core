@@ -186,7 +186,12 @@ func TestTargetedMembershipFreshSyntaxAllocationProducersRemainReviewed(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected := map[string]string{"copy": "503bd7f0584d5ce067b70aefc3168f49226c313d96d379ab9f0459796cd1d7e4", "allocateSlice": "b9d2b4b440c290bca97a16e28ccfd90d3b565da1123e6ae8e654238b91f82031"}
+	expected := map[string]string{
+		"copy":          "fb589f1f258a46878fde36804b8d65124b29ca0da1cb03b92003e7c0b271d522",
+		"allocateSlice": "b9d2b4b440c290bca97a16e28ccfd90d3b565da1123e6ae8e654238b91f82031",
+		"backingSlice":  "163fed14744aff72c083c1cb33ffa75fc7826c0d287fb44485734471496dd22f",
+		"validate":      "da0bc5c56ee21df0bb8380bb7f80466751a327046da4ba00fe311803325dae21",
+	}
 	writes := 0
 	for _, decl := range parsed.Decls {
 		fn, ok := decl.(*goast.FuncDecl)
@@ -220,6 +225,10 @@ func TestTargetedMembershipFreshSyntaxAllocationProducersRemainReviewed(t *testi
 			}
 			return true
 		})
+		delete(expected, fn.Name.Name)
+	}
+	if len(expected) != 0 {
+		t.Fatalf("reviewed syntax allocation functions missing: %v", expected)
 	}
 	if writes != 2 {
 		t.Fatalf("fresh node producer inventory changed: %d", writes)
