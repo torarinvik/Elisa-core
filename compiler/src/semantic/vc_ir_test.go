@@ -3,6 +3,7 @@
 package semantic
 
 import (
+	"math"
 	"testing"
 
 	"elisacore/src/lexer"
@@ -32,6 +33,17 @@ func TestVCTermFoldEmit(t *testing.T) {
 	for _, tc := range cases {
 		if got := emitVCTerm(tc.got); got != tc.want {
 			t.Errorf("%s: emit = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// A product outside int64 must remain structural; folding the wrapped Go
+// result would let the prover draw conclusions from the wrong integer.
+func TestVCTermMultiplicationOverflowRemainsStructural(t *testing.T) {
+	for _, pair := range [][2]int64{{math.MinInt64, -1}, {-1, math.MinInt64}} {
+		term := vcMkArith("*", vcIntLit{pair[0]}, vcIntLit{pair[1]}, 0, false)
+		if _, ok := term.(vcArith); !ok {
+			t.Fatalf("overflowing %d * %d folded to %T", pair[0], pair[1], term)
 		}
 	}
 }

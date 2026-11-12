@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"elisacore/src/lexer"
+	"elisacore/src/vcarithmetic"
 	"strings"
 )
 
@@ -305,7 +306,7 @@ func vcMkArith(op string, l, r vcTerm, wrapBits int, signedWrap bool) vcTerm {
 	li, lIsLit := l.(vcIntLit)
 	ri, rIsLit := r.(vcIntLit)
 	if wrapBits == 0 && lIsLit && rIsLit {
-		if v, ok := foldArith(op, li.Val, ri.Val); ok {
+		if v, ok := vcarithmetic.FoldArith(op, li.Val, ri.Val); ok {
 			return vcIntLit{Val: v}
 		}
 	}
@@ -335,35 +336,6 @@ func vcMkArith(op string, l, r vcTerm, wrapBits int, signedWrap bool) vcTerm {
 		}
 	}
 	return vcArith{Op: op, L: l, R: r, WrapBits: wrapBits, SignedWrap: signedWrap}
-}
-
-// foldArith evaluates a constant machine op in int64 with overflow detection; on overflow it declines
-// (keeps the term structural) rather than fold a wrong value.
-func foldArith(op string, a, b int64) (int64, bool) {
-	switch op {
-	case "+":
-		s := a + b
-		if (s > a) != (b > 0) {
-			return 0, false
-		}
-		return s, true
-	case "-":
-		d := a - b
-		if (d < a) != (b > 0) {
-			return 0, false
-		}
-		return d, true
-	case "*":
-		if a == 0 || b == 0 {
-			return 0, true
-		}
-		p := a * b
-		if p/b != a {
-			return 0, false
-		}
-		return p, true
-	}
-	return 0, false
 }
 
 // vcMkCompare folds a comparison of two literals and recognizes reflexivity (identical operands) — a
