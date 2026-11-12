@@ -409,6 +409,25 @@ class Stage0ProvenanceTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "receipt is missing or invalid"):
             stage0_provenance.check(self.root, self.binary)
 
+    def test_source_digest_tracks_symlink_target_and_contents(self) -> None:
+        first = self.root / "first.go"
+        second = self.root / "second.go"
+        link = self.root / "linked.go"
+        first.write_bytes(b"same")
+        second.write_bytes(b"same")
+        link.symlink_to(first.name)
+        files = [("linked.go", link)]
+        initial = stage0_provenance._digest_sources(files)
+        first.write_bytes(b"changed")
+        self.assertNotEqual(initial, stage0_provenance._digest_sources(files))
+        first.write_bytes(b"same")
+        link.unlink()
+        link.symlink_to(second.name)
+        self.assertNotEqual(initial, stage0_provenance._digest_sources(files))
+        link.unlink()
+        link.symlink_to("missing.go")
+        self.assertNotEqual(initial, stage0_provenance._digest_sources(files))
+
     def test_external_receipt_requires_explicit_source_root(self) -> None:
         with tempfile.TemporaryDirectory() as external_directory:
             binary = Path(external_directory) / "pinned-elisac"

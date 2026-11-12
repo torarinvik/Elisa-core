@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 from pathlib import Path
 import re
 import subprocess
@@ -241,12 +242,17 @@ def _digest_sources(
         logical_name = identity.encode("utf-8")
         file_digest = hashlib.sha256()
         size = 0
-        if path.is_file():
+        try:
+            mode = path.lstat().st_mode
+        except OSError:
+            mode = 0
+        is_link = stat.S_ISLNK(mode)
+        if stat.S_ISREG(mode) or (is_link and path.is_file()):
             with path.open("rb") as stream:
                 for chunk in iter(lambda: stream.read(1024 * 1024), b""):
                     size += len(chunk)
                     file_digest.update(chunk)
-        symlink = os.readlink(path).encode("utf-8", errors="surrogateescape") if path.is_symlink() else b""
+        symlink = os.readlink(path).encode("utf-8", errors="surrogateescape") if is_link else b""
         content_digest = file_digest.digest()
         if file_digests is not None:
             file_digests[path] = content_digest
