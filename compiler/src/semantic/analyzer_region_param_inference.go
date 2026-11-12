@@ -2,8 +2,8 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/regionframesyntax"
 	"os"
-	"strconv"
 	"strings"
 )
 
@@ -399,25 +399,7 @@ func cachedParamStoresBodyLocal(facts *regionParamBodyFacts, fn *ast.FuncDecl, n
 // specialization bindings, so a synthesized __rg_* name must be distinct from
 // every declared type, region, permission, value, or state generic parameter.
 func inferredRegionParamName(fn *ast.FuncDecl, parameter string) string {
-	base := "__rg_" + parameter
-	used := make(map[string]bool, len(fn.TypeParams)+len(fn.RegionParams)+len(fn.PermissionParams)+len(fn.GenericParams))
-	for _, name := range fn.TypeParams {
-		used[name] = true
-	}
-	for _, name := range fn.RegionParams {
-		used[name] = true
-	}
-	for _, name := range fn.PermissionParams {
-		used[name] = true
-	}
-	for _, param := range fn.GenericParams {
-		used[param.Name] = true
-	}
-	name := base
-	for suffix := 1; used[name]; suffix++ {
-		name = base + "_" + strconv.Itoa(suffix)
-	}
-	return name
+	return regionframesyntax.InferredRegionParamName(fn, parameter)
 }
 
 // calleeReturnTypeIsRegionValued resolves a callee's declared return type for the
