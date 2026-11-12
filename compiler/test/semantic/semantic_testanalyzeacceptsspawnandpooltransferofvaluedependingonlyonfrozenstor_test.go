@@ -266,7 +266,7 @@ def bad(owner: Arena) -> Thread[i64, Joinable]:
 		t.Fatalf("expected nested view unpublished-store spawn diagnostic, got:\n%s", all)
 	}
 }
-func TestAnalyzeAcceptsSpawnOfNestedViewAfterFreezeRemapsPackedStoreRecursively(t *testing.T) {
+func TestAnalyzeRejectsFrozenNestedViewWithLocalArrayBacking(t *testing.T) {
 	src := `packed enum Expr:
 	Int(value: int)
 
@@ -276,14 +276,14 @@ struct Box:
 @borrows_return(field, node, node)
 extern wrap_node(node: Expr) -> Box
 
-def pool_submit1[A, R](pool: ThreadPool&, fn: fn(A) -> R, arg: A) -> Task[R, Pending]:
+def pool_submit1[A, R](pool: mutable ThreadPool&, fn: fn(A) -> R, arg: A) -> Task[R, Pending]:
 	return zeroed
 
 def worker(items: view[Box]) -> i64:
 	_ = items
 	return 0
 
-def ok(owner: Arena, pool: ThreadPool&) -> Task[i64, Pending] can[Pool.Submit]:
+def ok(owner: Arena, pool: mutable ThreadPool&) -> Task[i64, Pending] can[Pool.Submit]:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	node: Expr = new[store] Expr.Int(value: 1)
 	items: array[Box, 1] = [wrap_node(node)]
@@ -291,9 +291,10 @@ def ok(owner: Arena, pool: ThreadPool&) -> Task[i64, Pending] can[Pool.Submit]:
 	_ = frozen
 	return submit[pool] worker(items[0:1])
 `
-	result, errs := parseAndAnalyze(t, "spawn1_nested_view_frozen_store_ok.elisa", src)
-	requireNoErrors(t, errs)
-	requireNoWarnings(t, result)
+	_, errs := parseAndAnalyze(t, "spawn1_nested_view_frozen_local_backing_reject.elisa", src)
+	if !strings.Contains(strings.Join(errs, "\n"), "call may store a reference to function-local storage") {
+		t.Fatalf("expected local backing escape diagnostic, got: %v", errs)
+	}
 }
 func TestAnalyzeRejectsPoolTransferOfValueDependingOnLocalRegion(t *testing.T) {
 	src := `packed enum Expr:
