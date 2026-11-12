@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/regionframesyntax"
 	"fmt"
 	"maps"
 	"slices"
@@ -118,16 +119,7 @@ func (a *Analyzer) wrapRegionPolyCallerBodies(funcs []*ast.FuncDecl) {
 // wrapFuncBodyInLazyAutoRegion wraps a function body in a compiler-synthesized lazy auto
 // region (the semantic analogue of the parser's maybeWrapFunctionBodyInAutoRegion).
 func wrapFuncBodyInLazyAutoRegion(fn *ast.FuncDecl) {
-	if fn == nil || len(fn.Body) == 0 {
-		return
-	}
-	pos := fn.Body[0].Pos()
-	fn.Body = []ast.Stmt{&ast.RegionStmt{
-		Position: pos,
-		Name:     fmt.Sprintf("__auto_%d", pos.Offset),
-		Lazy:     true,
-		Body:     fn.Body,
-	}}
+	regionframesyntax.WrapFuncBodyInLazyAutoRegion(fn)
 }
 
 // tightenRegionPolyLoopBodies wraps reclaimable loop bodies containing region-poly calls in a
@@ -392,16 +384,5 @@ func (a *Analyzer) regionPolyProtocolMethodImplFuncTypes(callee *ast.FieldExpr) 
 // returnTypeIsStaticRef reports whether a syntactic return type is a reference with
 // `static` storage (peeling mutable/optional wrappers): `static u8&`, `mutable static T&?`.
 func returnTypeIsStaticRef(typ ast.TypeExpr) bool {
-	for {
-		switch t := typ.(type) {
-		case *ast.MutableType:
-			typ = t.Elem
-		case *ast.OptionalTypeExpr:
-			typ = t.Value
-		case *ast.RefType:
-			return t.Storage == ast.RefStorageStatic
-		default:
-			return false
-		}
-	}
+	return regionframesyntax.ReturnTypeIsStaticRef(typ)
 }
