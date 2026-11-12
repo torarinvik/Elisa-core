@@ -57,7 +57,7 @@ func TestAffineLaggedRecurrencePreservesOverflowContract(t *testing.T) {
 	source := strings.ReplaceAll(boundedLaggedRecurrenceIR, "shl i64 %current, 1", "add i64 %current, 1")
 	t.Run("wrapping", func(t *testing.T) {
 		ir := testLaggedRecurrenceUnroll(t, source, true)
-		if !strings.Contains(ir, ", -1") {
+		if !strings.Contains(ir, "sub i64 %next.lcssa, 1") {
 			t.Fatalf("missing output adjustment:\n%s", ir)
 		}
 	})
@@ -92,14 +92,16 @@ func testLaggedRecurrenceUnroll(t *testing.T, source string, wantUnroll bool) st
 	if err := g.ensureTargetMachine(); err != nil {
 		t.Fatal(err)
 	}
-	if got := unrollBoundedDivisionLoops(g); got == 2 || (got == 1) != wantUnroll {
+	// The full pipeline may replace a bounded recurrence with a lookup table.
+	// Check the peeling and unroll shape on the pass that produces it.
+	if got := unrollLaggedRecurrences(g); (got != 0) != wantUnroll {
 		t.Fatalf("unroll returned %d, want changed=%t", got, wantUnroll)
 	}
 	if err := g.verify(); err != nil {
 		t.Fatal(err)
 	}
 	ir := g.printModule()
-	peeled := strings.Contains(ir, "icmp eq i64 %limit, 2") || strings.Contains(ir, "i64 2, label")
+	peeled := strings.Contains(ir, `!"llvm.loop.peeled.count", i32 1`)
 	if got := peeled && strings.Contains(ir, "add i64 %niter, 4"); got != wantUnroll {
 		t.Fatalf("peeled four-step body=%t, want %t:\n%s", got, wantUnroll, ir)
 	}
