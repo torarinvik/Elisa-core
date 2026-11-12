@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"elisacore/src/ast"
+	"elisacore/src/conjunctionsyntax"
 	"elisacore/src/lexer"
 )
 
@@ -81,13 +82,7 @@ const (
 )
 
 // splitConjuncts flattens an `and` tree into its leaf comparisons.
-func splitConjuncts(expr ast.Expr) []ast.Expr {
-	bin, ok := stripOptimizationParens(expr).(*ast.BinaryExpr)
-	if ok && bin != nil && bin.Op == lexer.TOKEN_AND {
-		return append(splitConjuncts(bin.Left), splitConjuncts(bin.Right)...)
-	}
-	return []ast.Expr{expr}
-}
+func splitConjuncts(expr ast.Expr) []ast.Expr { return conjunctionsyntax.Flatten(expr) }
 
 // rangeConjunctBound classifies one comparison of the law body as a lower or upper bound on `self`,
 // resolving the other operand to a constant via the predicate's bound-parameter substitution (or a
