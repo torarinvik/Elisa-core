@@ -15,6 +15,7 @@ func TestSyntaxSuffixRejectsStateChangesAndBackwardReads(t *testing.T) {
 			old := lexer.TokenizeSource("certificate.elisa", []byte(source), nil)
 			p := NewWithSyntaxTrace(old.CopyTokens())
 			file := p.ParseFile("certificate.elisa")
+			recordParserParityCase(t, source, len(p.Errors()), len(p.Notices()))
 			trace := p.SyntaxTrace()
 			if trace == nil {
 				t.Fatal("trace")
@@ -45,6 +46,7 @@ func TestSyntaxSuffixRejectsStateChangesAndBackwardReads(t *testing.T) {
 			got := replay.ParseFile("certificate.elisa")
 			fresh := New(lexer.New("certificate.elisa", []byte(changed)).Tokenize())
 			want := fresh.ParseFile("certificate.elisa")
+			recordParserParityCase(t, changed, len(fresh.Errors()), len(fresh.Notices()))
 			if calls != 0 || !reflect.DeepEqual(got, want) || len(replay.Errors()) != 0 {
 				t.Fatalf("replayed uncertified suffix: calls=%d errors=%v", calls, replay.Errors())
 			}

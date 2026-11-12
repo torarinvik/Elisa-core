@@ -18,6 +18,7 @@ func parseForNesting(t *testing.T, src string) []string {
 	}
 	p := New(tokens)
 	p.ParseFile("nesting.elisa")
+	recordParserParityCase(t, src, len(p.Errors()), len(p.Notices()))
 	return p.Errors()
 }
 

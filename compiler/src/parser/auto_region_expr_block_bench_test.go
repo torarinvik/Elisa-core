@@ -32,6 +32,7 @@ func TestParseNestedBareExprBlocksWithoutAutoRegion(t *testing.T) {
 	l := lexer.New("nested.elisa", []byte(source.String()))
 	p := New(l.Tokenize())
 	file := p.ParseFile("nested.elisa")
+	recordParserParityCase(t, source.String(), len(p.Errors()), len(p.Notices()))
 	if len(l.Errors()) != 0 || len(p.Errors()) != 0 || len(p.Notices()) != 0 {
 		t.Fatalf("nested bare blocks failed: lexer=%v parser=%v notices=%v", l.Errors(), p.Errors(), p.Notices())
 	}

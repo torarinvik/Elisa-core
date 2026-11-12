@@ -113,6 +113,7 @@ func TestSyntaxTraceReplaysEditedDeclarationPrefix(t *testing.T) {
 			old := lexer.TokenizeSource("trace.elisa", []byte(source), nil)
 			p := NewWithSyntaxTrace(old.CopyTokens())
 			file := p.ParseFile("trace.elisa")
+			recordParserParityCase(t, source, len(p.Errors()), len(p.Notices()))
 			if len(p.Errors()) > 0 || len(p.Notices()) > 0 {
 				t.Fatalf("bad fixture %v %v", p.Errors(), p.Notices())
 			}
@@ -136,6 +137,7 @@ func TestSyntaxTraceReplaysEditedDeclarationPrefix(t *testing.T) {
 			got := warm.ParseFileFromPrefix("trace.elisa", prefixFile, trace, cp)
 			cold := New(lexer.New("trace.elisa", []byte(changed)).Tokenize())
 			want := cold.ParseFile("trace.elisa")
+			recordParserParityCase(t, changed, len(cold.Errors()), len(cold.Notices()))
 			if !sameSyntaxFiles(got, want) || !reflect.DeepEqual(warm.Errors(), cold.Errors()) || !reflect.DeepEqual(warm.Notices(), cold.Notices()) || warm.rebindCounter != cold.rebindCounter || warm.nurseryCounter != cold.nurseryCounter || warm.byParSeq != cold.byParSeq || warm.foreignEnumErrorSetEmitted != cold.foreignEnumErrorSetEmitted {
 				t.Fatal("replayed parse/state differs from cold")
 			}
@@ -241,6 +243,7 @@ func TestSyntaxTraceReplaysForeignEnumOutgoingState(t *testing.T) {
 	old := lexer.TokenizeSource("enums.elisa", []byte(source), nil)
 	p := NewWithSyntaxTrace(old.CopyTokens())
 	file := p.ParseFile("enums.elisa")
+	recordParserParityCase(t, source, len(p.Errors()), len(p.Notices()))
 	if len(p.Errors()) > 0 {
 		t.Fatal(p.Errors())
 	}
@@ -262,6 +265,7 @@ func TestSyntaxTraceReplaysForeignEnumOutgoingState(t *testing.T) {
 	got := warm.ParseFileFromPrefix("enums.elisa", prefix, p.SyntaxTrace(), cp)
 	cold := New(lexer.New("enums.elisa", []byte(changed)).Tokenize())
 	want := cold.ParseFile("enums.elisa")
+	recordParserParityCase(t, changed, len(cold.Errors()), len(cold.Notices()))
 	if len(warm.Errors()) > 0 || !sameSyntaxFiles(got, want) {
 		t.Fatalf("ForeignEnum error set emitted twice or transition dropped: %v", warm.Errors())
 	}
@@ -272,6 +276,7 @@ func TestSyntaxTraceInvalidatesInspectedNextDeclaration(t *testing.T) {
 	old := lexer.TokenizeSource("lookahead.elisa", []byte(source), nil)
 	p := NewWithSyntaxTrace(old.CopyTokens())
 	p.ParseFile("lookahead.elisa")
+	recordParserParityCase(t, source, len(p.Errors()), len(p.Notices()))
 	changed := strings.Replace(source, "def last() -> i64:\n    return 2", "const last = 2", 1)
 	tokens := lexer.New("lookahead.elisa", []byte(changed)).Tokenize()
 	if _, ok := p.SyntaxTrace().ReusablePrefix(old.MatchingTokenPrefix(tokens), len(tokens)); ok {
@@ -288,6 +293,7 @@ func TestSyntaxTraceSeededEditParity(t *testing.T) {
 	old := lexer.TokenizeSource("history.elisa", []byte(original), nil)
 	p := NewWithSyntaxTrace(old.CopyTokens())
 	file := p.ParseFile("history.elisa")
+	recordParserParityCase(t, original, len(p.Errors()), len(p.Notices()))
 	snapshot, err := ast.NewSyntaxSnapshot(file, 8<<20)
 	if err != nil {
 		t.Fatal(err)
@@ -319,6 +325,7 @@ func TestSyntaxTraceSeededEditParity(t *testing.T) {
 		}
 		cold := New(append([]lexer.Token(nil), tokens...))
 		want := cold.ParseFile("history.elisa")
+		recordParserParityCase(t, changed, len(cold.Errors()), len(cold.Notices()))
 		if !sameSyntaxFiles(got, want) || !reflect.DeepEqual(warm.Errors(), cold.Errors()) || !reflect.DeepEqual(warm.Notices(), cold.Notices()) {
 			t.Fatalf("edit %d differs: start=%d end=%d insert=%q warm=%v cold=%v", iteration, start, end, insert, warm.Errors(), cold.Errors())
 		}
