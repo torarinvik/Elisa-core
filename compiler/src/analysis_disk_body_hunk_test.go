@@ -25,6 +25,8 @@ func TestAnalysisDiskBodyEditHunkScheduling(t *testing.T) {
 		{"delete-body-line", "def calculate(value: i64) -> i64:\n\ndef other() -> i64:\n    return 2\n", true},
 		{"blank-body-line", "def calculate(value: i64) -> i64:\n\n    return value + 1\n\ndef other() -> i64:\n    return 2\n", true},
 		{"signature", "def calculate(value: u64) -> i64:\n    return value + 1\n\ndef other() -> i64:\n    return 2\n", false},
+		{"separate-body-edits", "def calculate(value: i64) -> i64:\n    return value + 2\n\ndef other() -> i64:\n    return 3\n", true},
+		{"body-and-signature-edits", "def calculate(value: u64) -> i64:\n    return value + 2\n\ndef other() -> i64:\n    return 3\n", false},
 		{"inserted-helper", "def helper(a: i64) -> i64:\n    return a\n\n" + before, true},
 		{"inserted-helper-with-call", "def helper(a: i64) -> i64:\n    return calculate(a)\n\n" + before, true},
 		{"inserted-struct", "struct S:\n    a: i64\n\n" + before, true},

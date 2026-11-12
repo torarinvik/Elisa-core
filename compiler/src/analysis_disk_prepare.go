@@ -195,10 +195,39 @@ func analysisDiskLikelyBodyEdit(artifact analysisDiskArtifact, source []byte) bo
 	}
 	likely := false
 	err := artifact.withBaselineSource(func(baseline []byte) error {
-		likely = analysisDiskLikelyBodyEditSources(baseline, source) && !analysisDiskEditInsideTypeBlock(baseline, source)
+		likely = (analysisDiskLikelyBodyEditSources(baseline, source) || analysisDiskLikelyAlignedBodyEdits(baseline, source)) && !analysisDiskEditInsideTypeBlock(baseline, source)
 		return nil
 	})
 	return err == nil && likely
+}
+
+// Separate edits to existing body lines need not make the unchanged declarations
+// between them look like part of one large edit. This remains a scheduling hint:
+// UpdatePrepared independently validates every declaration before reusing state.
+func analysisDiskLikelyAlignedBodyEdits(before, after []byte) bool {
+	if bytes.Count(before, []byte("\n")) != bytes.Count(after, []byte("\n")) {
+		return false
+	}
+	oldLines := analysisDiskForwardLines{data: before}
+	newLines := analysisDiskForwardLines{data: after}
+	changed := false
+	for {
+		oldLine, oldOK := oldLines.next()
+		newLine, newOK := newLines.next()
+		if !oldOK || !newOK {
+			return changed && oldOK == newOK
+		}
+		if bytes.Equal(oldLine, newLine) {
+			continue
+		}
+		changed = true
+		for _, line := range [][]byte{oldLine, newLine} {
+			trimmed := bytes.TrimSpace(line)
+			if !analysisDiskTriviaLine(trimmed) && (!analysisDiskIndented(line) || analysisDiskContractClause(trimmed)) {
+				return false
+			}
+		}
+	}
 }
 
 // analysisDiskEditInsideTypeBlock is a scheduling guess: the first changed line sits
