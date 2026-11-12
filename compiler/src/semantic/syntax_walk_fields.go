@@ -2,48 +2,13 @@ package semantic
 
 import (
 	"reflect"
-	"sync"
 
 	"elisacore/src/lexer"
+	"elisacore/src/syntaxplan"
 )
 
-var syntaxWalkFieldPlans sync.Map // reflect.Type -> immutable []int
 var syntaxWalkPositionType = reflect.TypeOf(lexer.Pos{})
 
-// syntaxWalkFields serves walkers whose callbacks inspect pointers, interfaces
-// or non-map composite containers, never scalar values or lexer.Pos. These
-// callers do not traverse maps. Keep their other composite fields, including
-// future AST fields and lowered expression links.
-// Source-position records and scalars cannot lead to a syntax callback.
-func syntaxWalkFields(typ reflect.Type) []int {
-	if cached, ok := syntaxWalkFieldPlans.Load(typ); ok {
-		return cached.([]int)
-	}
-	fields := make([]int, 0, typ.NumField())
-	for i := 0; i < typ.NumField(); i++ {
-		field := typ.Field(i)
-		if syntaxWalkMayReachNode(field.Type) {
-			fields = append(fields, i)
-		}
-	}
-	cached, _ := syntaxWalkFieldPlans.LoadOrStore(typ, fields)
-	return cached.([]int)
-}
-
-// Scalar-only composites such as call argument names have no syntax to visit.
-func syntaxWalkMayReachNode(typ reflect.Type) bool {
-	if typ.Kind() == reflect.Slice || typ.Kind() == reflect.Array {
-		typ = typ.Elem()
-		if typ.Kind() == reflect.Struct {
-			return typ != syntaxWalkPositionType
-		}
-	}
-	switch typ.Kind() {
-	case reflect.Pointer, reflect.Interface, reflect.Slice, reflect.Array:
-		return true
-	case reflect.Struct:
-		return typ != syntaxWalkPositionType && len(syntaxWalkFields(typ)) != 0
-	default:
-		return false
-	}
-}
+// syntaxWalkFields preserves the analyzer's traversal policy while sharing its
+// immutable reflection plans with other syntax walkers.
+func syntaxWalkFields(typ reflect.Type) []int { return syntaxplan.Fields(typ) }
