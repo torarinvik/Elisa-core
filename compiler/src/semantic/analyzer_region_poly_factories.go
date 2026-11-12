@@ -100,23 +100,8 @@ func structLiteralLeavesRegionFieldsFresh(lit *ast.StructLitExpr, st *StructType
 // assignmentLeavesRegionFieldsFresh: an assignment whose target is rooted at a constructed local
 // must write a field path whose LEAF type carries no region storage (`t.a.flag <- true`).
 func assignmentLeavesRegionFieldsFresh(target ast.Expr, constructed map[string]bool, st *StructType) bool {
-	var path []string
-	cur := unwrapParenForRegionPoly(target)
-	for {
-		switch t := cur.(type) {
-		case *ast.FieldExpr:
-			path = append([]string{t.Field}, path...)
-			cur = unwrapParenForRegionPoly(t.Object)
-			continue
-		case *ast.IndexExpr:
-			path = append([]string{""}, path...)
-			cur = unwrapParenForRegionPoly(t.Object)
-			continue
-		}
-		break
-	}
-	id, isIdent := cur.(*ast.Ident)
-	if !isIdent || !constructed[id.Name] {
+	id, path := regionframesyntax.AssignmentPath(target, unwrapParenForRegionPoly)
+	if id == nil || !constructed[id.Name] {
 		return true
 	}
 	if len(path) == 0 {
