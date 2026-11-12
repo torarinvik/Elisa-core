@@ -283,9 +283,11 @@ static bool foldZeroProductBypass(BasicBlock &Guard) {
 }
 } // namespace
 
+#include "llvm_shared_divisibility.cpp"
+
 static unsigned elisacoreFoldConstantIntegerPaths(Module &M) {
   if (!M.getTargetTriple().isAArch64()) return 0;
-  unsigned Changed = 0, Budget = 48000;
+  unsigned Changed = foldSharedDivisibilityTests(M), Budget = 48000;
   for (Function &F : M) {
     if (!Budget) break;
     if (F.size() < 3 || F.size() > 128 || !F.getReturnType()->isIntegerTy() ||
