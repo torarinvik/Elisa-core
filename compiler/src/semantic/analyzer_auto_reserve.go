@@ -2,7 +2,6 @@ package semantic
 
 import (
 	"os"
-	"reflect"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -168,36 +167,7 @@ func (a *Analyzer) maybeAutoReserveCountingFill(stmt *ast.ForStmt) {
 // crash under -permissive). An unresolvable bound skips the reserve — the target falls
 // back to the ordinary grow-on-push path and, for iter fills, the perf lint.
 func (a *Analyzer) reserveBoundResolvableHere(bound ast.Expr) bool {
-	resolvable := true
-	var walk func(v reflect.Value)
-	walk = func(v reflect.Value) {
-		if !resolvable || !v.IsValid() || !v.CanInterface() {
-			return
-		}
-		switch v.Kind() {
-		case reflect.Pointer, reflect.Interface:
-			if v.IsNil() {
-				return
-			}
-			if ident, ok := v.Interface().(*ast.Ident); ok {
-				if _, ok := a.currentScope.Lookup(ident.Name); !ok {
-					resolvable = false
-				}
-				return
-			}
-			walk(v.Elem())
-		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
-				walk(v.Field(i))
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				walk(v.Index(i))
-			}
-		}
-	}
-	walk(reflect.ValueOf(bound))
-	return resolvable
+	return reservebounds.IdentifiersResolvable(bound, func(name string) bool { _, ok := a.currentScope.Lookup(name); return ok })
 }
 
 func (a *Analyzer) semanticMakeReserveStmt(pos lexer.Pos, target string, bound ast.Expr, analysisOnly bool) ast.Stmt {
