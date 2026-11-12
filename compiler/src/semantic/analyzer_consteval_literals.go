@@ -3,6 +3,7 @@ package semantic
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
+	"elisacore/src/literals"
 	"fmt"
 	"math"
 	"strconv"
@@ -149,10 +150,7 @@ func ParseFloatLiteral(expr *ast.FloatLit) (float64, bool) {
 }
 
 func ParseCharLiteral(expr *ast.CharLit) (int64, bool) {
-	if expr == nil || len(expr.Value) != 1 {
-		return 0, false
-	}
-	return int64(expr.Value[0]), true
+	return literals.ParseCharLiteral(expr)
 }
 
 func CastConstValue(value ConstValue, dst Type) (ConstValue, bool) {

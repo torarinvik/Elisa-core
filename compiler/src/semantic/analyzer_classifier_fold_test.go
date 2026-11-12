@@ -94,7 +94,27 @@ func TestFoldClassifierRecognizedAndRewritten(t *testing.T) {
 	if !ok || len(lit.Elems) != 256 {
 		t.Fatalf("table must be a 256-element list literal, got %#v", table.Value)
 	}
-	// Spot-check the truth table: '0' (48) -> Digit, '.' (46) -> Dot, 'x' (120) -> Other.
+	// Check every byte against an independent classification oracle.
+	for value := 0; value < 256; value++ {
+		want := "Other"
+		switch c := byte(value); {
+		case c >= '0' && c <= '9':
+			want = "Digit"
+		case c == 'e' || c == 'E':
+			want = "ExpMark"
+		case (c >= 'a' && c <= 'd') || c == 'f' || (c >= 'A' && c <= 'D') || c == 'F':
+			want = "HexAlpha"
+		case c == '.':
+			want = "Dot"
+		case c == '+' || c == '-':
+			want = "Sign"
+		}
+		field, ok := lit.Elems[value].(*ast.FieldExpr)
+		if !ok || field.Field != want {
+			t.Errorf("table[%d] = %#v, want member %q", value, lit.Elems[value], want)
+		}
+	}
+	// Keep representative entries explicit for readable failures.
 	expect := map[int]string{'0': "Digit", '9': "Digit", '.': "Dot", '+': "Sign", 'e': "ExpMark", 'f': "HexAlpha", 'x': "Other", 0: "Other"}
 	for idx, want := range expect {
 		fe, ok := lit.Elems[idx].(*ast.FieldExpr)
