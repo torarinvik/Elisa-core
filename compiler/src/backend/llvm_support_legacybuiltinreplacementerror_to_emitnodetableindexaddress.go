@@ -171,7 +171,11 @@ func (s *functionState) emitFieldAddress(expr *ast.FieldExpr) (llvmIRValueRef, s
 	if pointerLike {
 		objPtr, _, err = s.emitExpr(expr.Object, nil)
 	} else {
-		objPtr, _, err = s.emitAddress(expr.Object)
+		var storedType semantic.Type
+		objPtr, storedType, err = s.emitAddress(expr.Object)
+		if err == nil {
+			objPtr, _, err = s.refinedOptionalPayloadAddress(objPtr, storedType, objType, "field.base")
+		}
 	}
 	if err != nil {
 		return nil, nil, err

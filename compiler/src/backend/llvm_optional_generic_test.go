@@ -44,3 +44,24 @@ def main() -> i64:
 		t.Fatalf("expected specialized optional payload to remain i64:\n%s", body)
 	}
 }
+
+func TestGenerateLLVMIRIndexesFieldOfNarrowedOptionalGlobal(t *testing.T) {
+	src := `struct Snapshot:
+    items: darray[i64]
+
+global mutable saved: Snapshot? = null
+
+def read_back() -> i64:
+    can Global.Read:
+        return -1 if saved == null
+        return saved.items[1]
+`
+	result := parseAndAnalyzeBackendTest(t, "narrowed_optional_global.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output, "(%Optional__Snapshot, ptr @saved, i32 0, i32 1)") {
+		t.Fatalf("indexing a narrowed global must address the optional payload:\n%s", output)
+	}
+}
