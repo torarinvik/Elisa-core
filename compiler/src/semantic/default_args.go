@@ -415,7 +415,20 @@ func (a *Analyzer) validateParamDefaultExpr(expr ast.Expr, expected Type) bool {
 	a.storeLivedCache = nil
 	a.currentFuncType = savedFuncType
 	a.currentImplicitScopes = savedImplicitScopes
-	if !AssignableTo(expected, actualType) {
+	// A concrete callback default contributes to an error-set parameter at the
+	// call site. Validate it against that inferred family rather than requiring
+	// the concrete set to be assignable to the still-symbolic R.
+	checkedExpected := expected
+	if callback, ok := expected.(*FuncType); ok {
+		if result, ok := callback.Return.(*ErrorUnionType); ok && result.Errors != nil && len(result.Errors.Params) == 1 {
+			bindings := map[string]Type{}
+			a.collectTypeBindings(expected, actualType, bindings, map[string]Shape{}, map[string]string{}, map[string][]ast.PermissionRef{}, nil)
+			if _, bound := bindings[result.Errors.Params[0]]; bound {
+				checkedExpected = a.substituteType(expected, bindings, map[string]Shape{}, map[string]string{}, map[string][]ast.PermissionRef{})
+			}
+		}
+	}
+	if !AssignableTo(checkedExpected, actualType) {
 		a.errorf(expr.Pos(), "default argument expects %s, got %s", expected, actualType)
 		a.reportShapeMismatchNotes(expr.Pos(), expected, actualType)
 		return false
