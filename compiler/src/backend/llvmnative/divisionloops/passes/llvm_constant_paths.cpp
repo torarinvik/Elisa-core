@@ -26,6 +26,7 @@ static Constant *evaluatePathInstruction(Instruction &I, const PathValues &Value
     case Intrinsic::usub_with_overflow: case Intrinsic::umul_with_overflow:
     case Intrinsic::uadd_sat: case Intrinsic::usub_sat:
     case Intrinsic::sadd_sat: case Intrinsic::ssub_sat:
+    case Intrinsic::ctlz: case Intrinsic::cttz: case Intrinsic::ctpop:
       break;
     default:
       return nullptr;
