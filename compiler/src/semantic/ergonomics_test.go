@@ -204,3 +204,23 @@ def build(pair: PairRow) -> i64:
 		t.Fatalf("expected missing destructure field diagnostic, got:\n%s", all)
 	}
 }
+
+func TestAnalyzeUnusedStructFieldDefaultTypeMismatch(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "unused_struct_field_defaults.elisa", `struct Defaults:
+#line 0 defaults.elisa
+    good: i64 = 1
+#line 0 defaults.elisa
+    bad: (bool) = 1
+#line 0 defaults.elisa
+    mutable_bad: mutable (bool) = 1
+
+def main() -> i32:
+    return 0
+`)
+	errors := strings.Join(result.Errors(), "\n")
+	for _, field := range []string{"bad", "mutable_bad"} {
+		if !strings.Contains(errors, `default value for struct field "`+field+`" expects bool, got int`) {
+			t.Fatalf("missing default mismatch for %s: %s", field, errors)
+		}
+	}
+}

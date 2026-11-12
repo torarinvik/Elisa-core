@@ -109,6 +109,7 @@ func (a *Analyzer) populateStructFields(decls []scopedDecl) {
 							Mutable: field.Mutable,
 							IsTail:  field.IsTail,
 						}
+						a.checkDeclaredLiteralFieldDefault(st, field, fieldType)
 						a.analyzeStructFieldWhereRefinement(field, fieldType, concreteFields[:len(concreteFields)-1])
 					}
 					// Drop ghost fields from the concrete field list so codegen (and constructor
@@ -429,4 +430,29 @@ func (a *Analyzer) analyzeStructFieldWhereRefinement(field ast.FieldDecl, baseTy
 		a.ghostReadAllowed--
 	}()
 	a.analyzeWhereBoolPredicate(wt.Predicate)
+}
+
+// Validate closed defaults even if no constructor ever uses them. Defaults that
+// depend on a declaration or a generic instantiation still resolve at the use site.
+func (a *Analyzer) checkDeclaredLiteralFieldDefault(base *StructType, field ast.FieldDecl, expected Type) {
+	if expected == nil || IsInvalidType(expected) || len(base.GenericParams) != 0 || len(base.RegionParams) != 0 {
+		return
+	}
+	switch unwrapParen(field.DefaultValue).(type) {
+	case *ast.IntLit, *ast.FloatLit, *ast.BoolLit, *ast.CharLit, *ast.StringLit:
+		// This clone is used only for diagnostics. Keep its expression types
+		// and optimization facts out of the retained declaration state.
+		savedSuppressFacts := a.suppressOptimizationFacts
+		a.suppressOptimizationFacts = true
+		expr, _ := a.analyzeStructFieldDefaultExpr(base, field, expected)
+		a.suppressOptimizationFacts = savedSuppressFacts
+		for expr != nil {
+			delete(a.exprTypes, expr)
+			paren, ok := expr.(*ast.ParenExpr)
+			if !ok {
+				break
+			}
+			expr = paren.Inner
+		}
+	}
 }
