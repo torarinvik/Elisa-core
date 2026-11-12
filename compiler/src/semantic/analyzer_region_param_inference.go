@@ -90,7 +90,7 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 	// be rejected as a dangling write).
 	permRoots := collectProgramLifetimeRoots(decls)
 	funcByName := map[string]*ast.FuncDecl{}
-	arenaManaged := map[*ast.FuncDecl]bool{}
+	var inferable []*ast.FuncDecl
 	for _, fn := range cands {
 		if fn == nil {
 			continue
@@ -117,8 +117,15 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 		// An Arena& parameter self-threads allocation and remains authoritative. Existing region
 		// parameters, however, describe only the parameters explicitly tied to them; they must not
 		// suppress inference for a separate region-less container/struct reference that is grown.
-		if funcHasArenaParam(fn) {
-			arenaManaged[fn] = true
+		if len(fn.Body) != 0 && !funcHasArenaParam(fn) {
+			for _, param := range fn.Params {
+				_, container := regionlessRefContainer(param.Type)
+				_, structure := regionlessRefStruct(param.Type)
+				if container || structure {
+					inferable = append(inferable, fn)
+					break
+				}
+			}
 		}
 	}
 	for _, fn := range cands {
@@ -128,7 +135,9 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 		})
 	}
 	callers := make(map[*ast.FuncDecl][]*ast.FuncDecl)
-	forwardingByFunc := collectRegionParamForwarding(cands, funcByName, callers)
+	// Only functions with a stampable parameter can gain a region or need a
+	// second look after a callee changes. All functions remain call targets.
+	forwardingByFunc := collectRegionParamForwarding(inferable, funcByName, callers)
 	// These facts depend only on a function body and parameter name. Bodies stop
 	// changing after prepareCollectionAppends, while the worklist may revisit a
 	// function after a callee gains a region parameter.
@@ -138,7 +147,7 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 	// pass only the callers of a function that just changed can gain a param (a recursive
 	// function is its own caller). Each per-function pass is idempotent, so a function that
 	// changed is complete until a callee changes. Rescanning every candidate per round cost ~0.6 s each on the seed.
-	pending := cands
+	pending := inferable
 	for len(pending) != 0 {
 		queued := map[*ast.FuncDecl]bool{}
 		var next []*ast.FuncDecl
@@ -148,9 +157,6 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 			ahead[fn] = i
 		}
 		for i, fn := range pending {
-			if fn == nil || arenaManaged[fn] {
-				continue
-			}
 			if !a.inferRegionParamsForGrownContainerParamsIn(fn, funcByName, permRoots, funcScopes, forwardingByFunc[fn], bodyFacts) {
 				continue
 			}
@@ -172,7 +178,7 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 				order[fn] = -1
 			}
 			kept := next[:0]
-			for _, fn := range cands {
+			for _, fn := range inferable {
 				if _, ok := order[fn]; ok && order[fn] < 0 {
 					order[fn] = 0
 					kept = append(kept, fn)
@@ -184,7 +190,7 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 	}
 	if os.Getenv("ELISA_REGION_FIXPOINT_SHADOW") != "" {
 		for _, fn := range cands {
-			if fn != nil && !arenaManaged[fn] && a.inferRegionParamsForGrownContainerParamsIn(fn, funcByName, permRoots, funcScopes, forwardingByFunc[fn], bodyFacts) {
+			if fn != nil && !funcHasArenaParam(fn) && a.inferRegionParamsForGrownContainerParamsIn(fn, funcByName, permRoots, funcScopes, forwardingByFunc[fn], bodyFacts) {
 				panic("region inference worklist missed a dependency of " + fn.Name)
 			}
 		}
