@@ -59,6 +59,28 @@ func TestGraphRoundTripIdentity(t *testing.T) {
 		t.Fatal("decode aliases original input graph")
 	}
 }
+func TestGraphRejectsUnregisteredDynamicTypes(t *testing.T) {
+	type unregisteredInt int
+	type unregisteredNode struct {
+		Child *graph
+	}
+	type unregisteredSlice []*graph
+
+	registry := graphRegistry()
+	for _, dynamic := range []any{
+		unregisteredInt(1),
+		&unregisteredNode{Child: &graph{}},
+		unregisteredSlice{&graph{}},
+	} {
+		root := &graph{Dynamic: dynamic}
+		for _, encode := range []func(any) ([]byte, error){registry.Encode, registry.EncodeFramed} {
+			if data, err := encode(root); err == nil || data != nil {
+				t.Fatalf("encoder accepted unregistered dynamic type %T", dynamic)
+			}
+		}
+	}
+}
+
 func TestGraphRejectsCorruptionAndSchemaMismatch(t *testing.T) {
 	r := graphRegistry()
 	data, err := r.Encode(&graph{Name: "source"})

@@ -25,14 +25,14 @@ type pointerIdentity struct {
 
 type pointerObject struct {
 	address uintptr
-	typ reflect.Type
-	id  uint64
+	typ     reflect.Type
+	id      uint64
 }
 
 type pointerObjectIndex struct {
 	objects []pointerObject
-	count int
-	aliases   map[pointerIdentity]uint64
+	count   int
+	aliases map[pointerIdentity]uint64
 }
 
 func newPointerObjectIndex(capacity int) pointerObjectIndex {
@@ -102,7 +102,7 @@ func (index *pointerObjectIndex) add(address uintptr, typ reflect.Type, id uint6
 type encoder struct {
 	registry        *Registry
 	data            []byte
-	objects         map[identity]uint64
+	objects         sliceIndex
 	pointerObjects  pointerObjectIndex
 	depth           int
 	allocationCount int
@@ -147,12 +147,12 @@ func (r *Registry) encode(root any, framed bool, capacity int) ([]byte, error) {
 		if capacity >= 128<<20 {
 			// Large resumed analysis graphs contain millions of both kinds
 			// of entries. Reserve both tables to avoid growing them mid-walk.
-			pointerCapacity = min(capacity/96, 6_000_000)
-			sliceCapacity = min(capacity/256, 3_000_000)
+			pointerCapacity = min(capacity/76, 6_000_000)
+			sliceCapacity = min(capacity/144, 3_000_000)
 		}
 	}
 	e := &encoder{
-		registry: r, objects: make(map[identity]uint64, sliceCapacity), scanning: true,
+		registry: r, objects: newSliceIndex(sliceCapacity), scanning: true,
 		pointerObjects: newPointerObjectIndex(pointerCapacity),
 		strings:        map[string]uint64{}, framed: framed,
 	}
@@ -299,6 +299,11 @@ func (e *encoder) valueAtDepth(v reflect.Value) error {
 			return nil
 		}
 		inner := v.Elem()
+		// Discovery needs the value's references. Only the encoding pass
+		// needs its wire type ID, where an unknown type still fails.
+		if e.scanning {
+			return e.value(inner)
+		}
 		id := e.registry.ids[inner.Type()]
 		if id == 0 {
 			return fmt.Errorf("unregistered dynamic type %s", inner.Type())
@@ -318,7 +323,7 @@ func (e *encoder) valueAtDepth(v reflect.Value) error {
 		var slot int
 		if kind == reflect.Slice {
 			key = identity{typ: t, pointer: address, length: v.Len(), capacity: v.Cap()}
-			prior = e.objects[key]
+			prior, slot = e.objects.lookup(key)
 		} else {
 			prior, slot = e.pointerObjects.lookup(address, t)
 		}
@@ -331,7 +336,7 @@ func (e *encoder) valueAtDepth(v reflect.Value) error {
 		}
 		id := uint64(e.nodes.count + 1)
 		if kind == reflect.Slice {
-			e.objects[key] = id
+			e.objects.add(key, id, slot)
 		} else {
 			e.pointerObjects.add(address, t, id, slot)
 		}

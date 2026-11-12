@@ -82,6 +82,47 @@ func TestBatchedSlicesKeepCapacitiesHiddenValuesAndAliases(t *testing.T) {
 	}
 }
 
+func TestSliceIndexPreservesShapesAcrossGrowth(t *testing.T) {
+	type sliceGraph struct {
+		Owner []int
+		Views [][]int
+	}
+	root := &sliceGraph{Owner: []int{10, 20, 30, 40}}
+	root.Views = append(root.Views, root.Owner[:0:2], root.Owner[:1:3], nil, []int{})
+	for i := range 5000 {
+		root.Views = append(root.Views, []int{i})
+	}
+	root.Views = append(root.Views, root.Owner[:1:3])
+	registry := New([]reflect.Type{reflect.TypeFor[sliceGraph]()}, nil, nil)
+	registry.EnableParallelDecode()
+	for _, encode := range []func(any) ([]byte, error){registry.Encode, registry.EncodeFramed} {
+		data, err := encode(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := registry.Decode(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := result.(*sliceGraph)
+		if len(got.Views[0]) != 0 || cap(got.Views[0]) != 2 ||
+			len(got.Views[1]) != 1 || cap(got.Views[1]) != 3 ||
+			got.Views[2] != nil || got.Views[3] == nil {
+			t.Fatal("slice boundaries or nilness changed")
+		}
+		got.Views[0][:2][1] = 99
+		if got.Owner[1] != 99 || got.Views[1][:3][1] != 99 ||
+			got.Views[len(got.Views)-1][:3][1] != 99 {
+			t.Fatal("slice backing alias lost after index growth")
+		}
+		for i, view := range got.Views[4 : len(got.Views)-1] {
+			if len(view) != 1 || view[0] != i {
+				t.Fatalf("unrelated slice %d changed: %v", i, view)
+			}
+		}
+	}
+}
+
 func BenchmarkStateSmallSlices(b *testing.B) {
 	root := make([][]int, 10000)
 	for i := range root {
