@@ -73,6 +73,19 @@ func (p *Parser) parseStmt() ast.Stmt {
 			if p.looksLikeAssertByStmt() {
 				return p.parseAssertByStmt()
 			}
+			// In the spaced statement form, a parenthesized prefix belongs to
+			// the condition: `assert (x > 0) == ok` checks the whole comparison.
+			// Keep adjacent `assert(...)` as an ordinary expression call.
+			if p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_LPAREN && p.tokenAt(p.pos+1).Pos.Offset > p.cur().Pos.EndOffset {
+				pos := p.cur().Pos
+				callee := &ast.Ident{Position: pos, Name: "assert"}
+				p.advance()
+				p.stmtGuardArmed = true
+				condition := p.parseExpr()
+				p.stmtGuardArmed = false
+				p.expectNewlineAfterValueExpr(condition)
+				return p.takeStmtGuard(&ast.ExprStmt{Position: pos, Expr: &ast.CallExpr{Position: pos, Func: callee, Args: []ast.Expr{condition}}})
+			}
 		case "proof":
 			if p.looksLikeProofBlockStmt() {
 				return p.parseProofBlockStmt()

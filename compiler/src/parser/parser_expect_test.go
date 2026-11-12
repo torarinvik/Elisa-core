@@ -334,3 +334,40 @@ func TestParseAssertHoleStatement(t *testing.T) {
 		t.Fatalf("expected assert hole to format round-trip, got %q", got)
 	}
 }
+
+func TestAssertSpacedParenthesizedConditionIncludesFollowingComparison(t *testing.T) {
+	file, errs := parseSourceFile(t, `def check(left: int) -> void:
+    assert (left > 0) == true
+    assert(left > 0)
+    assert (left > 0) == true if left != 1
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	for i, stmt := range decl.Body {
+		if i == 2 {
+			guard, ok := stmt.(*ast.IfStmt)
+			if !ok || len(guard.Then) != 1 {
+				t.Fatalf("expected guarded assertion, got %T", stmt)
+			}
+			stmt = guard.Then[0]
+		}
+		exprStmt, ok := stmt.(*ast.ExprStmt)
+		if !ok {
+			t.Fatalf("statement %d is %T", i, stmt)
+		}
+		call, ok := exprStmt.Expr.(*ast.CallExpr)
+		if !ok || len(call.Args) != 1 {
+			t.Fatalf("statement %d: expected assert call", i)
+		}
+		if _, ok := call.Func.(*ast.Ident); !ok {
+			t.Fatalf("statement %d: unexpected callee", i)
+		}
+		if i == 0 {
+			if cond, ok := call.Args[0].(*ast.BinaryExpr); !ok || cond.Op != lexer.TOKEN_EQEQ {
+				t.Fatalf("expected whole comparison as assertion argument, got %#v", call.Args[0])
+			}
+		}
+	}
+}
