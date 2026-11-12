@@ -454,3 +454,79 @@ func TestMachineRefusalForeignMutationInBranch(t *testing.T) {
 // call. The driven resource is rooted in the cast's operand (`buf`), so an arm mutating
 // `buf` must be allowed — before the CastExpr case in collectExprRootIdents, the base was
 // dropped and the machine's own driven resource was misreported as foreign state.
+
+func TestMachineBranchTransitionRejectsFallthroughLocalWhenTransitionInElif(t *testing.T) {
+	src := machineSrc(`    machine over lexer.current_char():
+        state Read
+        state Write
+        start Read
+        Read, _:
+            if lexer.peek(1) == '{':
+                value: i64 = 7
+                lexer <- lexer.advance_char()
+            elif lexer.peek(1) == '}':
+                -> Write
+            -> Read
+        Write, _:
+            break
+`)
+	_, errs := parseSourceFile(t, src)
+	if len(errs) == 0 || !strings.Contains(strings.Join(errs, "\n"), "declaration in a fallthrough branch") {
+		t.Fatalf("expected refusal for fallthrough local with elif transition, got %v", errs)
+	}
+}
+
+func TestMachineBranchTransitionElifLowersAllDecisions(t *testing.T) {
+	src := machineSrc(`    machine over lexer.current_char():
+        state Read
+        state Write
+        start Read
+        Read, _:
+            if lexer.peek(1) == '{':
+                -> Write
+            elif lexer.peek(1) == '}':
+                -> Read
+            else:
+                break
+        Write, _:
+            break
+`)
+	file, errs := parseSourceFile(t, src)
+	if len(errs) != 0 {
+		t.Fatalf("valid elif decisions were rejected: %v", errs)
+	}
+	if file == nil || len(file.Decls) == 0 {
+		t.Fatal("missing lowered machine")
+	}
+}
+
+func TestMachineElifTransitionLoweringPreservesContinuation(t *testing.T) {
+	pos := lexer.Pos{Offset: 91}
+	suffix := &ast.ExprStmt{Expr: &ast.Ident{Name: "suffix"}}
+	branch := &ast.IfStmt{
+		Then:  []ast.Stmt{&ast.ReturnStmt{}},
+		Elifs: []ast.ElifClause{{Body: []ast.Stmt{&ast.BreakStmt{Position: pos}}}},
+	}
+	states := map[string]*machineState{"Write": {name: "Write"}}
+	lowered := lowerMachineBranchTransitions([]ast.Stmt{branch, suffix}, map[lexer.Pos]string{pos: "Write"}, states, func(p lexer.Pos, name string) ast.Expr { return &ast.Ident{Position: p, Name: name} }, "mode", nil)
+	if len(lowered) != 1 {
+		t.Fatalf("got %d statements, want one conditional", len(lowered))
+	}
+	condition, ok := lowered[0].(*ast.IfStmt)
+	if !ok || len(condition.Elifs) != 1 || len(condition.Elifs[0].Body) != 1 {
+		t.Fatalf("missing elif branch: %#v", lowered[0])
+	}
+	transition, ok := condition.Elifs[0].Body[0].(*ast.AssignStmt)
+	if !ok {
+		t.Fatalf("elif transition was not lowered: %T", condition.Elifs[0].Body[0])
+	}
+	if name, ok := transition.Value.(*ast.Ident); !ok || name.Name != "Write" {
+		t.Fatalf("wrong target: %#v", transition.Value)
+	}
+	if len(condition.Else) != 1 || condition.Else[0] != suffix {
+		t.Fatal("fallthrough did not preserve shared continuation")
+	}
+	if len(condition.Then) != 1 {
+		t.Fatal("terminal branch must not receive continuation")
+	}
+}

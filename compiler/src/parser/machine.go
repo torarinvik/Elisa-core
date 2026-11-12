@@ -3,6 +3,7 @@ package parser
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
+	"elisacore/src/machineroots"
 	"strings"
 )
 
@@ -469,7 +470,7 @@ func (p *Parser) parseMachineArmBody(arm *machineArm) {
 			}
 			branch := p.parseMachineBranch(arm)
 			arm.body = append(arm.body, branch)
-			arm.branchExit = !machineBranchCanFallThrough([]ast.Stmt{branch}, arm.branchTransitions)
+			arm.branchExit = !machineroots.CanFallThrough([]ast.Stmt{branch}, arm.branchTransitions)
 			p.validateMachineArmStmt(branch, arm)
 			continue
 		}
@@ -505,6 +506,17 @@ func (p *Parser) parseMachineBranch(arm *machineArm) ast.Stmt {
 	p.expect(lexer.TOKEN_INDENT)
 	thenBody := p.parseMachineBranchBody(arm)
 	p.expect(lexer.TOKEN_DEDENT)
+	var elifs []ast.ElifClause
+	for p.peek() == lexer.TOKEN_ELIF {
+		elifPos := p.advance().Pos
+		elifCond := p.parseExpr()
+		p.expect(lexer.TOKEN_COLON)
+		p.expectNewline()
+		p.expect(lexer.TOKEN_INDENT)
+		elifBody := p.parseMachineBranchBody(arm)
+		p.expect(lexer.TOKEN_DEDENT)
+		elifs = append(elifs, ast.ElifClause{Position: elifPos, Cond: elifCond, Body: elifBody})
+	}
 	var elseBody []ast.Stmt
 	if p.match(lexer.TOKEN_ELSE) {
 		p.expect(lexer.TOKEN_COLON)
@@ -513,8 +525,8 @@ func (p *Parser) parseMachineBranch(arm *machineArm) ast.Stmt {
 		elseBody = p.parseMachineBranchBody(arm)
 		p.expect(lexer.TOKEN_DEDENT)
 	}
-	branch := &ast.IfStmt{Position: pos, Cond: cond, Then: thenBody, Else: elseBody, FromSource: true}
-	if hasMachineBranchMarker(branch, arm.branchTransitions) && machineBranchHasFallthroughLocalDecl(branch, arm.branchTransitions) {
+	branch := &ast.IfStmt{Position: pos, Cond: cond, Then: thenBody, Elifs: elifs, Else: elseBody, FromSource: true}
+	if machineroots.HasBranchMarker(branch, arm.branchTransitions) && machineroots.HasFallthroughLocalDecl(branch, arm.branchTransitions) {
 		p.errorf("a declaration in a fallthrough branch cannot share a continuation with a branch transition")
 	}
 	return branch

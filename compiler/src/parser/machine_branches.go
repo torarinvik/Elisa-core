@@ -3,80 +3,9 @@ package parser
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
+	"elisacore/src/machineroots"
 	"fmt"
 )
-
-// A local in a branch that terminates never scopes over the copied continuation.
-// Reject only locals whose branch can fall through, where continuation duplication
-// could accidentally resolve a name to that branch-local binding.
-func machineBranchHasFallthroughLocalDecl(stmt ast.Stmt, markers map[lexer.Pos]string) bool {
-	n, ok := stmt.(*ast.IfStmt)
-	if !ok {
-		return false
-	}
-	if machineBranchCanFallThrough(n.Then, markers) && machineBranchHasLocalDeclInSequence(n.Then) {
-		return true
-	}
-	if len(n.Else) > 0 && machineBranchCanFallThrough(n.Else, markers) && machineBranchHasLocalDeclInSequence(n.Else) {
-		return true
-	}
-	for _, clause := range n.Elifs {
-		if machineBranchCanFallThrough(clause.Body, markers) && machineBranchHasLocalDeclInSequence(clause.Body) {
-			return true
-		}
-	}
-	return machineBranchHasFallthroughLocalDeclInSequence(n.Then, markers) || machineBranchHasFallthroughLocalDeclInSequence(n.Else, markers)
-}
-
-func machineBranchHasFallthroughLocalDeclInSequence(stmts []ast.Stmt, markers map[lexer.Pos]string) bool {
-	for _, stmt := range stmts {
-		if n, ok := stmt.(*ast.IfStmt); ok && machineBranchHasFallthroughLocalDecl(n, markers) {
-			return true
-		}
-	}
-	return false
-}
-
-func machineBranchHasLocalDeclInSequence(stmts []ast.Stmt) bool {
-	for _, stmt := range stmts {
-		if machineBranchHasLocalDecl(stmt) {
-			return true
-		}
-	}
-	return false
-}
-
-func machineBranchHasLocalDecl(stmt ast.Stmt) bool {
-	switch n := stmt.(type) {
-	case *ast.VarDeclStmt, *ast.LetDestructureStmt, *ast.TupleBindStmt, *ast.MoveBindStmt:
-		return true
-	case *ast.IfStmt:
-		for _, child := range n.Then {
-			if machineBranchHasLocalDecl(child) {
-				return true
-			}
-		}
-		for _, child := range n.Else {
-			if machineBranchHasLocalDecl(child) {
-				return true
-			}
-		}
-		for _, clause := range n.Elifs {
-			for _, child := range clause.Body {
-				if machineBranchHasLocalDecl(child) {
-					return true
-				}
-			}
-		}
-	case *ast.CanStmt:
-		for _, child := range n.Body {
-			if machineBranchHasLocalDecl(child) {
-				return true
-			}
-		}
-	}
-	return false
-}
 
 func (p *Parser) parseMachineBranchBody(arm *machineArm) []ast.Stmt {
 	var body []ast.Stmt
@@ -88,7 +17,7 @@ func (p *Parser) parseMachineBranchBody(arm *machineArm) []ast.Stmt {
 		if p.peek() == lexer.TOKEN_IF {
 			branch := p.parseMachineBranch(arm)
 			body = append(body, branch)
-			if !machineBranchCanFallThrough([]ast.Stmt{branch}, arm.branchTransitions) && p.peek() != lexer.TOKEN_DEDENT {
+			if !machineroots.CanFallThrough([]ast.Stmt{branch}, arm.branchTransitions) && p.peek() != lexer.TOKEN_DEDENT {
 				p.errorf("machine branch continues after every path has reached a terminal decision")
 				for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
 					p.advance()
@@ -128,29 +57,6 @@ func (p *Parser) parseMachineBranchBody(arm *machineArm) []ast.Stmt {
 		}
 	}
 	return body
-}
-
-func machineBranchCanFallThrough(stmts []ast.Stmt, markers map[lexer.Pos]string) bool {
-	canFall := true
-	for _, stmt := range stmts {
-		if !canFall {
-			return false
-		}
-		switch n := stmt.(type) {
-		case *ast.BreakStmt:
-			canFall = false
-		case *ast.ReturnStmt:
-			canFall = false
-		case *ast.IfStmt:
-			thenFalls := machineBranchCanFallThrough(n.Then, markers)
-			elseFalls := len(n.Else) == 0 || machineBranchCanFallThrough(n.Else, markers)
-			for _, clause := range n.Elifs {
-				thenFalls = thenFalls || machineBranchCanFallThrough(clause.Body, markers)
-			}
-			canFall = thenFalls || elseFalls
-		}
-	}
-	return canFall
 }
 
 // validateMachineArmStmt enforces straight-line restrictions and records un-nested exits.
@@ -224,34 +130,6 @@ func (p *Parser) validateMachineBranchStmt(stmt ast.Stmt, arm *machineArm) {
 	}
 }
 
-func hasMachineBranchMarker(stmt *ast.IfStmt, markers map[lexer.Pos]string) bool {
-	if len(markers) == 0 {
-		return false
-	}
-	var scan func([]ast.Stmt) bool
-	scan = func(stmts []ast.Stmt) bool {
-		for _, stmt := range stmts {
-			switch n := stmt.(type) {
-			case *ast.BreakStmt:
-				if _, ok := markers[n.Position]; ok {
-					return true
-				}
-			case *ast.IfStmt:
-				if scan(n.Then) || scan(n.Else) {
-					return true
-				}
-				for _, clause := range n.Elifs {
-					if scan(clause.Body) {
-						return true
-					}
-				}
-			}
-		}
-		return false
-	}
-	return scan(stmt.Then) || scan(stmt.Else)
-}
-
 // --- desugar -------------------------------------------------------------------------
 
 func (p *Parser) desugarMachine(pos lexer.Pos, suffix string, input, cond, yield ast.Expr, forHeader *machineForHeader, states []machineState, startState string, startArgs []ast.Expr, startSeen bool, arms []machineArm) ast.Stmt {
@@ -319,7 +197,7 @@ func (p *Parser) desugarMachine(pos lexer.Pos, suffix string, input, cond, yield
 			p.errorf("machine arm %s(...) expects %d payload pattern(s), got %d", arm.state, len(st.fields), len(arm.payload))
 			continue
 		}
-		if machineBranchCanFallThrough(arm.body, arm.branchTransitions) && arm.exit != machineExitTransition {
+		if machineroots.CanFallThrough(arm.body, arm.branchTransitions) && arm.exit != machineExitTransition {
 			p.errorf("machine arm %q makes no decision — end it with `-> State`, `return`, or `break` (docs/123 §5)", arm.state)
 		}
 		for _, targetName := range arm.branchTransitions {
