@@ -129,9 +129,12 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 		}
 	}
 	for _, fn := range cands {
+		if !hasCollectionAppendSyntax(fn) {
+			continue
+		}
 		scoped := funcScopes[fn]
 		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
-			a.prepareCollectionAppends(fn)
+			a.lowerCollectionAppends(fn)
 		})
 	}
 	callers := make(map[*ast.FuncDecl][]*ast.FuncDecl)

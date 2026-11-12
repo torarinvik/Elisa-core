@@ -13,7 +13,7 @@ func collectionAppendCall(n *ast.AugAssignStmt) *ast.CallExpr {
 // Region signatures are inferred before expression checking. Expose the push
 // spelling for typed container updates so they reuse the existing caller-region
 // inference. Numeric updates remain untouched; full checking still owns validity.
-func (a *Analyzer) prepareCollectionAppends(fn *ast.FuncDecl) {
+func hasCollectionAppendSyntax(fn *ast.FuncDecl) bool {
 	// Most bodies never use +=. Avoid resolving their locals and parameters
 	// in this prepass, including inside nested statement lists and expressions.
 	hasAppendSyntax := false
@@ -22,9 +22,16 @@ func (a *Analyzer) prepareCollectionAppends(fn *ast.FuncDecl) {
 			hasAppendSyntax = true
 		}
 	})
-	if !hasAppendSyntax {
-		return
+	return hasAppendSyntax
+}
+
+func (a *Analyzer) prepareCollectionAppends(fn *ast.FuncDecl) {
+	if hasCollectionAppendSyntax(fn) {
+		a.lowerCollectionAppends(fn)
 	}
+}
+
+func (a *Analyzer) lowerCollectionAppends(fn *ast.FuncDecl) {
 	proofProbe := a.beginProofReportProbe()
 	defer proofProbe.restore()
 	saved := a.suppressDiagnostics
