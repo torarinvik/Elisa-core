@@ -1,5 +1,17 @@
 // Version a bounded unsigned quotient sum into independent constant divisions.
 namespace {
+static Value *buildQuotientSum(IRBuilder<> &B, Value *Input, ArrayRef<uint32_t> Powers) {
+  Value *N = B.CreateTrunc(Input, B.getInt32Ty());
+  SmallVector<Value *, 12> Terms;
+  for (uint32_t Power : Powers)
+    Terms.push_back(B.CreateUDiv(N, B.getInt32(Power)));
+  // Pair independent terms so the sum does not introduce a serial chain.
+  for (unsigned Stride = 1; Stride < Terms.size(); Stride *= 2)
+    for (unsigned I = 0; I + Stride < Terms.size(); I += 2 * Stride)
+      Terms[I] = B.CreateAdd(Terms[I], Terms[I + Stride]);
+  return B.CreateZExt(Terms.front(), B.getInt64Ty());
+}
+
 static bool versionBoundedQuotientSum(BasicBlock &Body) {
   if (Body.size() != 6 || Body.hasAddressTaken()) return false;
   auto *Latch = dyn_cast<CondBrInst>(Body.getTerminator());
@@ -81,16 +93,17 @@ static bool versionBoundedQuotientSum(BasicBlock &Body) {
   IRBuilder<> Check(Dispatch);
   Check.CreateCondBr(Check.CreateICmpUGE(Input, Check.getInt64(Powers[5])), Fast, Pre);
   IRBuilder<> B(Fast);
-  Value *N = B.CreateTrunc(Input, B.getInt32Ty());
-  SmallVector<Value *, 12> Terms;
-  for (uint32_t Power : Powers)
-    Terms.push_back(B.CreateUDiv(N, B.getInt32(Power)));
-  // Pair independent terms so the sum does not introduce a serial chain.
-  for (unsigned Stride = 1; Stride < Terms.size(); Stride *= 2)
-    for (unsigned I = 0; I + Stride < Terms.size(); I += 2 * Stride)
-      Terms[I] = B.CreateAdd(Terms[I], Terms[I + Stride]);
-  Result->addIncoming(B.CreateZExt(Terms.front(), B.getInt64Ty()), Fast);
+  Result->addIncoming(buildQuotientSum(B, Input, Powers), Fast);
   B.CreateBr(Exit);
+
+  // The smaller arm cannot reach the sixth power. Keep its zero shortcut
+  // and compute only the five quotients that can contribute.
+  auto *Small = BasicBlock::Create(C, "quotient.sum.small", F, &Body);
+  Enter->setSuccessor(1, Small);
+  IRBuilder<> SmallBuilder(Small);
+  Result->addIncoming(buildQuotientSum(SmallBuilder, Input, ArrayRef(Powers).take_front(5)), Small);
+  SmallBuilder.CreateBr(Exit);
+  DeleteDeadBlock(&Body);
   return true;
 }
 } // namespace
