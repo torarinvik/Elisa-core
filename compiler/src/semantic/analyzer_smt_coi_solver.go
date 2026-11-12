@@ -293,7 +293,11 @@ func (a *Analyzer) smtCheckSlicedOnce(solver smt.Solver, query, goalAssert strin
 			// speculation here avoids solving a full query already proven by
 			// the cached weakening, while overlapping both checks on a miss.
 			if canPrefetch {
-				prefetch = prefetcher.StartPrefetch(next, vars, checkBudget, a.smtLogLabelText("query", goalAssert, query))
+				label := ""
+				if labeled, ok := solver.(smtLabeledSolver); ok && labeled.LogsRlimit() {
+					label = a.smtLogLabelText("query", goalAssert, query)
+				}
+				prefetch = prefetcher.StartPrefetch(next, vars, checkBudget, label)
 			}
 			return budgeted.CheckBudgetValues(weaker, vars, budget)
 		})
