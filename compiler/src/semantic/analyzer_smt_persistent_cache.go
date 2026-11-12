@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 
+	"elisacore/src/artifactidentity"
+	"elisacore/src/proofcacheio"
 	"elisacore/src/smt"
 )
 
@@ -95,28 +97,7 @@ func smtProofCompilerHash() (string, error) {
 }
 
 func smtProofOpenedArtifactHash(artifact *os.File, original os.FileInfo) (string, error) {
-	if artifact == nil || original == nil {
-		return "", fmt.Errorf("compiler identity unavailable")
-	}
-	before, err := artifact.Stat()
-	if err != nil {
-		return "", err
-	}
-	unchanged := func(info os.FileInfo) bool {
-		return info.Size() == original.Size() && info.ModTime().Equal(original.ModTime())
-	}
-	if !unchanged(before) {
-		return "", fmt.Errorf("running compiler artifact changed")
-	}
-	hash := sha256.New()
-	if _, err := io.Copy(hash, io.NewSectionReader(artifact, 0, before.Size())); err != nil {
-		return "", err
-	}
-	after, err := artifact.Stat()
-	if err != nil || !unchanged(after) {
-		return "", fmt.Errorf("compiler changed during identity read")
-	}
-	return hex.EncodeToString(hash.Sum(nil)), nil
+	return artifactidentity.OpenedHash(artifact, original)
 }
 
 func smtProofArtifactHash(path string) (string, error) {
@@ -229,22 +210,7 @@ func (c *smtProofCache) declineKey(query string, exact string) string {
 }
 
 func smtProofCacheKey(identity, query string) string {
-	hash := sha256.New()
-	_, _ = hash.Write([]byte(identity))
-	_, _ = hash.Write([]byte{0})
-	if len(query) <= 4096 {
-		_, _ = hash.Write([]byte(query))
-	} else {
-		// The digest's interface makes []byte(query) escape. Bound scratch
-		// instead of allocating another complete copy of every large query.
-		var block [4096]byte
-		for len(query) != 0 {
-			n := copy(block[:], query)
-			_, _ = hash.Write(block[:n])
-			query = query[n:]
-		}
-	}
-	return hex.EncodeToString(hash.Sum(nil))
+	return proofcacheio.Key(identity, query)
 }
 func smtProofChecksum(key, verdict string) string {
 	hash := sha256.Sum256([]byte(smtProofCacheSchema + "\x00" + key + "\x00" + verdict))
@@ -428,22 +394,5 @@ func (c *smtProofCache) publishDeclineVerdict(key string, verdict, counterexampl
 // Write to a sibling temporary file and publish with a rename. Existing
 // shards need no directory probe, and successful rename consumes the temp.
 func writeSMTCacheRecord(path, pattern string, payload []byte) {
-	dir := filepath.Dir(path)
-	f, err := os.CreateTemp(dir, pattern)
-	if os.IsNotExist(err) {
-		if os.MkdirAll(dir, 0700) != nil {
-			return
-		}
-		f, err = os.CreateTemp(dir, pattern)
-	}
-	if err != nil {
-		return
-	}
-	temporary := f.Name()
-	_, writeErr := f.Write(payload)
-	closeErr := f.Close()
-	if writeErr == nil && closeErr == nil && os.Rename(temporary, path) == nil {
-		return
-	}
-	_ = os.Remove(temporary)
+	proofcacheio.WriteRecord(path, pattern, payload)
 }
