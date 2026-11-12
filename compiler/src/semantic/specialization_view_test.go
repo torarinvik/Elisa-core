@@ -447,3 +447,30 @@ func TestSpecializationSyntaxDeclinesHiddenInteriorPointer(t *testing.T) {
 		t.Fatalf("hidden interior pointer admission: %v", err)
 	}
 }
+
+func TestSpecializationFactCopyOwnsNestedReferences(t *testing.T) {
+	type facts struct {
+		label string
+		ids   []int
+		rows  [1]map[string][]ast.Expr
+	}
+	original := &ast.IntLit{Value: "7"}
+	source := facts{label: "row", ids: []int{1}, rows: [1]map[string][]ast.Expr{{"key": {original}}}}
+	ctx := &specializationContext{syntax: newSpecializationSyntax()}
+	value := reflect.ValueOf(source)
+	ctx.prepareFact(value, map[specializationPointer]bool{})
+	if err := ctx.syntax.validate(); err != nil {
+		t.Fatal(err)
+	}
+	copied := ctx.copyFact(value, map[specializationPointer]reflect.Value{}).Interface().(facts)
+	literal := copied.rows[0]["key"][0].(*ast.IntLit)
+	if copied.label != source.label || literal == original || literal.Value != original.Value {
+		t.Fatalf("incorrect copied facts: %+v", copied)
+	}
+	literal.Value = "8"
+	copied.ids[0] = 2
+	delete(copied.rows[0], "key")
+	if source.rows[0]["key"][0] != original || original.Value != "7" || source.ids[0] != 1 {
+		t.Fatal("private fact update reached the original")
+	}
+}
