@@ -3,6 +3,7 @@ package parser
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
+	"elisacore/src/parserdesugar"
 )
 
 // docs/120 §6 — thread slots in multi-place assignment: the manifest as dataflow.
@@ -241,27 +242,8 @@ func (p *Parser) desugarSingleThreadAssign(target ast.Expr, value ast.Expr) (ast
 // classifySingleLeaves walks the single-place RHS's branch structure and counts leaf
 // classifications against the target name. enumerable=false for a shape the walk
 // cannot decompose (the pure path applies).
-func classifySingleLeaves(value ast.Expr, name string) (threads, values int, enumerable bool) {
-	switch n := value.(type) {
-	case *ast.TernaryExpr:
-		t1, v1, ok1 := classifySingleLeaves(n.Value, name)
-		t2, v2, ok2 := classifySingleLeaves(n.Alt, name)
-		return t1 + t2, v1 + v2, ok1 && ok2
-	case *ast.ExprBlock:
-		if n.Value == nil {
-			return 0, 0, false
-		}
-		return classifySingleLeaves(n.Value, name)
-	default:
-		switch classifySlot(value, name) {
-		case slotThread:
-			return 1, 0, true
-		case slotNeutral:
-			return 0, 0, true
-		default:
-			return 0, 1, true
-		}
-	}
+func classifySingleLeaves(value ast.Expr, name string) (int, int, bool) {
+	return parserdesugar.ClassifySingleLeaves(value, name)
 }
 
 // singleThreadStmts converts the all-thread/neutral RHS into plain statements: a
@@ -269,116 +251,30 @@ func classifySingleLeaves(value ast.Expr, name string) (threads, values int, enu
 // statements, a thread leaf becomes its bare (marked) mutating call, and a neutral
 // leaf (the bare binding) erases to nothing.
 func singleThreadStmts(value ast.Expr, name string) []ast.Stmt {
-	switch n := value.(type) {
-	case *ast.TernaryExpr:
-		thenStmts := singleThreadStmts(n.Value, name)
-		elseStmts := singleThreadStmts(n.Alt, name)
-		if len(thenStmts) == 0 {
-			thenStmts = []ast.Stmt{&ast.PassStmt{Position: n.Position}}
-		}
-		return []ast.Stmt{&ast.IfStmt{Position: n.Position, Cond: n.Cond, Then: thenStmts, Else: elseStmts}}
-	case *ast.ExprBlock:
-		stmts := append([]ast.Stmt(nil), n.Stmts...)
-		return append(stmts, singleThreadStmts(n.Value, name)...)
-	default:
-		if id, ok := value.(*ast.Ident); ok && id.Name == name {
-			return nil // neutral: yields the binding unchanged — erases
-		}
-		markThreadEffect(value)
-		return []ast.Stmt{&ast.ExprStmt{Position: value.Pos(), Expr: value}}
-	}
+	return parserdesugar.SingleThreadStmts(value, name)
 }
-
-// threadOnlyStmts converts an all-slots-thread RHS into plain statements: a value-if
-// becomes a statement if whose branch bodies are the branches' pre-tail statements
-// plus their hoisted thread effects.
 func threadOnlyStmts(value ast.Expr, hoistsOf func(*ast.TupleExpr) []ast.Stmt) []ast.Stmt {
-	switch n := value.(type) {
-	case *ast.TupleExpr:
-		return hoistsOf(n)
-	case *ast.ExprBlock:
-		// The block's pre-tail statements execute, then whatever its value position
-		// contributes (a tuple's hoisted effects, or a nested value-if's statement form).
-		stmts := append([]ast.Stmt(nil), n.Stmts...)
-		return append(stmts, threadOnlyStmts(n.Value, hoistsOf)...)
-	case *ast.TernaryExpr:
-		ifStmt := &ast.IfStmt{
-			Position: n.Position,
-			Cond:     n.Cond,
-			Then:     threadOnlyStmts(n.Value, hoistsOf),
-			Else:     threadOnlyStmts(n.Alt, hoistsOf),
-		}
-		return []ast.Stmt{ifStmt}
-	}
-	return nil
+	return parserdesugar.ThreadOnlyStmts(value, hoistsOf)
 }
 
 // markThreadEffect flags every call in a thread-slot expression's receiver chain as a
 // §6 thread effect, so the §7 strict tier treats it as a manifest point (a chained
 // `p.advance().skip_spaces()` threads through each in-place mutation).
-func markThreadEffect(e ast.Expr) {
-	for {
-		call, ok := e.(*ast.CallExpr)
-		if !ok {
-			return
-		}
-		call.LmutThreadEffect = true
-		field, ok := call.Func.(*ast.FieldExpr)
-		if !ok {
-			return
-		}
-		e = field.Object
-	}
-}
+func markThreadEffect(e ast.Expr) { parserdesugar.MarkThreadEffect(e) }
 
-type slotClass int
+type slotClass = parserdesugar.SlotClass
 
 const (
-	slotValue slotClass = iota
-	slotThread
-	slotNeutral
+	slotValue   = parserdesugar.SlotValue
+	slotThread  = parserdesugar.SlotThread
+	slotNeutral = parserdesugar.SlotNeutral
 )
 
-// classifySlot: a mutating call rooted at the target THREADS; the bare target binding
-// is NEUTRAL (thread-erase ≡ self-assign); anything else is a VALUE.
-func classifySlot(e ast.Expr, name string) slotClass {
-	if id, ok := e.(*ast.Ident); ok && id.Name == name {
-		return slotNeutral
-	}
-	if call, ok := e.(*ast.CallExpr); ok {
-		if root, ok := exprRootIdentName(call); ok && root == name {
-			return slotThread
-		}
-	}
-	return slotValue
-}
+func classifySlot(e ast.Expr, name string) slotClass { return parserdesugar.ClassifySlot(e, name) }
 
 // exprRootIdentName walks a receiver/place chain (field access, indexing, method
 // calls, parens, address-of) to its root identifier.
-func exprRootIdentName(e ast.Expr) (string, bool) {
-	for {
-		switch n := e.(type) {
-		case *ast.Ident:
-			return n.Name, true
-		case *ast.ParenExpr:
-			e = n.Inner
-		case *ast.AddrOfExpr:
-			e = n.Operand
-		case *ast.FieldExpr:
-			e = n.Object
-		case *ast.IndexExpr:
-			e = n.Object
-		case *ast.CallExpr:
-			field, ok := n.Func.(*ast.FieldExpr)
-			if !ok {
-				return "", false
-			}
-			e = field.Object
-		default:
-			return "", false
-		}
-	}
-}
+func exprRootIdentName(e ast.Expr) (string, bool) { return parserdesugar.ExprRootIdentName(e) }
 
 // collectThreadLeaves enumerates the RHS's yield tuples with setters. Handles the §1
 // RHS shapes: a bare tuple, a value-if (TernaryExpr, elif chains nested in Alt), and
@@ -409,18 +305,6 @@ func collectThreadLeaves(value ast.Expr) ([]*threadLeaf, bool) {
 }
 
 // appendMissingNames appends the names not already present in dst.
-func appendMissingNames(dst []string, names []string) []string {
-	for _, n := range names {
-		found := false
-		for _, d := range dst {
-			if d == n {
-				found = true
-				break
-			}
-		}
-		if !found {
-			dst = append(dst, n)
-		}
-	}
-	return dst
+func appendMissingNames(dst, names []string) []string {
+	return parserdesugar.AppendMissingNames(dst, names)
 }

@@ -3,6 +3,7 @@ package parser
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
+	"strconv"
 )
 
 // docs/119 §5 — `rebind`: explicit mutation threading (the primitive).
@@ -222,7 +223,7 @@ func callArgRootNames(call *ast.CallExpr) map[string]bool {
 // freshRebindName mints a collision-free temp name for one rebind tuple slot.
 func (p *Parser) freshRebindName(pos lexer.Pos, slot int) string {
 	p.rebindCounter++
-	return "__rb_" + itoa(p.rebindCounter) + "_" + itoa(slot)
+	return "__rb_" + strconv.Itoa(p.rebindCounter) + "_" + strconv.Itoa(slot)
 }
 
 // multiPlaceArrowAhead reports whether the comma at the current position is a
