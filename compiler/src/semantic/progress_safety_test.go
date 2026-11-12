@@ -249,6 +249,20 @@ def pong() -> void:
 	}
 }
 
+func TestProgressSafetyDetectsRecursionThroughDictionaryKey(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "progress_recursive_dictionary_key.elisa", `
+def ping() -> i64:
+    table: dict[i64, i64] = {pong(): 0}
+    return 0
+
+def pong() -> i64:
+    return ping()
+`, AnalyzeOptions{EnforceProgressSafety: true})
+	if all := strings.Join(result.Warnings(), "\n"); !strings.Contains(all, "progress warning: recursive cycle") {
+		t.Fatalf("expected recursion through a dictionary key to be reported, got:\n%s", all)
+	}
+}
+
 func TestProgressSafetyAllowsRecursiveCycleWithProgressEvidence(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "progress_recursive_cycle_budgeted.elisa", `
 def ping() -> void:
