@@ -70,3 +70,48 @@ def parse(bad: bool) -> i64 error[ParseError]:
     return 1
 `)
 }
+
+// Variant search includes families nested in modules, regardless of path depth.
+func TestErrorUnqualifiedVariantInNestedModule(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "nested_error_variant.elisa", `
+module Outer:
+    public:
+        module Inner:
+            public:
+                error Fault:
+                    Expected
+                    Other
+
+def origin() -> i64 error[Expected]:
+    return 1
+`)
+	sym, ok := result.GlobalScope.Lookup("origin")
+	if !ok {
+		t.Fatal("missing origin")
+	}
+	resultType, ok := sym.Type.(*FuncType).Return.(*ErrorUnionType)
+	if !ok {
+		t.Fatalf("expected an error-union return, got %T", sym.Type.(*FuncType).Return)
+	}
+	if len(resultType.Errors.Tags) != 1 || resultType.Errors.Tags[0] != "Outer.Inner.Fault.Expected" {
+		t.Fatalf("expected nested error variant, got %v", resultType.Errors.Tags)
+	}
+}
+
+func TestErrorUnqualifiedVariantNestedAmbiguity(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "nested_error_ambiguous.elisa", `
+error RootFault:
+    Shared
+module Outer:
+    public:
+        error NestedFault:
+            Shared
+
+def origin() -> i64 error[Shared]:
+    return 1
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, "ambiguous") || !strings.Contains(all, "Outer.NestedFault") || !strings.Contains(all, "RootFault") {
+		t.Fatalf("expected root and nested variant ambiguity, got:\n%s", all)
+	}
+}

@@ -203,7 +203,14 @@ func (a *Analyzer) findErrorVariantOwners(shortName string) []string {
 			continue
 		}
 		for _, qtag := range errSet.Tags {
-			if ErrorTagShortName(qtag) == shortName {
+			// A family name may itself be module-qualified. Bare-variant lookup
+			// compares only the final tag component, not the suffix after the
+			// first namespace separator used by match-tag compatibility.
+			tagName := qtag
+			if separator := strings.LastIndexByte(qtag, '.'); separator >= 0 {
+				tagName = qtag[separator+1:]
+			}
+			if tagName == shortName {
 				if !seen[errSet.Name] {
 					seen[errSet.Name] = true
 					owners = append(owners, errSet.Name)
