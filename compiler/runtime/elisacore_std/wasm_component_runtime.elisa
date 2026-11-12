@@ -133,6 +133,25 @@ def wasm_component_chunk_take(required_bytes: u32) -> u32:
         wasm_component_store_word(start + 4, requested)
         return start
 
+# Frame-backed blocks use the same two-word chunk prefix as component heap
+# chunks. The high capacity bit marks storage owned by the caller's frame; it
+# must never enter the global free list or grow into another chunk.
+const WASM_COMPONENT_FRAME_CHUNK_TAG: u32 = 2147483648
+
+def arena_init_stack_block(a: mutable void&, block: mutable void&, capacity: usize) -> void:
+    state: mutable WasmComponentArenaState& = wasm_component_arena_state(a)
+    bytes: u32 = capacity.u32() * 4
+    if capacity.usize() != capacity.u32().usize() or bytes / 4 != capacity.u32() or bytes >= WASM_COMPONENT_FRAME_CHUNK_TAG:
+        wasm_trap()
+        return
+    trusted Unsafe.PointerCast:
+        address: u32 = block.cast[uintptr].u32()
+        wasm_component_store_word(address, 0)
+        wasm_component_store_word(address + 4, bytes + WASM_COMPONENT_FRAME_CHUNK_TAG)
+        state.begin <- address
+        state.end <- address
+        state.end_index <- 0
+
 def wasm_component_arena_alloc(a: mutable void&, size_bytes: usize) -> u32:
     state: mutable WasmComponentArenaState& = wasm_component_arena_state(a)
     requested: mutable u32 = size_bytes.u32()
@@ -141,12 +160,17 @@ def wasm_component_arena_alloc(a: mutable void&, size_bytes: usize) -> u32:
 
     current: u32 = state.end
     if current != 0:
-        capacity: u32 = wasm_component_load_word(current + 4)
+        raw_capacity: u32 = wasm_component_load_word(current + 4)
+        frame_backed: bool = raw_capacity >= WASM_COMPONENT_FRAME_CHUNK_TAG
+        capacity: u32 = raw_capacity - WASM_COMPONENT_FRAME_CHUNK_TAG if frame_backed else raw_capacity
         used: u32 = state.end_index
         if used <= capacity and requested <= capacity - used:
             result: u32 = current + WASM_COMPONENT_CHUNK_HEADER_BYTES + used
             state.end_index <- used + requested
             return result
+        if frame_backed:
+            wasm_trap()
+            return 0
 
     fresh: mutable u32 = 0
     can Global{Read,Write}:
@@ -184,8 +208,10 @@ def arena_free(a: mutable void&) -> void:
         current: mutable u32 = state.begin
         while current != 0:
             next: u32 = wasm_component_load_word(current)
-            wasm_component_store_word(current, wasm_component_free_chunk)
-            wasm_component_free_chunk <- current
+            frame_backed: bool = wasm_component_load_word(current + 4) >= WASM_COMPONENT_FRAME_CHUNK_TAG
+            if not frame_backed:
+                wasm_component_store_word(current, wasm_component_free_chunk)
+                wasm_component_free_chunk <- current
             current <- next
         state.begin <- 0
         state.end <- 0
