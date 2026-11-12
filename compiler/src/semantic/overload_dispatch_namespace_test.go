@@ -56,7 +56,7 @@ module B:
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ovl_private.elisa", src, AnalyzeOptions{})
 	found := false
 	for _, d := range result.Diagnostics {
-		if strings.Contains(d.Message, "is private to module \"A\"") {
+		if strings.Contains(d.Message, "\"A.f\" is private to module \"A\"") {
 			found = true
 		}
 	}

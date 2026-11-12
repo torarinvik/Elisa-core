@@ -234,17 +234,23 @@ func (a *Analyzer) lookupVisibleGlobal(name string) (*Symbol, string, bool) {
 	return nil, "", false
 }
 
-func privateOwnerNamespace(name string) string {
-	// A receiver-overload or extension symbol (`__ovl__Ns.f__Ns.T__Ns.f`) belongs to the
-	// namespace of the visible name it mangles; its last dot sits inside the suffix.
+// visiblePrivateName removes the internal dispatch suffix used by overloaded and
+// extension functions so visibility diagnostics use the source-level name.
+func visiblePrivateName(name string) string {
 	for _, prefix := range [...]string{"__ovl__", "__ext__"} {
 		if rest, ok := strings.CutPrefix(name, prefix); ok {
 			if end := strings.Index(rest, "__"); end > 0 {
-				name = rest[:end]
+				return rest[:end]
 			}
 			break
 		}
 	}
+	return name
+}
+
+func privateOwnerNamespace(name string) string {
+	// The last dot of a mangled dispatch symbol may sit inside its suffix.
+	name = visiblePrivateName(name)
 	if idx := strings.LastIndex(name, "."); idx >= 0 {
 		return name[:idx]
 	}
