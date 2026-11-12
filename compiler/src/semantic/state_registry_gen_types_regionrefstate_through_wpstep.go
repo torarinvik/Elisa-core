@@ -5,8 +5,12 @@ import (
 	"reflect"
 )
 
-func semanticStateTypes_relationalEdge_through_wpStep() []reflect.Type {
+func semanticStateTypes_regionRefState_through_wpStep() []reflect.Type {
 	return []reflect.Type{
+		reflect.TypeOf((*regionRefState)(nil)).Elem(),
+		reflect.TypeOf((*regionState)(nil)).Elem(),
+		reflect.TypeOf((*regionUse)(nil)).Elem(),
+		reflect.TypeOf((*reindexedPermissionFunctions)(nil)).Elem(),
 		reflect.TypeOf((*relationalEdge)(nil)).Elem(),
 		reflect.TypeOf((*requiresReportKey)(nil)).Elem(),
 		reflect.TypeOf((*requiresVerdict)(nil)).Elem(),
@@ -15,6 +19,7 @@ func semanticStateTypes_relationalEdge_through_wpStep() []reflect.Type {
 		reflect.TypeOf((*resolvedTypeNameFunctionContribution)(nil)).Elem(),
 		reflect.TypeOf((*resolvedTypeNameLocation)(nil)).Elem(),
 		reflect.TypeOf((*resolvedTypeNameOwnershipField)(nil)).Elem(),
+		reflect.TypeOf((*resolvedTypeNamePathPart)(nil)).Elem(),
 		reflect.TypeOf((*resolvedTypeNamePointer)(nil)).Elem(),
 		reflect.TypeOf((*resolvedTypeNameRetirementPlan)(nil)).Elem(),
 		reflect.TypeOf((*resolvedTypeNameSourceOwner)(nil)).Elem(),
@@ -62,6 +67,7 @@ func semanticStateTypes_relationalEdge_through_wpStep() []reflect.Type {
 		reflect.TypeOf((*returnBorrowLateFrame)(nil)).Elem(),
 		reflect.TypeOf((*returnBorrowMatchBinder)(nil)).Elem(),
 		reflect.TypeOf((*returnBorrowQueryEntry)(nil)).Elem(),
+		reflect.TypeOf((*returnBorrowTargetScratch)(nil)).Elem(),
 		reflect.TypeOf((*rewriteDefaultContext)(nil)).Elem(),
 		reflect.TypeOf((*runtimeBridgeKind)(nil)).Elem(),
 		reflect.TypeOf((*runtimeBridgeMatch)(nil)).Elem(),
@@ -112,7 +118,6 @@ func semanticStateTypes_relationalEdge_through_wpStep() []reflect.Type {
 		reflect.TypeOf((*smtStructArgLeaf)(nil)).Elem(),
 		reflect.TypeOf((*smtTextBuilder)(nil)).Elem(),
 		reflect.TypeOf((*smtTokenScanner)(nil)).Elem(),
-		reflect.TypeOf((*smtTopLevelCommand)(nil)).Elem(),
 		reflect.TypeOf((*smtTranslator)(nil)).Elem(),
 		reflect.TypeOf((*smtVerdict)(nil)).Elem(),
 		reflect.TypeOf((*smtWeakeningAttempt)(nil)).Elem(),

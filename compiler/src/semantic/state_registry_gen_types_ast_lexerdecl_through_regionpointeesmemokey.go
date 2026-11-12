@@ -8,7 +8,7 @@ import (
 	"reflect"
 )
 
-func semanticStateTypes_ast_LexerDecl_through_reindexedPermissionFunctions() []reflect.Type {
+func semanticStateTypes_ast_LexerDecl_through_regionPointeesMemoKey() []reflect.Type {
 	return []reflect.Type{
 		reflect.TypeOf((*ast.LexerDecl)(nil)).Elem(),
 		reflect.TypeOf((*ast.LexerKeywordDecl)(nil)).Elem(),
@@ -186,6 +186,7 @@ func semanticStateTypes_ast_LexerDecl_through_reindexedPermissionFunctions() []r
 		reflect.TypeOf((*declKey)(nil)).Elem(),
 		reflect.TypeOf((*deferCaptureCollector)(nil)).Elem(),
 		reflect.TypeOf((*deferredAliasRefinement)(nil)).Elem(),
+		reflect.TypeOf((*deferredUsingMember)(nil)).Elem(),
 		reflect.TypeOf((*derivedLoopCandidate)(nil)).Elem(),
 		reflect.TypeOf((*derivedLoopCandidates)(nil)).Elem(),
 		reflect.TypeOf((*derivedLoopEdges)(nil)).Elem(),
@@ -193,10 +194,12 @@ func semanticStateTypes_ast_LexerDecl_through_reindexedPermissionFunctions() []r
 		reflect.TypeOf((*derivedLoopTransfer)(nil)).Elem(),
 		reflect.TypeOf((*derivedMethodSignature)(nil)).Elem(),
 		reflect.TypeOf((*diagnosticIdentity)(nil)).Elem(),
+		reflect.TypeOf((*digestStoreEnums)(nil)).Elem(),
 		reflect.TypeOf((*directResolvedCall)(nil)).Elem(),
 		reflect.TypeOf((*disjointArgRoots)(nil)).Elem(),
 		reflect.TypeOf((*dropHook)(nil)).Elem(),
 		reflect.TypeOf((*dropLocalBinding)(nil)).Elem(),
+		reflect.TypeOf((*earlyFreeGraph)(nil)).Elem(),
 		reflect.TypeOf((*easm.Function)(nil)).Elem(),
 		reflect.TypeOf((*easm.FunctionSummary)(nil)).Elem(),
 		reflect.TypeOf((*easm.GuestOverlayAccess)(nil)).Elem(),
@@ -325,6 +328,7 @@ func semanticStateTypes_ast_LexerDecl_through_reindexedPermissionFunctions() []r
 		reflect.TypeOf((*overlaySizeGuardFact)(nil)).Elem(),
 		reflect.TypeOf((*packedStoreDependencyState)(nil)).Elem(),
 		reflect.TypeOf((*packedStoreResolution)(nil)).Elem(),
+		reflect.TypeOf((*packedStoreSignatureCache)(nil)).Elem(),
 		reflect.TypeOf((*packedTypeWalk)(nil)).Elem(),
 		reflect.TypeOf((*pairDisjointEvidence)(nil)).Elem(),
 		reflect.TypeOf((*parallelForCaptureCollector)(nil)).Elem(),
@@ -406,9 +410,5 @@ func semanticStateTypes_ast_LexerDecl_through_reindexedPermissionFunctions() []r
 		reflect.TypeOf((*regionParamForwarding)(nil)).Elem(),
 		reflect.TypeOf((*regionPointees)(nil)).Elem(),
 		reflect.TypeOf((*regionPointeesMemoKey)(nil)).Elem(),
-		reflect.TypeOf((*regionRefState)(nil)).Elem(),
-		reflect.TypeOf((*regionState)(nil)).Elem(),
-		reflect.TypeOf((*regionUse)(nil)).Elem(),
-		reflect.TypeOf((*reindexedPermissionFunctions)(nil)).Elem(),
 	}
 }
