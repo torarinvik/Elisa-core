@@ -275,19 +275,32 @@ func privatizeSharedMaps(r *Result, a *Analyzer) []func() {
 		}
 		field := reflect.NewAt(f.Type(), unsafe.Pointer(f.UnsafeAddr())).Elem()
 		original := reflect.ValueOf(field.Interface())
-		clone := reflect.MakeMapWithSize(f.Type(), original.Len())
-		iter := original.MapRange()
-		// Key/Value allocate fresh reflected values for every entry. Reuse
-		// scratch storage instead; SetMapIndex copies each entry into clone.
-		key := reflect.New(f.Type().Key()).Elem()
-		value := reflect.New(f.Type().Elem()).Elem()
-		for iter.Next() {
-			key.SetIterKey(iter)
-			value.SetIterValue(iter)
-			clone.SetMapIndex(key, value)
-		}
-		field.Set(clone)
+		field.Set(cloneSharedCodegenMap(original))
 		restore = append(restore, func() { field.Set(original) })
 	}
 	return restore
+}
+
+// Expression types and facts dominate large native compilations. The typed
+// clone copies their map storage directly; other result maps use the generic
+// path because the shared-map check is based on identity, not field names.
+func cloneSharedCodegenMap(original reflect.Value) reflect.Value {
+	switch values := original.Interface().(type) {
+	case map[ast.Expr]Type:
+		return reflect.ValueOf(maps.Clone(values))
+	case map[ast.Expr]OptimizationFacts:
+		return reflect.ValueOf(maps.Clone(values))
+	}
+	clone := reflect.MakeMapWithSize(original.Type(), original.Len())
+	iter := original.MapRange()
+	// Key/Value allocate fresh reflected values for every entry. Reuse
+	// scratch storage instead; SetMapIndex copies each entry into clone.
+	key := reflect.New(original.Type().Key()).Elem()
+	value := reflect.New(original.Type().Elem()).Elem()
+	for iter.Next() {
+		key.SetIterKey(iter)
+		value.SetIterValue(iter)
+		clone.SetMapIndex(key, value)
+	}
+	return clone
 }
