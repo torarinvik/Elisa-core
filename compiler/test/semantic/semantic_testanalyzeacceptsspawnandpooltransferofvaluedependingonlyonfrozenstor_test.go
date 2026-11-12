@@ -15,13 +15,13 @@ packed enum Expr:
 def spawn1[A, R](fn: fn(A) -> R, arg: A) -> Thread[R, Joinable]:
 	return zeroed
 
-def pool_submit1[A, R](pool: ThreadPool&, fn: fn(A) -> R, arg: A) -> Task[R, Pending]:
+def pool_submit1[A, R](pool: mutable ThreadPool&, fn: fn(A) -> R, arg: A) -> Task[R, Pending]:
 	return zeroed
 
 def worker(node: Expr) -> i64:
 	return 0
 
-def ok(owner: Arena, pool: ThreadPool&) -> i64 can[Pool.Submit]:
+def ok(owner: Arena, pool: mutable ThreadPool&) -> i64 can[Pool.Submit]:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	node: Expr = new[store] Expr.Int(value: 1)
 	frozen: Expr.Store[Frozen] = freeze(move store)
@@ -42,13 +42,13 @@ func TestAnalyzeAcceptsThreadTransferOfBlessedRuntimeCarriers(t *testing.T) {
 def spawn1[A, R](fn: fn(A) -> R, arg: A) -> Thread[R, Joinable]:
 	return zeroed
 
-def pool_submit1[A, R](pool: ThreadPool&, fn: fn(A) -> R, arg: A) -> Task[R, Pending]:
+def pool_submit1[A, R](pool: mutable ThreadPool&, fn: fn(A) -> R, arg: A) -> Task[R, Pending]:
 	return zeroed
 
 def worker(gate: SharedGate) -> i64:
 	return 1
 
-def ok(pool_ref: ThreadPool&, mu: Mutex, cv: CondVar) -> i64 can[Pool.Submit]:
+def ok(pool_ref: mutable ThreadPool&, mu: Mutex, cv: CondVar) -> i64 can[Pool.Submit]:
 	_ = submit[pool_ref] worker(SharedGate{mu: mu, cv: cv})
 	return 0
 `
@@ -59,13 +59,13 @@ def ok(pool_ref: ThreadPool&, mu: Mutex, cv: CondVar) -> i64 can[Pool.Submit]:
 func TestAnalyzeAcceptsSpawnTransferOfStaticRef(t *testing.T) {
 	src := `extern shared_cell() -> static i32&
 
-def pool_submit1[A, R](pool: ThreadPool&, fn: fn(A) -> R, arg: A) -> Task[R, Pending]:
+def pool_submit1[A, R](pool: mutable ThreadPool&, fn: fn(A) -> R, arg: A) -> Task[R, Pending]:
 	return zeroed
 
 def worker(cell: static i32&) -> i64:
 	return cell[0].i64()
 
-def ok(pool: ThreadPool&) -> Task[i64, Pending] can[Pool.Submit]:
+def ok(pool: mutable ThreadPool&) -> Task[i64, Pending] can[Pool.Submit]:
 	return submit[pool] worker(shared_cell())
 `
 	result, errs := parseAndAnalyze(t, "spawn1_static_ref_ok.elisa", src)
@@ -107,13 +107,13 @@ func TestAnalyzeAcceptsThreadTransferOfBlessedRuntimeCarrierResults(t *testing.T
 def spawn1[A, R](fn: fn(A) -> R, arg: A) -> Thread[R, Joinable]:
 	return zeroed
 
-def pool_submit1[A, R](pool: ThreadPool&, fn: fn(A) -> R, arg: A) -> Task[R, Pending]:
+def pool_submit1[A, R](pool: mutable ThreadPool&, fn: fn(A) -> R, arg: A) -> Task[R, Pending]:
 	return zeroed
 
 def echo(gate: SharedGate) -> SharedGate:
 	return gate
 
-def ok(pool_ref: ThreadPool&, mu: Mutex, cv: CondVar) -> i64 can[Pool.Submit]:
+def ok(pool_ref: mutable ThreadPool&, mu: Mutex, cv: CondVar) -> i64 can[Pool.Submit]:
 	gate: SharedGate = SharedGate{mu: mu, cv: cv}
 	_ = submit[pool_ref] echo(gate)
 	return 0
@@ -128,14 +128,14 @@ func TestAnalyzeAcceptsThreadTransferOfStaticRefResult(t *testing.T) {
 def spawn1[A, R](fn: fn(A) -> R, arg: A) -> Thread[R, Joinable]:
 	return zeroed
 
-def pool_submit1[A, R](pool: ThreadPool&, fn: fn(A) -> R, arg: A) -> Task[R, Pending]:
+def pool_submit1[A, R](pool: mutable ThreadPool&, fn: fn(A) -> R, arg: A) -> Task[R, Pending]:
 	return zeroed
 
 def worker(value: i64) -> static i32&:
 	_ = value
 	return shared_cell()
 
-def ok(pool: ThreadPool&) -> i64 can[Pool.Submit]:
+def ok(pool: mutable ThreadPool&) -> i64 can[Pool.Submit]:
 	_ = submit[pool] worker(0)
 	return 0
 `
@@ -215,14 +215,14 @@ struct Box:
 @borrows_return(field, node, node)
 extern wrap_node(node: Expr) -> Box
 
-def pool_submit1[A, R](pool: ThreadPool&, fn: fn(A) -> R, arg: A) -> Task[R, Pending]:
+def pool_submit1[A, R](pool: mutable ThreadPool&, fn: fn(A) -> R, arg: A) -> Task[R, Pending]:
 	return zeroed
 
 def worker(box: Box) -> i64:
 	_ = box
 	return 0
 
-def ok(owner: Arena, pool: ThreadPool&) -> Task[i64, Pending] can[Pool.Submit]:
+def ok(owner: Arena, pool: mutable ThreadPool&) -> Task[i64, Pending] can[Pool.Submit]:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	node: Expr = new[store] Expr.Int(value: 1)
 	box: Box = wrap_node(node)
