@@ -125,6 +125,18 @@ func (a *Analyzer) recordStructLocalAllocRegion(sym *Symbol, bindingType Type, v
 		a.currentStructLocalAllocRegion[sym] = region
 		return
 	}
+	// An update can retain the base backing only when every replacement is
+	// scalar or a similarly safe update of that same base's field.
+	if update, ok := recordUpdateUnwrapParen(value).(*ast.RecordUpdateExpr); ok && update != nil {
+		// Do not infer a whole record's backing from a field or indexed base:
+		// such a path can pass through storage owned by a different region.
+		if base, ok := recordUpdateUnwrapParen(update.Base).(*ast.Ident); ok && base != nil && a.recordUpdatePreservesBacking(update, 0) {
+			if sourceRegion := a.structLocalArgRegion(base); sourceRegion != "" {
+				a.currentStructLocalAllocRegion[sym] = sourceRegion
+				return
+			}
+		}
+	}
 	// A by-value copy preserves the container descriptors and therefore the backing
 	// region of a previously recorded local. Carry only that exact source region; the
 	// use-site liveness check in attachStructLocalArgRegion still rejects a dead owner,

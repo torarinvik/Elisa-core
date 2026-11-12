@@ -226,6 +226,15 @@ func bodyForwardsConstructedStructLocalInfo(stmts []ast.Stmt) (bool, bool) {
 			if value != nil {
 				aliases = append(aliases, alias{decl.Name, value.Name})
 			}
+		case *ast.RecordUpdateExpr:
+			// An update may retain the base's backing storage. This prepass
+			// only requests an ambient region; semantic analysis checks the
+			// actual updated fields before forwarding the base's region.
+			if value != nil {
+				if base, ok := unwrapParenExprAST(value.Base).(*ast.Ident); ok && base != nil {
+					aliases = append(aliases, alias{decl.Name, base.Name})
+				}
+			}
 		case *ast.StructLitExpr:
 			constructed[decl.Name] = true
 		case *ast.CallExpr:
