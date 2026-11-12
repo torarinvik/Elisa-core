@@ -18,13 +18,9 @@ type smtAlphaToken struct {
 	kind byte
 }
 
-func smtAlphaQuery(query string) (string, bool) { return smtalpha.Query(query) }
 func smtAlphaWriteQuery(query string, out smtAlphaOutput) bool {
 	return smtalpha.WriteQuery(query, out)
 }
-func smtAlphaHasInvalidControl(query string) bool { return smtalpha.HasInvalidControl(query) }
-func smtAlphaValidSymbol(token string) bool       { return smtalpha.ValidSymbol(token) }
-func smtAlphaSymbol(token string) string          { return smtalpha.Symbol(token) }
 func smtAlphaWalk(query string, visit func(smtAlphaToken, int) bool) bool {
 	return smtalpha.Walk(query, func(token smtalpha.Token, depth int) bool {
 		return visit(smtAlphaToken{token.Text, token.Kind}, depth)
