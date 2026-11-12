@@ -38,6 +38,7 @@ type cachedInterfaceWord struct {
 	id    uint64
 	iface reflect.Type
 	word  unsafe.Pointer
+	typ   reflect.Type
 }
 
 func (r *Registry) Decode(data []byte) (any, error) {
@@ -152,6 +153,25 @@ func (d *decoder) valueAtDepth(v reflect.Value) error {
 		if id == 0 {
 			return nil
 		}
+		// A populated entry was created only after validating the registry ID,
+		// concrete type and interface assignment. Reuse all three for the common
+		// pointer case while still validating each referenced object.
+		entry := &d.ifaceWordCache[id%uint64(len(d.ifaceWordCache))]
+		if entry.word != nil && entry.id == id && entry.iface == v.Type() {
+			ref, err := d.uint()
+			if err != nil {
+				return err
+			}
+			if ref == 0 {
+				v.Set(reflect.Zero(entry.typ))
+				return nil
+			}
+			if ref >= uint64(len(d.objects)) || d.objects[ref].Type() != entry.typ {
+				return fmt.Errorf("invalid state reference")
+			}
+			d.setInterface(v, d.objects[ref], entry.word, true, id)
+			return nil
+		}
 		typ, err := d.typ(id)
 		if err != nil {
 			return err
@@ -159,14 +179,13 @@ func (d *decoder) valueAtDepth(v reflect.Value) error {
 		t := v.Type()
 		// A cached interface word also certifies assignability for this type pair.
 		key := [2]reflect.Type{typ, t}
-		entry := &d.ifaceWordCache[id%uint64(len(d.ifaceWordCache))]
 		word, cached := entry.word, false
 		if word != nil && id == entry.id && t == entry.iface {
 			cached = true
 		} else {
 			word, cached = d.ifaceWords[key]
 			if cached {
-				*entry = cachedInterfaceWord{id, t, word}
+				*entry = cachedInterfaceWord{id, t, word, typ}
 			}
 		}
 		if !cached && !typ.AssignableTo(t) {
@@ -387,7 +406,7 @@ func (d *decoder) setInterface(v, x reflect.Value, word unsafe.Pointer, cached b
 			d.ifaceWords = map[[2]reflect.Type]unsafe.Pointer{}
 		}
 		d.ifaceWords[key] = word
-		d.ifaceWordCache[id%uint64(len(d.ifaceWordCache))] = cachedInterfaceWord{id, v.Type(), word}
+		d.ifaceWordCache[id%uint64(len(d.ifaceWordCache))] = cachedInterfaceWord{id, v.Type(), word, x.Type()}
 	}
 	if !v.CanAddr() {
 		v.Set(x)
