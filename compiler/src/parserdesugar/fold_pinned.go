@@ -2,6 +2,7 @@ package parserdesugar
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/astscan"
 	"elisacore/src/lexer"
 )
 
@@ -11,6 +12,18 @@ import (
 // vectorizer may pack the W independent lanes into a SIMD register, but it can never reorder them
 // (no reassociation flag rides on these ops), so the bits do not depend on its choices.
 const pinnedFoldWidth = 8
+
+// FoldTransformUsesAccumulator conservatively refuses transforms that read the
+// running accumulator: independent lanes cannot preserve that dependency.
+func FoldTransformUsesAccumulator(expr ast.Expr, name string) bool {
+	dependent := false
+	astscan.WalkPointers(expr, func(node any) {
+		if ident, ok := node.(*ast.Ident); ok && ident != nil && ident.Name == name {
+			dependent = true
+		}
+	}, map[uintptr]bool{})
+	return dependent
+}
 
 // buildPinnedFoldReduce lowers an eligible fold to a fixed-width pinned reduction (docs/79 Part IV,
 // Phase 2). Eligibility mirrors `by par` (no head bindings / filter / range; a plain darray source; an
@@ -38,6 +51,9 @@ func BuildPinnedFoldReduce(pos lexer.Pos, bindings []ast.Stmt, body ast.Expr, na
 	case pinnedIdentName(bin.Right) == accName:
 		transformExpr = bin.Left
 	default:
+		return nil, false
+	}
+	if FoldTransformUsesAccumulator(transformExpr, accName) {
 		return nil, false
 	}
 	// The per-lane identity must be a typed literal we can synthesize; only a bare numeric-literal seed

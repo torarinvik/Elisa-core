@@ -148,6 +148,9 @@ func (p *Parser) buildParallelFoldReduce(pos lexer.Pos, bindings []ast.Stmt, bod
 	default:
 		return fail("the accumulator `" + accName + "` must be one whole operand of the top-level `<op>`")
 	}
+	if parserdesugar.FoldTransformUsesAccumulator(transformExpr, accName) {
+		return fail("transform must not reference the accumulator")
+	}
 
 	// map_reduce(slice(&src), seed, (x) => f(x), (l, r) => l <op> r)
 	sliceCall := &ast.CallExpr{Position: pos, Func: &ast.Ident{Position: pos, Name: "slice"}, Args: []ast.Expr{&ast.AddrOfExpr{Position: pos, Operand: srcIdent}}}
