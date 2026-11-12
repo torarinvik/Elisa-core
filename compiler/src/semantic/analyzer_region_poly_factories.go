@@ -125,70 +125,11 @@ func assignmentLeavesRegionFieldsFresh(target ast.Expr, constructed map[string]b
 // funcHasArenaParam reports whether any explicit parameter is an `Arena` (modulo `mutable`/`&`
 // wrappers) — such a function threads its own allocator and is excluded from build-local-return
 // classification, mirroring the parser's maybeWrapFunctionBodyInAutoRegion gate.
-func funcHasArenaParam(fn *ast.FuncDecl) bool {
-	for i := range fn.Params {
-		if typeExprNamedIs(fn.Params[i].Type, "Arena") {
-			return true
-		}
-	}
-	return false
-}
-
-// typeExprNamedIs reports whether a type expression names `name` after stripping `mutable`/`&`.
+func funcHasArenaParam(fn *ast.FuncDecl) bool { return regionframesyntax.HasArenaParam(fn) }
 func typeExprNamedIs(typ ast.TypeExpr, name string) bool {
-	for {
-		switch t := typ.(type) {
-		case *ast.MutableType:
-			typ = t.Elem
-		case *ast.RefType:
-			typ = t.Elem
-		default:
-			nt, ok := typ.(*ast.NamedType)
-			return ok && nt.Name == name
-		}
-	}
+	return regionframesyntax.TypeExprNamedIs(typ, name)
 }
-
-// typeExprIsRegionless reports whether a container local's declared type carries NO explicit `@r`
-// region annotation — only a region-less container literal lands in the inferred (adoptable) region.
-// A nil (untyped) declaration is conservatively NOT treated as region-less build-local-return: the
-// typed `out: darray[T] = []` form is the Stage 1 canonical shape (and matches join/make signatures).
-func typeExprIsRegionless(typ ast.TypeExpr) bool {
-	for {
-		mt, ok := typ.(*ast.MutableType)
-		if !ok {
-			break
-		}
-		typ = mt.Elem
-	}
-	switch t := typ.(type) {
-	case *ast.BuiltinTypeExpr:
-		return t.Region == ""
-	case *ast.NamedType:
-		return t.Name == "dstr" // dstr has no region-annotation surface; always region-less here
-	}
-	return false
-}
-
-// returnTypeIsOwnedContainer reports whether a function's return-type annotation is a growable owned
-// container — `darray`/`dict`/`set` (BuiltinTypeExpr) or `dstr` (NamedType, the u8 darray). Views
-// (`sview`/`cstr`) and `array` (fixed) are excluded: they are not region-owned growables.
+func typeExprIsRegionless(typ ast.TypeExpr) bool { return regionframesyntax.TypeExprIsRegionless(typ) }
 func returnTypeIsOwnedContainer(typ ast.TypeExpr) bool {
-	for {
-		mt, ok := typ.(*ast.MutableType)
-		if !ok {
-			break
-		}
-		typ = mt.Elem
-	}
-	switch t := typ.(type) {
-	case *ast.NamedType:
-		return t.Name == "dstr"
-	case *ast.BuiltinTypeExpr:
-		switch t.Name {
-		case "darray", "dict", "set":
-			return t.Region == ""
-		}
-	}
-	return false
+	return regionframesyntax.ReturnTypeIsOwnedContainer(typ)
 }
