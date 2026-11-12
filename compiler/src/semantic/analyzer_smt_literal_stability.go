@@ -1,6 +1,9 @@
 package semantic
 
-import "elisacore/src/ast"
+import (
+	"elisacore/src/ast"
+	"elisacore/src/exprpurity"
+)
 
 // A struct/tuple literal's components are evaluated left to right, once. Translating a component
 // expression AGAIN at the proof point (`result.f` ↦ the `f` argument of the returned literal, or a
@@ -16,46 +19,7 @@ import "elisacore/src/ast"
 // primitive (non-overloaded) unary/binary operators, ternaries with pure conditions/arms,
 // and nested literals of the same.
 // Index expressions are excluded (a user type may lower indexing to a call).
-func sideEffectFreeExpr(expr ast.Expr, depth int) bool {
-	if expr == nil || depth > 64 {
-		return false
-	}
-	switch n := expr.(type) {
-	case *ast.Ident, *ast.IntLit, *ast.BoolLit, *ast.FloatLit, *ast.CharLit, *ast.StringLit, *ast.NullLit:
-		return true
-	case *ast.ParenExpr:
-		return sideEffectFreeExpr(n.Inner, depth+1)
-	case *ast.UnaryExpr:
-		return n.LoweredCall == nil && sideEffectFreeExpr(n.Operand, depth+1)
-	case *ast.BinaryExpr:
-		return n.LoweredCall == nil && sideEffectFreeExpr(n.Left, depth+1) && sideEffectFreeExpr(n.Right, depth+1)
-	case *ast.TernaryExpr:
-		return sideEffectFreeExpr(n.Cond, depth+1) &&
-			sideEffectFreeExpr(n.Value, depth+1) && sideEffectFreeExpr(n.Alt, depth+1)
-	case *ast.CastExpr:
-		return sideEffectFreeExpr(n.Operand, depth+1)
-	case *ast.FieldExpr:
-		return sideEffectFreeExpr(n.Object, depth+1)
-	case *ast.TupleExpr:
-		for _, elem := range n.Elems {
-			if !sideEffectFreeExpr(elem, depth+1) {
-				return false
-			}
-		}
-		return true
-	case *ast.StructLitExpr:
-		if n.CopyBase != nil || len(n.Spreads) != 0 {
-			return false
-		}
-		for _, arg := range n.Args {
-			if !sideEffectFreeExpr(arg, depth+1) {
-				return false
-			}
-		}
-		return true
-	}
-	return false
-}
+func sideEffectFreeExpr(expr ast.Expr, depth int) bool { return exprpurity.Reevaluatable(expr, depth) }
 
 // literalComponentReevaluable reports, for components in EVALUATION (source) order, which ones may be
 // translated again at the proof point.

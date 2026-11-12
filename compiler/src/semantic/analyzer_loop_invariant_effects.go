@@ -2,7 +2,9 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/exprpurity"
 	"elisacore/src/lexer"
+	"elisacore/src/regionframesyntax"
 )
 
 // loopRecordLocalAdmissible admits an immutable body local whose definition reads only pre-body
@@ -142,39 +144,7 @@ func (a *Analyzer) loopRecordStored(stores []loopArrayStore, name string) bool {
 	return false
 }
 
-func exprIsSideEffectFreeForTermination(expr ast.Expr) bool {
-	switch n := expr.(type) {
-	case *ast.IntLit, *ast.BoolLit, *ast.StringLit, *ast.CharLit, *ast.Ident:
-		return true
-	case *ast.ParenExpr:
-		return n != nil && exprIsSideEffectFreeForTermination(n.Inner)
-	case *ast.FieldExpr:
-		return n != nil && !n.Safe && exprIsSideEffectFreeForTermination(n.Object)
-	case *ast.IndexExpr:
-		return n != nil &&
-			n.Index2 == nil && n.Fallback == nil && !n.LegacyElseFallback &&
-			n.AsSpecialize == nil && n.AsOverlayCall == nil &&
-			exprIsSideEffectFreeForTermination(n.Object) && exprIsSideEffectFreeForTermination(n.Index)
-	case *ast.SliceExpr:
-		return n != nil &&
-			exprIsSideEffectFreeForTermination(n.Object) &&
-			(n.Start == nil || exprIsSideEffectFreeForTermination(n.Start)) &&
-			(n.End == nil || exprIsSideEffectFreeForTermination(n.End))
-	case *ast.UnaryExpr:
-		return n != nil && n.Op != lexer.TOKEN_AMPERSAND && exprIsSideEffectFreeForTermination(n.Operand)
-	case *ast.BinaryExpr:
-		return n != nil && exprIsSideEffectFreeForTermination(n.Left) && exprIsSideEffectFreeForTermination(n.Right)
-	case *ast.CastExpr:
-		return n != nil && exprIsSideEffectFreeForTermination(n.Operand)
-	case *ast.TernaryExpr:
-		return n != nil &&
-			exprIsSideEffectFreeForTermination(n.Cond) &&
-			exprIsSideEffectFreeForTermination(n.Value) &&
-			exprIsSideEffectFreeForTermination(n.Alt)
-	default:
-		return false
-	}
-}
+func exprIsSideEffectFreeForTermination(expr ast.Expr) bool { return exprpurity.Termination(expr) }
 
 // loopBodyAssertIsPure recognizes only an unshadowed builtin `assert(cond)` whose condition is
 // side-effect-free. Loop proof models may ignore such a statement because it does not mutate the
@@ -307,24 +277,5 @@ func loopStoreTargetBaseKey(target *ast.IndexExpr, forTermination bool) (string,
 // null — declines (returns ok=false). The key is the dotted path joined by a separator that cannot
 // appear in an identifier, so two equal paths produce one key and unequal paths produce distinct keys.
 func normalizeFieldPathLValue(expr ast.Expr) (string, bool) {
-	switch n := expr.(type) {
-	case *ast.Ident:
-		if n == nil {
-			return "", false
-		}
-		return n.Name, true
-	case *ast.FieldExpr:
-		// A `?.` safe-navigation field is NOT a stable lvalue store base (the object may be null), so
-		// reject it; only an unconditional `.field` projection of a stable path is admissible.
-		if n == nil || n.Safe {
-			return "", false
-		}
-		base, ok := normalizeFieldPathLValue(n.Object)
-		if !ok {
-			return "", false
-		}
-		return base + smtFieldSeparator + n.Field, true
-	default:
-		return "", false
-	}
+	return regionframesyntax.FieldPathLValue(expr, smtFieldSeparator)
 }

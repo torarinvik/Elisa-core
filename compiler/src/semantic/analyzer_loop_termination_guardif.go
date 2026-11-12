@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/exprpurity"
 	"elisacore/src/lexer"
 )
 
@@ -334,44 +335,7 @@ func negateCond(cond ast.Expr) (ast.Expr, bool) {
 // boolean literals, and `and`/`or`/`not`/parenthesized combinations). Anything else (calls, indexing,
 // casts to bool, etc.) → reject, so a path condition is never dropped or mis-modeled.
 func condShapeTranslatable(cond ast.Expr) bool {
-	switch n := cond.(type) {
-	case *ast.ParenExpr:
-		return n != nil && condShapeTranslatable(n.Inner)
-	case *ast.BoolLit:
-		return true
-	case *ast.Ident:
-		return true // a boolean variable; boolTerm models it as a bool constant
-	case *ast.FieldExpr:
-		// A boolean field read like `self.done`; the object must be a pure field path (no call/index).
-		return n != nil && !n.Safe && isPureFieldPath(n.Object)
-	case *ast.UnaryExpr:
-		if n == nil {
-			return false
-		}
-		if n.Op == lexer.TOKEN_NOT {
-			return condShapeTranslatable(n.Operand)
-		}
-		return false
-	case *ast.BinaryExpr:
-		if n == nil {
-			return false
-		}
-		switch n.Op {
-		case lexer.TOKEN_AND, lexer.TOKEN_OR:
-			return condShapeTranslatable(n.Left) && condShapeTranslatable(n.Right)
-		case lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ, lexer.TOKEN_LT, lexer.TOKEN_LTEQ, lexer.TOKEN_GT, lexer.TOKEN_GTEQ:
-			return condArithOperandTranslatable(n.Left) && condArithOperandTranslatable(n.Right)
-		}
-		return false
-	default:
-		return false
-	}
-}
-
-// condArithOperandTranslatable accepts the operand of a comparison: pure integer arithmetic over
-// literals/variables/field-reads/value-casts (the same family the measure prover already reasons over).
-func condArithOperandTranslatable(expr ast.Expr) bool {
-	return exprIsPureArithOrRead(expr)
+	return exprpurity.GuardShape(cond, exprIsPureArithOrRead)
 }
 
 // opaqueExitGuardReadOnly is a conservative side-effect gate for opaque early-exit guards. It admits
@@ -416,21 +380,6 @@ func (a *Analyzer) opaqueExitGuardReadOnly(expr ast.Expr) bool {
 			}
 		}
 		return true
-	default:
-		return false
-	}
-}
-
-// isPureFieldPath reports whether expr is a stable field path rooted at an identifier through `.field`
-// hops only (no call/index/deref/safe-nav) — used to gate boolean field reads in guard conditions.
-func isPureFieldPath(expr ast.Expr) bool {
-	switch n := expr.(type) {
-	case *ast.Ident:
-		return n != nil
-	case *ast.ParenExpr:
-		return n != nil && isPureFieldPath(n.Inner)
-	case *ast.FieldExpr:
-		return n != nil && !n.Safe && isPureFieldPath(n.Object)
 	default:
 		return false
 	}
