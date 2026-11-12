@@ -138,6 +138,7 @@ func (r *Result) specializePrivateFunction(fn *ast.FuncDecl, args []Type, option
 		if r.shared != nil {
 			// Shared codegen freezes canonical analyzer maps until all workers finish.
 			// Keep this read-only table as a fallback instead of copying it per product.
+			analyzerSnapshot.funcDeclUsings = nil
 			sharedStoreTargets = analyzerSnapshot.paramStoreTargets
 			analyzerSnapshot.paramStoreTargets = nil
 		}
@@ -213,7 +214,7 @@ func (r *Result) specializePrivateFunction(fn *ast.FuncDecl, args []Type, option
 			}
 		}
 	}
-	a.withResolutionContext(namespace, a.funcDeclUsings[decl], func() { a.analyzeFuncWithTypeArgs(decl, args) })
+	a.withResolutionContext(namespace, a.declarationUsings(decl), func() { a.analyzeFuncWithTypeArgs(decl, args) })
 	delete(a.funcAnalysisActive, fn)
 	if a.smtUnavailable || a.smtSnapshotTainted {
 		// A successful specialization can still be conservatively weaker after

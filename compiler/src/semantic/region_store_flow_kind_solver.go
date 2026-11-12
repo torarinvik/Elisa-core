@@ -47,7 +47,7 @@ func (a *Analyzer) computeStoreFlowKinds(decl *ast.FuncDecl, s *storeFlowSummary
 			a.currentNamespace = ""
 		}
 	}
-	a.currentUsings = append([]string(nil), a.funcDeclUsings[decl]...)
+	a.currentUsings = append([]string(nil), a.declarationUsings(decl)...)
 	defer func() { a.currentNamespace, a.currentUsings = savedNamespace, savedUsings }()
 
 	scalars := a.storeScanScalarLocals(decl)

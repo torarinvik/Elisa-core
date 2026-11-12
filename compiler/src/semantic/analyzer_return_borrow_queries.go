@@ -356,7 +356,7 @@ func (a *Analyzer) computeReturnBorrowFlowForFuncOnce(fn *ast.FuncDecl, active m
 			a.currentNamespace = ""
 		}
 	}
-	a.currentUsings = append([]string(nil), a.funcDeclUsings[fn]...)
+	a.currentUsings = append([]string(nil), a.declarationUsings(fn)...)
 	defer func() {
 		a.currentNamespace, a.currentUsings, a.currentScope = savedNamespace, savedUsings, savedScope
 	}()

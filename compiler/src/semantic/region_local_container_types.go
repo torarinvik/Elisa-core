@@ -178,7 +178,7 @@ func (a *Analyzer) analyzeQuietly(decl *ast.FuncDecl) {
 			a.currentNamespace = ""
 		}
 	}
-	a.currentUsings = append([]string(nil), a.funcDeclUsings[decl]...)
+	a.currentUsings = append([]string(nil), a.declarationUsings(decl)...)
 	// Under parallel body analysis a declaration owned by another worker is analyzed
 	// on this worker's private pristine copy; its summaries are published under decl.
 	target, publish := a.quietAnalysisTarget(decl)

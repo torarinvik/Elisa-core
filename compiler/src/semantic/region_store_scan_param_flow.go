@@ -103,7 +103,7 @@ func (a *Analyzer) storeScanIsEnumConstructor(decl *ast.FuncDecl, call *ast.Call
 	// Resolve the enum name where decl is declared: scanned as a callee, the analyzer's current
 	// namespace/usings are the caller's, and `Expr.Ident(..)` in another module looked unresolved.
 	result := false
-	a.withResolutionContext(a.declNamespace(decl), a.funcDeclUsings[decl], func() {
+	a.withResolutionContext(a.declNamespace(decl), a.declarationUsings(decl), func() {
 		result = a.storeFlowEnumVariantConstructor(call)
 	})
 	return result

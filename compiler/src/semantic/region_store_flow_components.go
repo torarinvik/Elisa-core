@@ -177,7 +177,7 @@ func (a *Analyzer) computeStoreFlow(decl *ast.FuncDecl) *storeFlowSummary {
 			a.currentNamespace = ""
 		}
 	}
-	a.currentUsings = append([]string(nil), a.funcDeclUsings[decl]...)
+	a.currentUsings = append([]string(nil), a.declarationUsings(decl)...)
 	defer func() { a.currentNamespace, a.currentUsings = savedNamespace, savedUsings }()
 	savedParams := a.storeFlowParams
 	a.storeFlowParams = map[string]bool{}

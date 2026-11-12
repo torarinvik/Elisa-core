@@ -484,3 +484,17 @@ func (a *Analyzer) releaseSMTFlight(query string, owned *smtFlight) {
 		}
 	}
 }
+
+// declarationUsings gives private rows precedence over the frozen codegen input.
+func (a *Analyzer) declarationUsings(fn *ast.FuncDecl) []string {
+	if usings, ok := a.funcDeclUsings[fn]; ok {
+		return usings
+	}
+	if a.parallel != nil && a.parallel.specialization != nil {
+		base := a.parallel.specialization.base
+		if base != nil && base.shared != nil {
+			return base.analyzer.funcDeclUsings[fn]
+		}
+	}
+	return nil
+}

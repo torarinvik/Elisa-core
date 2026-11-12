@@ -117,7 +117,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 		// names (e.g. a match pattern's enum name made visible by a file-level
 		// `using`) silently fail to resolve in this suppressed-diagnostics pass,
 		// poisoning cached expression types with <invalid>.
-		a.currentUsings = append([]string(nil), a.funcDeclUsings[fn]...)
+		a.currentUsings = append([]string(nil), a.declarationUsings(fn)...)
 	}
 
 	a.withSourceGenericParams(fn, fn.GenericParams, nil, func() {

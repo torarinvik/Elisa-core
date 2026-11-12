@@ -100,6 +100,33 @@ func TestSpecializationFuncDeclUsingsSharesRowsAndIsolatesOuterMap(t *testing.T)
 	}
 }
 
+func TestSharedSpecializationDeclarationUsings(t *testing.T) {
+	canonical := &compilerast.FuncDecl{Name: "canonical"}
+	private := &compilerast.FuncDecl{Name: "private"}
+	root := &Result{analyzer: &Analyzer{
+		funcDeclUsings: map[*compilerast.FuncDecl][]string{canonical: {"Std"}},
+	}}
+	root.BeginSharedCodegen()
+	defer root.EndSharedCodegen()
+	worker := &Analyzer{
+		funcDeclUsings: map[*compilerast.FuncDecl][]string{private: {"Private"}},
+		parallel:       &parallelWorkerState{specialization: &specializationContext{base: root}},
+	}
+	if got := worker.declarationUsings(canonical); len(got) != 1 || got[0] != "Std" {
+		t.Fatalf("canonical using lookup = %v", got)
+	}
+	if got := worker.declarationUsings(private); len(got) != 1 || got[0] != "Private" {
+		t.Fatalf("private using lookup = %v", got)
+	}
+	worker.funcDeclUsings[canonical] = nil
+	if got := worker.declarationUsings(canonical); got != nil {
+		t.Fatalf("empty private row did not override canonical usings: %v", got)
+	}
+	if got := root.analyzer.funcDeclUsings[canonical]; len(got) != 1 || got[0] != "Std" {
+		t.Fatalf("private override changed the canonical row: %v", got)
+	}
+}
+
 func TestFuncDeclUsingsRowsAreOnlyInstalledAsFreshCopies(t *testing.T) {
 	_, file, _, _ := runtime.Caller(0)
 	dir := filepath.Dir(file)
