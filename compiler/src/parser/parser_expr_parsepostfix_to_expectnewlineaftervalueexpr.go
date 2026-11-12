@@ -149,7 +149,7 @@ func (p *Parser) parsePostfix() ast.Expr {
 				continue
 			}
 
-			expr = &ast.FieldExpr{Position: pos, Object: expr, Field: field}
+			expr = p.newField(ast.FieldExpr{Position: pos, Object: expr, Field: field})
 
 		case lexer.TOKEN_ARROW:
 			// A multi-line block expression (catch/match arms, an indented value block)
@@ -263,7 +263,7 @@ func (p *Parser) parsePostfix() ast.Expr {
 				callFunc = &ast.FieldExpr{Position: fieldExpr.Position, Object: fieldExpr.Object, Field: fieldExpr.Field}
 				safe = true
 			}
-			expr = &ast.CallExpr{
+			expr = p.newCall(ast.CallExpr{
 				Position:      pos,
 				Func:          callFunc,
 				HasArgForward: hasArgForward,
@@ -273,7 +273,7 @@ func (p *Parser) parsePostfix() ast.Expr {
 				ArgShorthand:  argShorthand,
 				ArgItemOrder:  argItems,
 				Safe:          safe,
-			}
+			})
 
 		default:
 			return expr

@@ -72,12 +72,13 @@ type Parser struct {
 	// Innermost loop's simple yielded accumulator, or "" for a statement loop.
 	loopBreakTargets []string
 	// Keep the original hot parser fields at their previous offsets.
-	trace          *SyntaxTrace
-	readThrough    int
-	readLength     bool
-	readFrom       int
-	suffixReplay   *syntaxSuffixReplay
-	borrowedTokens bool
+	trace             *SyntaxTrace
+	readThrough       int
+	readLength        bool
+	readFrom          int
+	suffixReplay      *syntaxSuffixReplay
+	borrowedTokens    bool
+	expressionStorage *expressionStorage
 }
 
 // takeStmtGuard consumes a recorded postfix statement guard, if any, wrapping the finished
@@ -112,6 +113,9 @@ func New(tokens []lexer.Token) *Parser {
 func NewWithBorrowedTokens(tokens []lexer.Token) *Parser {
 	p := New(tokens)
 	p.borrowedTokens = true
+	if len(tokens) >= 64<<10 {
+		p.expressionStorage = &expressionStorage{}
+	}
 	return p
 }
 

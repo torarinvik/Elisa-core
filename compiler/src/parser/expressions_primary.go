@@ -361,7 +361,7 @@ func (p *Parser) parsePrimary() ast.Expr {
 			p.expect(lexer.TOKEN_RBRACE)
 			return &ast.StructLitExpr{Position: tok.Pos, Name: tok.Text, Args: args, ArgNames: argNames, Brace: true, Spreads: spreads, CopyBase: copyBase}
 		}
-		return &ast.Ident{Position: tok.Pos, Name: tok.Text}
+		return p.newIdent(ast.Ident{Position: tok.Pos, Name: tok.Text})
 	case lexer.TOKEN_LPAREN:
 		pos := p.cur().Pos
 		p.advance()
