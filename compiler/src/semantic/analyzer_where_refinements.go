@@ -2,6 +2,8 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/astscan"
+	"elisacore/src/exprpurity"
 	"elisacore/src/lexer"
 )
 
@@ -275,161 +277,10 @@ func (a *Analyzer) validateWhereReferences(pred ast.Expr, allowed map[string]boo
 // semantics are definitively pure return true; every unknown kind returns false (sound over-rejection
 // rather than unsound under-rejection). CallExpr is intentionally NOT listed — a general call can
 // run arbitrary code and must not be classified as pure.
-func wherePredicateIsSideEffectFree(expr ast.Expr) bool {
-	pure := wherePredicateIsSideEffectFree // alias for recursion
-	switch n := expr.(type) {
-	case nil, *ast.Ident, *ast.IntLit, *ast.FloatLit, *ast.StringLit, *ast.BoolLit, *ast.CharLit:
-		return true
-	case *ast.ParenExpr:
-		return pure(n.Inner)
-	case *ast.UnaryExpr:
-		return pure(n.Operand)
-	case *ast.BinaryExpr:
-		return pure(n.Left) && pure(n.Right)
-	case *ast.FieldExpr:
-		// Field access on a pure object is pure (read-only projection, no mutation).
-		return pure(n.Object)
-	case *ast.IndexExpr:
-		return pure(n.Object) && pure(n.Index) && pure(n.Index2) && pure(n.Fallback)
-	case *ast.SliceExpr:
-		return pure(n.Object) && pure(n.Start) && pure(n.End)
-	case *ast.TernaryExpr:
-		// `Cond ? Value : Alt` — all three branches are pure reads.
-		return pure(n.Cond) && pure(n.Value) && pure(n.Alt)
-	case *ast.TupleExpr:
-		// Tuple constructor from pure elements is pure (creates a value, no side effects).
-		for _, e := range n.Elems {
-			if !pure(e) {
-				return false
-			}
-		}
-		return true
-	case *ast.ListLitExpr:
-		// List/set/dict literals are pure when all elements (and keys) are pure.
-		// Spreads are still reads, so they don't break purity.
-		for _, e := range n.Elems {
-			if !pure(e) {
-				return false
-			}
-		}
-		for _, k := range n.Keys {
-			if !pure(k) {
-				return false
-			}
-		}
-		return true
-	case *ast.CastExpr:
-		// A value-reinterpret cast is pure: it reads the operand and reinterprets it, no writes.
-		return pure(n.Operand)
-	case *ast.AddrOfExpr:
-		// Taking the address of a pure sub-expression doesn't mutate anything.
-		return pure(n.Operand)
-	case *ast.SpecializeExpr:
-		// Generic specialisation is a compile-time rewrite; the value operand is read-only.
-		return pure(n.Operand)
-	case *ast.SizeofExpr, *ast.AlignofExpr, *ast.OffsetofExpr:
-		// Compile-time layout queries — always pure (no runtime reads at all).
-		return true
-	case *ast.QuantifierExpr:
-		// forall/exists — purely logical, no mutation.
-		return pure(n.In) && pure(n.Body)
-	}
-	// Every other kind (CallExpr, AllocExpr, LambdaExpr, MatchExpr, RaiseExpr, etc.) is conservatively
-	// treated as potentially impure.
-	return false
-}
+func wherePredicateIsSideEffectFree(expr ast.Expr) bool { return exprpurity.WherePredicate(expr) }
 
-func exprIdentNames(expr ast.Expr) []string {
-	seen := map[string]bool{}
-	var out []string
-	visitExprIdentNames(expr, func(name string) {
-		if !seen[name] {
-			seen[name] = true
-			out = append(out, name)
-		}
-	})
-	return out
-}
-
-// visitExprIdentNames walks the same syntax as exprIdentNames without requiring
-// an intermediate deduplicated slice when the caller already has a set.
-func visitExprIdentNames(expr ast.Expr, visit func(string)) {
-	var walk func(ast.Expr)
-	walk = func(e ast.Expr) {
-		switch n := e.(type) {
-		case nil:
-		case *ast.Ident:
-			visit(n.Name)
-		case *ast.ParenExpr:
-			walk(n.Inner)
-		case *ast.UnaryExpr:
-			walk(n.Operand)
-		case *ast.BinaryExpr:
-			walk(n.Left)
-			walk(n.Right)
-		case *ast.FieldExpr:
-			walk(n.Object)
-		case *ast.IndexExpr:
-			walk(n.Object)
-			walk(n.Index)
-			walk(n.Index2)
-			walk(n.Fallback)
-		case *ast.SliceExpr:
-			walk(n.Object)
-			walk(n.Start)
-			walk(n.End)
-		case *ast.CallExpr:
-			walk(n.Func)
-			for _, arg := range n.Args {
-				walk(arg)
-			}
-		case *ast.TernaryExpr:
-			walk(n.Cond)
-			walk(n.Value)
-			walk(n.Alt)
-		case *ast.TupleExpr:
-			for _, elem := range n.Elems {
-				walk(elem)
-			}
-		case *ast.ListLitExpr:
-			for _, elem := range n.Elems {
-				walk(elem)
-			}
-			for _, k := range n.Keys {
-				walk(k)
-			}
-			walk(n.Owner)
-		case *ast.CastExpr:
-			walk(n.Operand)
-		case *ast.AddrOfExpr:
-			walk(n.Operand)
-		case *ast.SpecializeExpr:
-			walk(n.Operand)
-		case *ast.QuantifierExpr:
-			walk(n.In)
-			walk(n.Body)
-		case *ast.MembershipRangeExpr:
-			walk(n.Start)
-			walk(n.End)
-		case *ast.RecordUpdateExpr:
-			walk(n.Base)
-			for _, arg := range n.Args {
-				walk(arg)
-			}
-		case *ast.StructLitExpr:
-			for _, arg := range n.Args {
-				walk(arg)
-			}
-		case *ast.UnwrapElseExpr:
-			walk(n.Value)
-			walk(n.Fallback)
-		case *ast.GetExpr:
-			walk(n.Value)
-			walk(n.Fallback)
-		}
-	}
-	walk(expr)
-}
+func exprIdentNames(expr ast.Expr) []string                 { return astscan.ExprIdentNames(expr) }
+func visitExprIdentNames(expr ast.Expr, visit func(string)) { astscan.VisitExprIdentNames(expr, visit) }
 
 // seedWhereRefinementFact records the where predicate of a local binding as an SMT assert-fact so
 // later obligations in the same scope can consume it. Only fires when the declared type is a
