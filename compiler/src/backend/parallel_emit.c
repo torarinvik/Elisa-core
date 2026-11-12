@@ -190,10 +190,12 @@ static int part_restrict_module(LLVMModuleRef m, const long long *owners, size_t
 	if (source && original != NULL) return 0;
 	size_t idx = 0;
 	for (LLVMValueRef f = LLVMGetFirstFunction(m); f; f = LLVMGetNextFunction(f), idx++, ordinal++) {
-		if (idx >= count) {
+		if (owners && idx >= count) {
 			return 0;
 		}
-		long long owner = owners[idx];
+		// A worker with a single partition owns every eligible definition.
+		// Keep the normal linkage and alias handling without weighing bodies.
+		long long owner = owners ? owners[idx] : (part_function_owned(f) ? 0 : -1);
 		if (owner >= 0) {
 			part_externalize(f, ordinal);
 			if (owner != part) {
@@ -205,7 +207,7 @@ static int part_restrict_module(LLVMModuleRef m, const long long *owners, size_t
 			}
 		}
 	}
-	if (idx != count) {
+	if (owners && idx != count) {
 		return 0;
 	}
 	for (LLVMValueRef a = LLVMGetFirstGlobalAlias(m); a; a = LLVMGetNextGlobalAlias(a)) {
@@ -517,7 +519,7 @@ static int part_worker(const char *bitcode_path, int jobs, int part, const char 
 	// The owners are recomputed from the identical module, so every worker agrees.
 	long long *owners = NULL;
 	size_t count = 0;
-	part_function_owners(m, jobs, &owners, &count);
+	if (jobs != 1) part_function_owners(m, jobs, &owners, &count);
 	int ok = part_restrict_module(m, owners, count, part, import_weight, NULL, NULL);
 	free(owners);
 	if (!ok) {
