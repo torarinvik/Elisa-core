@@ -3,153 +3,24 @@ package semantic
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
+	"elisacore/src/predicatetypes"
 	"reflect"
 )
 
 const predicateOperatorAbsence = "canonical-predicate-no-comparison-candidates-v1"
 
-func predicateTypeTag(name string) byte {
-	switch name {
-	case "int":
-		return 'n'
-	case "i64":
-		return 'i'
-	case "bool":
-		return 'b'
-	case "char":
-		return 'c'
-	case "i8":
-		return '0'
-	case "i16":
-		return '1'
-	case "i32":
-		return '2'
-	case "u8":
-		return '3'
-	case "u16":
-		return '4'
-	case "u32":
-		return '5'
-	case "u64":
-		return '6'
-	case "isize":
-		return '7'
-	case "usize":
-		return '8'
-	case "uintptr":
-		return '9'
-	default:
-		return 0
-	}
-}
+const predicateRangeTypeTag = predicatetypes.RangeTypeTag
 
-func predicateTypeName(tag byte) string {
-	switch tag {
-	case 'n':
-		return "int"
-	case 'i':
-		return "i64"
-	case 'b':
-		return "bool"
-	case 'c':
-		return "char"
-	case '0':
-		return "i8"
-	case '1':
-		return "i16"
-	case '2':
-		return "i32"
-	case '3':
-		return "u8"
-	case '4':
-		return "u16"
-	case '5':
-		return "u32"
-	case '6':
-		return "u64"
-	case '7':
-		return "isize"
-	case '8':
-		return "usize"
-	case '9':
-		return "uintptr"
-	default:
-		return ""
-	}
-}
-
-func validPredicateTyping(types string) bool {
-	if len(types) == 0 || len(types) > 4096 || predicateTypeName(types[0]) != "bool" {
-		return false
-	}
-	for i := range types {
-		if predicateTypeName(types[i]) == "" {
-			return false
-		}
-	}
-	return true
-}
-
-// Range containers have no standalone semantic ExprType. Their children are
-// typed scalars; the normalized candidate-list type is rebuilt on current ASTs.
-const predicateRangeTypeTag byte = 'R'
-
-func validRangePredicateTyping(types string) bool {
-	if len(types) == 0 || len(types) > 4096 || types[0] != 'b' {
-		return false
-	}
-	found := false
-	for i := range types {
-		if types[i] == predicateRangeTypeTag {
-			found = true
-			continue
-		}
-		if predicateTypeName(types[i]) == "" {
-			return false
-		}
-	}
-	return found
-}
+func predicateTypeTag(name string) byte           { return predicatetypes.TypeTag(name) }
+func predicateTypeName(tag byte) string           { return predicatetypes.TypeName(tag) }
+func validPredicateTyping(types string) bool      { return predicatetypes.ValidTyping(types) }
+func validRangePredicateTyping(types string) bool { return predicatetypes.ValidRangeTyping(types) }
 
 func predicateTypingMatchesNodes(nodes []ast.Expr, types string) bool {
-	if len(nodes) != len(types) {
-		return false
-	}
-	ranges := false
-	for i, node := range nodes {
-		_, rangeNode := node.(*ast.MembershipRangeExpr)
-		if rangeNode != (types[i] == predicateRangeTypeTag) {
-			return false
-		}
-		ranges = ranges || rangeNode
-	}
-	if ranges {
-		return validRangePredicateTyping(types)
-	}
-	return validPredicateTyping(types)
+	return predicatetypes.TypingMatchesNodes(nodes, types)
 }
-
-// Cold analysis wraps direct ranges in a one-element candidate list. Both
-// spellings have the same source protocol; retain the current wrapper, never a
-// prior invocation's AST or ArrayType. Other list shapes remain unsupported.
 func predicateMembershipRange(expr ast.Expr) (*ast.MembershipRangeExpr, *ast.ListLitExpr, bool) {
-	switch node := expr.(type) {
-	case *ast.MembershipRangeExpr:
-		return node, nil, node != nil
-	case *ast.ListLitExpr:
-		if node == nil || len(node.Elems) != 1 {
-			return nil, nil, false
-		}
-		copy := *node
-		copy.Position = lexer.Pos{}
-		copy.Elems = nil
-		if !reflect.ValueOf(copy).IsZero() {
-			return nil, nil, false
-		}
-		rangeNode, ok := node.Elems[0].(*ast.MembershipRangeExpr)
-		return rangeNode, node, ok && rangeNode != nil
-	}
-	return nil, nil, false
+	return predicatetypes.MembershipRange(expr)
 }
 
 func predicateCurrentBindingsAndOperators(a *Analyzer, fn *ast.FuncDecl, nodes []ast.Expr) bool {
@@ -276,47 +147,8 @@ func predicateExprBuiltinTypeName(expr ast.Expr, parameterTypes map[string]strin
 	return ""
 }
 
-// Predicate admission is deliberately separate from integer-local planning.
-// Only canonical scalar syntax is accepted; current semantic bindings and
-// operator candidates must still be validated at the replay boundary.
 func predicateBuiltinSyntaxName(input ast.TypeExpr) string {
-	var name string
-	switch typ := input.(type) {
-	case *ast.NamedType:
-		if typ == nil {
-			return ""
-		}
-		copy := *typ
-		name = copy.Name
-		copy.Position = lexer.Pos{}
-		copy.Name = ""
-		if !reflect.ValueOf(copy).IsZero() {
-			return ""
-		}
-	case *ast.BuiltinTypeExpr:
-		if typ == nil {
-			return ""
-		}
-		copy := *typ
-		name = copy.Name
-		copy.Position = lexer.Pos{}
-		copy.Name = ""
-		if len(copy.TypeArgs) != 0 || len(copy.ValueArgs) != 0 {
-			return ""
-		}
-		copy.TypeArgs = nil
-		copy.ValueArgs = nil
-		if !reflect.ValueOf(copy).IsZero() {
-			return ""
-		}
-	default:
-		return ""
-	}
-	switch name {
-	case "bool", "char", "int", "i64", "i8", "i16", "i32", "u8", "u16", "u32", "u64", "isize", "usize", "uintptr":
-		return name
-	}
-	return ""
+	return predicatetypes.BuiltinSyntaxName(input)
 }
 
 func predicateReturnExpressions(fn *ast.FuncDecl) ([]ast.Expr, bool) {
