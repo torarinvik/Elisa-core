@@ -235,6 +235,15 @@ func (r *RetainedAnalysis) factTables() *retainedFactTables {
 // evaluated against the live program-wide state, with fn standing in for live. Two parses of
 // one function with equal digests give the declaration phase equal inputs.
 func (r *RetainedAnalysis) localFactDigest(a *Analyzer, live, fn *ast.FuncDecl, sd scopedDecl) string {
+	return r.localFactDigestWithStoreEnums(a, live, fn, sd, digestStoreEnums{})
+}
+
+type digestStoreEnums struct {
+	plain        map[string]bool
+	bareVariants map[string]bool
+}
+
+func (r *RetainedAnalysis) localFactDigestWithStoreEnums(a *Analyzer, live, fn *ast.FuncDecl, sd scopedDecl, enums digestStoreEnums) string {
 	proofProbe := a.beginProofReportProbe()
 	defer proofProbe.restore()
 	sym := a.funcDeclSymbols[live]
@@ -258,10 +267,13 @@ func (r *RetainedAnalysis) localFactDigest(a *Analyzer, live, fn *ast.FuncDecl, 
 		fmt.Fprintf(&b, "ownsRegion=%v;", a.funcOwnsRegion(fn))
 		fmt.Fprintf(&b, "poly=%v,%v,%v,%v;", a.functionReturnsRegionAllocatedValue(fn), functionBuildsAndReturnsLocalContainer(fn), functionBuildsAndReturnsLocalStruct(fn, ft), a.functionWritesHandleToScalarOutParam(fn))
 		fmt.Fprintf(&b, "alloc=%v;callsPoly=%v;", bodyAllocatesInferredContainers(fn.Body), a.bodyCallsRegionPolyOutsideRegion(fn.Body))
-		backed := a.collectRegionBackedPackedEnums([]*ast.FuncDecl{fn})
-		fmt.Fprintf(&b, "backed=%v;", slices.Sorted(maps.Keys(backed)))
+		backed := maps.Clone(enums.plain)
+		if backed == nil {
+			backed = a.storeBackedPlainEnums()
+		}
 		callees := map[*FuncType]bool{}
-		constructors, bareVariants := a.scanPackedStoreBody(fn, callees, nil)
+		constructors, bareVariants := a.scanPackedStoreBody(fn, callees, enums.bareVariants, backed)
+		fmt.Fprintf(&b, "backed=%v;", slices.Sorted(maps.Keys(backed)))
 		fmt.Fprintf(&b, "builds=%v;bare=%v;", slices.Sorted(maps.Keys(constructors)), slices.Sorted(maps.Keys(bareVariants)))
 		names := []string{}
 		for c := range callees {

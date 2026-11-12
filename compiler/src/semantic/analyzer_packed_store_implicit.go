@@ -16,14 +16,7 @@ import (
 // so it must NOT receive implicit store threading — that would break the legacy explicit-store code
 // (e.g. the JSON parser's JsonNode). This is the precise gate on implicit packed-store injection.
 func (a *Analyzer) collectRegionBackedPackedEnums(funcs []*ast.FuncDecl) map[string]bool {
-	out := map[string]bool{}
-	// Store-backed plain enums are region-backed by design, independent of whether any call site uses
-	// `new[auto]` syntax — their bare constructors allocate into the region too.
-	for _, t := range a.namedTypes {
-		if et, ok := t.(*EnumType); ok && et != nil && et.StoreBackedPlain {
-			out[et.Root().Name] = true // docs/77: region-backed by hierarchy root
-		}
-	}
+	out := a.storeBackedPlainEnums()
 	for _, fn := range funcs {
 		if fn != nil {
 			walkStoreScanNodes(fn.Body, func(node any) {
@@ -33,6 +26,18 @@ func (a *Analyzer) collectRegionBackedPackedEnums(funcs []*ast.FuncDecl) map[str
 					}
 				}
 			})
+		}
+	}
+	return out
+}
+
+func (a *Analyzer) storeBackedPlainEnums() map[string]bool {
+	out := map[string]bool{}
+	// Store-backed plain enums are region-backed by design, independent of whether any call site uses
+	// `new[auto]` syntax — their bare constructors allocate into the region too.
+	for _, t := range a.namedTypes {
+		if et, ok := t.(*EnumType); ok && et != nil && et.StoreBackedPlain {
+			out[et.Root().Name] = true // docs/77: region-backed by hierarchy root
 		}
 	}
 	return out
@@ -92,7 +97,7 @@ func (a *Analyzer) computeTransitiveStoreNeeds(funcs []*ast.FuncDecl, regionBack
 			}
 			clear(sig)
 		}
-		constructors, bareVariants := a.scanPackedStoreBody(fn, callees[ft], bareVariantNames)
+		constructors, bareVariants := a.scanPackedStoreBody(fn, callees[ft], bareVariantNames, nil)
 		for name, et := range constructors {
 			if regionBacked[name] && et.HandleIsPointer() {
 				if needs[ft] == nil {

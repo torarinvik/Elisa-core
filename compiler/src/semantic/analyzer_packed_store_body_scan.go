@@ -3,8 +3,10 @@ package semantic
 import "elisacore/src/ast"
 
 // scanPackedStoreBody collects construction roots and direct callees in one
-// traversal. The AST walker visits shared argument nodes only once.
-func (a *Analyzer) scanPackedStoreBody(fn *ast.FuncDecl, callees map[*FuncType]bool, bareVariantNames map[string]bool) (constructors map[string]*EnumType, bareVariants map[string]bool) {
+// traversal. If autoRegionRoots is supplied, it also records the packed
+// allocations that use the implicit region. The walker visits shared argument
+// nodes only once.
+func (a *Analyzer) scanPackedStoreBody(fn *ast.FuncDecl, callees map[*FuncType]bool, bareVariantNames, autoRegionRoots map[string]bool) (constructors map[string]*EnumType, bareVariants map[string]bool) {
 	walkStoreScanNodes(fn.Body, func(node any) {
 		var constructed *EnumType
 		switch n := node.(type) {
@@ -12,6 +14,9 @@ func (a *Analyzer) scanPackedStoreBody(fn *ast.FuncDecl, callees map[*FuncType]b
 			if n != nil {
 				if enumType, _, ok := a.packedAllocConstructorInfo(n.Value); ok && enumType != nil && enumType.Packed {
 					constructed = enumType.Root()
+					if autoRegionRoots != nil && n.AutoRegion {
+						autoRegionRoots[constructed.Name] = true
+					}
 				}
 			}
 		case *ast.CallExpr:

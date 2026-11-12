@@ -229,6 +229,10 @@ func (r *RetainedAnalysis) precomputeBaselineDigests() {
 	if r.digestOf == nil {
 		r.digestOf = map[*ast.FuncDecl]string{}
 	}
+	enums := digestStoreEnums{
+		plain:        r.a.storeBackedPlainEnums(),
+		bareVariants: r.a.packedStoreBareVariantNames(),
+	}
 	for _, d := range retainedWalkDecls(r.pristine) {
 		fn, ok := d.(*ast.FuncDecl)
 		if !ok || len(fn.Body) == 0 {
@@ -245,7 +249,7 @@ func (r *RetainedAnalysis) precomputeBaselineDigests() {
 		if !known {
 			continue
 		}
-		r.digestOf[fn] = r.localFactDigest(r.a, cands[0], fn, sd)
+		r.digestOf[fn] = r.localFactDigestWithStoreEnums(r.a, cands[0], fn, sd, enums)
 	}
 }
 

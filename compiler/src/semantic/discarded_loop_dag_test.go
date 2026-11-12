@@ -77,10 +77,28 @@ func TestBarePackedVariantWalkHandlesSharedResolvedArguments(t *testing.T) {
 		}
 		fn := &ast.FuncDecl{Body: []ast.Stmt{&ast.ExprStmt{Expr: expr}}}
 		for _, names := range []map[string]bool{nil, analyzer.packedStoreBareVariantNames()} {
-			_, got := analyzer.scanPackedStoreBody(fn, map[*FuncType]bool{}, names)
+			_, got := analyzer.scanPackedStoreBody(fn, map[*FuncType]bool{}, names, nil)
 			if got["Tree"] != !payload || len(got) != map[bool]int{false: 1, true: 0}[payload] {
 				t.Fatalf("payload=%v variant names=%v roots=%v", payload, names, got)
 			}
+		}
+	}
+}
+
+func TestPackedStoreScanRecordsImplicitAllocationRoots(t *testing.T) {
+	variant := &EnumVariant{Name: "Leaf"}
+	enum := &EnumType{Name: "Tree", Packed: true, VariantMap: map[string]*EnumVariant{"Leaf": variant}}
+	analyzer := &Analyzer{namedTypes: map[string]Type{"Tree": enum}}
+	for _, implicit := range []bool{false, true} {
+		alloc := &ast.AllocExpr{
+			AutoRegion: implicit,
+			Value:      &ast.FieldExpr{Object: &ast.Ident{Name: "Tree"}, Field: "Leaf"},
+		}
+		fn := &ast.FuncDecl{Body: []ast.Stmt{&ast.ExprStmt{Expr: alloc}}}
+		roots := make(map[string]bool)
+		constructors, _ := analyzer.scanPackedStoreBody(fn, map[*FuncType]bool{}, nil, roots)
+		if constructors["Tree"] != enum || roots["Tree"] != implicit {
+			t.Fatalf("implicit=%v: constructors=%v, implicit roots=%v", implicit, constructors, roots)
 		}
 	}
 }
