@@ -227,6 +227,55 @@ static bool foldTrailingZeroLoop(BasicBlock &Loop, CondBrInst &Back, BasicBlock 
   return true;
 }
 
+// A shift-and-OR chain fills every bit below its highest set bit. When
+// the input fits in the covered span, adding one yields 1 << bit_length.
+static bool foldBitSpreadIncrement(BinaryOperator &Add, LazyValueInfo &LVI) {
+  if (Add.getOpcode() != Instruction::Add ||
+      (!Add.getType()->isIntegerTy(32) && !Add.getType()->isIntegerTy(64)) ||
+      !scalarLoopHasConstant(Add.getOperand(1), 1) || Add.use_empty())
+    return false;
+  auto *Type = cast<IntegerType>(Add.getType());
+  unsigned Width = Type->getBitWidth();
+  Value *Seed = Add.getOperand(0);
+  unsigned Span = 0;
+  for (unsigned Shift = Width / 2; Shift; Shift /= 2) {
+    auto *Both = dyn_cast<BinaryOperator>(Seed);
+    if (!Both || Both->getOpcode() != Instruction::Or)
+      return false;
+    auto *Right = dyn_cast<BinaryOperator>(Both->getOperand(1));
+    Value *Base = Both->getOperand(0);
+    if (!Right || Right->getOpcode() != Instruction::LShr) {
+      Right = dyn_cast<BinaryOperator>(Base);
+      Base = Both->getOperand(1);
+    }
+    if (!Right || Right->getOpcode() != Instruction::LShr ||
+        Right->getOperand(0) != Base)
+      return false;
+    if (!Span && Shift == 32 && scalarLoopHasConstant(Right->getOperand(1), 16))
+      Shift = 16;
+    if (!scalarLoopHasConstant(Right->getOperand(1), Shift))
+      return false;
+    Span = std::max(Span, 2 * Shift);
+    Seed = Base;
+  }
+
+  ConstantRange Range = LVI.getConstantRange(Seed, &Add, false);
+  if (Range.isEmptySet() ||
+      Range.getUnsignedMax().getActiveBits() > std::min(Span, Width - 1))
+    return false;
+
+  IRBuilder<> B(&Add);
+  Value *Stable = B.CreateFreeze(Seed, "bit.spread.seed");
+  Value *Leading = B.CreateIntrinsic(Intrinsic::ctlz, {Type}, {Stable, B.getFalse()});
+  Value *Length = B.CreateSub(ConstantInt::get(Type, Width), Leading);
+  // Keep the shift defined even if freeze picks a value outside the inferred
+  // range for an undef input. AArch64 shifts already mask the count.
+  Value *Count = B.CreateAnd(Length, ConstantInt::get(Type, Width - 1));
+  Value *Rounded = B.CreateShl(ConstantInt::get(Type, 1), Count, "bit.spread.rounded");
+  Add.replaceAllUsesWith(Rounded);
+  return true;
+}
+
 } // namespace
 
 static unsigned elisacoreFoldScalarLoopIdioms(Module &M) {
@@ -234,6 +283,12 @@ static unsigned elisacoreFoldScalarLoopIdioms(Module &M) {
   unsigned Changed = 0;
   for (Function &F : M) {
     if (F.size() > 48 || BDU_SkipFunction(F, M)) continue;
+    AssumptionCache AC(F);
+    LazyValueInfo LVI(&F, &AC);
+    for (BasicBlock &Block : F)
+      for (Instruction &I : Block)
+        if (auto *Add = dyn_cast<BinaryOperator>(&I))
+          Changed += foldBitSpreadIncrement(*Add, LVI);
     for (BasicBlock &Loop : F) {
       if ((Loop.size() != 5 && Loop.size() != 7 && Loop.size() != 11) || Loop.hasAddressTaken()) continue;
       auto *Back = dyn_cast<CondBrInst>(Loop.getTerminator());
