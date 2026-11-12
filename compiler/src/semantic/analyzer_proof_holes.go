@@ -348,7 +348,7 @@ func parseComparisonFact(s string) (comparisonFact, bool) {
 		s = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(s, "("), ")"))
 	}
 	fields := strings.Fields(s)
-	if len(fields) != 3 || !isForwardOp(fields[1]) {
+	if len(fields) != 3 || !isProofComparisonOp(fields[1]) {
 		return comparisonFact{}, false
 	}
 	return comparisonFact{left: fields[0], op: fields[1], right: fields[2]}, true
@@ -360,6 +360,10 @@ func isForwardComparison(op lexer.TokenKind) bool {
 
 func isForwardOp(op string) bool {
 	return op == "<" || op == "<="
+}
+
+func isProofComparisonOp(op string) bool {
+	return isForwardOp(op) || op == ">" || op == ">="
 }
 
 func parseSimpleCounterexample(ce string) map[string]int64 {
