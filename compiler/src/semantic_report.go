@@ -123,20 +123,6 @@ func summarizeBlockFactTransforms(blocks []semantic.FactBlockTransforms) string 
 	return strings.Join(lines, "\n")
 }
 
-func indentReportBlock(text string, prefix string) string {
-	if text == "" {
-		return ""
-	}
-	lines := strings.Split(text, "\n")
-	for i, line := range lines {
-		if line == "" {
-			continue
-		}
-		lines[i] = prefix + line
-	}
-	return strings.Join(lines, "\n") + "\n"
-}
-
 func summarizeSinkParams(sinkParams []bool) string {
 	if len(sinkParams) == 0 {
 		return "[]"
