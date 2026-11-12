@@ -82,8 +82,11 @@ func (s *functionState) emitStackBlockInit(arenaPtr llvmIRValueRef, arenaType se
 
 // emitStackBlockInstall calls arena_init_stack_block(arena, block, payloadSlots) at the builder.
 func (s *functionState) emitStackBlockInstall(arenaPtr llvmIRValueRef, arenaType semantic.Type, block llvmIRValueRef, payloadSlots uint64) error {
-	i64 := llvmInt64TypeInContext(s.g.context)
 	usizeType := s.g.namedType("usize")
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return err
+	}
 	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	voidRef := s.lambdaVoidRefType()
 	helperType := &semantic.FuncType{Name: "arena_init_stack_block", Params: []semantic.Type{arenaRefType, voidRef, usizeType}, Return: s.g.namedType("void")}
@@ -95,7 +98,7 @@ func (s *functionState) emitStackBlockInstall(arenaPtr llvmIRValueRef, arenaType
 	if err != nil {
 		return err
 	}
-	s.buildCall(llvmFnType, callee, []llvmIRValueRef{arenaPtr, block, llvmConstInt(i64, llvmIRUnsignedLongLong(payloadSlots), 0)}, "")
+	s.buildCall(llvmFnType, callee, []llvmIRValueRef{arenaPtr, block, llvmConstInt(usizeLLVMType, llvmIRUnsignedLongLong(payloadSlots), 0)}, "")
 	return nil
 }
 
