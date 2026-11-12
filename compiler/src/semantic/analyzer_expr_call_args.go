@@ -259,6 +259,10 @@ func (a *Analyzer) rewriteFreeCallReceiverOverload(expr *ast.CallExpr) {
 	if len(expr.Args) == 0 {
 		return
 	}
+	if expr.NamedArgCount() != 0 {
+		a.rewriteNamedReceiverOverload(expr, ident)
+		return
+	}
 	// Keep to the simple all-positional case so the parallel arg metadata stays
 	// consistent after dropping arg0; bail on named/shorthand/pack/forward args.
 	if len(expr.ArgNames) != 0 || len(expr.ArgShorthand) != 0 || len(expr.ArgItemOrder) != 0 || expr.HasArgForward {
