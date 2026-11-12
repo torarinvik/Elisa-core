@@ -276,6 +276,85 @@ static bool foldBitSpreadIncrement(BinaryOperator &Add, LazyValueInfo &LVI) {
   return true;
 }
 
+// Check the immutable table contents rather than relying on a symbol name.
+static bool isNibblePopulationTable(const GlobalVariable &Table) {
+  if (!Table.isConstant() || !Table.hasDefinitiveInitializer() ||
+      Table.getValueType() != ArrayType::get(Type::getInt32Ty(Table.getContext()), 16))
+    return false;
+  for (unsigned I = 0; I < 16; ++I)
+    if (!scalarLoopHasConstant(Table.getInitializer()->getAggregateElement(I), llvm::popcount(I)))
+      return false;
+  return true;
+}
+
+static Value *nibblePopulationInput(Value *V, const DataLayout &DL, unsigned &Shift) {
+  auto *Load = dyn_cast<LoadInst>(V);
+  auto *GEP = Load ? dyn_cast<GEPOperator>(Load->getPointerOperand()) : nullptr;
+  if (!GEP || !Load->isSimple() || !Load->getType()->isIntegerTy(32) ||
+      (GEP->getNumIndices() != 1 && GEP->getNumIndices() != 2) ||
+      DL.getTypeAllocSize(GEP->getResultElementType()) != 4 ||
+      DL.getTypeAllocSize(Load->getType()) != 4 ||
+      DL.getIndexSizeInBits(GEP->getPointerAddressSpace()) < 7)
+    return nullptr;
+  if (GEP->getNumIndices() == 2 &&
+      (!isa<ArrayType>(GEP->getSourceElementType()) ||
+       !scalarLoopHasConstant(GEP->getOperand(1), 0)))
+    return nullptr;
+  auto *Table = dyn_cast<GlobalVariable>(GEP->getPointerOperand());
+  if (!Table || !isNibblePopulationTable(*Table))
+    return nullptr;
+  auto *Mask = dyn_cast<BinaryOperator>(GEP->getOperand(GEP->getNumIndices()));
+  if (!Mask || Mask->getOpcode() != Instruction::And ||
+      !scalarLoopHasConstant(Mask->getOperand(1), 15))
+    return nullptr;
+  Value *Input = Mask->getOperand(0);
+  if (auto *Right = dyn_cast<BinaryOperator>(Input);
+      Right && Right->getOpcode() == Instruction::LShr) {
+    auto *Amount = dyn_cast<ConstantInt>(Right->getOperand(1));
+    if (!Amount || Amount->getValue().ugt(28) || Amount->getZExtValue() % 4 != 0)
+      return nullptr;
+    Shift = Amount->getZExtValue();
+    Input = Right->getOperand(0);
+  }
+  return Input;
+}
+
+static bool foldNibblePopulationReduction(IntrinsicInst &Reduce, const DataLayout &DL) {
+  if (Reduce.getIntrinsicID() != Intrinsic::vector_reduce_add || Reduce.use_empty() ||
+      !Reduce.getType()->isIntegerTy(32) ||
+      Reduce.getArgOperand(0)->getType() != FixedVectorType::get(Reduce.getType(), 8))
+    return false;
+  Value *Vector = Reduce.getArgOperand(0);
+  Value *Seed = nullptr;
+  unsigned Lanes = 0, Nibbles = 0;
+  for (unsigned I = 0; I < 8; ++I) {
+    auto *Insert = dyn_cast<InsertElementInst>(Vector);
+    auto *Lane = Insert ? dyn_cast<ConstantInt>(Insert->getOperand(2)) : nullptr;
+    if (!Lane || Lane->getValue().uge(8))
+      return false;
+    unsigned LaneBit = 1U << Lane->getZExtValue();
+    if (Lanes & LaneBit)
+      return false;
+    Lanes |= LaneBit;
+    unsigned Shift = 0;
+    Value *Input = nibblePopulationInput(Insert->getOperand(1), DL, Shift);
+    unsigned NibbleBit = 1U << (Shift / 4);
+    if (!Input || (Seed && Input != Seed) || (Nibbles & NibbleBit))
+      return false;
+    Seed = Input;
+    Nibbles |= NibbleBit;
+    Vector = Insert->getOperand(0);
+  }
+  if (!Seed->getType()->isIntegerTy(32) && !Seed->getType()->isIntegerTy(64))
+    return false;
+  IRBuilder<> B(&Reduce);
+  Value *Stable = B.CreateFreeze(Seed, "nibble.population.seed");
+  Value *Word = B.CreateTruncOrBitCast(Stable, B.getInt32Ty());
+  Value *Count = B.CreateIntrinsic(Intrinsic::ctpop, {Word->getType()}, {Word});
+  Reduce.replaceAllUsesWith(Count);
+  return true;
+}
+
 } // namespace
 
 static unsigned elisacoreFoldScalarLoopIdioms(Module &M) {
@@ -286,9 +365,12 @@ static unsigned elisacoreFoldScalarLoopIdioms(Module &M) {
     AssumptionCache AC(F);
     LazyValueInfo LVI(&F, &AC);
     for (BasicBlock &Block : F)
-      for (Instruction &I : Block)
+      for (Instruction &I : Block) {
         if (auto *Add = dyn_cast<BinaryOperator>(&I))
           Changed += foldBitSpreadIncrement(*Add, LVI);
+        else if (auto *Reduce = dyn_cast<IntrinsicInst>(&I))
+          Changed += foldNibblePopulationReduction(*Reduce, M.getDataLayout());
+      }
     for (BasicBlock &Loop : F) {
       if ((Loop.size() != 5 && Loop.size() != 7 && Loop.size() != 11) || Loop.hasAddressTaken()) continue;
       auto *Back = dyn_cast<CondBrInst>(Loop.getTerminator());
