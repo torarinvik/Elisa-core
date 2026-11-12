@@ -3,6 +3,7 @@ package semantic
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
+	"elisacore/src/purereturnshape"
 )
 
 type pureReturnCase struct {
@@ -57,101 +58,8 @@ func substitutePureReturnExpr(expr ast.Expr, subst map[string]ast.Expr, work *in
 	return rewritten, true
 }
 
-// pureReturnExpressionShapeWithinBudget preflights the expression forms admitted as local aliases
-// before calling the recursive purity predicate. That predicate predates hostile-source budgets,
-// so this bounded walk prevents deeply nested initializers from overflowing the Go stack.
 func pureReturnExpressionShapeWithinBudget(expr ast.Expr, work *int, depth int) bool {
-	if expr == nil {
-		return true
-	}
-	if work == nil || depth >= pureReturnMaxDepth || *work <= 0 {
-		return false
-	}
-	(*work)--
-	switch n := expr.(type) {
-	case *ast.Ident, *ast.IntLit, *ast.FloatLit, *ast.StringLit, *ast.BoolLit, *ast.CharLit, *ast.NullLit,
-		*ast.SizeofExpr, *ast.AlignofExpr, *ast.OffsetofExpr:
-		return true
-	case *ast.ParenExpr:
-		return pureReturnExpressionShapeWithinBudget(n.Inner, work, depth+1)
-	case *ast.UnaryExpr:
-		return pureReturnExpressionShapeWithinBudget(n.Operand, work, depth+1)
-	case *ast.BinaryExpr:
-		return pureReturnExpressionShapeWithinBudget(n.Left, work, depth+1) && pureReturnExpressionShapeWithinBudget(n.Right, work, depth+1)
-	case *ast.FieldExpr:
-		return pureReturnExpressionShapeWithinBudget(n.Object, work, depth+1)
-	case *ast.IndexExpr:
-		return pureReturnExpressionShapeWithinBudget(n.Object, work, depth+1) && pureReturnExpressionShapeWithinBudget(n.Index, work, depth+1) &&
-			pureReturnExpressionShapeWithinBudget(n.Index2, work, depth+1) && pureReturnExpressionShapeWithinBudget(n.Fallback, work, depth+1)
-	case *ast.SliceExpr:
-		return pureReturnExpressionShapeWithinBudget(n.Object, work, depth+1) && pureReturnExpressionShapeWithinBudget(n.Start, work, depth+1) && pureReturnExpressionShapeWithinBudget(n.End, work, depth+1)
-	case *ast.TernaryExpr:
-		return pureReturnExpressionShapeWithinBudget(n.Cond, work, depth+1) && pureReturnExpressionShapeWithinBudget(n.Value, work, depth+1) && pureReturnExpressionShapeWithinBudget(n.Alt, work, depth+1)
-	case *ast.CallExpr:
-		if !pureReturnExpressionShapeWithinBudget(n.Func, work, depth+1) {
-			return false
-		}
-		for _, arg := range n.Args {
-			if !pureReturnExpressionShapeWithinBudget(arg, work, depth+1) {
-				return false
-			}
-		}
-		return true
-	case *ast.MatchExpr:
-		if n.Store != nil || !pureReturnExpressionShapeWithinBudget(n.Value, work, depth+1) {
-			return false
-		}
-		for _, arm := range n.Arms {
-			if !lemmaScalarMatchPattern(arm.Pattern) || arm.Guard != nil || len(arm.Body) != 1 {
-				return false
-			}
-			tail, ok := arm.Body[0].(*ast.ExprStmt)
-			if !ok || !pureReturnExpressionShapeWithinBudget(tail.Expr, work, depth+1) {
-				return false
-			}
-		}
-		return true
-	case *ast.StructLitExpr:
-		// A plain struct literal builds a value from its field values.
-		if n.CopyBase != nil || len(n.Spreads) != 0 {
-			return false
-		}
-		for _, arg := range n.Args {
-			if !pureReturnExpressionShapeWithinBudget(arg, work, depth+1) {
-				return false
-			}
-		}
-		return true
-	case *ast.TupleExpr:
-		for _, elem := range n.Elems {
-			if !pureReturnExpressionShapeWithinBudget(elem, work, depth+1) {
-				return false
-			}
-		}
-		return true
-	case *ast.ListLitExpr:
-		for _, elem := range n.Elems {
-			if !pureReturnExpressionShapeWithinBudget(elem, work, depth+1) {
-				return false
-			}
-		}
-		for _, key := range n.Keys {
-			if !pureReturnExpressionShapeWithinBudget(key, work, depth+1) {
-				return false
-			}
-		}
-		return true
-	case *ast.CastExpr:
-		return pureReturnExpressionShapeWithinBudget(n.Operand, work, depth+1)
-	case *ast.AddrOfExpr:
-		return pureReturnExpressionShapeWithinBudget(n.Operand, work, depth+1)
-	case *ast.SpecializeExpr:
-		return pureReturnExpressionShapeWithinBudget(n.Operand, work, depth+1)
-	case *ast.QuantifierExpr:
-		return pureReturnExpressionShapeWithinBudget(n.In, work, depth+1) && pureReturnExpressionShapeWithinBudget(n.Body, work, depth+1)
-	default:
-		return false
-	}
+	return purereturnshape.ExpressionWithinBudget(expr, work, depth)
 }
 
 // pureReturnCasesFromStmts lowers the return-tree subset to an expression. Immutable, owner-free
