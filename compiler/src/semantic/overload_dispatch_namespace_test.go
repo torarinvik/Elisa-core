@@ -81,6 +81,35 @@ def call() -> i64:
 	}
 }
 
+func TestOverloadedCallDiagnosticPreservesUnderscores(t *testing.T) {
+	src := `module Provider:
+    def choose__pair[T](value: T, marker: bool) -> i64:
+        return 1
+    def choose__pair(value: i64, marker: i64) -> i64:
+        return 2
+def call() -> i64:
+    return Provider::choose__pair(1, true)
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "overload_underscores.elisa", src, AnalyzeOptions{})
+	joined := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(joined, `argument 2 to "Provider.choose__pair" expects i64, got bool`) {
+		t.Fatalf("diagnostic lost the source callable name: %s", joined)
+	}
+}
+
+func TestVisibleCallableNamePreservesDispatchIdentity(t *testing.T) {
+	for input, want := range map[string]string{
+		"ordinary": "ordinary",
+		"__ovl__Provider.choose__i64__Provider.choose": "Provider.choose",
+		"__ovl__Provider.choose__pair__i64__Provider.choose__pair": "Provider.choose__pair",
+		"__ext__Provider.method__i64__method": "Provider.method",
+	} {
+		if got := visibleCallableName(input); got != want {
+			t.Errorf("visibleCallableName(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func TestPrivateSelectiveImportDiagnosticRequiresMatchingArguments(t *testing.T) {
 	src := `module A:
     private:

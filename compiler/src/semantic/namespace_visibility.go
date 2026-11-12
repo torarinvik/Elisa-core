@@ -239,6 +239,26 @@ func (a *Analyzer) lookupVisibleGlobal(name string) (*Symbol, string, bool) {
 func visibleCallableName(name string) string {
 	for _, prefix := range [...]string{"__ovl__", "__ext__"} {
 		if rest, ok := strings.CutPrefix(name, prefix); ok {
+			if prefix == "__ovl__" {
+				// Receiver-overload symbols repeat the visible name at the end.
+				// Use that repetition to distinguish separators from `__` in a
+				// user-written name.
+				best := ""
+				for at := strings.Index(rest, "__"); at > 0; {
+					candidate := rest[:at]
+					if strings.HasSuffix(rest, "__"+candidate) {
+						best = candidate
+					}
+					next := strings.Index(rest[at+2:], "__")
+					if next < 0 {
+						break
+					}
+					at += next + 2
+				}
+				if best != "" {
+					return best
+				}
+			}
 			if end := strings.Index(rest, "__"); end > 0 {
 				return rest[:end]
 			}
