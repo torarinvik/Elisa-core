@@ -22,60 +22,7 @@ func paramFieldContainerIsGrown(stmts []ast.Stmt, name string) bool {
 // be the ambient one. Over-approximating is safe (adoption only lengthens lifetimes); it is
 // restricted so read-only bodies keep their own scratch region.
 func paramStoresBodyLocal(fn *ast.FuncDecl, name string) bool {
-	locals := map[string]bool{}
-	walkStoreScanNodes(fn.Body, func(node any) {
-		if v, ok := node.(*ast.VarDeclStmt); ok && v != nil && v.Name != name && localMayOwnContainer(v) {
-			locals[v.Name] = true
-		}
-	})
-	if len(locals) == 0 {
-		return false
-	}
-	target := map[string]bool{name: true}
-	found := false
-	walkStoreScanNodes(fn.Body, func(node any) {
-		if found {
-			return
-		}
-		switch n := node.(type) {
-		case *ast.AssignStmt:
-			if n == nil {
-				return
-			}
-			if _, bare := n.Target.(*ast.Ident); bare {
-				return
-			}
-			if root := rootIdentExpr(n.Target); root != nil && root.Name == name && storeScanMentions(n.Value, locals) {
-				found = true
-			}
-		case *ast.CallExpr:
-			if n == nil {
-				return
-			}
-			mentionsLocal := false
-			for _, arg := range n.Args {
-				if storeScanMentions(arg, locals) {
-					mentionsLocal = true
-				}
-			}
-			if !mentionsLocal {
-				return
-			}
-			if field, ok := n.Func.(*ast.FieldExpr); ok && field != nil {
-				if root := rootIdentExpr(field.Object); root != nil && root.Name == name {
-					found = true
-					return
-				}
-			}
-			for _, arg := range n.Args {
-				if storeScanMentions(arg, target) {
-					found = true
-					return
-				}
-			}
-		}
-	})
-	return found
+	return regionframesyntax.ParamStoresBodyLocal(fn, name, walkStoreScanNodes, localMayOwnContainer, rootIdentExpr, storeScanMentions)
 }
 
 // localMayOwnContainer: a body local whose declared type (or, untyped, whose initializer) may own
