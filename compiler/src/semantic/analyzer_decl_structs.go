@@ -447,7 +447,7 @@ func (a *Analyzer) checkDeclaredLiteralFieldDefault(base *StructType, field ast.
 		expr, _ := a.analyzeStructFieldDefaultExpr(base, field, expected)
 		a.suppressOptimizationFacts = savedSuppressFacts
 		for expr != nil {
-			delete(a.exprTypes, expr)
+			a.deleteExprType(expr)
 			paren, ok := expr.(*ast.ParenExpr)
 			if !ok {
 				break
