@@ -305,6 +305,12 @@ func (d *decoder) valueAtDepth(v reflect.Value) error {
 				v.SetInt(n)
 			}
 		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			// Every decoded unsigned value fits uint64, including named uint64
+			// types. Preserve the checked reflect path for narrower types.
+			if kind == reflect.Uint64 && v.CanAddr() && v.CanSet() {
+				*(*uint64)(unsafe.Pointer(v.UnsafeAddr())) = x
+				break
+			}
 			if v.OverflowUint(x) {
 				return fmt.Errorf("state integer overflow")
 			}
