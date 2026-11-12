@@ -8,11 +8,21 @@ import (
 	"strings"
 )
 
+type deferredUsingMember struct {
+	member      string
+	pos         lexer.Pos
+	path        moduleAliasPath
+	provisional string
+	owned       bool
+	isUsing     bool
+}
+
 type scopedDecl struct {
-	Decl      ast.Decl
-	Namespace string
-	Usings    []string
-	Private   bool
+	Decl       ast.Decl
+	Namespace  string
+	Usings     []string
+	Private    bool
+	usingPaths []moduleAliasPath
 }
 
 func joinQualifiedName(namespace string, name string) string {
@@ -83,7 +93,56 @@ func (a *Analyzer) declIsPrivate(decl ast.Decl, inheritedPrivate bool) bool {
 
 func (a *Analyzer) flattenScopedDecls(decls []ast.Decl, namespace string, inheritedUsings []string) []scopedDecl {
 	a.indexUnconditionalModuleNames(decls, namespace)
-	result := a.flattenScopedDeclsWithVisibility(decls, namespace, inheritedUsings, false)
+	paths := make([]moduleAliasPath, 0, len(inheritedUsings))
+	for _, name := range inheritedUsings {
+		paths = append(paths, moduleAliasPath{name: name})
+	}
+	var deferredMembers []deferredUsingMember
+	result := a.flattenScopedDeclsWithVisibility(decls, namespace, inheritedUsings, paths, &deferredMembers, false)
+	// A using member is program-wide. Reconcile its target after static branch
+	// discovery, then diagnose conflicts against the first resolved target.
+	resolvedMembers := make(map[string]string)
+	for _, deferred := range deferredMembers {
+		member := deferred.member
+		resolved := joinQualifiedName(a.resolveModuleAliasPath(deferred.path), member)
+		if !deferred.isUsing {
+			resolved = deferred.provisional
+		}
+		if earlier, seen := resolvedMembers[member]; seen {
+			if earlier != resolved {
+				if deferred.isUsing {
+					a.errorf(deferred.pos, "conflicting using: %q is already brought in as %q, cannot also bring it as %q", member, earlier, resolved)
+				} else {
+					a.errorf(deferred.pos, "conflicting import: %q is already imported as %q, cannot also import it as %q", member, earlier, resolved)
+				}
+			}
+			continue
+		}
+		if deferred.owned && a.importAliases[member] == deferred.provisional {
+			if resolved != deferred.provisional {
+				a.importAliases[member] = resolved
+				a.visibleAliasGen++
+			}
+		} else if existing, ok := a.importAliases[member]; ok && existing != resolved {
+			if deferred.isUsing {
+				a.errorf(deferred.pos, "conflicting using: %q is already brought in as %q, cannot also bring it as %q", member, existing, resolved)
+			} else {
+				a.errorf(deferred.pos, "conflicting import: %q is already imported as %q, cannot also import it as %q", member, existing, resolved)
+			}
+			resolved = existing
+		}
+		resolvedMembers[member] = resolved
+	}
+	// Active static branches may have introduced a nearer module after an
+	// enclosing block was visited. Resolve using targets only after the walk.
+	for i := range result {
+		resolved := make([]string, 0, len(result[i].usingPaths))
+		for _, path := range result[i].usingPaths {
+			resolved = append(resolved, a.resolveModuleAliasPath(path))
+		}
+		result[i].Usings = dedupeQualifiedNames(resolved)
+		result[i].usingPaths = nil
+	}
 	for key, path := range a.moduleAliasPaths {
 		a.moduleAliases[key] = a.resolveModuleAliasPath(path)
 	}
@@ -147,8 +206,9 @@ func (a *Analyzer) validateModuleExtensions(decls []ast.Decl) {
 	}
 }
 
-func (a *Analyzer) flattenScopedDeclsWithVisibility(decls []ast.Decl, namespace string, inheritedUsings []string, inheritedPrivate bool) []scopedDecl {
+func (a *Analyzer) flattenScopedDeclsWithVisibility(decls []ast.Decl, namespace string, inheritedUsings []string, inheritedPaths []moduleAliasPath, deferredMembers *[]deferredUsingMember, inheritedPrivate bool) []scopedDecl {
 	blockUsings := make([]string, 0)
+	blockPaths := make([]moduleAliasPath, 0)
 	for _, decl := range decls {
 		usingDecl, ok := decl.(*ast.UsingDecl)
 		if !ok {
@@ -158,19 +218,32 @@ func (a *Analyzer) flattenScopedDeclsWithVisibility(decls []ast.Decl, namespace 
 		case usingDecl.Alias != "":
 			a.registerModuleAlias(usingDecl, namespace)
 		case usingDecl.Member != "":
-			a.registerUsingMember(usingDecl, namespace)
+			path := moduleAliasPath{scope: namespace, name: usingDecl.Name}
+			_, existed := a.importAliases[usingDecl.Member]
+			provisional := joinQualifiedName(a.resolveModuleAliasPath(path), usingDecl.Member)
+			if !existed {
+				if a.importAliases == nil {
+					a.importAliases = make(map[string]string)
+				}
+				a.importAliases[usingDecl.Member] = provisional
+				a.visibleAliasGen++
+			}
+			*deferredMembers = append(*deferredMembers, deferredUsingMember{member: usingDecl.Member, pos: usingDecl.Pos(), path: path, provisional: provisional, owned: !existed, isUsing: true})
 		default:
-			blockUsings = append(blockUsings, joinQualifiedName(namespace, usingDecl.Name))
+			path := moduleAliasPath{scope: namespace, name: usingDecl.Name}
+			blockUsings = append(blockUsings, a.resolveModuleAliasPath(path))
+			blockPaths = append(blockPaths, path)
 		}
 	}
 	effectiveUsings := dedupeQualifiedNames(append(append([]string(nil), inheritedUsings...), blockUsings...))
+	effectivePaths := append(append([]moduleAliasPath(nil), inheritedPaths...), blockPaths...)
 	out := make([]scopedDecl, 0, len(decls))
 	for _, decl := range decls {
 		switch n := decl.(type) {
 		case *ast.StaticIfDecl:
 			branch := a.activeDeclBranchInNamespace(n, namespace)
 			a.indexUnconditionalModuleNames(branch, namespace)
-			out = append(out, a.flattenScopedDeclsWithVisibility(branch, namespace, effectiveUsings, inheritedPrivate)...)
+			out = append(out, a.flattenScopedDeclsWithVisibility(branch, namespace, effectiveUsings, effectivePaths, deferredMembers, inheritedPrivate)...)
 		case *ast.NamespaceDecl:
 			childNamespace := joinQualifiedName(namespace, n.Name)
 			// A private module hides the MODULE, not its members: its body starts at the
@@ -184,15 +257,29 @@ func (a *Analyzer) flattenScopedDeclsWithVisibility(decls []ast.Decl, namespace 
 				}
 				a.privateModules[childNamespace] = true
 			}
-			out = append(out, a.flattenScopedDeclsWithVisibility(n.Decls, childNamespace, effectiveUsings, false)...)
+			out = append(out, a.flattenScopedDeclsWithVisibility(n.Decls, childNamespace, effectiveUsings, effectivePaths, deferredMembers, false)...)
 		case *ast.UsingDecl:
 			continue
 		case *ast.ImportDecl:
-			a.registerImportAliases(n, namespace)
+			for _, name := range n.Names {
+				if name == "" {
+					continue
+				}
+				target := joinQualifiedName(joinQualifiedName(namespace, n.Module), name)
+				_, existed := a.importAliases[name]
+				if !existed {
+					if a.importAliases == nil {
+						a.importAliases = make(map[string]string)
+					}
+					a.importAliases[name] = target
+					a.visibleAliasGen++
+				}
+				*deferredMembers = append(*deferredMembers, deferredUsingMember{member: name, pos: n.Pos(), provisional: target, owned: !existed})
+			}
 			continue
 		default:
 			a.primeScopedConstValues(decl, namespace, effectiveUsings)
-			out = append(out, scopedDecl{Decl: decl, Namespace: namespace, Usings: append([]string(nil), effectiveUsings...), Private: a.declIsPrivate(decl, inheritedPrivate)})
+			out = append(out, scopedDecl{Decl: decl, Namespace: namespace, Usings: append([]string(nil), effectiveUsings...), Private: a.declIsPrivate(decl, inheritedPrivate), usingPaths: effectivePaths})
 		}
 	}
 	return out
@@ -266,7 +353,7 @@ func (a *Analyzer) registerUsingMember(n *ast.UsingDecl, namespace string) {
 	if a.importAliases == nil {
 		a.importAliases = make(map[string]string)
 	}
-	target := joinQualifiedName(joinQualifiedName(namespace, n.Name), n.Member)
+	target := joinQualifiedName(a.resolveModuleAliasPath(moduleAliasPath{scope: namespace, name: n.Name}), n.Member)
 	if existing, ok := a.importAliases[n.Member]; ok && existing != target {
 		a.errorf(n.Pos(), "conflicting using: %q is already brought in as %q, cannot also bring it as %q", n.Member, existing, target)
 		return
