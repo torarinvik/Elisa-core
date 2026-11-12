@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/regionframesyntax"
 )
 
 // collectRegionParamForwarding summarizes syntactic parameter-to-call forwarding once per
@@ -118,49 +119,8 @@ func appendUniqueRegionForwardTarget(targets []regionForwardTarget, target regio
 // regionForwardedParamPath recognizes either a bare parameter forwarded through address-of/casts,
 // or a field/index path rooted at one. A field path is kept separate so only struct parameters use
 // field forwarding to infer their enclosing reference region.
-func regionForwardedParamPath(arg ast.Expr) (name string, isField bool, ok bool) {
-	for {
-		switch e := unwrapParenForRegionPoly(arg).(type) {
-		case *ast.AddrOfExpr:
-			if e == nil {
-				return "", false, false
-			}
-			arg = e.Operand
-		case *ast.CastExpr:
-			if e == nil {
-				return "", false, false
-			}
-			arg = e.Operand
-		default:
-			goto inspectPath
-		}
-	}
-
-inspectPath:
-	current := unwrapParenForRegionPoly(arg)
-	for current != nil {
-		switch e := current.(type) {
-		case *ast.FieldExpr:
-			if e == nil {
-				return "", false, false
-			}
-			isField = true
-			current = unwrapParenForRegionPoly(e.Object)
-		case *ast.IndexExpr:
-			if e == nil {
-				return "", false, false
-			}
-			current = unwrapParenForRegionPoly(e.Object)
-		case *ast.Ident:
-			if e == nil || e.Name == "" {
-				return "", false, false
-			}
-			return e.Name, isField, true
-		default:
-			return "", false, false
-		}
-	}
-	return "", false, false
+func regionForwardedParamPath(arg ast.Expr) (string, bool, bool) {
+	return regionframesyntax.RegionForwardedParamPath(arg)
 }
 
 func (a *Analyzer) forwardTargetsRequireRegion(targets []regionForwardTarget) bool {
@@ -193,53 +153,10 @@ func (a *Analyzer) forwardTargetsRequireRegion(targets []regionForwardTarget) bo
 // This only decides region-poly inference; the region is still verified at the real call site (where
 // the cast now preserves the operand's region), so seeing through the cast here is sound.
 func forwardsParamIdent(arg ast.Expr, name string) bool {
-	for {
-		switch e := unwrapParenForRegionPoly(arg).(type) {
-		case *ast.Ident:
-			return e != nil && e.Name == name
-		case *ast.AddrOfExpr:
-			if e == nil {
-				return false
-			}
-			arg = e.Operand
-		case *ast.CastExpr:
-			if e == nil {
-				return false
-			}
-			arg = e.Operand
-		default:
-			return false
-		}
-	}
+	return regionframesyntax.ForwardsParamIdent(arg, name)
 }
-
-// typeExprCarriesRegionParam reports whether a parameter type-expr is annotated with a region that is
-// one of the callee's region params (so passing a value there REQUIRES supplying that region). Peels
-// the mutable/owned/tail/ref qualifiers and checks the region annotation on the reference, the
-// container builtin, or a generic type.
-func typeExprCarriesRegionParam(t ast.TypeExpr, regionParams map[string]bool) bool {
-	for t != nil {
-		switch n := t.(type) {
-		case *ast.MutableType:
-			t = n.Elem
-		case *ast.OwnedType:
-			t = n.Elem
-		case *ast.TailType:
-			t = n.Elem
-		case *ast.RefType:
-			if n.Region != "" && regionParams[n.Region] {
-				return true
-			}
-			t = n.Elem
-		case *ast.BuiltinTypeExpr:
-			return n.Region != "" && regionParams[n.Region]
-		case *ast.GenericType:
-			return n.Region != "" && regionParams[n.Region]
-		default:
-			return false
-		}
-	}
-	return false
+func typeExprCarriesRegionParam(t ast.TypeExpr, params map[string]bool) bool {
+	return regionframesyntax.TypeExprCarriesRegionParam(t, params)
 }
 
 // inferReturnViewRegion ties a function's region-less `view[T]` return type to an inferred region
