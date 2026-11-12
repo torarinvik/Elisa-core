@@ -53,3 +53,32 @@ func TestVisibleNameCandidatesMemoized(t *testing.T) {
 		t.Fatalf("memo disagrees with a fresh build: %v", got)
 	}
 }
+
+func TestAnalysisBuildReconstructsVisibleNameCandidates(t *testing.T) {
+	const source = "def main() -> i64:\n    return 0\n"
+	build, err := BeginAnalysisBuild(retainedParse(t, source), nil, []byte(source), AnalyzeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	analyzer := build.retained.a
+	analyzer.registerModuleAlias(&ast.UsingDecl{Name: "Library", Alias: "L"}, "")
+	want := analyzer.visibleNameCandidates("L.call")
+	data, err := build.MarshalState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live := analyzer.visibleNameCandidates("L.call"); &live[0] != &want[0] {
+		t.Fatal("checkpoint replaced the live candidate memo")
+	}
+	restored, err := RestoreAnalysisBuild(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoredAnalyzer := restored.retained.a
+	if restoredAnalyzer.visibleCandidates.byContext != nil || restoredAnalyzer.visibleCandidates.byName != nil {
+		t.Fatal("checkpoint included the candidate memo")
+	}
+	if got := restoredAnalyzer.visibleNameCandidates("L.call"); !slices.Equal(got, want) {
+		t.Fatalf("rebuilt candidates = %v, want %v", got, want)
+	}
+}

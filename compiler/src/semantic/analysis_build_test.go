@@ -540,3 +540,36 @@ func TestAnalysisBuildCheckpointStoresOnlyLiveSMTHistory(t *testing.T) {
 		t.Fatalf("unexpected restored SMT history: %q, capacity %d", history, cap(history))
 	}
 }
+
+func TestAnalysisBuildReconstructsLocalDefinitionDependencies(t *testing.T) {
+	const source = "def main() -> i64:\n    return 0\n"
+	build, err := BeginAnalysisBuild(retainedParse(t, source), nil, []byte(source), AnalyzeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	symbol := &Symbol{}
+	initializer := &ast.VarDeclStmt{Value: &ast.Ident{Name: "input"}}
+	analyzer := build.retained.a
+	dependencies := analyzer.smtLocalDefinitionDeps(symbol, initializer)
+	if len(dependencies) != 1 || dependencies[0] != "input" {
+		t.Fatalf("unexpected initializer dependencies: %v", dependencies)
+	}
+	data, err := build.MarshalState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live := analyzer.smtLocalDefDeps[symbol]; len(live) != 1 || &live[0] != &dependencies[0] {
+		t.Fatal("checkpoint discarded the live initializer dependency memo")
+	}
+	restored, err := RestoreAnalysisBuild(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := restored.retained.a
+	if a.smtLocalDefDeps != nil {
+		t.Fatal("checkpoint included the initializer dependency memo")
+	}
+	if got := a.smtLocalDefinitionDeps(symbol, initializer); len(got) != 1 || got[0] != "input" {
+		t.Fatalf("unexpected rebuilt initializer dependencies: %v", got)
+	}
+}

@@ -42,3 +42,35 @@ func TestTypeCanContainRegionRefsMemo(t *testing.T) {
 		t.Fatal("an already-visited type must answer false inside a walk, not the memoized true")
 	}
 }
+
+func TestAnalysisBuildReconstructsTypePredicates(t *testing.T) {
+	const source = "def main() -> i64:\n    return 0\n"
+	build, err := BeginAnalysisBuild(retainedParse(t, source), nil, []byte(source), AnalyzeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := build.retained.a
+	typ := &RefType{Elem: &BuiltinType{Name: "i64"}}
+	want := a.typeCanContainRegionRefs(typ, nil)
+	if len(a.regionRefsMemo) == 0 {
+		t.Fatal("fixture did not warm the predicate memo")
+	}
+	data, err := build.MarshalState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := a.regionRefsMemo[typ]; !ok || got != want {
+		t.Fatal("checkpoint changed the live predicate memo")
+	}
+	restored, err := RestoreAnalysisBuild(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cold := restored.retained.a
+	if cold.regionRefsMemo != nil {
+		t.Fatal("checkpoint included the predicate memo")
+	}
+	if got := cold.typeCanContainRegionRefs(typ, nil); got != want {
+		t.Fatalf("rebuilt predicate = %v, want %v", got, want)
+	}
+}

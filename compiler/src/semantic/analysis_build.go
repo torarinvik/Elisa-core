@@ -334,6 +334,23 @@ func (b *AnalysisBuild) marshalState(capacity int, externalSource bool) ([]byte,
 	// visited so far. Preserve the live indexes for an in-process advance.
 	storeScanIndexes := a.storeScanIndexCache
 	a.storeScanIndexCache = nil
+	// Visible-name candidates depend only on the current lexical context
+	// and registered aliases. The restored analyzer rebuilds them on demand.
+	visibleCandidates := a.visibleCandidates
+	a.visibleCandidates = visibleCandidateCache{}
+	// These dependencies are computed from immutable local initializers.
+	localDefinitionDeps := a.smtLocalDefDeps
+	a.smtLocalDefDeps = nil
+	// These predicates are derived from the frozen type graph. Keep their
+	// live tables for in-process advances and rebuild them lazily on restore.
+	typeMemos := [...]*map[Type]bool{
+		&a.programLivedTypes, &a.regionRefsMemo, &a.affineHandleMemo,
+		&a.typeParamMemo, &a.borrowedOwnerRefMemo, &a.mutableBorrowCapabilityMemo,
+	}
+	var savedTypeMemos [len(typeMemos)]map[Type]bool
+	for i, memo := range typeMemos {
+		savedTypeMemos[i], *memo = *memo, nil
+	}
 	// The graph codec preserves slice backing storage. History only uses its
 	// live entries, so spare capacity must not pull old queries into the file.
 	history := a.smtHistory
@@ -349,6 +366,11 @@ func (b *AnalysisBuild) marshalState(capacity int, externalSource bool) ([]byte,
 		b.externalSourceDigest = [sha256.Size]byte{}
 		r.pristine = pristine
 		a.storeScanIndexCache = storeScanIndexes
+		a.visibleCandidates = visibleCandidates
+		a.smtLocalDefDeps = localDefinitionDeps
+		for i, memo := range typeMemos {
+			*memo = savedTypeMemos[i]
+		}
 	}()
 	return semanticStateRegistry().EncodeFramedWithCapacity(b, capacity)
 }
