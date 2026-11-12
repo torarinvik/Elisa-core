@@ -355,6 +355,10 @@ func (b *AnalysisBuild) marshalState(capacity int, externalSource bool) ([]byte,
 	// live entries, so spare capacity must not pull old queries into the file.
 	history := a.smtHistory
 	a.smtHistory = history[:len(history):len(history)]
+	prefixes, historyCapacity := planCheckpointHistory(history)
+	if prefixes != nil {
+		a.smtHistory = nil
+	}
 	source := r.src
 	if externalSource {
 		b.externalSourceDigest = sha256.Sum256(source)
@@ -372,7 +376,11 @@ func (b *AnalysisBuild) marshalState(capacity int, externalSource bool) ([]byte,
 			*memo = savedTypeMemos[i]
 		}
 	}()
-	return semanticStateRegistry().EncodeFramedWithCapacity(b, capacity)
+	data, err := semanticStateRegistry().EncodeFramedWithCapacity(b, capacity)
+	if err == nil && prefixes != nil {
+		data = appendCheckpointHistory(data, history, prefixes, historyCapacity)
+	}
+	return data, err
 }
 
 func RestoreAnalysisBuild(data []byte) (*AnalysisBuild, error) {
@@ -386,7 +394,11 @@ func RestoreAnalysisBuildWithSource(data, source []byte) (*AnalysisBuild, error)
 }
 
 func restoreAnalysisBuild(data, source []byte, externalSource bool) (*AnalysisBuild, error) {
-	value, err := semanticStateRegistry().Decode(data)
+	graph, compactHistory, err := splitCheckpointHistory(data)
+	if err != nil {
+		return nil, err
+	}
+	value, err := semanticStateRegistry().Decode(graph)
 	if err != nil {
 		return nil, err
 	}
@@ -412,6 +424,16 @@ func restoreAnalysisBuild(data, source []byte, externalSource bool) (*AnalysisBu
 		}
 		b.retained.src = source
 		b.externalSourceDigest = [sha256.Size]byte{}
+	}
+	if compactHistory != nil {
+		if b.retained.a.smtHistory != nil {
+			return nil, fmt.Errorf("duplicate checkpoint SMT history")
+		}
+		history, err := restoreCheckpointHistory(compactHistory)
+		if err != nil {
+			return nil, err
+		}
+		b.retained.a.smtHistory = history
 	}
 	b.retained.post = func(decls []scopedDecl, appended map[*ast.FuncDecl]*FuncType) {
 		b.retained.a.runPostPhases(decls, b.retained.options, nil, appended)
