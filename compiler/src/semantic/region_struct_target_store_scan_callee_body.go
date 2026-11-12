@@ -81,6 +81,26 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 		}
 		return a.resolveReadOnlyScanCallee(call)
 	}
+	// The same callee can occur many times in a single body scan. Its
+	// declared parameter syntax does not depend on the argument being traced.
+	type arenaParamEntry struct {
+		decl     *ast.FuncDecl
+		hasArena bool
+	}
+	var arenaParams [8]arenaParamEntry
+	hasArenaParam := func(callee *ast.FuncDecl) bool {
+		for i := range arenaParams {
+			if arenaParams[i].decl == callee {
+				return arenaParams[i].hasArena
+			}
+			if arenaParams[i].decl == nil {
+				hasArena := funcHasArenaParam(callee)
+				arenaParams[i] = arenaParamEntry{callee, hasArena}
+				return hasArena
+			}
+		}
+		return funcHasArenaParam(callee)
+	}
 	// Parameter type properties are stable once type shapes freeze. Repeated
 	// calls to the same helper otherwise redo the same nested type predicates.
 	type paramProperty struct {
@@ -257,7 +277,7 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 		// A nested call's result carries, from each argument, only what its callee may RETURN
 		// from that parameter (the rule-160 judgement, applied inside a stored value).
 		if call, isCall := inner.(*ast.CallExpr); isCall && call != nil {
-			if callee, ok := resolvePayloadCallee(call); ok && callee != nil && storeFlowCallFitsParams(callee, call) && !funcHasArenaParam(callee) && !a.declReturnsVoid(callee) {
+			if callee, ok := resolvePayloadCallee(call); ok && callee != nil && storeFlowCallFitsParams(callee, call) && !hasArenaParam(callee) && !a.declReturnsVoid(callee) {
 				mode := storeNone
 				for i, arg := range returnBorrowCallArgs(call) {
 					argMode := valueMode(arg)
@@ -324,7 +344,7 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 			// stores are scanned when the walk reaches it; its result carries a tainted argument
 			// only when the callee's summary connects that argument to its return.
 			if call, isCall := storeScanUnwrap(n.Value).(*ast.CallExpr); isCall && call != nil {
-				if callee, ok := resolvePayloadCallee(call); ok && callee != nil && storeFlowCallFitsParams(callee, call) && !funcHasArenaParam(callee) {
+				if callee, ok := resolvePayloadCallee(call); ok && callee != nil && storeFlowCallFitsParams(callee, call) && !hasArenaParam(callee) {
 					if a.declReturnsVoid(callee) {
 						// The lmut manifest `t <- f(.., t, ..)` of a void callee: the result IS
 						// the threaded argument; the call's own stores are scanned at the call.
@@ -441,7 +461,7 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 				return
 			}
 			callee, ok := resolvePayloadCallee(n)
-			if !ok || callee == nil || !storeFlowCallFitsParams(callee, n) || funcHasArenaParam(callee) {
+			if !ok || callee == nil || !storeFlowCallFitsParams(callee, n) || hasArenaParam(callee) {
 				for _, s := range taintedArgs {
 					mode = storeScanRaise(decl, 218, n, mode, s.mode)
 					if mode == storeHeader {
