@@ -1,30 +1,6 @@
 package astscan
 
-import "strings"
+import "elisacore/src/generatednames"
 
-func IsLocalGeneratedName(name string) bool {
-	const (
-		autoPrefix       = "__auto_"
-		quantifierPrefix = "__quantifier_"
-	)
-	var suffix string
-	switch {
-	case strings.HasPrefix(name, autoPrefix):
-		suffix = name[len(autoPrefix):]
-	case strings.HasPrefix(name, quantifierPrefix):
-		suffix = name[len(quantifierPrefix):]
-	default:
-		return false
-	}
-	if len(suffix) == 0 {
-		return false
-	}
-	for i := 0; i < len(suffix); i++ {
-		if suffix[i] < '0' || suffix[i] > '9' {
-			return false
-		}
-	}
-	return true
-}
-
-func retainedLocalGensymName(name string) bool { return IsLocalGeneratedName(name) }
+func IsLocalGeneratedName(name string) bool    { return generatednames.IsLocalGeneratedName(name) }
+func retainedLocalGensymName(name string) bool { return generatednames.IsLocalGeneratedName(name) }

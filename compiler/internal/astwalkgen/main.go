@@ -93,12 +93,12 @@ type walkMode struct {
 }
 
 var modes = []walkMode{
-	{File: "src/astscan/ast_pointer_walk_gen.go", Package: "astscan", Maps: true, Prefix: "astWalk", Reflect: "WalkPointersReflect", Entry: "WalkPointers", Describe: "fillMayAdoptWalk"},
-	{File: "src/astscan/ast_scan_walk_gen.go", Package: "astscan", Maps: false, Prefix: "astScanWalk", Reflect: "WalkReflect", Entry: "Walk", Describe: "walkStoreScanNodes"},
-	{File: "src/astscan/ast_prune_walk_gen.go", Package: "astscan", Maps: false, Prefix: "astPruneWalk", Reflect: "pruneWalkReflect", Entry: "walkPruneTyped", Describe: "walkPruned", Prune: true},
-	{File: "src/astscan/ast_canonical_walk_gen.go", Package: "astscan", Maps: true, Prefix: "astCanonicalWalk", Reflect: "WalkCanonicalOpaque", Entry: "WalkCanonical", Describe: "canonical AST membership", Prune: true, OpaqueFields: true},
-	{File: "src/astscan/proof_binding_walk_gen.go", Package: "astscan", Entry: "WalkProofBindings", Describe: "proof-binding source syntax", ProofBinding: true},
-	{File: "src/astscan/proof_coordinate_walk_gen.go", Package: "astscan", Entry: "WalkProofCoordinates", Describe: "proof-coordinate source syntax", ProofCoordinate: true},
+	{File: "src/astpointerscan/ast_pointer_walk_gen.go", Package: "astpointerscan", Maps: true, Prefix: "astWalk", Reflect: "WalkPointersReflect", Entry: "WalkPointers", Describe: "fillMayAdoptWalk"},
+	{File: "src/aststatementscan/ast_scan_walk_gen.go", Package: "aststatementscan", Maps: false, Prefix: "astScanWalk", Reflect: "WalkReflect", Entry: "Walk", Describe: "walkStoreScanNodes"},
+	{File: "src/astprunedscan/ast_prune_walk_gen.go", Package: "astprunedscan", Maps: false, Prefix: "astPruneWalk", Reflect: "pruneWalkReflect", Entry: "walkPruneTyped", Describe: "walkPruned", Prune: true},
+	{File: "src/astcanonicalscan/ast_canonical_walk_gen.go", Package: "astcanonicalscan", Maps: true, Prefix: "astCanonicalWalk", Reflect: "WalkCanonicalOpaque", Entry: "WalkCanonical", Describe: "canonical AST membership", Prune: true, OpaqueFields: true},
+	{File: "src/proofbindingscan/proof_binding_walk_gen.go", Package: "proofbindingscan", Entry: "WalkProofBindings", Describe: "proof-binding source syntax", ProofBinding: true},
+	{File: "src/proofcoordinatescan/proof_coordinate_walk_gen.go", Package: "proofcoordinatescan", Entry: "WalkProofCoordinates", Describe: "proof-coordinate source syntax", ProofCoordinate: true},
 }
 
 type gen struct {
