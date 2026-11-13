@@ -519,7 +519,7 @@ def build(root: Path, binary: Path) -> Path:
         if os.environ.get("ELISA_REBUILD_SUPERVISED") != "1":
             command[:0] = [
                 sys.executable, str(Path(__file__).with_name("run_with_timeout.py")),
-                "3", "--grace-seconds", "0", "--",
+                "5", "--grace-seconds", "0", "--",
             ]
         # The Go compiler spends substantial time collecting its large semantic
         # package. Give that subprocess more headroom without changing the
