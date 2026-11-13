@@ -6,12 +6,12 @@ import (
 	"elisacore/src/ast"
 	"elisacore/src/incremental"
 	"elisacore/src/lexer"
+	"elisacore/src/predicatetypes"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"reflect"
 	"sort"
-	"sync"
 )
 
 func (invocation *incrementalBodyInvocation) prepareAnalyzer(a *Analyzer) {
@@ -64,61 +64,10 @@ func (invocation *incrementalBodyInvocation) prefetchLocalInitializerQueries() {
 }
 
 func primitiveReturnHeader(fn *ast.FuncDecl) (*ast.ReturnStmt, bool) {
-	if fn == nil || fn.Name == "" || len(fn.Name) > primitiveSourceByteBudget || len(fn.Body) != 1 {
-		return nil, false
-	}
-	// Every other declaration feature stays cold, including future added fields.
-	header := *fn
-	if !primitiveParameterSyntax(header.Params) {
-		return nil, false
-	}
-	header.Params = nil // the parser uses a non-nil empty list for `()`
-	header.Position = lexer.Pos{}
-	header.Name = ""
-	header.ReturnType = nil
-	header.Body = nil
-	if !reflect.ValueOf(header).IsZero() {
-		return nil, false
-	}
-	switch typ := fn.ReturnType.(type) {
-	case *ast.NamedType:
-		copy := *typ
-		copy.Position = lexer.Pos{}
-		copy.Name = ""
-		if (typ.Name != "i64" && typ.Name != "int") || !reflect.ValueOf(copy).IsZero() {
-			return nil, false
-		}
-	case *ast.BuiltinTypeExpr:
-		copy := *typ
-		copy.Position = lexer.Pos{}
-		copy.Name = ""
-		if len(copy.TypeArgs) != 0 || len(copy.ValueArgs) != 0 {
-			return nil, false
-		}
-		copy.TypeArgs = nil
-		copy.ValueArgs = nil
-		if (typ.Name != "i64" && typ.Name != "int") || !reflect.ValueOf(copy).IsZero() {
-			return nil, false
-		}
-	default:
-		return nil, false
-	}
-	stmt, ok := fn.Body[0].(*ast.ReturnStmt)
-	if !ok || stmt.Value == nil {
-		return nil, false
-	}
-	statementHeader := *stmt
-	statementHeader.Position = lexer.Pos{}
-	statementHeader.Value = nil
-	if !reflect.ValueOf(statementHeader).IsZero() {
-		return nil, false
-	}
-	return stmt, true
+	return predicatetypes.ReturnHeader(fn, primitiveParameterSchemaValid, primitiveParameterLimit, primitiveSourceByteBudget)
 }
 
 const primitiveSourceByteBudget = 1024 * 1024
-
-var primitiveSeenPool = sync.Pool{New: func() any { return make(map[ast.Expr]bool, 256) }}
 
 func primitiveReturnExpressions(fn *ast.FuncDecl) ([]ast.Expr, bool) {
 	return primitiveReturnExpressionsWithNodeBudget(fn, nil, nil)
@@ -171,10 +120,6 @@ func primitiveReturnTypingHeader(fn *ast.FuncDecl) (*ast.ReturnStmt, bool) {
 	return primitiveReturnHeader(&header)
 }
 
-func primitiveI64ReturnExpressions(fn *ast.FuncDecl) ([]ast.Expr, bool) {
-	return primitiveI64ReturnExpressionsWithNodeBudget(fn, nil, nil)
-}
-
 func primitiveI64ReturnExpressionsWithNodeBudget(fn *ast.FuncDecl, remainingNodes *int, budgetExhausted *bool) ([]ast.Expr, bool) {
 	stmt, ok := primitiveReturnTypingHeader(fn)
 	if !ok || len(fn.Name) > primitiveSourceByteBudget {
@@ -206,77 +151,7 @@ func primitiveI64ExpressionNodes(root ast.Expr, parameters map[string]bool, sour
 }
 
 func primitiveI64ExpressionNodesWithNodeBudget(root ast.Expr, parameters map[string]bool, sourceBytes int, remainingNodes *int, budgetExhausted *bool) ([]ast.Expr, int, bool) {
-	if root == nil || sourceBytes > primitiveSourceByteBudget {
-		return nil, sourceBytes, false
-	}
-	var nodes []ast.Expr
-	seen := primitiveSeenPool.Get().(map[ast.Expr]bool)
-	defer func() { clear(seen); primitiveSeenPool.Put(seen) }()
-	var visit func(ast.Expr, int) bool
-	visit = func(expr ast.Expr, depth int) bool {
-		if expr == nil || depth > 128 || len(nodes) >= 4096 {
-			return false
-		}
-		if seen[expr] {
-			return false
-		}
-		if remainingNodes != nil {
-			if *remainingNodes <= 0 {
-				if budgetExhausted != nil {
-					*budgetExhausted = true
-				}
-				return false
-			}
-			(*remainingNodes)--
-		}
-		seen[expr] = true
-		nodes = append(nodes, expr)
-		switch node := expr.(type) {
-		case *ast.Ident:
-			if !primitiveParameterSchemaValid || !parameters[node.Name] || len(node.Name) > primitiveSourceByteBudget-sourceBytes {
-				return false
-			}
-			sourceBytes += len(node.Name)
-			return true
-		case *ast.IntLit:
-			if len(node.Value) > primitiveSourceByteBudget-sourceBytes {
-				return false
-			}
-			sourceBytes += len(node.Value)
-			copy := *node
-			copy.Position = lexer.Pos{}
-			copy.Value = ""
-			copy.IsHex = false
-			return node.Suffix == "" && reflect.ValueOf(copy).IsZero()
-		case *ast.ParenExpr:
-			copy := *node
-			copy.Position = lexer.Pos{}
-			copy.Inner = nil
-			return reflect.ValueOf(copy).IsZero() && visit(node.Inner, depth+1)
-		case *ast.UnaryExpr:
-			copy := *node
-			copy.Position = lexer.Pos{}
-			copy.Op = 0
-			copy.Operand = nil
-			return node.Op == lexer.TOKEN_MINUS && reflect.ValueOf(copy).IsZero() && visit(node.Operand, depth+1)
-		case *ast.BinaryExpr:
-			copy := *node
-			copy.Position = lexer.Pos{}
-			copy.Op = 0
-			copy.Left = nil
-			copy.Right = nil
-			if !reflect.ValueOf(copy).IsZero() || (node.Op != lexer.TOKEN_PLUS && node.Op != lexer.TOKEN_MINUS && node.Op != lexer.TOKEN_STAR) {
-				return false
-			}
-			return visit(node.Left, depth+1) && visit(node.Right, depth+1)
-		default:
-			return false
-		}
-	}
-	if !visit(root, 0) {
-		return nil, sourceBytes, false
-	}
-	return nodes, sourceBytes, true
+	return predicatetypes.IntegerExpressionNodes(root, parameters, sourceBytes, primitiveSourceByteBudget, primitiveParameterSchemaValid, remainingNodes, budgetExhausted)
 }
 
 // The compact source protocol includes every non-position field admitted by

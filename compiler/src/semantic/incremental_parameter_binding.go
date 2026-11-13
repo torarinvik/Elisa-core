@@ -3,6 +3,7 @@ package semantic
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
+	"elisacore/src/predicatetypes"
 	"reflect"
 )
 
@@ -11,51 +12,7 @@ const primitiveParameterLimit = 256
 // Parameter bindings belong to the current analyzer. Products retain names and
 // compact type tags, never symbols, scopes or parameter declaration pointers.
 func primitiveParameterSyntax(params []ast.ParamDecl) bool {
-	if len(params) == 0 {
-		return true
-	}
-	if !primitiveParameterSchemaValid || len(params) > primitiveParameterLimit {
-		return false
-	}
-	names := map[string]bool{}
-	total := 0
-	for _, param := range params {
-		total += len(param.Name)
-		if param.Name == "" || total > primitiveSourceByteBudget || names[param.Name] || param.Mutable || param.DefaultValue != nil {
-			return false
-		}
-		names[param.Name] = true
-		switch typ := param.Type.(type) {
-		case *ast.NamedType:
-			if typ == nil {
-				return false
-			}
-			copy := *typ
-			copy.Position = lexer.Pos{}
-			copy.Name = ""
-			if (typ.Name != "i64" && typ.Name != "int") || !reflect.ValueOf(copy).IsZero() {
-				return false
-			}
-		case *ast.BuiltinTypeExpr:
-			if typ == nil {
-				return false
-			}
-			copy := *typ
-			copy.Position = lexer.Pos{}
-			copy.Name = ""
-			if len(copy.TypeArgs) != 0 || len(copy.ValueArgs) != 0 {
-				return false
-			}
-			copy.TypeArgs = nil
-			copy.ValueArgs = nil
-			if (typ.Name != "i64" && typ.Name != "int") || !reflect.ValueOf(copy).IsZero() {
-				return false
-			}
-		default:
-			return false
-		}
-	}
-	return true
+	return predicatetypes.ParameterSyntax(params, primitiveParameterSchemaValid, primitiveParameterLimit, primitiveSourceByteBudget)
 }
 
 func primitiveCurrentParameterBindings(a *Analyzer, fn *ast.FuncDecl) bool {
