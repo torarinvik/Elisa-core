@@ -92,6 +92,12 @@ func analysisDiskRequestObserverEnabled() bool { return analysisDiskRequestObser
 // startup environment. Backend parity also depends on a lexer package global
 // captured at startup, but it does not require bypassing semantic disk state.
 func retainedRequestRequiresLocalProcess() bool {
+	// A supervised rebuild has a process-group deadline. The retained server
+	// runs outside that group and does not cancel compilation on disconnect, so
+	// forwarding would allow work to continue after the deadline.
+	if os.Getenv("ELISA_REBUILD_SUPERVISED") == "1" {
+		return true
+	}
 	// The outer s0cache certificate records process-local SMT taint. A retained
 	// server has independent semantic state, so its result cannot be certified
 	// by this client process. Keep certificate-backed requests local.

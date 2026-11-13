@@ -40,6 +40,7 @@ func clearAnalysisDiskObserverEnvironment(t *testing.T) {
 		"ELISACORE_RETAINED_FAST_DEBUG",
 		"ELISACORE_RETAINED_FAST_PREPARE",
 		"ELISACORE_CACHE_CERTIFICATE",
+		"ELISA_REBUILD_SUPERVISED",
 		"ELISACORE_PARTITION_DECLINE_DEBUG",
 		"ELISACORE_PART_KEEP",
 		"ELISACORE_RETAINED_PROFILE_DIR",
@@ -50,6 +51,18 @@ func clearAnalysisDiskObserverEnvironment(t *testing.T) {
 		"ELISA_BACKEND_PARITY_OUT",
 	} {
 		t.Setenv(name, "")
+	}
+}
+
+func TestSupervisedRebuildDoesNotForwardToRetainedServer(t *testing.T) {
+	clearAnalysisDiskObserverEnvironment(t)
+	t.Setenv("ELISACORE_RETAINED_SERVER", "/tmp/retained-test.sock")
+	if retainedRequestRequiresLocalProcess() {
+		t.Fatal("ordinary request unexpectedly requires local execution")
+	}
+	t.Setenv("ELISA_REBUILD_SUPERVISED", "1")
+	if !retainedRequestRequiresLocalProcess() {
+		t.Fatal("supervised rebuild could outlive its deadline in retained server")
 	}
 }
 
