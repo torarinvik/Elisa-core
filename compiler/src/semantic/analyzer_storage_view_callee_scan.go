@@ -256,10 +256,6 @@ func releaseStorageViewNodes(nodes []any) {
 	storageViewNodesPool.Put(nodes[:0])
 }
 
-func storageViewScanBody(decl *ast.FuncDecl) storageViewSolveBody {
-	return storageViewScanBodyWithNodes(decl, nil)
-}
-
 func storageViewScanBodyWithNodes(decl *ast.FuncDecl, nodes []any) storageViewSolveBody {
 	// Each top-level statement contributes a node, often with at least one
 	// relevant expression. Cap the hint so unusually wide bodies do not reserve

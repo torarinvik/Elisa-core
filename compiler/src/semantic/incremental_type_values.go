@@ -158,10 +158,6 @@ func (env *FunctionTypeEnvironment) reference(t Type) (*functionTypeReference, e
 	return &functionTypeReference{key, kind, fingerprint}, nil
 }
 
-func functionNominalTypeFingerprint(t Type) ([32]byte, error) {
-	return functionNominalTypeFingerprintWithResult(t, nil)
-}
-
 // DiagnosticCodegenTypeFingerprint captures the supported semantic type graph
 // for comparison experiments. It is not a complete code-generation dependency
 // certificate: callers must separately validate source, results, target settings,

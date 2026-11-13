@@ -3,12 +3,11 @@ package semantic
 import (
 	"container/heap"
 	"elisacore/src/ast"
+	"elisacore/src/bodygraph"
 	"elisacore/src/graphalgo"
-	"elisacore/src/lexer"
 	"fmt"
 	"os"
 	"reflect"
-	"sort"
 	"sync"
 	"time"
 )
@@ -26,212 +25,19 @@ type bodyGraph struct {
 	funcRecursive []bool  // direct or function-value self-reference
 }
 
-func bodyFunctions(d ast.Decl) []*ast.FuncDecl {
-	switch n := d.(type) {
-	case *ast.FuncDecl:
-		return []*ast.FuncDecl{n}
-	case *ast.ImplDecl:
-		var funcs []*ast.FuncDecl
-		for _, member := range n.Members {
-			if fn, ok := member.(*ast.FuncDecl); ok {
-				funcs = append(funcs, fn)
-			}
-		}
-		return funcs
-	}
-	return nil
-}
-
-func bodyDefinedNames(d ast.Decl) []string {
-	switch n := d.(type) {
-	case *ast.FuncDecl:
-		return []string{fillMayAdoptLastSegment(n.Name)}
-	case *ast.ImplDecl:
-		var names []string
-		for _, m := range n.Members {
-			if fn, ok := m.(*ast.FuncDecl); ok {
-				names = append(names, fillMayAdoptLastSegment(fn.Name))
-			}
-		}
-		return names
-	}
-	return nil
-}
-
-func bodyStmts(d ast.Decl) []ast.Stmt {
-	switch n := d.(type) {
-	case *ast.FuncDecl:
-		return funcScanStmts(n)
-	case *ast.ImplDecl:
-		var stmts []ast.Stmt
-		for _, m := range n.Members {
-			if fn, ok := m.(*ast.FuncDecl); ok {
-				stmts = append(stmts, funcScanStmts(fn)...)
-			}
-		}
-		return stmts
-	}
-	return nil
-}
-
-// bodyGraphBinaryOperatorMethod returns a possible statically dispatched dunder
-// for an operator before expression analysis has populated LoweredCall. These
-// are body-scheduling edges only: without receiver types, treating them as
-// function-call edges would create false recursive-summary classifications.
-func bodyGraphBinaryOperatorMethod(op lexer.TokenKind) string {
-	switch op {
-	case lexer.TOKEN_PLUS:
-		return "__add__"
-	case lexer.TOKEN_MINUS:
-		return "__sub__"
-	case lexer.TOKEN_STAR:
-		return "__mul__"
-	case lexer.TOKEN_SLASH:
-		return "__div__"
-	case lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ:
-		return "__eq__"
-	case lexer.TOKEN_LT, lexer.TOKEN_GT, lexer.TOKEN_LTEQ, lexer.TOKEN_GTEQ:
-		return "__cmp__"
-	default:
-		return ""
-	}
-}
-
-func bodyGraphUnaryOperatorMethod(op lexer.TokenKind) string {
-	if op == lexer.TOKEN_MINUS {
-		return "__neg__"
-	}
-	return ""
-}
-
-// funcScanStmts is a function's body plus its contract clauses, which name
-// callees too (a ghost spec unfolded in an `ensure`).
-func funcScanStmts(fn *ast.FuncDecl) []ast.Stmt {
-	stmts := append([]ast.Stmt(nil), fn.Body...)
-	for _, group := range [][]ast.Expr{fn.Requires, fn.EnsureValues, fn.Decreases} {
-		for _, e := range group {
-			stmts = append(stmts, &ast.ExprStmt{Position: e.Pos(), Expr: e})
-		}
-	}
-	for _, group := range [][]*ast.ProofBlockStmt{fn.RequiresProofs, fn.EnsureProofs} {
-		for _, p := range group {
-			stmts = append(stmts, p)
-		}
-	}
-	return stmts
-}
-
-// funcDefaultArgStmts returns defaults as ordering dependencies. They are
-// evaluated at call sites, so references here must not enter recursive-summary
-// classification for the function whose parameter has the default.
-func funcDefaultArgStmts(fn *ast.FuncDecl) []ast.Stmt {
-	var stmts []ast.Stmt
-	for _, param := range fn.Params {
-		if param.DefaultValue != nil {
-			stmts = append(stmts, &ast.ExprStmt{Position: param.DefaultValue.Pos(), Expr: param.DefaultValue})
-		}
-	}
-	return stmts
-}
+func bodyFunctions(d ast.Decl) []*ast.FuncDecl        { return bodygraph.BodyFunctions(d) }
+func bodyDefinedNames(d ast.Decl) []string            { return bodygraph.BodyDefinedNames(d) }
+func bodyStmts(d ast.Decl) []ast.Stmt                 { return bodygraph.BodyStmts(d) }
+func funcScanStmts(fn *ast.FuncDecl) []ast.Stmt       { return bodygraph.FuncScanStmts(fn) }
+func funcDefaultArgStmts(fn *ast.FuncDecl) []ast.Stmt { return bodygraph.FuncDefaultArgStmts(fn) }
 
 func buildBodyGraph(bodies []scopedDecl) *bodyGraph {
-	definers := map[string][]int{}
-	for i, scoped := range bodies {
-		for _, name := range bodyDefinedNames(scoped.Decl) {
-			definers[name] = append(definers[name], i)
-		}
+	declarations := make([]ast.Decl, len(bodies))
+	for i, body := range bodies {
+		declarations[i] = body.Decl
 	}
-	g := &bodyGraph{deps: make([][]int, len(bodies)), weight: make([]int, len(bodies))}
-	functionIndexByDecl := map[*ast.FuncDecl]int{}
-	functionDefiners := map[string][]int{}
-	for _, scoped := range bodies {
-		for _, fn := range bodyFunctions(scoped.Decl) {
-			functionIndex := len(g.functions)
-			g.functions = append(g.functions, fn)
-			functionIndexByDecl[fn] = functionIndex
-			functionDefiners[fillMayAdoptLastSegment(fn.Name)] = append(functionDefiners[fillMayAdoptLastSegment(fn.Name)], functionIndex)
-		}
-	}
-	g.functionDeps = make([][]int, len(g.functions))
-	g.funcRecursive = make([]bool, len(g.functions))
-	// Dependency targets are dense indices. Reuse generation-mark arrays rather
-	// than allocating a hash set for each body and function.
-	bodySeen := make([]int, len(bodies))
-	functionSeen := make([]int, len(g.functions))
-	functionGeneration := 0
-	for i, scoped := range bodies {
-		bodyGeneration := i + 1
-		for _, fn := range bodyFunctions(scoped.Decl) {
-			functionIndex := functionIndexByDecl[fn]
-			functionGeneration++
-			generation := functionGeneration
-			note := func(name string) {
-				for _, j := range definers[fillMayAdoptLastSegment(name)] {
-					if j != i && bodySeen[j] != bodyGeneration {
-						bodySeen[j] = bodyGeneration
-						g.deps[i] = append(g.deps[i], j)
-					}
-				}
-				for _, target := range functionDefiners[fillMayAdoptLastSegment(name)] {
-					if target == functionIndex {
-						g.funcRecursive[functionIndex] = true
-						continue
-					}
-					if functionSeen[target] != generation {
-						functionSeen[target] = generation
-						g.functionDeps[functionIndex] = append(g.functionDeps[functionIndex], target)
-					}
-				}
-			}
-			noteBodyDependency := func(name string) {
-				for _, j := range definers[fillMayAdoptLastSegment(name)] {
-					if j != i && bodySeen[j] != bodyGeneration {
-						bodySeen[j] = bodyGeneration
-						g.deps[i] = append(g.deps[i], j)
-					}
-				}
-			}
-			scan := func(stmts []ast.Stmt, functionRefs bool) {
-				walkStoreScanNodes(stmts, func(node any) {
-					g.weight[i]++
-					dependency := noteBodyDependency
-					if functionRefs {
-						dependency = note
-					}
-					switch n := node.(type) {
-					case *ast.Ident:
-						dependency(n.Name)
-					case *ast.FieldExpr:
-						dependency(n.Field)
-					case *ast.BinaryExpr:
-						if method := bodyGraphBinaryOperatorMethod(n.Op); method != "" {
-							noteBodyDependency(method)
-						}
-						if n.Op == lexer.TOKEN_PLUS {
-							// Span algebra can also lower `+` to a protocol method or a
-							// visible helper after this pre-analysis graph is built.
-							noteBodyDependency("combine")
-							noteBodyDependency("combine_span")
-							noteBodyDependency("lua_span_union")
-						}
-					case *ast.UnaryExpr:
-						if method := bodyGraphUnaryOperatorMethod(n.Op); method != "" {
-							noteBodyDependency(method)
-						}
-					case ast.Expr:
-						if name, _, ok := ast.PrepassCallShape(n); ok {
-							dependency(name)
-						}
-					}
-				})
-			}
-			scan(funcScanStmts(fn), true)
-			scan(funcDefaultArgStmts(fn), false)
-			sort.Ints(g.functionDeps[functionIndex])
-		}
-		sort.Ints(g.deps[i])
-	}
-	return g
+	graph := bodygraph.Build(declarations, walkStoreScanNodes)
+	return &bodyGraph{deps: graph.Deps, weight: graph.Weight, functions: graph.Functions, functionDeps: graph.FunctionDeps, funcRecursive: graph.FuncRecursive}
 }
 
 func (g *bodyGraph) cyclicFunctions() map[*ast.FuncDecl]bool {
@@ -261,34 +67,7 @@ func reportBodyGraph(bodies []scopedDecl) {
 	}
 	g := buildBodyGraph(bodies)
 	comps := g.sccs()
-	compOf := make([]int, len(bodies))
-	for c, comp := range comps {
-		for _, v := range comp {
-			compOf[v] = c
-		}
-	}
-	total, largest, largestW := 0, 0, 0
-	finish := make([]int, len(comps)) // longest weighted path ending at each component
-	critical := 0
-	for c, comp := range comps {
-		w, start := 0, 0
-		for _, v := range comp {
-			w += g.weight[v]
-			for _, d := range g.deps[v] {
-				if dc := compOf[d]; dc != c && finish[dc] > start {
-					start = finish[dc]
-				}
-			}
-		}
-		finish[c] = start + w
-		if finish[c] > critical {
-			critical = finish[c]
-		}
-		total += w
-		if len(comp) > largest {
-			largest, largestW = len(comp), w
-		}
-	}
+	total, largest, largestW, critical := graphalgo.ComponentMetrics(g.deps, g.weight, comps)
 	for _, comp := range comps {
 		if len(comp) >= 20 {
 			var names []string
@@ -388,26 +167,7 @@ func (s *bodySchedule) finish(u int) {
 // its own dependencies: the caller already holds them (it ran or imported that unit
 // after importing the unit's closure), so each worker walks each unit once.
 func (s *bodySchedule) depClosure(u int, have func(int) bool) []int {
-	if len(s.deps[u]) == 0 {
-		return nil
-	}
-	var out []int
-	seen := map[int]bool{u: true}
-	var visit func(int)
-	visit = func(v int) {
-		for _, d := range s.deps[v] {
-			if !seen[d] {
-				seen[d] = true
-				if have(d) {
-					continue
-				}
-				visit(d)
-				out = append(out, d)
-			}
-		}
-	}
-	visit(u)
-	return out
+	return graphalgo.DependencyClosure(s.deps, u, have)
 }
 
 func planBodySchedule(bodies []scopedDecl, workers int) *bodySchedule {
@@ -416,55 +176,22 @@ func planBodySchedule(bodies []scopedDecl, workers int) *bodySchedule {
 	// Members of a recursive cycle cannot see each other's finished facts in any
 	// order, so a large cycle is dealt in chunks that run side by side; each chunk
 	// still waits for the cycle's outside callees, and callers wait for every chunk.
-	chunk := parallelSCCChunkSize()
-	var units [][]int
-	var sccOf []int
-	for c, comp := range components {
-		for from := 0; from < len(comp); from += chunk {
-			units = append(units, comp[from:min(from+chunk, len(comp))])
-			sccOf = append(sccOf, c)
-		}
-	}
-	s := &bodySchedule{units: units, unitOf: make([]int, len(bodies)), worker: make([]int, len(units)),
-		deps: make([][]int, len(units)), done: make([]chan struct{}, len(units)),
+	units, unitOf, sccOf, sccUnits, unitDeps, weights := graphalgo.WorkUnits(g.deps, g.weight, components, parallelSCCChunkSize())
+	s := &bodySchedule{units: units, unitOf: unitOf, worker: make([]int, len(units)),
+		deps: unitDeps, done: make([]chan struct{}, len(units)),
 		exported: make([]map[int]reflect.Value, len(units)), funcs: make([][]*ast.FuncDecl, len(units)), took: make([]time.Duration, len(units)), nodes: make([][][]nodeFact, len(units)), stmts: make([][]ast.Stmt, len(units))}
 	s.cyclic = g.cyclicFunctions()
 	s.sccOf = sccOf
-	s.sccUnits = map[int][]int{}
-	for u, unit := range units {
-		for _, b := range unit {
-			s.unitOf[b] = u
-		}
-		s.sccUnits[sccOf[u]] = append(s.sccUnits[sccOf[u]], u)
-	}
+	s.sccUnits = sccUnits
 	s.sccLeft = map[int]int{}
 	for c, us := range s.sccUnits {
 		s.sccLeft[c] = len(us)
 	}
 	s.sccPublish = map[int][][2]*FuncType{}
-	weights := make([]int, len(units))
-	// A generation per unit avoids rebuilding a hash set for every body while
-	// retaining exactly the same dependency deduplication and ordering.
-	seenGeneration := make([]int, len(units))
 	for u, unit := range units {
 		s.done[u] = make(chan struct{})
-		w := 0
-		generation := u + 1
-		seenGeneration[u] = generation
 		for _, b := range unit {
 			s.stmts[u] = append(s.stmts[u], bodyStmts(bodies[b].Decl)...)
-			w += g.weight[b] + 50
-			for _, d := range g.deps[b] {
-				if du := s.unitOf[d]; seenGeneration[du] != generation && sccOf[du] != sccOf[u] {
-					// A cycle's function types publish when its last chunk ends.
-					for _, sibling := range s.sccUnits[sccOf[du]] {
-						if seenGeneration[sibling] != generation {
-							seenGeneration[sibling] = generation
-							s.deps[u] = append(s.deps[u], sibling)
-						}
-					}
-				}
-			}
 			switch n := bodies[b].Decl.(type) {
 			case *ast.FuncDecl:
 				s.funcs[u] = append(s.funcs[u], n)
@@ -476,43 +203,8 @@ func planBodySchedule(bodies []scopedDecl, workers int) *bodySchedule {
 				}
 			}
 		}
-		sort.Ints(s.deps[u])
-		weights[u] = w
 	}
-	s.rdeps = make([][]int, len(s.units))
-	s.pending = make([]int, len(s.units))
-	s.priority = make([]int, len(s.units))
-	// Count reverse edges first so all lists can use one exactly sized backing
-	// array instead of growing and copying a separate slice for each callee.
-	clear(seenGeneration)
-	edgeCount := 0
-	for u := range s.units {
-		s.pending[u] = len(s.deps[u])
-		for _, d := range s.deps[u] {
-			seenGeneration[d]++
-			edgeCount++
-		}
-	}
-	backing := make([]int, edgeCount)
-	offset := 0
-	for unit, count := range seenGeneration {
-		if count != 0 {
-			s.rdeps[unit] = backing[offset : offset : offset+count]
-			offset += count
-		}
-	}
-	for u := range s.units {
-		for _, d := range s.deps[u] {
-			s.rdeps[d] = append(s.rdeps[d], u)
-		}
-	}
-	for u := len(s.units) - 1; u >= 0; u-- {
-		best := 0
-		for _, r := range s.rdeps[u] {
-			best = max(best, s.priority[r])
-		}
-		s.priority[u] = best + weights[u]
-	}
+	s.rdeps, s.pending, s.priority = graphalgo.ScheduleDependencies(s.deps, weights, make([]int, len(units)))
 	s.cond = sync.NewCond(&s.mu)
 	s.ready.priority = s.priority
 	s.left = len(s.units)

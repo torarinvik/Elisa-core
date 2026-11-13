@@ -9,11 +9,6 @@ import (
 	"sort"
 )
 
-func captureFunctionTypeGraph(root Type, env *FunctionTypeEnvironment) (*functionTypeGraph, error) {
-	graph, _, err := captureFunctionTypeGraphs([]Type{root}, env)
-	return graph, err
-}
-
 func captureFunctionTypeGraphs(roots []Type, env *FunctionTypeEnvironment) (*functionTypeGraph, []uint32, error) {
 	graph := &functionTypeGraph{}
 	seen := map[Type]uint32{}
