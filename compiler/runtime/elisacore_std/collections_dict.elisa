@@ -135,7 +135,14 @@ def arena_dict_reserve[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capa
         if old_items_opt != null and old_capacity > 0:
             old_items: mutable DictBucket[K, T]& = old_items_opt
             for i in 0..<old_capacity:
-                arena_dict_place_fresh(rehash, old_items[i].key, old_items[i].value) if old_items[i].state == COLLECTION_BUCKET_OCCUPIED
+                if old_items[i].state == COLLECTION_BUCKET_OCCUPIED:
+                    old_key: K = old_items[i].key
+                    probe: DictProbeResult = arena_dict_find_index(rehash, old_key)
+                    new_items[probe.index].key <- old_key
+                    new_items[probe.index].value <- old_items[i].value
+                    new_items[probe.index].state <- COLLECTION_BUCKET_OCCUPIED
+                    rehash.count <- rehash.count + 1.usize()
+                    rehash.used <- rehash.used + 1.usize()
 
         m.items as & <- rehash.items
         (collection_stack_profile_release(owner, live_table) can Global{Read,Write})
