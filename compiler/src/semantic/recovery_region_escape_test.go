@@ -59,3 +59,19 @@ def bad(fallback: sview) -> sview:
 		t.Fatalf("expected the array-contained recovery return to reject the region escape, got:\n%s", diagnostics)
 	}
 }
+
+func TestRecoveryReturnChecksTypestatePostcondition(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "recovery_return_postcondition.elisa", `
+struct Job[state Pending | Ready]:
+	stage: mutable int
+	derive state:
+		Pending when self.stage == 0
+		Ready when self.stage == 1
+def finish(job: mutable Job[Pending]&, maybe: i64?) -> void can[Abort] ensures job => Ready:
+	value: i64 = get maybe else return
+	job.stage <- 1
+`)
+	if diagnostics := strings.Join(result.Errors(), "\n"); !strings.Contains(diagnostics, "cannot prove ensures job => Ready") {
+		t.Fatalf("expected the early recovery return to check the postcondition, got:\n%s", diagnostics)
+	}
+}

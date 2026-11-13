@@ -161,34 +161,10 @@ func (a *Analyzer) analyzeRecoveryReturn(recovery *ast.RecoveryClause) {
 		}
 		return
 	}
-	if recovery.Value == nil {
-		if !isVoidType(a.currentReturn) {
-			a.errorf(recovery.Position, "return recovery expects %s, got void", a.currentReturn)
-		}
-		// `else return` leaves the function: live must-consume values leak.
-		a.reportUnconsumedProtocolValuesOnExit()
-		return
-	}
-	valueType := a.analyzeExpr(recovery.Value)
-	// A recovery return exits the same function as an ordinary return. Its
-	// value must satisfy the same lifetime checks even when the recovery is
-	// nested in a call argument or an aggregate expression.
-	a.checkLocalArenaEscape(recovery.Value, valueType, "return")
-	a.checkReturnBorrowEscapesLocal(recovery.Value, valueType)
-	a.checkGlobalStorageReturnEscape(recovery.Value)
-	a.checkProgramRegionSlotStore(recovery.Value, a.currentReturn, valueType)
-	if !a.checkTupleReturnRegionEscapes(recovery.Value, valueType, a.currentReturn) {
-		a.checkReturnRegionContainerEscape(recovery.Value, valueType)
-		a.checkRegionAggregateReturnEscape(recovery.Value, valueType)
-		a.checkRegionParamReturnEscape(recovery.Value, valueType)
-	}
-	expectedReturn := a.matchReturnType(valueType)
-	if !AssignableTo(expectedReturn, valueType) {
-		a.errorf(recovery.Position, "return type expects %s, got %s", expectedReturn, valueType)
-		a.reportShapeMismatchNotes(recovery.Position, expectedReturn, valueType)
-	}
-	a.consumeAffineValueExpr(recovery.Value, expectedReturn, "return")
-	a.reportUnconsumedProtocolValuesOnExit()
+	// Recovery returns leave the function just like return statements. Reuse the
+	// complete path so lifetime, postcondition, provenance and drop checks cannot
+	// drift apart as either form evolves.
+	a.analyzeReturnStatement(&ast.ReturnStmt{Position: recovery.Position, Value: recovery.Value}, nil)
 }
 
 // narrowedOptionalDeclaredType returns the declared optional type of a place that an
