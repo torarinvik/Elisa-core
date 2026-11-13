@@ -1,3 +1,5 @@
+//go:build cgo
+
 package backend
 
 import "elisacore/src/ast"
