@@ -75,3 +75,19 @@ def finish(job: mutable Job[Pending]&, maybe: i64?) -> void can[Abort] ensures j
 		t.Fatalf("expected the early recovery return to check the postcondition, got:\n%s", diagnostics)
 	}
 }
+
+func TestOptionalRecoveryReturnChecksRegionEscape(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "optional_recovery_return_region.elisa", `
+def consume(value: i64) -> void:
+	pass
+def bad(maybe: i64?, fallback: sview) -> sview:
+	can Memory.Allocate, Abort.Panic:
+		region inner(4096):
+			bytes: mutable darray[u8] @inner = [65.u8()]
+			consume(get maybe else return bytes.as_sview())
+		return fallback
+`)
+	if diagnostics := strings.Join(result.Errors(), "\n"); !strings.Contains(diagnostics, "escapes via return") {
+		t.Fatalf("expected the optional recovery return to reject the region escape, got:\n%s", diagnostics)
+	}
+}
