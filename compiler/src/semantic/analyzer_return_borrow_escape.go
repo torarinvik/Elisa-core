@@ -210,8 +210,15 @@ func (a *Analyzer) returnBorrowFlowForExpr(expr ast.Expr, aliases map[string]ret
 	if !flow.empty() && expr != nil {
 		// A value whose type holds no reference, view, closure or generic part cannot carry a
 		// borrow of anything: `ValueType{kind, bits}` computed from reference arguments is a copy.
-		if t, ok := a.lookupExprType(expr); ok && a.typeIsBorrowFree(t, map[Type]bool{}) {
-			return returnBorrowFlow{}
+		if t, ok := a.lookupExprType(expr); ok {
+			if a.typeIsBorrowFree(t, map[Type]bool{}) {
+				return returnBorrowFlow{}
+			}
+			// A copied value may contain views into a program-lived store
+			// even when its container was allocated in the current frame.
+			if flow.Local && len(a.programRegions) != 0 && a.typeViewsProgramLived(t, map[Type]bool{}) {
+				flow.Local = false
+			}
 		}
 	}
 	return flow
