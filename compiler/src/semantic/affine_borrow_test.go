@@ -144,3 +144,21 @@ def via_borrow_uaf() -> void:
 		t.Fatalf("expected Pooled[Node]& to stay rejected; got:\n%s", all)
 	}
 }
+
+// Mutable references must not provide an alternate route around the pooled
+// handle restriction: releasing a handle may recycle its slot while an alias
+// obtained through the reference is still live.
+func TestMutablePooledHandleStaysUnborrowable(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "pooled_mutable_borrow_reject.elisa", poolBorrowPrelude+`def get_ptr(h: mutable Pooled[Node]&) -> mutable heap Node&:
+    h.ptr
+
+def via_borrow_uaf() -> void:
+    h: mutable Pooled[Node] = zeroed
+    b: mutable heap Node& = get_ptr(&h)
+    release(move h)
+    b.val <- 9
+`)
+	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "references to values containing linear handles are not supported; got Pooled[Node]&") {
+		t.Fatalf("expected mutable Pooled[Node]& to stay rejected; got:\n%s", all)
+	}
+}
