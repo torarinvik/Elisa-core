@@ -87,7 +87,9 @@ func (a *Analyzer) calleeStoresProgramLivedElementsActive(decl *ast.FuncDecl, ot
 		}
 		switch n := node.(type) {
 		case *ast.AssignStmt:
-			if n == nil {
+			// A manifest invokes the call without storing a result. The
+			// call node is still visited for writes through its arguments.
+			if n == nil || n.ArgManifest {
 				return
 			}
 			root := rootIdentExpr(n.Target)
