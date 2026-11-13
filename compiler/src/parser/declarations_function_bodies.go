@@ -201,7 +201,7 @@ func (p *Parser) parseExternDeclWithAnnotations(annotations []ast.Annotation) as
 	// Boundary preconditions: `extern f(...) -> T requires <bool>[, <bool>]` — checked at calls.
 	var requires []ast.Expr
 	var uses []*ast.ContractStmt
-	if p.matchIdentText("requires") {
+	if p.matchIdentText("requires") || p.matchIdentText("require") {
 		saved := p.allowQuantifiers
 		p.allowQuantifiers = true
 		requires = append(requires, p.parseExpr())

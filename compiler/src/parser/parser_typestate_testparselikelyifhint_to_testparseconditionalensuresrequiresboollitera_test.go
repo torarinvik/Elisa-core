@@ -220,6 +220,17 @@ func TestParseFunctionEnsuresClauses(t *testing.T) {
 		t.Fatalf("expected fourth ensures clause to preserve state, got %#v", decl.Ensures[3])
 	}
 }
+func TestParseExternSingularRequire(t *testing.T) {
+	file, errs := parseSourceFile(t, "extern ready(handle: void&) -> bool require true\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.ExternFuncDecl)
+	if !ok || len(decl.Requires) != 1 {
+		t.Fatalf("expected an extern with one precondition, got %#v", file.Decls[0])
+	}
+}
+
 func TestParseExternEnsuresClause(t *testing.T) {
 	file, errs := parseSourceFile(t, "extern sfree_heap_pair_node(node: heap HeapPairNode&) -> void can[Memory.Release] ensures node => !\n")
 	if len(errs) != 0 {

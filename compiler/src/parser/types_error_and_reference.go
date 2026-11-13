@@ -145,7 +145,7 @@ func (p *Parser) parseErrorSetItemGroup() []ast.ErrorTagExpr {
 // clause, not a region-prefixed reference.
 func isPostReturnClauseKeyword(text string) bool {
 	switch text {
-	case "can", "effects", "ensures", "ensure", "requires", "uses", "changes", "preserves", "fulfills":
+	case "can", "effects", "ensures", "ensure", "requires", "require", "uses", "changes", "preserves", "fulfills":
 		return true
 	default:
 		return false
