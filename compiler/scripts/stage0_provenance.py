@@ -150,6 +150,7 @@ def _source_candidates(
     selected: dict[str, Path] = {}
     package_directories: dict[str, Path] = {}
     closure_packages: dict[str, dict[str, object]] = {}
+    module_directories: dict[str, Path] = {}
     for package in packages:
         directory_value = package.get("Dir")
         if not isinstance(directory_value, str) or not directory_value:
@@ -162,14 +163,22 @@ def _source_candidates(
         module = package.get("Module")
         module = module if isinstance(module, dict) else {}
         module_directory_value = module.get("Dir")
-        module_directory = Path(str(module_directory_value)).resolve() if module_directory_value else None
         if directory.is_relative_to(root):
             prefix = "module"
             package_relative = directory.relative_to(root)
         elif directory.is_relative_to(goroot):
             prefix = "goroot"
             package_relative = directory.relative_to(goroot)
-        elif module_directory is not None and directory.is_relative_to(module_directory):
+        elif module_directory_value:
+            module_directory_key = str(module_directory_value)
+            module_directory = module_directories.get(module_directory_key)
+            if module_directory is None:
+                module_directory = Path(module_directory_key).resolve()
+                module_directories[module_directory_key] = module_directory
+            if not directory.is_relative_to(module_directory):
+                raise RuntimeError(
+                    f"unsupported Stage0 Go package source root: {package.get('ImportPath', 'unknown')} at {directory}"
+                )
             module_path = str(module.get("Path", ""))
             module_version = str(module.get("Version", ""))
             if not module_path or not module_version:
