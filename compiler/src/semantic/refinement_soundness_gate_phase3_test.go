@@ -279,26 +279,33 @@ def bad() -> i64:
 // Passing a value that satisfies P but violates Q must still be caught.
 // ---------------------------------------------------------------------------
 
-// SOUNDNESS TODO: When a refine alias chain is resolved, both predicates (outer
-// AND inner) must be discharged. Currently chain resolution via resolveRefineAliasFully
-// combines predicates, but call-site discharge of the combined form is not
-// always fully verified against the actual argument.
-func TestSoundnessGateP3_TODO_ChainedAliasPredicatesAllDischarge(t *testing.T) {
-	t.Skip("SOUNDNESS TODO (in flight): chained refine alias call-site combined-predicate discharge not fully verified")
-	src := `
+// Both predicates in a refine alias chain must be checked at a call site.
+func TestSoundnessGateP3_ChainedAliasPredicatesAllDischarge(t *testing.T) {
+	const template = `
 refine Small = i64 where self < 100
 refine TinyPositive = Small where self > 0
 
 def need_tiny_pos(n: TinyPositive) -> i64:
     return n
 
-def bad() -> i64:
-    return need_tiny_pos(-5)
+def check() -> i64:
+    return need_tiny_pos(VALUE)
 `
-	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(
-		t, "p3_chain_combined_pred.elisa", src, AnalyzeOptions{})
-	if len(result.Errors()) == 0 {
-		t.Errorf("SOUNDNESS VIOLATION: -5 violates TinyPositive (self > 0); combined alias predicate must be refuted; "+
-			"errors=%v proof=%v", result.Errors(), result.ProofReport)
+	for _, tc := range []struct {
+		value string
+		valid bool
+	}{{"5", true}, {"-5", false}, {"100", false}} {
+		t.Run(tc.value, func(t *testing.T) {
+			src := strings.ReplaceAll(template, "VALUE", tc.value)
+			result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(
+				t, "p3_chain_combined_pred.elisa", src, AnalyzeOptions{})
+			errors := strings.Join(result.Errors(), "\n")
+			if tc.valid && errors != "" {
+				t.Fatalf("valid value rejected: %s", errors)
+			}
+			if !tc.valid && !strings.Contains(errors, "where precondition of need_tiny_pos is violated") {
+				t.Fatalf("expected alias precondition violation, got: %s", errors)
+			}
+		})
 	}
 }
