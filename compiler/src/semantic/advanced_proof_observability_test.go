@@ -213,9 +213,7 @@ def caller() -> i64:
 
 // TestAdvancedObservability_NamedContract_Uses_ExpansionSite
 //
-// Check whether a ProofReport entry is produced at the `uses` expansion site itself
-// (not just at call sites). Currently no such entry is expected; this test documents
-// the gap.
+// Check that a ProofReport entry identifies the `uses` expansion site itself.
 func TestAdvancedObservability_NamedContract_Uses_ExpansionSite(t *testing.T) {
 	src := `
 contract CheckPositive(x: i64):
@@ -239,13 +237,7 @@ def need(val: i64 where val > 0) -> i64:
 		}
 	}
 	if !found {
-		// OBSERVABILITY TODO: the `uses` expansion site (expandOneUse in
-		// analyzer_named_contracts.go) does not record a ProofReport entry mentioning
-		// the contract name. This means named-contract applications are invisible to
-		// proof tooling by name. To fix: add a recordProof call in expandOneUse (or in
-		// the requires-discharge path when the clause originated from a `uses`) with
-		// subject = "uses <ContractName> in <fn>" and predicate = "uses".
-		t.Skip("OBSERVABILITY TODO: `uses` contract expansion does not produce a named ProofReport entry (contract name invisible)")
+		t.Errorf("expected named contract expansion proof entry; got %+v", result.ProofReport)
 	}
 }
 

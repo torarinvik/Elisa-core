@@ -123,7 +123,7 @@ def f() -> i64:
 		}
 	}
 	if !found {
-		t.Skip("OBSERVABILITY TODO: ensure postcondition (proven) does not yet produce a ProofReport entry — add recordProof to the ensure discharge path")
+		t.Errorf("expected proven ensure proof entry; got %+v", result.ProofReport)
 	}
 }
 
@@ -174,7 +174,7 @@ def f(n: i64) -> i64:
 		AnalyzeOptions{},
 	)
 	if !proofReportContains(result.ProofReport, "local where refinement", "where", ProofRuntime) {
-		t.Skip("OBSERVABILITY TODO: local where binding (runtime-fallback) does not yet produce a ProofRuntime ProofReport entry")
+		t.Errorf("expected runtime local-where proof entry; got %+v", result.ProofReport)
 	}
 }
 
@@ -230,7 +230,7 @@ def f(n: i64) -> i64:
 		AnalyzeOptions{},
 	)
 	if !proofReportContains(result.ProofReport, "where refinement on reassignment", "where", ProofRuntime) {
-		t.Skip("OBSERVABILITY TODO: where reassignment (runtime-fallback) does not yet produce a ProofRuntime ProofReport entry")
+		t.Errorf("expected runtime reassignment proof entry; got %+v", result.ProofReport)
 	}
 }
 
@@ -286,7 +286,7 @@ def make(n: i64) -> Box:
 		AnalyzeOptions{},
 	)
 	if !proofReportContains(result.ProofReport, "where refinement on field \"v\"", "where", ProofRuntime) {
-		t.Skip("OBSERVABILITY TODO: struct field where (runtime-fallback) does not yet produce a ProofRuntime ProofReport entry")
+		t.Errorf("expected runtime field-where proof entry; got %+v", result.ProofReport)
 	}
 }
 
