@@ -1,5 +1,7 @@
 package semantic
 
+import "strings"
+
 func IsInvalidType(t Type) bool {
 	_, ok := t.(*InvalidType)
 	return ok
@@ -93,6 +95,12 @@ func MatchErrorTag(dst *ErrorSetType, srcTag string) (string, bool) {
 	}
 	if dst.HasTag(srcTag) {
 		return srcTag, true
+	}
+	// A qualified tag names a particular error family. Falling back to its
+	// leaf would allow an unrelated family with the same variant spelling.
+	// Unqualified catch arms still use the unique-leaf lookup below.
+	if strings.Contains(srcTag, ".") {
+		return "", false
 	}
 	shortName := ErrorTagShortName(srcTag)
 	match := ""
