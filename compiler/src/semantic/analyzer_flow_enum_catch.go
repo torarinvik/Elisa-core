@@ -168,6 +168,17 @@ func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 // arm scope, typed by the matched variant's payload fields. Binding is optional — an arm
 // may ignore the payload by omitting the parenthesised binders; but if it binds, the arity
 // must match.
+// Resolve the module alias in a qualified catch arm in its lexical namespace.
+// The remaining family and variant path is left intact for exact tag matching.
+func (a *Analyzer) resolveCatchArmAlias(name string) string {
+	if dot := strings.IndexByte(name, '.'); dot > 0 {
+		if target, ok := a.lookupModuleAliasTarget(a.currentNamespace, name[:dot]); ok {
+			return target + name[dot:]
+		}
+	}
+	return name
+}
+
 func (a *Analyzer) bindCatchArmPayload(scope *Scope, arm ast.CatchArm, errs *ErrorSetType, tag string) {
 	if len(arm.Payload) == 0 {
 		return
@@ -281,7 +292,7 @@ func (a *Analyzer) analyzeCatchExpr(expr *ast.CatchExpr) Type {
 			mergeArm(arm.Position, arm.Body, errorScope)
 			continue
 		}
-		matchedTag, ok := MatchErrorTag(unionType.Errors, arm.Name)
+		matchedTag, ok := MatchErrorTag(unionType.Errors, a.resolveCatchArmAlias(arm.Name))
 		if !ok {
 			if unionType.Errors.HasParams() {
 				a.errorf(arm.Position, "catch arm %q does not match %s; use `error %s:` to catch the opaque error-set parameter component", arm.Name, ErrorSetDiagnosticName(unionType.Errors), arm.Name)
