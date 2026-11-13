@@ -85,6 +85,9 @@ func TestAnalysisBuildReconstructsStoreScanTypePredicates(t *testing.T) {
 	typ := &ArrayType{Elem: &BuiltinType{Name: "uintptr"}}
 	address := a.storeScanTypeMayEncodeAddress(typ, map[Type]bool{})
 	plain := a.storeScanTypeIsPlainValue(typ)
+	noStorage := a.storeScanHoldsNoRegionStorage(typ)
+	viewOnly := a.storeScanViewOnlyCached(typ)
+	shares := a.storeScanSharesCached(typ)
 	// Program-lived classification only runs when a program region exists;
 	// seed its derived memo to verify it is not serialized.
 	a.storeScanProgramLivedMemo = map[Type]bool{typ: false}
@@ -98,6 +101,9 @@ func TestAnalysisBuildReconstructsStoreScanTypePredicates(t *testing.T) {
 	if len(a.storeScanAddressMemo) == 0 || len(a.storeScanPlainValueMemo) == 0 || len(a.storeScanProgramLivedMemo) == 0 {
 		t.Fatal("checkpoint changed live store-scan predicate memos")
 	}
+	if len(a.storeScanNoStorageCache) == 0 || len(a.storeScanViewOnlyCache) == 0 || len(a.storeScanSharesCache) == 0 {
+		t.Fatal("checkpoint changed live store-scan classification caches")
+	}
 	restored, err := RestoreAnalysisBuild(data)
 	if err != nil {
 		t.Fatal(err)
@@ -106,7 +112,13 @@ func TestAnalysisBuildReconstructsStoreScanTypePredicates(t *testing.T) {
 	if cold.storeScanAddressMemo != nil || cold.storeScanPlainValueMemo != nil || cold.storeScanProgramLivedMemo != nil {
 		t.Fatal("checkpoint serialized derived store-scan predicate memos")
 	}
+	if cold.storeScanNoStorageCache != nil || cold.storeScanViewOnlyCache != nil || cold.storeScanSharesCache != nil {
+		t.Fatal("checkpoint serialized derived store-scan classification caches")
+	}
 	if cold.storeScanTypeMayEncodeAddress(typ, map[Type]bool{}) != address || cold.storeScanTypeIsPlainValue(typ) != plain {
 		t.Fatal("recomputed store-scan predicates changed")
+	}
+	if cold.storeScanHoldsNoRegionStorage(typ) != noStorage || cold.storeScanViewOnlyCached(typ) != viewOnly || cold.storeScanSharesCached(typ) != shares {
+		t.Fatal("recomputed store-scan classifications changed")
 	}
 }

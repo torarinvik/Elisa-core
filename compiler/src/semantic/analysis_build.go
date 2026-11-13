@@ -347,6 +347,7 @@ func (b *AnalysisBuild) marshalState(capacity int, externalSource bool) ([]byte,
 		&a.programLivedTypes, &a.regionRefsMemo, &a.affineHandleMemo,
 		&a.typeParamMemo, &a.borrowedOwnerRefMemo, &a.mutableBorrowCapabilityMemo,
 		&a.storeScanAddressMemo, &a.storeScanPlainValueMemo, &a.storeScanProgramLivedMemo,
+		&a.storeScanNoStorageCache, &a.storeScanViewOnlyCache, &a.storeScanSharesCache,
 	}
 	var savedTypeMemos [len(typeMemos)]map[Type]bool
 	for i, memo := range typeMemos {
