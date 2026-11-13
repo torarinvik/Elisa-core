@@ -132,3 +132,25 @@ def main() -> int:
         return 9
 `, true)
 }
+
+func TestActualDictRehashPreservesKeysAfterRemovals(t *testing.T) {
+	runActualDictInactiveNative(t, `def main() -> int:
+    can Memory.Allocate, Abort.Panic:
+        values: mutable dict[i64, i64] = {}
+        for i in 0..<128:
+            values.put(i, i * 3)
+        assert values.count == 128
+        for i in 0..<128:
+            assert values.contains(i)
+        for i in 0..<64:
+            assert values.remove(i)
+        for i in 128..<256:
+            values.put(i, i * 3)
+        assert values.count == 192
+        for i in 0..<64:
+            assert not values.contains(i)
+        for i in 64..<256:
+            assert values.contains(i)
+        return 0
+`, false)
+}
