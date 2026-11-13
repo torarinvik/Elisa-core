@@ -234,16 +234,14 @@ type regionParamBodyFactsKey struct {
 }
 
 type regionParamBodyFacts struct {
-	containerGrownKnown      bool
-	containerGrown           bool
-	containerReassignedKnown bool
-	containerReassigned      bool
-	fieldGrownKnown          bool
-	fieldGrown               bool
-	fieldAssignedFreshKnown  bool
-	fieldAssignedFresh       bool
-	storesBodyLocalKnown     bool
-	storesBodyLocal          bool
+	containerNeedsRegionKnown bool
+	containerNeedsRegion      bool
+	fieldGrownKnown           bool
+	fieldGrown                bool
+	fieldAssignedFreshKnown   bool
+	fieldAssignedFresh        bool
+	storesBodyLocalKnown      bool
+	storesBodyLocal           bool
 }
 
 func bodyFactsForParam(cache map[regionParamBodyFactsKey]*regionParamBodyFacts, fn *ast.FuncDecl, name string) *regionParamBodyFacts {
@@ -295,18 +293,11 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, 
 			needsRegion := grownWithRegionValue || a.forwardTargetsRequireRegion(forwarding.direct[p.Name])
 			if !needsRegion {
 				facts := bodyFactsForParam(bodyFacts, fn, p.Name)
-				if !facts.containerGrownKnown {
-					facts.containerGrown = paramContainerIsGrownNeedingRegion(fn.Body, p.Name, permRoots)
-					facts.containerGrownKnown = true
+				if !facts.containerNeedsRegionKnown {
+					facts.containerNeedsRegion = regionframesyntax.ParamContainerNeedsRegion(fn.Body, p.Name, permRoots, containerGrowthMethods, storeRegionRootName)
+					facts.containerNeedsRegionKnown = true
 				}
-				needsRegion = facts.containerGrown
-				if !needsRegion {
-					if !facts.containerReassignedKnown {
-						facts.containerReassigned = paramContainerReassignedFromLiteral(fn.Body, p.Name)
-						facts.containerReassignedKnown = true
-					}
-					needsRegion = facts.containerReassigned
-				}
+				needsRegion = facts.containerNeedsRegion
 			}
 			if needsRegion {
 				stamp = cstamp
