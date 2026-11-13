@@ -233,10 +233,12 @@ func advanceAnalysisDiskBuildWithCheckpoint(program *loadedProgram, file *ast.Fi
 		checkpointSized = false
 		// The first large checkpoint has no prior wire size. Reserve from
 		// source size to avoid copying a growing output buffer several times.
+		// Six times the expanded source covered the initial compiler checkpoint
+		// while reserving less memory than the former eight-times estimate.
 		// Once published, use the measured size for subsequent checkpoints.
 		hint := capacityHint
 		if hint == 0 && len(program.source) >= 4<<20 {
-			hint = 8 * min(len(program.source), 32<<20)
+			hint = 6 * min(len(program.source), 32<<20)
 		}
 		data, err := build.MarshalStateWithExternalSource(hint)
 		if err == nil {
