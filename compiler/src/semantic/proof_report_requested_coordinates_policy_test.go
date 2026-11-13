@@ -18,7 +18,7 @@ import (
 func TestRequestedProofCoordinatesKeepFrozenFullRendererAndTraversal(t *testing.T) {
 	_, filename, _, _ := runtime.Caller(0)
 	dir := filepath.Dir(filename)
-	old, err := os.ReadFile(filepath.Join(dir, "proof_report_coordinates.go"))
+	old, err := os.ReadFile(filepath.Join(dir, "proof_report_syntax_renderer_test.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestRequestedProofCoordinatesKeepFrozenFullRendererAndTraversal(t *testing.
 		}
 		return true
 	})
-	fallbackSource, err := os.ReadFile(filepath.Join(dir, "../astscan/proof_coordinate_fallback.go"))
+	fallbackSource, err := os.ReadFile(filepath.Join(dir, "../proofcoordinatescan/proof_coordinate_fallback.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestRequestedProofCoordinatesKeepFrozenFullRendererAndTraversal(t *testing.
 	if rootCalls != 1 || !sharedSeen {
 		t.Fatal("complete typed source root/shared pointer traversal missing")
 	}
-	generatedSource, err := os.ReadFile(filepath.Join(dir, "../astscan/proof_coordinate_walk_gen.go"))
+	generatedSource, err := os.ReadFile(filepath.Join(dir, "../proofcoordinatescan/proof_coordinate_walk_gen.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestRequestedProofCoordinatesKeepFrozenFullRendererAndTraversal(t *testing.
 				enabled = render(field.Value) == "true"
 			}
 		}
-		if file == "src/astscan/proof_coordinate_walk_gen.go" && enabled {
+		if file == "src/proofcoordinatescan/proof_coordinate_walk_gen.go" && enabled {
 			covered = true
 		}
 		return true
