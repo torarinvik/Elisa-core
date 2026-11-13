@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/flowshape"
 	"elisacore/src/lexer"
 	"maps"
 	"slices"
@@ -203,7 +204,7 @@ func (info *loopFlowInfo) assignBranchCount(name string) int {
 func (info *loopFlowInfo) bindingIsMonotoneCounter(name string) bool {
 	sawStep := false
 	allSteps := true
-	visitAssignments(info.body, name, func(stmt ast.Stmt) {
+	flowshape.VisitAssignments(info.body, name, func(stmt ast.Stmt) {
 		switch n := stmt.(type) {
 		case *ast.AssignStmt:
 			if isConstantStep(n.Value, name) {
@@ -237,39 +238,6 @@ func isConstantStep(value ast.Expr, name string) bool {
 	return false
 }
 
-func visitAssignments(stmts []ast.Stmt, name string, visit func(ast.Stmt)) {
-	for _, stmt := range stmts {
-		switch n := stmt.(type) {
-		case *ast.AssignStmt:
-			if identNameOf(n.Target) == name {
-				visit(n)
-			}
-		case *ast.AugAssignStmt:
-			if identNameOf(n.Target) == name {
-				visit(n)
-			}
-		case *ast.IfStmt:
-			visitAssignments(n.Then, name, visit)
-			for _, elif := range n.Elifs {
-				visitAssignments(elif.Body, name, visit)
-			}
-			visitAssignments(n.Else, name, visit)
-		case *ast.MatchStmt:
-			for _, arm := range n.Arms {
-				visitAssignments(arm.Body, name, visit)
-			}
-		case *ast.ScopeStmt:
-			visitAssignments(n.Body, name, visit)
-		case *ast.CanStmt:
-			visitAssignments(n.Body, name, visit)
-		case *ast.InStoreStmt:
-			visitAssignments(n.Body, name, visit)
-		case *ast.RegionStmt:
-			visitAssignments(n.Body, name, visit)
-		}
-	}
-}
-
 // bindingIsStickyLatch reports whether a bool binding is only ever assigned a SINGLE literal value
 // across the loop body (always `true`, or always `false`) — a one-way sticky latch recording a
 // fact ("have we seen an explicit arg yet", "has the tail terminated"), never reset. That is a
@@ -279,7 +247,7 @@ func (info *loopFlowInfo) bindingIsStickyLatch(name string) bool {
 	sawTrue := false
 	sawFalse := false
 	sawNonLiteral := false
-	visitAssignments(info.body, name, func(stmt ast.Stmt) {
+	flowshape.VisitAssignments(info.body, name, func(stmt ast.Stmt) {
 		assign, ok := stmt.(*ast.AssignStmt)
 		if !ok {
 			sawNonLiteral = true

@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"elisacore/src/flowshape"
 	"sort"
 
 	"elisacore/src/ast"
@@ -147,7 +148,7 @@ func varsWrittenInAtLeastTwoArms(arms [][]string) []string {
 // fallThroughAssignList returns the distinct bare-Ident assignment targets in a block, or nil
 // if the block diverts (its writes never reach the join).
 func fallThroughAssignList(body []ast.Stmt) []string {
-	if flowBlockEndsInExit(body) {
+	if flowshape.BlockEndsInExit(body) {
 		return nil
 	}
 	set := map[string]bool{}

@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/flowshape"
 )
 
 // R3 — unguarded repeated advance (docs/121 §3-R3). Advancing the same loop-carried cursor twice
@@ -201,19 +202,7 @@ func advanceOfAssign(assign *ast.AssignStmt) (string, string, bool) {
 	return binding, name, true
 }
 
-// callNameAndReceiver extracts a call's method name and, if it is a method/UFCS call on a bare
-// binding, that receiver name. Handles both `recv.method()` (FieldExpr callee) and the
-// UFCS/lowered `method(recv)` form (Ident callee with a SafeReceiver or leading Ident arg).
+// callNameAndReceiver shares the call-shape traversal with flow analysis.
 func callNameAndReceiver(call *ast.CallExpr) (string, string) {
-	switch fn := call.Func.(type) {
-	case *ast.FieldExpr:
-		return fn.Field, identNameOf(fn.Object)
-	case *ast.Ident:
-		receiver := identNameOf(call.SafeReceiver)
-		if receiver == "" && len(call.Args) > 0 {
-			receiver = identNameOf(call.Args[0])
-		}
-		return fn.Name, receiver
-	}
-	return "", ""
+	return flowshape.CallNameAndReceiver(call)
 }
