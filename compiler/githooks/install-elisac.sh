@@ -87,7 +87,7 @@ if [ ! -f "$PROVENANCE_SCRIPT" ] || ! command -v "$PYTHON_TOOL" >/dev/null 2>&1;
     echo "[hook] Stage0 provenance helper/Python unavailable; installed compiler retained" >&2
     exit 0
 fi
-if ! "$PYTHON_TOOL" "$TIMEOUT_SCRIPT" 3 --grace-seconds 0 -- env ELISA_REBUILD_SUPERVISED=1 "$PYTHON_TOOL" "$PROVENANCE_SCRIPT" build --root "$COMPILER_DIR" --binary "$INSTALL_BIN" >/tmp/elisac-autoinstall.log 2>&1; then
+if ! "$PYTHON_TOOL" "$TIMEOUT_SCRIPT" 5 --grace-seconds 0 -- env ELISA_REBUILD_SUPERVISED=1 "$PYTHON_TOOL" "$PROVENANCE_SCRIPT" build --root "$COMPILER_DIR" --binary "$INSTALL_BIN" >/tmp/elisac-autoinstall.log 2>&1; then
     echo "[hook] elisac provenance build FAILED (binary left as-is); see /tmp/elisac-autoinstall.log" >&2
     exit 0
 fi

@@ -96,7 +96,7 @@ class RunWithTimeoutTests(unittest.TestCase):
         self.assertIn('"$(PYTHON_BIN)" "$(ELISA_STAGE0_TIMEOUT_SCRIPT)" 5 --grace-seconds 0 -- go build', makefile)
         self.assertIn("ELISA_STAGE0_TIMEOUT_SCRIPT ?= $(CURDIR)/scripts/run_with_timeout.py", makefile)
         self.assertEqual(makefile.count('5 --grace-seconds 0 -- env -i'), 2)
-        self.assertIn('3 --grace-seconds 0 -- env ELISA_REBUILD_SUPERVISED=1 "$PYTHON_TOOL" "$PROVENANCE_SCRIPT" build', hook)
+        self.assertIn('5 --grace-seconds 0 -- env ELISA_REBUILD_SUPERVISED=1 "$PYTHON_TOOL" "$PROVENANCE_SCRIPT" build', hook)
 
 
 if __name__ == "__main__":
