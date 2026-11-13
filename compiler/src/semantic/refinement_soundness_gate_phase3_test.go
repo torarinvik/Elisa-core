@@ -231,11 +231,8 @@ def f(n: TinyPositive) -> i64:
 // the index is within range and remain an obligation when it is not.
 // ---------------------------------------------------------------------------
 
-// SOUNDNESS TODO: Parametric refine alias with a dotted-path argument (xs.count)
-// is not yet fully discharged at the call site. The prover should see index=0 is
-// in [0, xs.count) and discharge statically, but this path is not wired up today.
-func TestSoundnessGateP3_TODO_ParametricAliasDottedPathDischarges(t *testing.T) {
-	t.Skip("SOUNDNESS TODO (in flight): parametric refine alias dotted-path arg discharge not yet wired up")
+// A valid dotted-path bound should discharge without a runtime check.
+func TestSoundnessGateP3_ParametricAliasDottedPathDischarges(t *testing.T) {
 	src := `
 refine IndexOf[T](xs: darray[T]) = i64 where self >= 0 and self < xs.count
 
@@ -255,11 +252,8 @@ def test() -> i64:
 	}
 }
 
-// SOUNDNESS TODO: Parametric refine alias with a provably-violating index should
-// produce a hard refutation. (Mirrors TestSoundnessGateP2_TODO_ParametricRefineAliasViolationIsError
-// but focuses on the out-of-range direction of the same gap.)
-func TestSoundnessGateP3_TODO_ParametricAliasDottedPathViolationIsError(t *testing.T) {
-	t.Skip("SOUNDNESS TODO (in flight): parametric refine alias dotted-path violation not yet refuted at call site")
+// A provably out-of-range index must be rejected.
+func TestSoundnessGateP3_ParametricAliasDottedPathViolationIsError(t *testing.T) {
 	src := `
 refine IndexOf[T](xs: darray[T]) = i64 where self >= 0 and self < xs.count
 
@@ -272,9 +266,8 @@ def bad() -> i64:
 `
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(
 		t, "p3_param_alias_dotted_violation.elisa", src, AnalyzeOptions{})
-	if len(result.Errors()) == 0 {
-		t.Errorf("SOUNDNESS VIOLATION: index 5 into 2-element array via IndexOf alias must be refuted; "+
-			"errors=%v proof=%v", result.Errors(), result.ProofReport)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), "where precondition of get is violated") {
+		t.Errorf("expected the out-of-range index to violate get's precondition; errors=%v proof=%v", result.Errors(), result.ProofReport)
 	}
 }
 
