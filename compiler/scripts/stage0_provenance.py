@@ -521,8 +521,13 @@ def build(root: Path, binary: Path) -> Path:
                 sys.executable, str(Path(__file__).with_name("run_with_timeout.py")),
                 "3", "--grace-seconds", "0", "--",
             ]
+        # The Go compiler spends substantial time collecting its large semantic
+        # package. Give that subprocess more headroom without changing the
+        # resulting executable or overriding an explicit user/memory setting.
+        build_environment = os.environ.copy()
+        build_environment.setdefault("GOGC", "500")
         try:
-            result = subprocess.run(command, cwd=root, check=False, capture_output=True, text=True)
+            result = subprocess.run(command, cwd=root, check=False, capture_output=True, text=True, env=build_environment)
         except OSError as error:
             raise RuntimeError(f"cannot build Stage0 compiler: {error}") from error
         if result.returncode != 0:

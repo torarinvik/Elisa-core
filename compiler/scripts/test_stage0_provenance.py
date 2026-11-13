@@ -108,6 +108,23 @@ class Stage0ProvenanceTests(unittest.TestCase):
         with patch.object(stage0_provenance.subprocess, "run", side_effect=self.fake_go):
             return stage0_provenance.build(self.root, self.binary)
 
+    def test_build_gc_setting_defaults_and_preserves_override(self) -> None:
+        for configured, expected in ((None, "500"), ("75", "75")):
+            observed = []
+
+            def capture(args, **kwargs):
+                if "build" in args and "./src" in args:
+                    observed.append(kwargs["env"]["GOGC"])
+                return self.fake_go(args, **kwargs)
+
+            with patch.dict(os.environ):
+                os.environ.pop("GOGC", None)
+                if configured is not None:
+                    os.environ["GOGC"] = configured
+                with patch.object(stage0_provenance.subprocess, "run", side_effect=capture):
+                    stage0_provenance.build(self.root, self.binary)
+            self.assertEqual(observed, [expected])
+
     def test_build_and_check_accept_unchanged_inputs_and_keep_dependency_metadata(self) -> None:
         receipt = self.build_current()
         with patch.object(stage0_provenance.subprocess, "run", side_effect=self.fake_go):
