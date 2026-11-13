@@ -40,7 +40,7 @@ func (a *Analyzer) reportSemanticDepthLimit(operation string, limit int) {
 
 func (a *Analyzer) containsAffineHandleValues(t Type, seen map[string]bool) bool {
 	switch t.(type) {
-	case *ArrayType, *DArrayType, *ViewType, *OptionalType, *ErrorUnionType, *DictType, *SetType,
+	case *ArrayType, *DArrayType, *ViewType, *TupleType, *OptionalType, *ErrorUnionType, *DictType, *SetType,
 		*DictEntryType, *PackedVariantViewType, *EnumType, *GenericInstanceType, *StructType:
 	default:
 		// typeContainsWithSeen descends into none of these, and isAffineHandleType holds only
@@ -144,6 +144,13 @@ func (a *Analyzer) typeContainsWithSeen(t Type, leaf func(Type) bool, what strin
 		return a.typeContainsWithSeen(tt.Elem, leaf, what, seen, depth+1)
 	case *ViewType:
 		return a.typeContainsWithSeen(tt.Elem, leaf, what, seen, depth+1)
+	case *TupleType:
+		for _, field := range tt.Fields {
+			if a.typeContainsWithSeen(field.Type, leaf, what, seen, depth+1) {
+				return true
+			}
+		}
+		return false
 	case *OptionalType:
 		return a.typeContainsWithSeen(tt.Value, leaf, what, seen, depth+1)
 	case *ErrorUnionType:
