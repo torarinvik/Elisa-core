@@ -292,16 +292,23 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, 
 			if forwarding.grownContainers[p.Name] {
 				grownWithRegionValue = a.containerParamGrownWithRegionValue(fn, p.Name, funcByName, funcScopes)
 			}
-			facts := bodyFactsForParam(bodyFacts, fn, p.Name)
-			if !facts.containerGrownKnown {
-				facts.containerGrown = paramContainerIsGrownNeedingRegion(fn.Body, p.Name, permRoots)
-				facts.containerGrownKnown = true
+			needsRegion := grownWithRegionValue || a.forwardTargetsRequireRegion(forwarding.direct[p.Name])
+			if !needsRegion {
+				facts := bodyFactsForParam(bodyFacts, fn, p.Name)
+				if !facts.containerGrownKnown {
+					facts.containerGrown = paramContainerIsGrownNeedingRegion(fn.Body, p.Name, permRoots)
+					facts.containerGrownKnown = true
+				}
+				needsRegion = facts.containerGrown
+				if !needsRegion {
+					if !facts.containerReassignedKnown {
+						facts.containerReassigned = paramContainerReassignedFromLiteral(fn.Body, p.Name)
+						facts.containerReassignedKnown = true
+					}
+					needsRegion = facts.containerReassigned
+				}
 			}
-			if !facts.containerReassignedKnown {
-				facts.containerReassigned = paramContainerReassignedFromLiteral(fn.Body, p.Name)
-				facts.containerReassignedKnown = true
-			}
-			if facts.containerGrown || facts.containerReassigned || a.forwardTargetsRequireRegion(forwarding.direct[p.Name]) || grownWithRegionValue {
+			if needsRegion {
 				stamp = cstamp
 				if grownWithRegionValue && ambientGrownParam == "" && containerParamCount == 1 {
 					ambientGrownParam = p.Name
