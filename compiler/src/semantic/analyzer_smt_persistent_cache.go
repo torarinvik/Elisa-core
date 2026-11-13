@@ -1,8 +1,6 @@
 package semantic
 
 import (
-	"bytes"
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -13,7 +11,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
-	"time"
 
 	"elisacore/src/artifactidentity"
 	"elisacore/src/proofcacheio"
@@ -150,43 +147,8 @@ func newSMTProofCache(directory, binary string) *smtProofCache {
 	return &smtProofCache{directory: directory, identity: identity, proofIdentity: proofIdentity}
 }
 
-// Every specialization that reaches the proof cache builds one of these, so the
-// solver's version is remembered per file. A replaced solver has a new file
-// identity or timestamp, which keeps a long-lived server's namespace current.
-var (
-	smtProofSolverVersionMu   sync.Mutex
-	smtProofSolverVersionMemo = map[string]smtProofSolverVersionEntry{}
-)
-
-type smtProofSolverVersionEntry struct {
-	info    os.FileInfo
-	version string
-}
-
-func smtProofSolverVersion(solver string) (string, bool) {
-	info, err := os.Stat(solver)
-	if err != nil {
-		return "", false
-	}
-	smtProofSolverVersionMu.Lock()
-	defer smtProofSolverVersionMu.Unlock()
-	if entry, ok := smtProofSolverVersionMemo[solver]; ok && os.SameFile(entry.info, info) && entry.info.Size() == info.Size() && entry.info.ModTime().Equal(info.ModTime()) {
-		return entry.version, true
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	var version smtProofVersionOutput
-	command := exec.CommandContext(ctx, solver, "--version")
-	command.WaitDelay = 500 * time.Millisecond
-	command.Stdout = &version
-	command.Stderr = io.Discard
-	if command.Run() != nil {
-		return "", false
-	}
-	text := version.String()
-	smtProofSolverVersionMemo[solver] = smtProofSolverVersionEntry{info: info, version: text}
-	return text, true
-}
+// Solver version probes are shared with the proof-cache I/O package.
+func smtProofSolverVersion(solver string) (string, bool) { return proofcacheio.SolverVersion(solver) }
 
 func (c *smtProofCache) key(query string) string {
 	return smtProofCacheKey(c.proofID(), query)
@@ -308,16 +270,6 @@ func (c *smtProofCache) publishModelFreeSAT(keys smtProofKeys) {
 	if c != nil && keys.exact != "" {
 		c.publishVerdict(keys.modelFreeSATKey(), "sat")
 	}
-}
-
-// Bound identity-probe output as well as its elapsed time.
-type smtProofVersionOutput struct{ bytes.Buffer }
-
-func (b *smtProofVersionOutput) Write(payload []byte) (int, error) {
-	if b.Len()+len(payload) > 4096 {
-		return 0, fmt.Errorf("solver version output exceeds limit")
-	}
-	return b.Buffer.Write(payload)
 }
 
 // Declines are kept under a separate schema. Only definitive SAT and explicitly

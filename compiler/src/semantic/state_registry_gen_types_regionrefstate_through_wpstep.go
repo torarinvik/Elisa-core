@@ -108,8 +108,6 @@ func semanticStateTypes_regionRefState_through_wpStep() []reflect.Type {
 		reflect.TypeOf((*smtProofCacheRecord)(nil)).Elem(),
 		reflect.TypeOf((*smtProofIdentityResolvers)(nil)).Elem(),
 		reflect.TypeOf((*smtProofKeys)(nil)).Elem(),
-		reflect.TypeOf((*smtProofSolverVersionEntry)(nil)).Elem(),
-		reflect.TypeOf((*smtProofVersionOutput)(nil)).Elem(),
 		reflect.TypeOf((*smtQueryResult)(nil)).Elem(),
 		reflect.TypeOf((*smtSViewEqualityKey)(nil)).Elem(),
 		reflect.TypeOf((*smtSViewSliceKey)(nil)).Elem(),
