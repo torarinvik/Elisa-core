@@ -37,6 +37,7 @@ func ParamStoresBodyLocal(fn *ast.FuncDecl, name string, walk func([]ast.Stmt, f
 			for _, arg := range n.Args {
 				if mentions(arg, locals) {
 					mentionsLocal = true
+					break
 				}
 			}
 			if !mentionsLocal {
