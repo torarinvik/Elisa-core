@@ -59,3 +59,26 @@ func TestErrorTagMatchingAllowsUnqualifiedArmsOnly(t *testing.T) {
 		t.Fatalf("unqualified unique tag did not match: %q, %v", got, ok)
 	}
 }
+
+func TestInfallibleCalleeStillChecksCallbackErrors(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "infallible_callee_callback.elisa", `
+error A:
+    Bad
+error B:
+    Bad
+def consume(callback: fn() -> i64 error[A]) -> i64:
+    return 1
+def consume_pure(callback: fn() -> i64) -> i64:
+    return 1
+def good() -> i64:
+    return consume(fn() => raise A.Bad)
+def bad() -> i64:
+    return consume(fn() => raise B.Bad)
+def bad_pure() -> i64:
+    return consume_pure(fn() => raise A.Bad)
+`)
+	errors := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(errors, "raise cannot propagate tag") || !strings.Contains(errors, `argument 1 to "consume_pure" expects`) {
+		t.Fatalf("infallible callees must retain callback error contracts, got:\n%s", errors)
+	}
+}
