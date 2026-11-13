@@ -32,6 +32,10 @@ func TestPinnedFoldDeclinesGeneratedNameCollisions(t *testing.T) {
 			if _, ok := BuildPinnedFoldReduce(lexer.Pos{}, nil, body, internal, "acc", nil, &ast.Ident{Name: "values"}, nil, nil, &ast.IntLit{Value: "0"}); ok {
 				t.Fatal("element name must not collide with an internal binding")
 			}
+			body.Left = &ast.Ident{Name: internal}
+			if _, ok := BuildPinnedFoldReduce(lexer.Pos{}, nil, body, "item", internal, nil, &ast.Ident{Name: "values"}, nil, nil, &ast.IntLit{Value: "0"}); ok {
+				t.Fatal("accumulator name must not collide with an internal binding")
+			}
 		})
 	}
 }
