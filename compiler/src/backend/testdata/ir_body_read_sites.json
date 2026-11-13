@@ -2,7 +2,7 @@
   "purpose": "Diagnostic-only closed source inventory; not a cache authority. All remaining direct Body selectors were reviewed as statement/lambda/static-declaration branches, except the FuncDecl wrapper and the partition scheduling estimate. New or modified sites require renewed type/context review. Reflection and semantic summary coverage remain open.",
   "files": {
     "llvm_autovec_verify.go": {
-      "sha256": "975cb4115699842d6465159f32dd8c326cf8e67c55fc0777cf265424ac0e846b",
+      "sha256": "cef7db2c0a3bbad22bd7fbfa7a10ee00a1787da703677d66e57bd73d33c25622",
       "selectors": 1,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
@@ -112,7 +112,7 @@
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
     "llvm_quantifier_runtime.go": {
-      "sha256": "f95dbe71ba2d038f3794b82542e9b8a0da79047c4705c90e1fd946b6ef965cb5",
+      "sha256": "34db35e32b3a8340a5f815dbfcf69ad80119c43fb5742cd1342509b8c228ee1d",
       "selectors": 1,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
