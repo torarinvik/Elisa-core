@@ -2,17 +2,10 @@
 
 package backend
 
-/*
-#include <stdlib.h>
-#include <llvm-c/Core.h>
-*/
-import "C"
-
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
-	"unsafe"
 )
 
 func inferTypeBindingsFromCall(fn *semantic.FuncType, args []ast.Expr, argTypes []semantic.Type, resultType semantic.Type) map[string]semantic.Type {
@@ -293,57 +286,6 @@ func orderedGenericTypeArgs(fnType *semantic.FuncType, decl *ast.FuncDecl, bindi
 		return nil
 	}
 	return args
-}
-
-// Legacy external spellings remain ABI names, not specialization authority.
-// Distinct structural arguments may share one spelling only when the current
-// lowered signature, calling convention and ABI parameter attributes agree.
-func (g *llvmGenerator) checkGenericExternABI(name string, fn *semantic.FuncType) error {
-	cname := C.CString(g.llvmSymbolName(name))
-	defer C.free(unsafe.Pointer(cname))
-	existing := C.LLVMGetNamedFunction(g.module, cname)
-	if existing == nil {
-		return nil
-	}
-	if err := g.ensureDeclaredFunctionType(name, existing, fn); err != nil {
-		return err
-	}
-	cc, _ := g.llvmCallConvForFunc(fn)
-	if C.LLVMGetFunctionCallConv(existing) != cc {
-		return fmt.Errorf("generic extern ABI calling convention conflict for %s", name)
-	}
-	typ, err := g.lowerFunctionTypeForSymbol(name, fn)
-	if err != nil {
-		return err
-	}
-	probeName := C.CString(".elisa.generic.abi.probe")
-	defer C.free(unsafe.Pointer(probeName))
-	probe := C.LLVMAddFunction(g.module, probeName, typ)
-	defer C.LLVMDeleteFunction(probe)
-	g.applyAggregateAbiAttrs(probe, fn)
-	for index := C.LLVMAttributeIndex(0); index <= C.LLVMAttributeIndex(C.LLVMCountParams(probe)); index++ {
-		count := C.LLVMGetAttributeCountAtIndex(existing, index)
-		if count != C.LLVMGetAttributeCountAtIndex(probe, index) {
-			return fmt.Errorf("generic extern ABI attribute conflict for %s", name)
-		}
-		if count == 0 {
-			continue
-		}
-		left := make([]C.LLVMAttributeRef, int(count))
-		right := make([]C.LLVMAttributeRef, int(count))
-		C.LLVMGetAttributesAtIndex(existing, index, &left[0])
-		C.LLVMGetAttributesAtIndex(probe, index, &right[0])
-		have := make(map[C.LLVMAttributeRef]bool, len(left))
-		for _, attr := range left {
-			have[attr] = true
-		}
-		for _, attr := range right {
-			if !have[attr] {
-				return fmt.Errorf("generic extern ABI attribute conflict for %s", name)
-			}
-		}
-	}
-	return nil
 }
 
 func genericImplSpecializationBase(base string, owner *semantic.StaticImpl, method string) (string, error) {

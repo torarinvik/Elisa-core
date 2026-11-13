@@ -465,3 +465,20 @@ func llvmBuildSIToFP(builder llvmIRBuilderRef, value llvmIRValueRef, typ llvmIRT
 func llvmBuildUIToFP(builder llvmIRBuilderRef, value llvmIRValueRef, typ llvmIRTypeRef, name *llvmIRChar) llvmIRValueRef {
 	return C.LLVMBuildUIToFP(builder, value, typ, name)
 }
+
+// The auto-arena cleanup analysis inspects uses without requiring its own cgo preamble.
+type llvmIRUseRef = C.LLVMUseRef
+
+func llvmGetFirstUse(value llvmIRValueRef) llvmIRUseRef { return C.LLVMGetFirstUse(value) }
+func llvmGetNextUse(use llvmIRUseRef) llvmIRUseRef      { return C.LLVMGetNextUse(use) }
+func llvmGetUser(use llvmIRUseRef) llvmIRValueRef       { return C.LLVMGetUser(use) }
+func llvmIsStore(value llvmIRValueRef) bool             { return C.LLVMIsAStoreInst(value) != nil }
+func llvmIsCall(value llvmIRValueRef) bool              { return C.LLVMIsACallInst(value) != nil }
+func llvmIsVolatile(value llvmIRValueRef) bool          { return C.LLVMGetVolatile(value) != 0 }
+func llvmIsNonAtomic(value llvmIRValueRef) bool {
+	return C.LLVMGetOrdering(value) == C.LLVMAtomicOrderingNotAtomic
+}
+func llvmIsNull(value llvmIRValueRef) bool                { return C.LLVMIsNull(value) != 0 }
+func llvmCalledValue(value llvmIRValueRef) llvmIRValueRef { return C.LLVMGetCalledValue(value) }
+func llvmNumCallArgs(value llvmIRValueRef) llvmIRUnsigned { return C.LLVMGetNumArgOperands(value) }
+func llvmEraseInstruction(value llvmIRValueRef)           { C.LLVMInstructionEraseFromParent(value) }

@@ -173,6 +173,13 @@ static void elisacoreAddFuncEnumAttr(LLVMValueRef fn, unsigned index, LLVMContex
 */
 import "C"
 
+import (
+	"fmt"
+	"unsafe"
+
+	"elisacore/src/semantic"
+)
+
 type llvmIRModuleRef = C.LLVMModuleRef
 type llvmIRLinkage = C.LLVMLinkage
 type llvmIRTypeKind = C.LLVMTypeKind
@@ -484,3 +491,62 @@ const llvmVoidTypeKind = C.LLVMVoidTypeKind
 func llvmGetNamedGlobal(module llvmIRModuleRef, name *llvmIRChar) llvmIRValueRef {
 	return C.LLVMGetNamedGlobal(module, name)
 }
+
+// Legacy external spellings remain ABI names, not specialization authority.
+// Distinct structural arguments may share one spelling only when the current
+// lowered signature, calling convention and ABI parameter attributes agree.
+func (g *llvmGenerator) checkGenericExternABI(name string, fn *semantic.FuncType) error {
+	cname := C.CString(g.llvmSymbolName(name))
+	defer C.free(unsafe.Pointer(cname))
+	existing := C.LLVMGetNamedFunction(g.module, cname)
+	if existing == nil {
+		return nil
+	}
+	if err := g.ensureDeclaredFunctionType(name, existing, fn); err != nil {
+		return err
+	}
+	cc, _ := g.llvmCallConvForFunc(fn)
+	if C.LLVMGetFunctionCallConv(existing) != cc {
+		return fmt.Errorf("generic extern ABI calling convention conflict for %s", name)
+	}
+	typ, err := g.lowerFunctionTypeForSymbol(name, fn)
+	if err != nil {
+		return err
+	}
+	probeName := C.CString(".elisa.generic.abi.probe")
+	defer C.free(unsafe.Pointer(probeName))
+	probe := C.LLVMAddFunction(g.module, probeName, typ)
+	defer C.LLVMDeleteFunction(probe)
+	g.applyAggregateAbiAttrs(probe, fn)
+	for index := C.LLVMAttributeIndex(0); index <= C.LLVMAttributeIndex(C.LLVMCountParams(probe)); index++ {
+		count := C.LLVMGetAttributeCountAtIndex(existing, index)
+		if count != C.LLVMGetAttributeCountAtIndex(probe, index) {
+			return fmt.Errorf("generic extern ABI attribute conflict for %s", name)
+		}
+		if count == 0 {
+			continue
+		}
+		left := make([]C.LLVMAttributeRef, int(count))
+		right := make([]C.LLVMAttributeRef, int(count))
+		C.LLVMGetAttributesAtIndex(existing, index, &left[0])
+		C.LLVMGetAttributesAtIndex(probe, index, &right[0])
+		have := make(map[C.LLVMAttributeRef]bool, len(left))
+		for _, attr := range left {
+			have[attr] = true
+		}
+		for _, attr := range right {
+			if !have[attr] {
+				return fmt.Errorf("generic extern ABI attribute conflict for %s", name)
+			}
+		}
+	}
+	return nil
+}
+
+// These bindings preserve the existing allocation and release sites; they only
+// keep Cgo out of files that manage names and constant-evaluation strings.
+func llvmCString(text string) *llvmIRChar  { return C.CString(text) }
+func llvmGoString(text *llvmIRChar) string { return C.GoString(text) }
+func llvmFree(pointer unsafe.Pointer)      { C.free(pointer) }
+
+func llvmCBytes(bytes []byte) unsafe.Pointer { return C.CBytes(bytes) }

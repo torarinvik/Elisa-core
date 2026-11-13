@@ -1,9 +1,6 @@
-package backend
+//go:build cgo
 
-/*
-#include <llvm-c/Core.h>
-*/
-import "C"
+package backend
 
 // A private, zero-initialized auto arena that never reaches an allocator
 // has no storage or hint to release. Examine the complete IR so even an
@@ -12,31 +9,31 @@ func (s *functionState) elideUnusedAutoArenas() {
 	if len(s.emptyArenaCandidates) == 0 {
 		return
 	}
-	free := C.LLVMGetNamedFunction(s.g.module, cStringFree("arena_free"))
+	free := llvmGetNamedFunction(s.g.module, cStringFree("arena_free"))
 	for _, arena := range s.emptyArenaCandidates {
 		if autoArenaHasOnlyEmptyCleanup(arena, free) {
-			for use := C.LLVMGetFirstUse(arena); use != nil; use = C.LLVMGetFirstUse(arena) {
-				C.LLVMInstructionEraseFromParent(C.LLVMGetUser(use))
+			for use := llvmGetFirstUse(arena); use != nil; use = llvmGetFirstUse(arena) {
+				llvmEraseInstruction(llvmGetUser(use))
 			}
-			C.LLVMInstructionEraseFromParent(arena)
+			llvmEraseInstruction(arena)
 		}
 	}
 }
 
-func autoArenaHasOnlyEmptyCleanup(arena, free C.LLVMValueRef) bool {
-	for use := C.LLVMGetFirstUse(arena); use != nil; use = C.LLVMGetNextUse(use) {
-		user := C.LLVMGetUser(use)
-		if C.LLVMIsAStoreInst(user) != nil &&
-			C.LLVMGetOperand(user, 1) == arena &&
-			C.LLVMGetVolatile(user) == 0 &&
-			C.LLVMGetOrdering(user) == C.LLVMAtomicOrderingNotAtomic &&
-			C.LLVMIsNull(C.LLVMGetOperand(user, 0)) != 0 {
+func autoArenaHasOnlyEmptyCleanup(arena, free llvmIRValueRef) bool {
+	for use := llvmGetFirstUse(arena); use != nil; use = llvmGetNextUse(use) {
+		user := llvmGetUser(use)
+		if llvmIsStore(user) &&
+			llvmGetOperand(user, 1) == arena &&
+			!llvmIsVolatile(user) &&
+			llvmIsNonAtomic(user) &&
+			llvmIsNull(llvmGetOperand(user, 0)) {
 			continue
 		}
-		if free != nil && C.LLVMIsACallInst(user) != nil &&
-			C.LLVMGetCalledValue(user) == free &&
-			C.LLVMGetNumArgOperands(user) == 1 &&
-			C.LLVMGetOperand(user, 0) == arena {
+		if free != nil && llvmIsCall(user) &&
+			llvmCalledValue(user) == free &&
+			llvmNumCallArgs(user) == 1 &&
+			llvmGetOperand(user, 0) == arena {
 			continue
 		}
 		return false
