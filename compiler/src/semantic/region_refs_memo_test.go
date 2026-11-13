@@ -74,3 +74,39 @@ func TestAnalysisBuildReconstructsTypePredicates(t *testing.T) {
 		t.Fatalf("rebuilt predicate = %v, want %v", got, want)
 	}
 }
+
+func TestAnalysisBuildReconstructsStoreScanTypePredicates(t *testing.T) {
+	const source = "def main() -> i64:\n    return 0\n"
+	build, err := BeginAnalysisBuild(retainedParse(t, source), nil, []byte(source), AnalyzeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := build.retained.a
+	typ := &ArrayType{Elem: &BuiltinType{Name: "uintptr"}}
+	address := a.storeScanTypeMayEncodeAddress(typ, map[Type]bool{})
+	plain := a.storeScanTypeIsPlainValue(typ)
+	// Program-lived classification only runs when a program region exists;
+	// seed its derived memo to verify it is not serialized.
+	a.storeScanProgramLivedMemo = map[Type]bool{typ: false}
+	if len(a.storeScanAddressMemo) == 0 || len(a.storeScanPlainValueMemo) == 0 {
+		t.Fatal("fixture did not warm the store-scan predicate memos")
+	}
+	data, err := build.MarshalState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(a.storeScanAddressMemo) == 0 || len(a.storeScanPlainValueMemo) == 0 || len(a.storeScanProgramLivedMemo) == 0 {
+		t.Fatal("checkpoint changed live store-scan predicate memos")
+	}
+	restored, err := RestoreAnalysisBuild(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cold := restored.retained.a
+	if cold.storeScanAddressMemo != nil || cold.storeScanPlainValueMemo != nil || cold.storeScanProgramLivedMemo != nil {
+		t.Fatal("checkpoint serialized derived store-scan predicate memos")
+	}
+	if cold.storeScanTypeMayEncodeAddress(typ, map[Type]bool{}) != address || cold.storeScanTypeIsPlainValue(typ) != plain {
+		t.Fatal("recomputed store-scan predicates changed")
+	}
+}
