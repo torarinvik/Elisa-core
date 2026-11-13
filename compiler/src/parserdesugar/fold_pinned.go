@@ -25,6 +25,25 @@ func FoldTransformUsesAccumulator(expr ast.Expr, name string) bool {
 	return dependent
 }
 
+func pinnedFoldReservedName(name string) bool {
+	switch name {
+	case "__fold_n", "__fold_i", "__fold_a0", "__fold_a1", "__fold_a2", "__fold_a3", "__fold_a4", "__fold_a5", "__fold_a6", "__fold_a7":
+		return true
+	default:
+		return false
+	}
+}
+
+func pinnedFoldTransformUsesReservedName(expr ast.Expr) bool {
+	found := false
+	astscan.WalkPointers(expr, func(node any) {
+		if ident, ok := node.(*ast.Ident); ok && ident != nil && pinnedFoldReservedName(ident.Name) {
+			found = true
+		}
+	}, map[uintptr]bool{})
+	return found
+}
+
 // buildPinnedFoldReduce lowers an eligible fold to a fixed-width pinned reduction (docs/79 Part IV,
 // Phase 2). Eligibility mirrors `by par` (no head bindings / filter / range; a plain darray source; an
 // associative top-level op with the accumulator as one whole operand) plus a numeric-literal seed (so
@@ -56,6 +75,13 @@ func BuildPinnedFoldReduce(pos lexer.Pos, bindings []ast.Stmt, body ast.Expr, na
 	if FoldTransformUsesAccumulator(transformExpr, accName) {
 		return nil, false
 	}
+	// Generated loop bindings must not shadow names from the source expression.
+	// The scalar lowering preserves lexical bindings when a user chose one of
+	// these spellings, rather than silently reading an internal lane or index.
+	if pinnedFoldReservedName(srcIdent.Name) || pinnedFoldReservedName(name) || pinnedFoldReservedName(accName) || pinnedFoldTransformUsesReservedName(transformExpr) {
+		return nil, false
+	}
+
 	// The per-lane identity must be a typed literal we can synthesize; only a bare numeric-literal seed
 	// tells us the kind (int vs float) without type information at parse time.
 	isMul := bin.Op == lexer.TOKEN_STAR
