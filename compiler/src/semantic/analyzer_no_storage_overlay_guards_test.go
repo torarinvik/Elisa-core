@@ -26,8 +26,12 @@ func TestNoStorageOverlayResourceGuards(t *testing.T) {
 	if _, err := state.MarshalState(); err == nil {
 		t.Fatal("active overlay persisted")
 	}
-	if err := (&AnalysisBuild{retained: state, file: result.File, loweredFile: result.LoweredFile}).validate(); err == nil || !strings.Contains(err.Error(), "no-storage overlay") {
+	build := &AnalysisBuild{retained: state, file: result.File, loweredFile: result.LoweredFile}
+	if err := build.validate(); err == nil || !strings.Contains(err.Error(), "no-storage overlay") {
 		t.Fatal("active build admitted", err)
+	}
+	if _, err := build.MarshalState(); err == nil || !strings.Contains(err.Error(), "no-storage overlay") {
+		t.Fatal("checkpoint admitted active no-storage overlay", err)
 	}
 	encoded, err := semanticStateRegistry().Encode(state)
 	if err != nil {

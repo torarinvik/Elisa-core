@@ -17,6 +17,9 @@ func TestNoStorageOverlayClosedAccessPolicy(t *testing.T) {
 	dir := filepath.Dir(filename)
 	allowed := map[string]map[string]bool{
 		"analyzer_no_storage_overlay.go": {"lookupStoreScanViewOnly": true, "setStoreScanViewOnly": true, "lookupStoreScanNoStorage": true, "setStoreScanNoStorage": true, "lookupStoreScanShares": true, "setStoreScanShares": true, "lookupStoreScanParamWriteCache": true, "setStoreScanParamWriteCache": true, "lookupCompilerBuiltinHelperCall": true, "setCompilerBuiltinHelperCall": true, "lookupReturnElementStmtUnknown": true, "setReturnElementStmtUnknown": true, "clearReturnElementStmtUnknown": true},
+		// marshalState validates that no construction overlay is active before
+		// temporarily removing derived caches from the canonical checkpoint.
+		"analysis_build.go": {"marshalState": true},
 		// analyzeDeclsParallel rejects every active construction overlay before
 		// clearing canonical per-return scratch maps for its next body pass.
 		"parallel_bodies.go":               {"analyzeDeclsParallel": true},
