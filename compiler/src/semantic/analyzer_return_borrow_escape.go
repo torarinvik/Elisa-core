@@ -140,8 +140,12 @@ func (a *Analyzer) typeMayHoldFrameBorrow(t Type, seen map[Type]bool) bool {
 		// A `heap`/`static` reference cannot point into a frame: storing `&local` or a forwarded
 		// stack reference into one is rejected.
 		return !outlivesFrameStorage(tt.Storage)
-	case *ViewType, *SViewType, *CStrType:
-		return true
+	case *ViewType:
+		return !a.isProgramRegion(tt.Region)
+	case *SViewType:
+		return !a.isProgramRegion(tt.Region)
+	case *CStrType:
+		return !a.isProgramRegion(tt.Region)
 	case *ArrayType:
 		return a.typeMayHoldFrameBorrow(tt.Elem, seen)
 	case *DArrayType:
