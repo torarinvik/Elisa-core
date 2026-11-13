@@ -61,7 +61,7 @@ func (a *Analyzer) hasOtherFreshFieldTarget(fn *ast.FuncDecl, name string) bool 
 // and deliberately narrow: a scalar field assignment never matches, and funcByName rules out
 // callees that return a scalar.
 func paramFieldAssignedFreshContainer(stmts []ast.Stmt, name string, funcByName map[string]*ast.FuncDecl) bool {
-	return regionframesyntax.ParamFieldAssignedFreshContainer(stmts, name, funcByName, isCompilerGeneratedAutoRegionStmt, reassignmentAllocatesFreshBacking, stripParenExpr, rootIdentExpr, storeFlowScalarTypeExpr)
+	return regionframesyntax.ParamFieldAssignedFreshContainer(stmts, name, funcByName, isCompilerGeneratedAutoRegionStmt, regionframesyntax.ReassignmentAllocatesFreshBacking, stripParenExpr, rootIdentExpr, storeFlowScalarTypeExpr)
 }
 
 // paramContainerIsGrown reports whether the body contains a growth-method call (push/extend/…)

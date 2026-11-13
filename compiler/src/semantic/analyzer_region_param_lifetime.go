@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/regionframesyntax"
 )
 
 // functionWritesHandleToScalarOutParam reports whether the function assigns to a by-reference PACKED
@@ -313,73 +314,12 @@ func storeRegionRootName(store ast.Expr) string {
 // complement to paramFieldContainerIsGrown's scope-skip, but restricted to PROGRAM-LIFETIME scopes
 // so a scoped-arena growth is never silently accepted.
 func paramContainerIsGrownNeedingRegion(stmts []ast.Stmt, name string, permRoots map[string]bool) bool {
-	found := false
-	walkPruned(stmts, func(node any) bool {
-		if found {
-			return false
-		}
-		// A growth inside an `in <programLifetimeArena>:` scope already has a program-lifetime
-		// allocation region supplied lexically — don't descend (it needs no threaded region).
-		if in, ok := node.(*ast.InStoreStmt); ok && in != nil {
-			if permRoots[storeRegionRootName(in.Store)] {
-				return false
-			}
-		}
-		if call, ok := node.(*ast.CallExpr); ok {
-			if field, ok := call.Func.(*ast.FieldExpr); ok && field != nil && containerGrowthMethods[field.Field] {
-				if id, ok := field.Object.(*ast.Ident); ok && id != nil && id.Name == name {
-					found = true
-					return false
-				}
-			}
-		}
-		return true
-	})
-	return found
+	return regionframesyntax.ParamContainerGrownNeedingRegion(stmts, name, permRoots, containerGrowthMethods, storeRegionRootName)
 }
 
-// paramContainerReassignedFromLiteral reports whether the body REASSIGNS the named ref-container
-// parameter from a freshly-allocating literal — `param <- [a, b]`, `param <- [x for x in ...]`, or
-// `param <- "..."` (the dstr string-literal sugar, still a StringLit at this pre-pass; flow analysis
-// later rewrites it to a byte-list literal). Like push, whole-container reassignment from a literal
-// allocates a new backing buffer that must land in the param's region — so it equally forces the
-// param to be region-polymorphic, allocating into the caller's region (sound) rather than a local
-// auto-region (which would dangle through the ref — use-after-free). Only literal RHS forms qualify;
-// reassignment from a call/other container raises region-compatibility questions push never had, so
-// it is conservatively excluded (a false negative just reinstates the old "active scope" error).
+// Retained-state fingerprints distinguish direct growth from fresh-backing assignments.
 func paramContainerReassignedFromLiteral(stmts []ast.Stmt, name string) bool {
-	found := false
-	walkPruned(stmts, func(node any) bool {
-		if found {
-			return false
-		}
-		if asn, ok := node.(*ast.AssignStmt); ok && asn != nil && !asn.Optional {
-			if id, ok := asn.Target.(*ast.Ident); ok && id != nil && id.Name == name && reassignmentAllocatesFreshBacking(asn.Value) {
-				found = true
-				return false
-			}
-		}
-		return true
-	})
-	return found
-}
-
-// reassignmentAllocatesFreshBacking reports whether an assignment RHS allocates a new container
-// backing buffer in place: a list/dict/set literal, a comprehension, or a string literal (the dstr
-// sugar, rewritten to a byte-list literal in flow analysis). Parens are unwrapped.
-func reassignmentAllocatesFreshBacking(value ast.Expr) bool {
-	for {
-		paren, ok := value.(*ast.ParenExpr)
-		if !ok {
-			break
-		}
-		value = paren.Inner
-	}
-	switch value.(type) {
-	case *ast.ListLitExpr, *ast.ListComprehensionExpr, *ast.StringLit:
-		return true
-	}
-	return false
+	return regionframesyntax.ParamContainerReassignedFromLiteral(stmts, name)
 }
 
 // paramStructIsProgramLived: docs/128 -- a by-ref struct parameter whose every field is
