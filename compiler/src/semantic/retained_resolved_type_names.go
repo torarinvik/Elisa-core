@@ -96,7 +96,12 @@ func captureResolvedTypeNameContributionsWithNested(rows map[ast.TypeExpr]string
 		functions:    make(map[string]resolvedTypeNameFunctionContribution, len(functionKeys)),
 		declarations: map[string]string{},
 	}
-	locations = make(map[ast.TypeExpr]resolvedTypeNameLocation, len(rows))
+	// Body type expressions also need ownership even before they have resolved
+	// rows. On large programs, reserving only for existing rows repeatedly
+	// grows the map while walking those bodies. Bound the estimate so unusual
+	// inputs cannot force an excessive speculative allocation.
+	locationHint := max(len(rows), min(len(functionKeys), 1_000_000/12)*12)
+	locations = make(map[ast.TypeExpr]resolvedTypeNameLocation, locationHint)
 	ambiguous := map[ast.TypeExpr]bool{}
 	active := map[any]bool{}
 	work := 0
