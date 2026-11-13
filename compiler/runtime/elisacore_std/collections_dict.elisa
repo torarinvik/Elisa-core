@@ -137,10 +137,16 @@ def arena_dict_reserve[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capa
             for i in 0..<old_capacity:
                 if old_items[i].state == COLLECTION_BUCKET_OCCUPIED:
                     old_key: K = old_items[i].key
-                    probe: DictProbeResult = arena_dict_find_index(rehash, old_key)
-                    new_items[probe.index].key <- old_key
-                    new_items[probe.index].value <- old_items[i].value
-                    new_items[probe.index].state <- COLLECTION_BUCKET_OCCUPIED
+                    # New buckets are empty and old keys are unique: no equality or
+                    # tombstone checks are needed while reinserting them.
+                    mask: usize = target_capacity - 1.usize()
+                    slot: mutable usize = ctx_hash_value(old_key).usize() & mask
+                    for _ in 0..<target_capacity |slot|:
+                        break if new_items[slot].state == COLLECTION_BUCKET_EMPTY
+                        slot <- (slot + 1.usize()) & mask
+                    new_items[slot].key <- old_key
+                    new_items[slot].value <- old_items[i].value
+                    new_items[slot].state <- COLLECTION_BUCKET_OCCUPIED
                     rehash.count <- rehash.count + 1.usize()
                     rehash.used <- rehash.used + 1.usize()
 
