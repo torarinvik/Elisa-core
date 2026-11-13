@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/regionforwardscan"
 	"elisacore/src/regionframesyntax"
 )
 
@@ -25,79 +26,23 @@ func collectRegionParamForwarding(cands []*ast.FuncDecl, funcByName map[string]*
 				callers[callee] = append(previous, fn)
 			}
 		}
-		walkStoreScanNodes(fn.Body, func(node any) {
-			// The walker also reaches the call inside any parenthesized
-			// expression, so inspect its underlying node only once.
-			var expr ast.Expr
-			switch n := node.(type) {
-			case *ast.Ident:
-				if callers != nil {
-					noteCaller(funcByName[n.Name])
-				}
-				return
-			case *ast.CallExpr:
-				// The region-valued growth probe matches this exact receiver shape.
-				// Record it during the existing walk so parameters with no matching
-				// call do not trigger another whole-body scan on every fixpoint pass.
-				if n != nil {
-					if field, ok := n.Func.(*ast.FieldExpr); ok && field != nil && containerGrowthMethods[field.Field] {
-						if id, ok := field.Object.(*ast.Ident); ok && id != nil {
-							for _, param := range fn.Params {
-								if param.Name == id.Name {
-									if forwarding.grownContainers == nil {
-										forwarding.grownContainers = make(map[string]bool)
-									}
-									forwarding.grownContainers[id.Name] = true
-									break
-								}
-							}
-						}
-					}
-				}
-				expr = n
-			case *ast.StructLitExpr:
-				expr = n
-			default:
-				return
+		regionforwardscan.Scan(fn, funcByName, containerGrowthMethods, walkStoreScanNodes, callers != nil, noteCaller, func(name string) {
+			if forwarding.grownContainers == nil {
+				forwarding.grownContainers = make(map[string]bool)
 			}
-			calleeName, args, isCall := ast.PrepassCallShape(expr)
-			callee := funcByName[calleeName]
-			if !isCall || callee == nil {
-				return
-			}
-			noteCaller(callee)
-			if len(fn.Params) == 0 {
-				return
-			}
-			for argPos, arg := range args {
-				name, isField, ok := regionForwardedParamPath(arg)
-				if !ok {
-					continue
+			forwarding.grownContainers[name] = true
+		}, func(name string, isField bool, callee *ast.FuncDecl, argPos int) {
+			target := regionForwardTarget{callee: callee, argPos: argPos}
+			if isField {
+				if forwarding.fields == nil {
+					forwarding.fields = make(map[string][]regionForwardTarget)
 				}
-				// Only declared parameter names are queried by the inference
-				// fixpoint; local forwarding cannot affect those queries.
-				isParam := false
-				for _, param := range fn.Params {
-					if param.Name == name {
-						isParam = true
-						break
-					}
+				forwarding.fields[name] = appendUniqueRegionForwardTarget(forwarding.fields[name], target)
+			} else {
+				if forwarding.direct == nil {
+					forwarding.direct = make(map[string][]regionForwardTarget)
 				}
-				if !isParam {
-					continue
-				}
-				target := regionForwardTarget{callee: callee, argPos: argPos}
-				if isField {
-					if forwarding.fields == nil {
-						forwarding.fields = make(map[string][]regionForwardTarget)
-					}
-					forwarding.fields[name] = appendUniqueRegionForwardTarget(forwarding.fields[name], target)
-				} else {
-					if forwarding.direct == nil {
-						forwarding.direct = make(map[string][]regionForwardTarget)
-					}
-					forwarding.direct[name] = appendUniqueRegionForwardTarget(forwarding.direct[name], target)
-				}
+				forwarding.direct[name] = appendUniqueRegionForwardTarget(forwarding.direct[name], target)
 			}
 		})
 		if forwarding.direct != nil || forwarding.fields != nil || forwarding.grownContainers != nil {
