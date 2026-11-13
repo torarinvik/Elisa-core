@@ -16,6 +16,9 @@ func TestContainsAffineHandleValuesTraversesTuples(t *testing.T) {
 		{"plain", &TupleType{Fields: []TupleField{{Type: plain}}}, false},
 		{"affine_second_field", &TupleType{Fields: []TupleField{{Type: plain}, {Type: handle}}}, true},
 		{"nested_optional", &OptionalType{Value: &TupleType{Fields: []TupleField{{Type: handle}}}}, true},
+		{"aggregate_state", &AggregateStateType{Base: handle}, true},
+		{"tuple_with_aggregate_state", &TupleType{Fields: []TupleField{{Type: &AggregateStateType{Base: handle}}}}, true},
+		{"plain_aggregate_state", &AggregateStateType{Base: plain}, false},
 		{"borrow_is_not_owned", &TupleType{Fields: []TupleField{{Type: &RefType{Elem: handle}}}}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -24,6 +27,18 @@ func TestContainsAffineHandleValuesTraversesTuples(t *testing.T) {
 				t.Fatalf("containsAffineHandleValues = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestAggregateStatePreservesAffineOwnerBorrowability(t *testing.T) {
+	owner := &StructType{Name: "Handle", Affine: true, Droppable: true}
+	stateful := &AggregateStateType{Base: owner}
+	if !isAffineHandleType(stateful) || !isBorrowableAffineOwnerType(stateful) {
+		t.Fatal("state wrapper must preserve its affine owner's borrowability")
+	}
+	container := &AggregateStateType{Base: &TupleType{Fields: []TupleField{{Type: owner}}}}
+	if isBorrowableAffineOwnerType(container) {
+		t.Fatal("aggregate containing an affine owner must not become a borrowable owner")
 	}
 }
 

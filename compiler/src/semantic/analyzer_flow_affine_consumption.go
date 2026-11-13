@@ -16,6 +16,7 @@ func isUnhandledErrorUnionType(t Type) bool {
 }
 
 func isAffineHandleType(t Type) bool {
+	t = StripAggregateStateType(t)
 	switch tt := t.(type) {
 	case *GenericInstanceType:
 		base, ok := tt.Base.(*StructType)
@@ -31,6 +32,7 @@ func isAffineHandleType(t Type) bool {
 }
 
 func isBorrowableAffineOwnerType(t Type) bool {
+	t = StripAggregateStateType(t)
 	// User-declared `linear struct` values are borrowable owners: a `&value`
 	// borrow may be taken (e.g. to witness a held FsGuard at a guest call)
 	// without consuming the value, and the existing borrowed-owner escape /
@@ -71,6 +73,7 @@ func isUserDroppableAffineStructType(t Type) bool {
 }
 
 func affineHandleKind(t Type) string {
+	t = StripAggregateStateType(t)
 	if !isAffineHandleType(t) {
 		return "value containing linear handles"
 	}
