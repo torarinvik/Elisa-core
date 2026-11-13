@@ -327,8 +327,7 @@ def _closure_digest(
     digest.update(tag + b"\0")
     digest.update(environment.get("GOVERSION", "").encode("utf-8") + b"\0")
     count = 0
-    # Package directories from Go's input listing are already canonical.
-    # Only an embedded file in a subdirectory can need further resolution.
+    # Only embedded subdirectories need resolution after Go lists the packages.
     parent_paths = {directory: directory for directory in directories}
     parent_paths[main_dir] = main_dir
     for identity, path in files if files is not None else _source_candidates(root, environment):
