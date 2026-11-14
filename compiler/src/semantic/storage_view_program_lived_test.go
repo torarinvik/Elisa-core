@@ -85,16 +85,20 @@ def main() -> i32:
         buf.push(98)
     return got[0].text[0].i32()
 `
-	for _, mutate := range []bool{false, true} {
-		source := fixture
-		if !mutate {
-			source = strings.Replace(source, "    for i in 0..<100 |buf|:\n        buf.push(98)\n", "", 1)
-		}
-		result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "owned_return.elisa", source)
-		all := strings.Join(result.Errors(), "\n")
-		stale := strings.Contains(all, "storage dependency facts were invalidated by darray push of buf")
-		if stale != mutate || (!mutate && all != "") {
-			t.Fatalf("mutation=%v, errors: %s", mutate, all)
-		}
+	for _, read := range []string{"got[0].text[0].i32()", "got.count.i32() - 1"} {
+		t.Run(read, func(t *testing.T) {
+			for _, mutate := range []bool{false, true} {
+				source := strings.Replace(fixture, "got[0].text[0].i32()", read, 1)
+				if !mutate {
+					source = strings.Replace(source, "    for i in 0..<100 |buf|:\n        buf.push(98)\n", "", 1)
+				}
+				result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "owned_return.elisa", source)
+				all := strings.Join(result.Errors(), "\n")
+				stale := strings.Contains(all, "storage dependency facts were invalidated by darray push of buf")
+				if stale != mutate || (!mutate && all != "") {
+					t.Fatalf("mutation=%v, errors: %s", mutate, all)
+				}
+			}
+		})
 	}
 }
