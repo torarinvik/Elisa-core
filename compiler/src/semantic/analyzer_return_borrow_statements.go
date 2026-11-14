@@ -377,9 +377,7 @@ func (a *Analyzer) noteReturnBorrowCallArgumentStores(expr ast.Expr, aliases map
 				return true
 			}
 		case *ast.TernaryExpr:
-			binders := map[ast.Node]bool{}
-			returnBorrowMarkConditionBinders(n.Cond, binders)
-			if len(binders) > 0 {
+			if returnBorrowMarkConditionBinders(n.Cond, nil) {
 				env := a.beginReturnBorrowBranch(aliases)
 				outerScope := a.currentScope
 				a.currentScope = NewScope(outerScope)

@@ -438,9 +438,7 @@ func (a *Analyzer) returnBorrowFlowForExprInner(expr ast.Expr, aliases map[strin
 		}
 	case *ast.TernaryExpr:
 		alt := a.returnBorrowFlowForExpr(n.Alt, aliases, active, localBindings)
-		binders := map[ast.Node]bool{}
-		returnBorrowMarkConditionBinders(n.Cond, binders)
-		if len(binders) == 0 {
+		if !returnBorrowMarkConditionBinders(n.Cond, nil) {
 			return mergeReturnBorrowFlow(a.returnBorrowFlowForExpr(n.Value, aliases, active, localBindings), alt)
 		}
 		// The condition's unwraps are in scope in the taken branch.

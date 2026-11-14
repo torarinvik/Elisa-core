@@ -64,9 +64,7 @@ func (a *Analyzer) returnBorrowFlowForQuery(n *ast.QueryExpr, aliases map[string
 // noteReturnBorrowConditionStores notes the stores of a condition, with each and-chain operand's
 // unwraps in scope for the operands after it.
 func (a *Analyzer) noteReturnBorrowConditionStores(cond ast.Expr, aliases map[string]returnBorrowFlow, active map[*ast.FuncDecl]bool, localBindings map[*Symbol]bool) {
-	binders := map[ast.Node]bool{}
-	returnBorrowMarkConditionBinders(cond, binders)
-	if len(binders) == 0 {
+	if !returnBorrowMarkConditionBinders(cond, nil) {
 		a.noteReturnBorrowCallArgumentStores(cond, aliases, active, localBindings)
 		return
 	}

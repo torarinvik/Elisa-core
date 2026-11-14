@@ -185,31 +185,46 @@ func (a *Analyzer) returnBorrowEnvTrustedRoot(expr ast.Expr) (*ast.Ident, return
 // iterator-loop patterns and declaring tuple bindings on statement paths it walks.
 // returnBorrowMarkConditionBinders marks the condition unwraps defineReturnBorrowConditionBindings
 // binds; the two must agree on which binders the walk models.
-func returnBorrowMarkConditionBinders(cond ast.Expr, modeled map[ast.Node]bool) {
+func returnBorrowMarkConditionBinders(cond ast.Expr, modeled map[ast.Node]bool) bool {
 	switch n := cond.(type) {
 	case *ast.ParenExpr:
-		returnBorrowMarkConditionBinders(n.Inner, modeled)
+		return returnBorrowMarkConditionBinders(n.Inner, modeled)
 	case *ast.BinaryExpr:
 		switch n.Op {
 		case lexer.TOKEN_AND:
-			returnBorrowMarkConditionBinders(n.Left, modeled)
-			returnBorrowMarkConditionBinders(n.Right, modeled)
+			left := returnBorrowMarkConditionBinders(n.Left, modeled)
+			if left && modeled == nil {
+				return true
+			}
+			right := returnBorrowMarkConditionBinders(n.Right, modeled)
+			return left || right
 		case lexer.TOKEN_OR:
-			// The analysis defines the alternatives' shared binders with the or-expression as
-			// their node; the walk defines them under that same node.
-			modeled[n] = true
+			// The analysis defines the alternatives' shared binders under the or-expression.
+			if modeled != nil {
+				modeled[n] = true
+			}
+			return true
 		case lexer.TOKEN_IS:
 			if _, _, pattern, ok := unwrapDirectConditionPattern(n); ok && pattern != nil {
-				for _, binder := range returnBorrowMatchPatternBinders(pattern, nil) {
+				binders := returnBorrowMatchPatternBinders(pattern, nil)
+				for _, binder := range binders {
+					if modeled == nil {
+						return true
+					}
 					modeled[binder.node] = true
 				}
+				return len(binders) != 0
 			}
 		}
 	case *ast.OptionalBindExpr:
 		if n.Name != "" && n.Name != "_" {
-			modeled[n] = true
+			if modeled != nil {
+				modeled[n] = true
+			}
+			return true
 		}
 	}
+	return false
 }
 
 // returnBorrowMatchBinder is a match-arm binder the return-borrow walk models: its value is a copy
