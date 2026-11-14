@@ -148,7 +148,7 @@ static if ELISA_TARGET_OS_POSIX:
 		can Memory.Release:
 			return if mu.handle == null
 			raw: mutable heap void& = mu.handle.cast[mutable heap void&]
-			_ = pthread_mutex_destroy(raw.cast[mutable PthreadMutexT&])
+			_ = pthread_mutex_destroy(raw.cast[mutable PthreadMutexT&]) can Unsafe.Alias
 			free(raw.cast[heap void&])
 			mu.handle <- null
 
@@ -170,7 +170,7 @@ static if ELISA_TARGET_OS_POSIX:
 		can Memory.Release:
 			return if cv.handle == null
 			raw: mutable heap void& = cv.handle.cast[mutable heap void&]
-			_ = pthread_cond_destroy(raw.cast[mutable PthreadCondT&])
+			_ = pthread_cond_destroy(raw.cast[mutable PthreadCondT&]) can Unsafe.Alias
 			free(raw.cast[heap void&])
 			cv.handle <- null
 

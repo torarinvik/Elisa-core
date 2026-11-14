@@ -56,7 +56,7 @@ def ctx_pool_worker_main(arg: void&?) -> void&?:
 					entry_bits: void& = head.entry
 					arg_bits: mutable void& = head.arg
 					trusted Unsafe.IndirectCall:
-						_ = entry_bits.call_as[fn(mutable void&) -> void&](arg_bits)
+						_ = entry_bits.call_as[fn(mutable void&) -> void&](arg_bits) can Unsafe.Alias
 					# publish completion and wake any awaiter
 					can Sync.Lock:
 						ctx_pool_lock(mu)
@@ -167,7 +167,7 @@ def pool_shutdown(pool: mutable ThreadPool&):
 		dispose_state <- state.outstanding_records == 0.usize()
 		can Sync.Unlock:
 			ctx_pool_unlock(mu)
-		ctx_pool_state_destroy(state) if dispose_state
+		ctx_pool_state_destroy(state) can Unsafe.Alias if dispose_state
 		pool.handle <- null
 
 # The implicit pool for `parallel for` / each / reduce when there is no explicit
@@ -254,7 +254,7 @@ def ctx_pool_wait_record_done(handle: uintptr):
 		dispose_state <- state.owner_closed != 0 and state.outstanding_records == 0.usize()
 		can Sync.Unlock:
 			ctx_pool_unlock(mu)
-		ctx_pool_state_destroy(state) if dispose_state
+		ctx_pool_state_destroy(state) can Unsafe.Alias if dispose_state
 
 # Standalone awaits consume their record immediately. TaskGroups use the retaining
 # helper above and free records only after every task in the batch has joined.
@@ -347,7 +347,7 @@ def ctx_concurrency_work1_release(state_bits: mutable void&?):
 		return if state_bits == null
 		live_bits: mutable void& = state_bits
 		state: mutable heap ConcurrencyWorkStart1& = live_bits.cast[mutable heap ConcurrencyWorkStart1&]
-		remaining: i64 = ctx_concurrency_ref_release(&state.refs)
+		remaining: i64 = ctx_concurrency_ref_release(&state.refs) can Unsafe.Alias
 		if remaining == 0:
 			free(state.arg_bits.cast[heap void&])
 			free(state.result_bits.cast[heap void&])
@@ -372,11 +372,11 @@ def ctx_concurrency_work1_entry[A, R, permission P](state_bits: mutable void&) -
 		fn: fn(A) -> R can[P] = state.fn_bits.cast[fn(A) -> R can[P]]
 		arg_box: heap ConcurrencyBox[A]& = state.arg_bits.cast[heap ConcurrencyBox[A]&]
 		result: R = fn(arg_box.value)
-		ctx_concurrency_result_write[R](state.result_bits, result)
+		ctx_concurrency_result_write[R](state.result_bits, result) can Unsafe.Alias
 		# Release-publish only after the result write. An Acquire load that sees 1
 		# observes the initialized result storage; `ready` never consumes it.
-		store(&state.completed, 1, MemoryOrder.Release) can Atomics.Store
-		(ctx_concurrency_work1_release(state.cast[mutable void&]) can Unsafe.PointerCast)
+		store(&state.completed, 1, MemoryOrder.Release) can Atomics.Store, Unsafe.Alias
+		(ctx_concurrency_work1_release(state.cast[mutable void&]) can Unsafe{PointerCast,Alias})
 		return state.cast[void&]
 
 def ctx_concurrency_work1_take_result[R](state_bits: void&?) -> R:
@@ -385,7 +385,7 @@ def ctx_concurrency_work1_take_result[R](state_bits: void&?) -> R:
 		live_bits: void& = state_bits
 		state: heap ConcurrencyWorkStart1& = live_bits.cast[heap ConcurrencyWorkStart1&]
 		result: R = ctx_concurrency_result_read[R](state.result_bits)
-		(ctx_concurrency_work1_release(state.cast[mutable void&]) can Unsafe.PointerCast)
+		(ctx_concurrency_work1_release(state.cast[mutable void&]) can Unsafe{PointerCast,Alias})
 		return result
 
 def ctx_thread_from_raw[R, S](raw: Thread[void&?, S]) -> Thread[R, S]:

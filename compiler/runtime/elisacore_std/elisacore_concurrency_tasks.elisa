@@ -7,7 +7,7 @@ def ctx_task_group_release_all(group: mutable TaskGroup&):
 		trusted Unsafe.AssumeProgress:
 			while current != null:
 				next: mutable heap PoolTaskRecord&? = current.group_next
-				ctx_concurrency_work1_release(current.group_state_bits)
+				ctx_concurrency_work1_release(current.group_state_bits) can Unsafe.Alias
 				free(current.cast[heap void&])
 				current <- next
 

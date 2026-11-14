@@ -197,8 +197,8 @@ def join_native_callback_u32(thread: Thread[u32, Joinable], fallback: u32) -> u3
 		handle: uintptr = thread.handle
 		state_bits: void&? = thread.state
 		_ = move thread
-		result: u32 = (native_callback_context_join_u32_voidp(handle, state_bits.cast[mutable heap void&?], fallback) can Unsafe.PointerCast)
-		(native_callback_context_free(state_bits.cast[mutable heap void&?]) can Unsafe.PointerCast)
+		result: u32 = (native_callback_context_join_u32_voidp(handle, state_bits.cast[mutable heap void&?], fallback) can Unsafe{PointerCast,Alias})
+		(native_callback_context_free(state_bits.cast[mutable heap void&?]) can Unsafe{PointerCast,Alias})
 		return result
 
 def detach_raw(thread: Thread[void&?, Joinable]):
