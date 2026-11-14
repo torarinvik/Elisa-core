@@ -320,11 +320,15 @@ var exportDeclMapPaths = sync.OnceValue(func() [][]int {
 func publishChangedFields(shared, private *FuncType) {
 	dst := settable(reflect.ValueOf(shared).Elem())
 	src := reflect.ValueOf(private).Elem()
-	// One graph snapshot preserves sharing across fields as well as root cycles.
-	snapshot := snapshotFuncTypeForDestination(private, shared)
+	var snapshot reflect.Value
 	for i := 0; i < dst.NumField(); i++ {
 		d, s := settable(dst.Field(i)), settable(src.Field(i))
 		if !reflect.DeepEqual(d.Interface(), s.Interface()) {
+			// Defer copying until a field needs publication. A single snapshot
+			// preserves sharing across changed fields and redirects root cycles.
+			if !snapshot.IsValid() {
+				snapshot = snapshotFuncTypeForDestination(private, shared)
+			}
 			// Publication transfers a snapshot, not ownership of the worker's
 			// mutable slice/map backing. Later local inference must not modify
 			// memory another worker reads through the shared declaration.
