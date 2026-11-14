@@ -231,11 +231,15 @@ func returnBorrowBoundMachineInputs(fn *ast.FuncDecl) map[string]bool {
 	var walk func(v reflect.Value)
 	walk = func(v reflect.Value) {
 		switch v.Kind() {
-		case reflect.Pointer, reflect.Interface:
+		case reflect.Interface:
+			if !v.IsNil() {
+				walk(v.Elem())
+			}
+		case reflect.Pointer:
 			if v.IsNil() {
 				return
 			}
-			if decl, ok := v.Interface().(*ast.VarDeclStmt); ok && decl != nil {
+			if decl, ok := v.Interface().(*ast.VarDeclStmt); ok {
 				if ident, isIdent := decl.Value.(*ast.Ident); isIdent && ident != nil && strings.HasPrefix(ident.Name, "__machine_input_") {
 					bound[ident.Name] = true
 				}
