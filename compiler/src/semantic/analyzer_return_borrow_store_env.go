@@ -406,7 +406,7 @@ func returnBorrowFlowGrew(before, after returnBorrowFlow) bool {
 // every argument's borrow merely because its call is still opaque. Calls' independent store effects
 // are recorded before this filter is applied.
 func (a *Analyzer) returnBorrowDeclaredValueFlow(flow returnBorrowFlow, declared Type) returnBorrowFlow {
-	if declared == nil || IsInvalidType(declared) || !a.typeIsBorrowFree(declared, map[Type]bool{}) {
+	if flow.empty() || declared == nil || IsInvalidType(declared) || !a.typeIsBorrowFree(declared, map[Type]bool{}) {
 		return flow
 	}
 	return returnBorrowFlow{}
