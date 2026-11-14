@@ -370,6 +370,35 @@ def run() -> void:
 	}
 }
 
+func TestIndexedCallArgumentAlias(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		index    string
+		conflict bool
+	}{
+		{"distinct", "1", false},
+		{"same", "0x0", true},
+		{"unknown", "i", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "indexed_call_alias.elisa", `
+def update(a: mutable i64&, b: mutable i64&) -> void:
+    a <- 1
+    b <- 2
+
+def run(i: usize) -> void:
+    values: mutable darray[i64] = [1, 2]
+    can Unsafe.UncheckedIndex:
+        update(&values[0], &values[`+test.index+`])
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+			all := allDiagnostics(result)
+			if got := strings.Contains(all, "mutable alias requires"); got != test.conflict {
+				t.Fatalf("alias conflict = %t, want %t; diagnostics:\n%s", got, test.conflict, all)
+			}
+		})
+	}
+}
+
 func TestUnprovenArrayIndexRequiresUnsafeUncheckedIndexGrant(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "array_index_requires_bounds.elisa", `
 def read_at(items: i32[4], index: usize) -> i32:

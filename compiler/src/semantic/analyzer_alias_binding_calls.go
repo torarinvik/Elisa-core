@@ -1,6 +1,8 @@
 package semantic
 
 import (
+	"strconv"
+
 	"elisacore/src/ast"
 )
 
@@ -396,7 +398,24 @@ func (a *Analyzer) aliasRootForExprSeen(expr ast.Expr, seen map[*Symbol]bool) st
 		}
 		return root + "." + n.Field
 	case *ast.IndexExpr:
-		return a.aliasRootForExprSeen(n.Object, seen)
+		root := a.aliasRootForExprSeen(n.Object, seen)
+		if root == "" || n.Index2 != nil || n.Fallback != nil {
+			return root
+		}
+		// Keep precision for scalar elements whose address directly names storage
+		// in the array. An aggregate element can carry references to other storage.
+		element := a.exprType(n)
+		switch StripAggregateStateType(stripRefForBounds(a.exprType(n.Object))).(type) {
+		case *ArrayType, *DArrayType:
+			if IsNumericType(element) || IsBoolType(element) {
+				if literal, ok := stripOptimizationParens(n.Index).(*ast.IntLit); ok {
+					if index, ok := ParseIntLiteral(literal); ok && index >= 0 {
+						return root + ".[" + strconv.FormatInt(index, 10) + "]"
+					}
+				}
+			}
+		}
+		return root + ".[*]"
 	case *ast.SliceExpr:
 		return a.aliasRootForExprSeen(n.Object, seen)
 	case *ast.CallExpr:

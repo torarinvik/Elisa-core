@@ -440,7 +440,20 @@ func aliasRootsOverlap(a string, b string) bool {
 	if a == b {
 		return true
 	}
-	return strings.HasPrefix(a, b+".") || strings.HasPrefix(b, a+".")
+	for {
+		left, leftTail, leftMore := strings.Cut(a, ".")
+		right, rightTail, rightMore := strings.Cut(b, ".")
+		if left == "[*]" || right == "[*]" {
+			return true
+		}
+		if left != right {
+			return false
+		}
+		if !leftMore || !rightMore {
+			return true
+		}
+		a, b = leftTail, rightTail
+	}
 }
 
 // aliasMapHasOverlapConflict reports whether any root in `accesses` that overlaps `root`
