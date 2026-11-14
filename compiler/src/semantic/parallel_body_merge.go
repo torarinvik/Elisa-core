@@ -281,16 +281,16 @@ func mergeValue(dst, w, base reflect.Value, p *parallelWorkerState) {
 	}
 	switch w.Kind() {
 	case reflect.Struct:
-		fields := make([]reflect.StructField, w.NumField())
-		if w.Type() == reflect.TypeFor[Analyzer]() {
-			fields = analyzerStorageFields
-		} else {
+		isAnalyzer := w.Type() == reflect.TypeFor[Analyzer]()
+		fields := analyzerStorageFields
+		if !isAnalyzer {
+			fields = make([]reflect.StructField, w.NumField())
 			for i := range fields {
 				fields[i] = w.Type().Field(i)
 			}
 		}
 		for _, field := range fields {
-			if w.Type() == reflect.TypeOf(Analyzer{}) && (field.Name == "proofLifecycle" || field.Name == "proofReport") {
+			if isAnalyzer && (field.Name == "proofLifecycle" || field.Name == "proofReport") {
 				continue
 			}
 			if p != nil {
@@ -302,7 +302,8 @@ func mergeValue(dst, w, base reflect.Value, p *parallelWorkerState) {
 			mergeValue(settable(dst.FieldByIndex(field.Index)), settable(w.FieldByIndex(field.Index)), settable(base.FieldByIndex(field.Index)), p)
 		}
 	case reflect.Map:
-		if w.IsNil() {
+		if w.IsNil() || (w.Pointer() == base.Pointer() && w.Pointer() == dst.Pointer()) {
+			// Shared declaration indexes have no worker-local delta.
 			return
 		}
 		if dst.IsNil() {
