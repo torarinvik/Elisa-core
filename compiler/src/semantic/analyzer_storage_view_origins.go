@@ -113,7 +113,7 @@ func (a *Analyzer) recordStorageViewOriginPush(expr ast.Expr, locals map[string]
 		return
 	}
 	field, ok := call.Func.(*ast.FieldExpr)
-	if !ok {
+	if !ok || field.Field != "push" {
 		return
 	}
 	receiver, ok := stripOptimizationParens(field.Object).(*ast.Ident)
