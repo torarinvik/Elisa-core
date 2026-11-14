@@ -460,3 +460,27 @@ def bad_size(t: Tree) -> i64:
 		t.Fatalf("expected structural decreases diagnostic, got: %v", r.Errors())
 	}
 }
+
+func TestMutualRecursiveBoolPreconditionTerminates(t *testing.T) {
+	result := analyzeContractStrict(t, "mutual_bool_precondition.elisa", `def left(remaining: usize) -> bool:
+    requires remaining > 0
+    decreases remaining
+    requires right(remaining)
+    if remaining <= 1:
+        return true
+    return right(remaining - 1)
+
+def right(remaining: usize) -> bool:
+    requires remaining > 0
+    decreases remaining
+    if remaining <= 1:
+        return false
+    return left(remaining - 1)
+
+def main() -> i32:
+    return 0
+`)
+	if errors := strings.Join(result.Errors(), "\n"); !strings.Contains(errors, "precondition") {
+		t.Fatalf("expected an unproven precondition, got %s", errors)
+	}
+}

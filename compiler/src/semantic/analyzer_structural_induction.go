@@ -235,6 +235,13 @@ func (tr *smtTranslator) emitStructuralPredicateEquation(call *ast.CallExpr, dec
 	if tr.callEqInFlight[key] >= tr.callEqMaxUnroll {
 		return // bounded unroll reached: leave the symbol opaque (still sound)
 	}
+	// Recursive calls with new arguments create new keys. Bound unfolding by
+	// declaration as well so mutual recursion cannot keep introducing equations.
+	if tr.callEqDeclDepth[decl] >= tr.callEqMaxDeclDepth {
+		return
+	}
+	tr.callEqDeclDepth[decl]++
+	defer func() { tr.callEqDeclDepth[decl]-- }()
 	// Map the predicate's parameters to the actual-argument tokens so a recursive sub-call on a child
 	// keys on that child's projection (the IH symbol), and integer payload comparisons see the actuals.
 	penv := map[string]string{}
