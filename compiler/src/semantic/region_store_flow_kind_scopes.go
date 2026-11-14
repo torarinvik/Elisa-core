@@ -306,10 +306,10 @@ func storeFlowResolveKindScopes(body []ast.Stmt, excluded map[string]bool) (*sto
 				seen[v.Pointer()] = true
 				walk(reflect.ValueOf(&n.Value).Elem(), e, true, "")
 				walk(reflect.ValueOf(&n.Store).Elem(), e, true, "")
+				header := storeScanExprNames(n.Value)
 				for i := range n.Arms {
 					arm := &n.Arms[i]
 					names := stmtBoundNames(&ast.MatchStmt{Arms: []ast.MatchArm{{Pattern: arm.Pattern}}})
-					header := storeScanExprNames(n.Value)
 					for _, name := range names {
 						if header[name] {
 							bad[name] = true
