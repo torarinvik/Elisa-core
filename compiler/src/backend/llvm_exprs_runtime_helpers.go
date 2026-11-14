@@ -291,20 +291,38 @@ func (s *functionState) emitResolvedCallInner(callee llvmIRValueRef, funcType *s
 		if err != nil {
 			return nil, nil, err
 		}
-		callArgs := make([]llvmIRValueRef, 0, len(args)+1)
+		callArgs := make([]llvmIRValueRef, 0, len(args)+layout.paramBase())
+		statusPlan := layout.externErrorRet
+		var statusSlot llvmIRValueRef
+		callName := "calltmp"
+		if statusPlan.sret {
+			statusSlot = llvmBuildAlloca(s.builder, statusPlan.llvmType, cStringFree("call.error.sret"))
+			callArgs = append(callArgs, statusSlot)
+			callName = ""
+		}
 		callArgs = append(callArgs, resultSlot)
 		callArgs = append(callArgs, args...)
 		var call llvmIRValueRef
-		if direct {
-			call = s.buildTypedCall(llvmFnType, callee, callArgs, "calltmp", funcType)
+		if direct || statusPlan.llvmType != nil {
+			call = s.buildTypedCall(llvmFnType, callee, callArgs, callName, funcType)
 		} else {
-			call, err = s.emitFunctionValueCall(callee, funcType, callArgs, "calltmp")
+			call, err = s.emitFunctionValueCall(callee, funcType, callArgs, callName)
 			if err != nil {
 				return nil, nil, err
 			}
 		}
 		applyByvalCallAttrs(call)
-		unionValue, err := s.buildErrorUnionValueFromPointer(retUnion, call, resultSlot)
+		status := call
+		if statusPlan.sret {
+			s.addCallSretAttr(call, statusPlan.llvmType)
+			status = llvmBuildLoad2(s.builder, statusPlan.llvmType, statusSlot, cStringFree("call.error"))
+		} else if statusPlan.direct && statusPlan.retType != statusPlan.llvmType {
+			bytes := max(llvmABISizeOfType(s.g.targetData, statusPlan.retType), llvmABISizeOfType(s.g.targetData, statusPlan.llvmType))
+			slot := s.g.cAbiSlot(s.builder, uint64(bytes), "call.error.slot")
+			llvmBuildStore(s.builder, call, slot)
+			status = llvmBuildLoad2(s.builder, statusPlan.llvmType, slot, cStringFree("call.error"))
+		}
+		unionValue, err := s.buildErrorUnionValueFromPointer(retUnion, status, resultSlot)
 		if err != nil {
 			return nil, nil, err
 		}

@@ -94,9 +94,10 @@ func (g *llvmGenerator) aggregateIsMemoryClassABI(t semantic.Type, cabi bool) bo
 // an error-union out-pointer and/or an sret out-pointer for a large aggregate
 // return. Explicit params follow, in order, starting at paramBase().
 type funcAbiLayout struct {
-	errorUnionOut bool
-	sret          bool
-	sretType      llvmIRTypeRef
+	errorUnionOut  bool
+	externErrorRet cAbiRetPlan
+	sret           bool
+	sretType       llvmIRTypeRef
 }
 
 func (l funcAbiLayout) paramBase() int {
@@ -116,7 +117,7 @@ func (l funcAbiLayout) sretParamPos() int {
 	if !l.sret {
 		return -1
 	}
-	if l.errorUnionOut {
+	if l.errorUnionOut && !l.externErrorRet.sret {
 		return 1
 	}
 	return 0
@@ -126,8 +127,23 @@ func (g *llvmGenerator) computeFuncAbiLayout(fn *semantic.FuncType) (funcAbiLayo
 	if fn == nil {
 		return funcAbiLayout{}, nil
 	}
-	_, eu := nonVoidErrorUnion(fn.Return)
+	union, eu := nonVoidErrorUnion(fn.Return)
 	layout := funcAbiLayout{errorUnionOut: eu}
+	if eu && fn.IsNativeExtern {
+		statusType, err := g.lowerType(union.Errors)
+		if err != nil {
+			return layout, err
+		}
+		if llvmGetTypeKind(statusType) == llvmStructTypeKind {
+			plan, err := g.cAbiClassifyAggregateRet(statusType)
+			if err != nil {
+				return layout, err
+			}
+			layout.externErrorRet = plan
+			layout.sret = plan.sret
+			layout.sretType = statusType
+		}
+	}
 	if !eu && g.aggregateIsMemoryClassABI(fn.Return, funcTypeIsCABI(fn)) {
 		t, err := g.lowerType(fn.Return)
 		if err != nil {

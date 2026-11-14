@@ -58,7 +58,6 @@ func (g *llvmGenerator) lowerFunctionTypeInternal(fn *semantic.FuncType, entrySt
 	if err != nil {
 		return nil, err
 	}
-	_, isErrorUnionReturn := nonVoidErrorUnion(fn.Return)
 	// `-> T?` at a C boundary is the bare nullable payload pointer, not Elisa's
 	// {tag, payload} struct; the call site rebuilds the optional from a null test.
 	// See externOptionalABI.
@@ -70,11 +69,15 @@ func (g *llvmGenerator) lowerFunctionTypeInternal(fn *semantic.FuncType, entrySt
 	if externReturnsResource(fn) {
 		returnType = llvmPointerTypeInContext(g.context, 0)
 	}
-	// Large aggregate returns are returned via an sret out-pointer (return void),
-	// mirroring the error-union out-param mechanism. (Error-union returns already
-	// carry their value via an out-pointer, so they are mutually exclusive.)
+	layout, err := g.computeFuncAbiLayout(fn)
+	if err != nil {
+		return nil, err
+	}
 	cabi := funcTypeIsCABI(fn)
-	sretReturn := !isErrorUnionReturn && !nicheOptionalReturn && g.aggregateIsMemoryClassABI(fn.Return, cabi)
+	sretReturn := layout.sret && !nicheOptionalReturn
+	if layout.externErrorRet.direct {
+		returnType = layout.externErrorRet.retType
+	}
 	if sretReturn {
 		returnType = llvmVoidTypeInContext(g.context)
 	}
@@ -82,6 +85,9 @@ func (g *llvmGenerator) lowerFunctionTypeInternal(fn *semantic.FuncType, entrySt
 		returnType = llvmInt32TypeInContext(g.context)
 	}
 	params := make([]llvmIRTypeRef, 0, len(fn.Params)+1)
+	if layout.externErrorRet.sret {
+		params = append(params, llvmPointerTypeInContext(g.context, 0))
+	}
 	if unionType, ok := nonVoidErrorUnion(fn.Return); ok {
 		outParamType, err := g.lowerErrorUnionOutParamType(unionType)
 		if err != nil {
@@ -89,7 +95,7 @@ func (g *llvmGenerator) lowerFunctionTypeInternal(fn *semantic.FuncType, entrySt
 		}
 		params = append(params, outParamType)
 	}
-	if sretReturn {
+	if sretReturn && !layout.externErrorRet.sret {
 		params = append(params, llvmPointerTypeInContext(g.context, 0))
 	}
 	// A C-ABI extern's C parameter order may differ from its semantic one: each `view[T]`

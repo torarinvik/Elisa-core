@@ -280,6 +280,10 @@ func (g *llvmGenerator) cAbiClassifyRet(t semantic.Type) (cAbiRetPlan, error) {
 	if isVoidType(t) || !g.cAbiIsAggregate(t) {
 		return cAbiRetPlan{direct: true, retType: llvmType, llvmType: llvmType}, nil
 	}
+	return g.cAbiClassifyAggregateRet(llvmType)
+}
+
+func (g *llvmGenerator) cAbiClassifyAggregateRet(llvmType llvmIRTypeRef) (cAbiRetPlan, error) {
 	if err := g.ensureTargetMachine(); err != nil {
 		return cAbiRetPlan{}, err
 	}
