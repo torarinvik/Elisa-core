@@ -47,7 +47,11 @@ func (a *Analyzer) returnBorrowUntrustedNames(fn *ast.FuncDecl, processed map[*a
 			return
 		}
 		switch v.Kind() {
-		case reflect.Pointer, reflect.Interface:
+		case reflect.Interface:
+			if !v.IsNil() {
+				walk(v.Elem(), inExpr)
+			}
+		case reflect.Pointer:
 			if v.IsNil() {
 				return
 			}
@@ -65,12 +69,9 @@ func (a *Analyzer) returnBorrowUntrustedNames(fn *ast.FuncDecl, processed map[*a
 						return
 					}
 					// `r: mutable T& = x` aliases x: stores through r reach x.
-					isRef := false
-					if n.Type != nil {
-						_, isRef = n.Type.(*ast.RefType)
-					}
-					if _, ok := a.exprType(n.Value).(*RefType); ok {
-						isRef = true
+					_, isRef := n.Type.(*ast.RefType)
+					if !isRef {
+						_, isRef = a.exprType(n.Value).(*RefType)
 					}
 					// A machine's input var is only compared against its arms, unless an arm binds it.
 					if isRef && (!strings.HasPrefix(n.Name, "__machine_input_") || machineInputBound(n.Name)) {

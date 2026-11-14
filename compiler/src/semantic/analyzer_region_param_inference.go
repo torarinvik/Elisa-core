@@ -152,11 +152,13 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 	// function is its own caller). Each per-function pass is idempotent, so a function that
 	// changed is complete until a callee changes. Rescanning every candidate per round cost ~0.6 s each on the seed.
 	pending := inferable
+	queued := make(map[*ast.FuncDecl]bool)
+	ahead := make(map[*ast.FuncDecl]int, len(pending))
 	for len(pending) != 0 {
-		queued := map[*ast.FuncDecl]bool{}
+		clear(queued)
+		clear(ahead)
 		var next []*ast.FuncDecl
 		// A caller still ahead in this round sees the change when its turn comes.
-		ahead := make(map[*ast.FuncDecl]int, len(pending))
 		for i, fn := range pending {
 			ahead[fn] = i
 		}
