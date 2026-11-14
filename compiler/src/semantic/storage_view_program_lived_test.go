@@ -68,3 +68,33 @@ func TestStorageViewPlainBindingStillInvalidatedByCalleeGrowth(t *testing.T) {
 		t.Fatalf("expected the plain view to be invalidated, got:\n%s", all)
 	}
 }
+
+func TestStorageViewReturnedArrayPayloadTracksCaller(t *testing.T) {
+	fixture := `struct Tok:
+    text: sview
+
+def toks(src: darray[u8]&) -> darray[Tok]:
+    out: mutable darray[Tok] = []
+    out.push(Tok{text: src.as_sview()})
+    return out
+
+def main() -> i32:
+    buf: mutable darray[u8] = [97]
+    got: darray[Tok] = toks(&buf)
+    for i in 0..<100 |buf|:
+        buf.push(98)
+    return got[0].text[0].i32()
+`
+	for _, mutate := range []bool{false, true} {
+		source := fixture
+		if !mutate {
+			source = strings.Replace(source, "    for i in 0..<100 |buf|:\n        buf.push(98)\n", "", 1)
+		}
+		result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "owned_return.elisa", source)
+		all := strings.Join(result.Errors(), "\n")
+		stale := strings.Contains(all, "storage dependency facts were invalidated by darray push of buf")
+		if stale != mutate || (!mutate && all != "") {
+			t.Fatalf("mutation=%v, errors: %s", mutate, all)
+		}
+	}
+}

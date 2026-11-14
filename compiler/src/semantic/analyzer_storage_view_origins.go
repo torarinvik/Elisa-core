@@ -75,6 +75,7 @@ func (a *Analyzer) storageViewReturnOriginsFor(decl *ast.FuncDecl, depth int) *s
 					addAll(a.storageViewOriginsOfExpr(s.Value, params, locals, depth, 0, false))
 				}
 			case *ast.ExprStmt:
+				a.recordStorageViewOriginPush(s.Expr, locals)
 				if last && s.Expr != nil {
 					addAll(a.storageViewOriginsOfExpr(s.Expr, params, locals, depth, 0, false))
 				}
@@ -105,6 +106,29 @@ func (a *Analyzer) storageViewReturnOriginsFor(decl *ast.FuncDecl, depth int) *s
 	return summary
 }
 
+// A push into a local list can add a borrowed payload to its eventual return.
+func (a *Analyzer) recordStorageViewOriginPush(expr ast.Expr, locals map[string]ast.Expr) {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok || len(call.Args) != 1 || !a.isCompilerBuiltinHelperCall(call, "darray.push") {
+		return
+	}
+	field, ok := call.Func.(*ast.FieldExpr)
+	if !ok {
+		return
+	}
+	receiver, ok := stripOptimizationParens(field.Object).(*ast.Ident)
+	if !ok {
+		return
+	}
+	list, ok := locals[receiver.Name].(*ast.ListLitExpr)
+	if !ok {
+		return
+	}
+	updated := *list
+	updated.Elems = append(append([]ast.Expr(nil), list.Elems...), call.Args[0])
+	locals[receiver.Name] = &updated
+}
+
 // storageViewOriginsOfExpr traces a returned expression back to parameter field paths.
 func (a *Analyzer) storageViewOriginsOfExpr(expr ast.Expr, params map[string]int, locals map[string]ast.Expr, depth, hops int, into bool) ([]storageViewReturnOrigin, bool) {
 	if expr == nil || hops > 16 {
@@ -121,6 +145,11 @@ func (a *Analyzer) storageViewOriginsOfExpr(expr ast.Expr, params map[string]int
 		return a.storageViewOriginsOfExpr(n.Operand, params, locals, depth, hops+1, into)
 	case *ast.StringLit:
 		return nil, true
+	case *ast.ListLitExpr:
+		return a.storageViewOriginsOfAggregate(n.Elems, params, locals, depth, hops, into)
+	case *ast.StructLitExpr:
+		args := append(append([]ast.Expr(nil), n.LoweredArgs()...), n.Spreads...)
+		return a.storageViewOriginsOfAggregate(args, params, locals, depth, hops, into)
 	case *ast.NullLit:
 		// `return null` from a `T&?` helper borrows nothing: it adds no origin and must not
 		// make the whole summary unknown (which would drop the other returns' origins).
@@ -224,6 +253,21 @@ func (a *Analyzer) storageViewOriginsOfExpr(expr ast.Expr, params map[string]int
 		return out, true
 	}
 	return nil, false
+}
+
+func (a *Analyzer) storageViewOriginsOfAggregate(args []ast.Expr, params map[string]int, locals map[string]ast.Expr, depth, hops int, into bool) ([]storageViewReturnOrigin, bool) {
+	var origins []storageViewReturnOrigin
+	for _, arg := range args {
+		if t := a.exprType(arg); t != nil && !a.typeCarriesBorrowedStorage(t, map[Type]bool{}) {
+			continue
+		}
+		mapped, ok := a.storageViewOriginsOfExpr(arg, params, locals, depth, hops+1, into)
+		if !ok {
+			return nil, false
+		}
+		origins = append(origins, mapped...)
+	}
+	return origins, true
 }
 
 // storageViewOriginCallee resolves a user call to its FuncDecl plus the argument list aligned

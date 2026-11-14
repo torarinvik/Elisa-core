@@ -149,12 +149,8 @@ func (a *Analyzer) storageViewDependencyForUserCall(call *ast.CallExpr) (storage
 		}
 		return mergeStorageViewDependencies(deps...)
 	}
-	if !storageViewTopLevelBorrowType(resultType) {
-		// An enum result can carry a payload view into an argument (`wrap(b) -> Tok`
-		// returning `Tok.Word(b.as_sview())`); trace it through the return summary.
-		if _, isEnum := resultType.(*EnumType); !isEnum || !a.typeCarriesBorrowedStorage(resultType, map[Type]bool{}) {
-			return storageViewDependencyState{}, false
-		}
+	if !storageViewTopLevelBorrowType(resultType) && !a.typeCarriesBorrowedStorage(resultType, map[Type]bool{}) {
+		return storageViewDependencyState{}, false
 	}
 	// A reference to a container HEADER (`-> mutable darray[T]&` returning `&state.items`)
 	// survives the container's own growth; its relocation hazard is tracked as a container
