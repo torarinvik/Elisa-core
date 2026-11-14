@@ -109,7 +109,7 @@ func (a *Analyzer) storageViewReturnOriginsFor(decl *ast.FuncDecl, depth int) *s
 // A push into a local list can add a borrowed payload to its eventual return.
 func (a *Analyzer) recordStorageViewOriginPush(expr ast.Expr, locals map[string]ast.Expr) {
 	call, ok := expr.(*ast.CallExpr)
-	if !ok || len(call.Args) != 1 || !a.isCompilerBuiltinHelperCall(call, "darray.push") {
+	if !ok || len(call.Args) != 1 {
 		return
 	}
 	field, ok := call.Func.(*ast.FieldExpr)
@@ -121,7 +121,7 @@ func (a *Analyzer) recordStorageViewOriginPush(expr ast.Expr, locals map[string]
 		return
 	}
 	list, ok := locals[receiver.Name].(*ast.ListLitExpr)
-	if !ok {
+	if !ok || !a.isCompilerBuiltinHelperCall(call, "darray.push") {
 		return
 	}
 	updated := *list
