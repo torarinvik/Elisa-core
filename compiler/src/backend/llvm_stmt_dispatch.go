@@ -228,6 +228,10 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 		if err != nil {
 			return err
 		}
+		value, err = s.emitGlobalRegionHandoff(n.Target, ptr, value, targetType)
+		if err != nil {
+			return err
+		}
 		if s.g.result != nil && s.g.semanticReadView().ValueReassignReclaims(n) {
 			if err := s.emitReassignReclaim(n, ptr, targetType); err != nil {
 				return err
