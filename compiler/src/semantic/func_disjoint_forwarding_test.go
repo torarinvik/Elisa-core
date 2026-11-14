@@ -61,7 +61,7 @@ def run() -> void:
 	b: mutable darray[f64] = []
 	c: mutable darray[f64] = []
 	solve(&a, &b)
-	solve(&c, &c)
+	solve(&c, &c) can Unsafe.Alias
 `
 	result := analyzeTreeTestSource(t, "fwd_aliased.elisa", src)
 	if solve := disjointInfoForFunc(result, "solve"); solve != nil && solve.PairDistinct(0, 1) {

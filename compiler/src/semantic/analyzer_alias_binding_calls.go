@@ -199,7 +199,7 @@ func aliasExprIsExplicitBorrow(expr ast.Expr) bool {
 }
 
 func (a *Analyzer) validateCallArgAliasAccess(call *ast.CallExpr, paramTypes []Type, args []ast.Expr) {
-	if call == nil || !a.enforceUnsafePermissions {
+	if call == nil {
 		return
 	}
 	a.recordCallAlignedAliasArgs(call, args)

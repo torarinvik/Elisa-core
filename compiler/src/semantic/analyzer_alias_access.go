@@ -301,7 +301,7 @@ func (a *Analyzer) recordStructAliasCarrierFieldAssignment(target ast.Expr, targ
 }
 
 func (a *Analyzer) recordUnsafeAliasExpr(expr ast.Expr) {
-	if expr == nil || !a.enforceUnsafePermissions {
+	if expr == nil {
 		return
 	}
 	if a.unsafeAliasExprs != nil {

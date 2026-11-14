@@ -79,7 +79,7 @@ func TestCallArgDisjointHeaderAliasLaundering(t *testing.T) {
 		"stored_ref": `
     r: mutable darray[f64]& = &a
     replace(r, b)
-    axpy(&a, &b)
+    axpy(&a, &b) can Unsafe.Alias
 `,
 		"reassigned_ref": `
     r: mutable darray[f64]& = &b
@@ -348,7 +348,7 @@ func TestCallArgDisjointAliasBindingCaptured(t *testing.T) {
 def run() -> void:
     a: mutable darray[f64] = [1.0]
     r: mutable darray[f64]& = &a
-    axpy(&a, r)
+    axpy(&a, r) can Unsafe.Alias
 `
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "captured_alias.elisa", source, AnalyzeOptions{})
 	if len(result.Errors()) != 0 {

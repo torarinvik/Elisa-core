@@ -44,7 +44,7 @@ func TestCallArgDisjointSelfAliasNotDistinct(t *testing.T) {
 	src := disjointKernelSrc + `
 def run() -> void:
 	a: mutable darray[f64] = []
-	axpy(&a, &a)
+	axpy(&a, &a) can Unsafe.Alias
 `
 	result := analyzeTreeTestSource(t, "disjoint_self.elisa", src)
 	if info := firstDisjointInfo(result); info != nil && info.PairDistinct(0, 1) {
@@ -150,7 +150,7 @@ func TestCallArgDisjointDriftFrontier(t *testing.T) {
 			name: "same local aliases",
 			body: `
 	a: mutable darray[f64] = []
-	axpy(&a, &a)
+	axpy(&a, &a) can Unsafe.Alias
 `,
 		},
 		{
@@ -202,7 +202,7 @@ func TestCallArgDisjointDriftFrontier(t *testing.T) {
 	b: mutable darray[f64] = []
 	outer.push(a)
 	outer.push(b)
-	axpy(&outer[0], &outer[1])
+	axpy(&outer[0], &outer[1]) can Unsafe.Alias
 `,
 		},
 	}

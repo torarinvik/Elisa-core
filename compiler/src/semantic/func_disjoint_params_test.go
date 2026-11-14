@@ -157,7 +157,7 @@ def run_ok() -> void:
 
 def run_alias() -> void:
 	c: mutable darray[f64] = []
-	axpy(&c, &c)
+	axpy(&c, &c) can Unsafe.Alias
 `
 	result := analyzeTreeTestSource(t, "fdisjoint_alias.elisa", src)
 	if info := disjointInfoForFunc(result, "axpy"); info != nil && info.PairDistinct(0, 1) {

@@ -51,8 +51,8 @@ func (a *Analyzer) validatePermissionExprWithValueContext(expr ast.Expr, granted
 		for _, arg := range n.LoweredArgs() {
 			a.validatePermissionExpr(arg, granted)
 		}
-		if a.enforceUnsafePermissions && a.exprRequiresUnsafeAlias(n) {
-			a.warnOnMissingLocalGrant(n.Pos(), "mutable alias", unsafeAliasRefs(n.Position), granted)
+		if a.exprRequiresUnsafeAlias(n) {
+			a.errorOnMissingLocalGrant(n.Pos(), "mutable alias", unsafeAliasRefs(n.Position), granted)
 		}
 		if a.enforceUnsafePermissions && isIndirectCallTarget(n.Func) {
 			a.warnOnMissingLocalGrant(n.Pos(), "indirect call", unsafeIndirectCallRefs(n.Position), granted)
