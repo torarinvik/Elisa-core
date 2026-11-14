@@ -57,7 +57,7 @@ func TestActualDictInactiveStorageNativeInsertDeleteRehashAndClear(t *testing.T)
 global anchor: i64 = 73
 
 def main() -> int:
-    can Memory.Allocate, Memory.Release, Abort.Panic, Atomics{Exchange, Store}, Global{Read, Write}:
+    can Memory.Allocate, Memory.Release, Abort.Panic, Atomics{Exchange, Store}, Global{Read, Write}, Unsafe.Alias:
         arena: mutable Arena = zeroed
         defer block:
             arena_free(&arena)
