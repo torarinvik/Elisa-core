@@ -417,14 +417,15 @@ func (a *Analyzer) autoRegionAdoptsCallerArena(targetRegion string) bool {
 // `out.push(...)` is checked by checkNestedRegionElementStoreEscape; the callee's own checks
 // accept the store (both are its parameters), so the caller checks every argument the call may
 // store, with the same adoption sanction.
-func (a *Analyzer) checkCallArgumentRegionStoreEscape(call *ast.CallExpr) {
+func (a *Analyzer) checkCallArgumentRegionStoreEscape(call *ast.CallExpr) map[int]bool {
 	if a == nil || call == nil || a.suppressDiagnostics || a.staticContextDepth != 0 || a.currentFuncDecl == nil {
-		return
+		return nil
 	}
 	fnType := a.returnBorrowCalleeSignature(call)
 	if fnType == nil {
-		return
+		return nil
 	}
+	var rejected map[int]bool
 	args := returnBorrowCallArgs(call)
 	// What each argument may point at depends only on its type; compute it once per argument,
 	// not once per (writable param, argument) pair.
@@ -452,7 +453,12 @@ func (a *Analyzer) checkCallArgumentRegionStoreEscape(call *ast.CallExpr) {
 		// another argument's storage.
 		if ref, isRef := paramType.(*RefType); isRef && ref != nil && ref.Mutable {
 			if st, isStruct := peelToStructType(ref.Elem); isStruct && typeCarriesRegionStorage(st) {
-				a.checkCallArgumentStructTargetStoreEscape(call, args, index)
+				if a.checkCallArgumentStructTargetStoreEscape(call, args, index) {
+					if rejected == nil {
+						rejected = make(map[int]bool)
+					}
+					rejected[index] = true
+				}
 				continue
 			}
 		}
@@ -507,9 +513,14 @@ func (a *Analyzer) checkCallArgumentRegionStoreEscape(call *ast.CallExpr) {
 				}
 				if a.regionStoreEscapes(targetRegion, region) {
 					a.errorf(arg.Pos(), "call may store a value in region %q into longer-lived region %q through argument %d; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before the call", a.regionDisplayName(region), a.regionDisplayName(targetRegion), index+1, a.regionDisplayName(region), a.regionDisplayName(targetRegion), a.regionDisplayName(targetRegion))
+					if rejected == nil {
+						rejected = make(map[int]bool)
+					}
+					rejected[index] = true
 					break
 				}
 			}
 		}
 	}
+	return rejected
 }

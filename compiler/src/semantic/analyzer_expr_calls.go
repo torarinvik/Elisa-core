@@ -197,10 +197,11 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 	// docs/119 §6.2: the same value-receiver mutation is a hidden write when it targets an
 	// outer binding inside a value block — `xs.push(v)` on an uncaptured outer `xs` is E4.
 	defer a.checkValueBlockMutatingBuiltinMethod(expr)
-	// A call may store a borrow of this frame through a `mutable T&` argument that outlives it.
-	defer a.queueCallArgumentStoreChecks(expr)
-	// …and a borrow of a function-local REGION's storage (a local darray's bytes) the same way.
-	defer a.checkCallArgumentRegionStoreEscape(expr)
+	// A call may store a borrow through an argument that outlives this frame.
+	// Keep the region diagnostic when both checks identify the same destination.
+	defer func() {
+		a.queueCallArgumentStoreChecks(expr, a.checkCallArgumentRegionStoreEscape(expr))
+	}()
 	// …and the same for a non-container holder (`set(h, b.as_sview())`, set storing into h.s).
 	defer a.checkCallArgumentHolderStoreEscape(expr)
 	// A tracked local container a callee fills takes on the provenance of its other arguments.

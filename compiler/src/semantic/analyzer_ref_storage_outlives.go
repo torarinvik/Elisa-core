@@ -104,7 +104,7 @@ func (a *Analyzer) checkReturnBorrowEscapesLocal(value ast.Expr, valueType Type)
 	}
 	// Each return is checked against the per-binding store environment once the whole body has
 	// been analyzed, so a clean `return H{r: z}` is not blamed for a different path's escape.
-	if a.deferLocalBorrowCheck(pendingLocalBorrowStore{value: value, message: "returning an aggregate or helper result that contains a reference into function-local storage", summaryGated: true}) {
+	if a.deferLocalBorrowCheck(pendingLocalBorrowStore{value: value, message: "returning an aggregate or helper result that contains a reference into function-local storage", summaryGated: true, regionDependent: true}) {
 		return
 	}
 	flow := a.returnBorrowFlowForExpr(value, nil, map[*ast.FuncDecl]bool{}, map[*Symbol]bool{})

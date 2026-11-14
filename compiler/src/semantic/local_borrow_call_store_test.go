@@ -537,7 +537,11 @@ def main() -> i32:
 		for _, line := range c.lines {
 			found := false
 			for _, err := range errs {
-				if strings.Contains(err, fmt.Sprintf(".elisa:%d:", line)) && (strings.Contains(err, "function-local storage") || strings.Contains(err, "region dependency facts include local region")) {
+				localBorrow := strings.Contains(err, "function-local storage") ||
+					strings.Contains(err, "region dependency facts include local region")
+				localRegionStore := strings.Contains(err, `call may store a value in region "<inferred>"`) &&
+					strings.Contains(err, "freed first, leaving a dangling reference")
+				if strings.Contains(err, fmt.Sprintf(".elisa:%d:", line)) && (localBorrow || localRegionStore) {
 					found = true
 				}
 			}

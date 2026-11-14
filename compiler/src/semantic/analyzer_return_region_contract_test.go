@@ -164,3 +164,19 @@ def relay[@a, @b](pair: (left: sview, right: sview) @b) -> (left: sview, right: 
 		t.Fatalf("expected tuple literals and tuple variables to reject lifetimes not proven to satisfy @a, got:\n%s", diagnostics)
 	}
 }
+
+func TestReturnDArrayViewBorrowsBackingStorage(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "darray_view_return.elisa", `
+def leak() -> sview:
+    can Memory.Allocate:
+        bytes: mutable dstr = [65, 66]
+        return bytes.as_sview()
+
+def forward(bytes: darray[u8]&) -> sview:
+    return bytes.as_sview()
+`)
+	errs := result.Errors()
+	if len(errs) != 1 || !strings.Contains(errs[0], "function-local storage") {
+		t.Fatalf("expected only the local backing storage to be rejected, got: %v", errs)
+	}
+}

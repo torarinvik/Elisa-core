@@ -15,7 +15,8 @@ import (
 // left holding a dangling backing (a silent use-after-free). The struct's storage region is the
 // region recorded for the argument (struct local / region-carrying ref); a region-less target
 // (a parameter, a global, a caller-owned struct) outlives every local region.
-func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, args []ast.Expr, index int) {
+func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, args []ast.Expr, index int) bool {
+	rejected := false
 	targetArg := args[index]
 	var storeDecl *ast.FuncDecl
 	calleeChecked := false
@@ -98,10 +99,12 @@ func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, 
 					fmt.Fprintf(os.Stderr, "STORECALL at %s mode=%d tracked=%v nobytes=%v argType=%s region=%s\n", arg.Pos(), mode, tracked, typeHoldsNoBytes(stripRefForBounds(a.exprType(arg)), map[Type]bool{}), typeString(a.exprType(arg)), region)
 				}
 				a.errorf(arg.Pos(), "call may store a value in region %q into longer-lived storage through argument %d; region %q is freed first, leaving a dangling reference. Copy it into the target's region (or a region that outlives it) before the call", a.regionDisplayName(region), index+1, a.regionDisplayName(region))
+				rejected = true
 				break
 			}
 		}
 	}
+	return rejected
 }
 
 // Complete view provenance means a view-only store cannot add regions beyond

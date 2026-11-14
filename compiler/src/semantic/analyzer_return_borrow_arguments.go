@@ -5,6 +5,14 @@ import (
 )
 
 func (a *Analyzer) returnBorrowFlowForCall(call *ast.CallExpr, aliases map[string]returnBorrowFlow, active map[*ast.FuncDecl]bool, localBindings map[*Symbol]bool) returnBorrowFlow {
+	// These builtin views borrow the receiver's backing storage. Their implicit
+	// receiver is absent from call.Args, so ordinary argument tracing misses it.
+	if builtin, ok := a.exprType(call.Func).(*FuncType); ok && builtin != nil &&
+		(builtin.Name == "darray.sview" || builtin.Name == "darray.cstr") {
+		if field, ok := call.Func.(*ast.FieldExpr); ok {
+			return a.returnBorrowAddressFlow(field.Object, aliases, active, localBindings)
+		}
+	}
 	decl, ok := a.resolveDirectCallFuncDecl(call)
 	if !ok {
 		if ident, isIdent := call.Func.(*ast.Ident); isIdent && ident != nil {

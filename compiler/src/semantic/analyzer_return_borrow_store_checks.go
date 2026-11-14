@@ -87,7 +87,7 @@ func (a *Analyzer) errorReportedAt(pos lexer.Pos) bool {
 // `fill(&frame_local, out)` with fill pushing `&h.buf[0]` into out leaves the caller's out holding a
 // pointer into this frame. The callee's own checks accept the store (both are its parameters), so
 // the caller checks what the call may store through each such argument.
-func (a *Analyzer) queueCallArgumentStoreChecks(call *ast.CallExpr) {
+func (a *Analyzer) queueCallArgumentStoreChecks(call *ast.CallExpr, regionRejected map[int]bool) {
 	if a == nil || call == nil || a.suppressDiagnostics || a.staticContextDepth != 0 || a.currentFuncDecl == nil {
 		return
 	}
@@ -100,7 +100,7 @@ func (a *Analyzer) queueCallArgumentStoreChecks(call *ast.CallExpr) {
 		if index >= len(args) {
 			break
 		}
-		if !a.returnBorrowWritableParam(paramType) {
+		if regionRejected[index] || !a.returnBorrowWritableParam(paramType) {
 			continue
 		}
 		// Writability describes what the argument permits, not what this callee actually does.
