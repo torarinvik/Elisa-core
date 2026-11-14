@@ -177,15 +177,14 @@ func (s *functionState) emitCloneDArrayValue(sourceValue llvmIRValueRef, sourceT
 		if err != nil {
 			return nil, err
 		}
-		indexPtr := llvmBuildAlloca(s.builder, usizeLLVMType, cStringFree(name+".index"))
+		loopEntry := llvmGetInsertBlock(s.builder)
 		one := llvmConstInt(usizeLLVMType, 1, 0)
-		llvmBuildStore(s.builder, zeroCount, indexPtr)
 		loopBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".loop"))
 		bodyBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".body"))
 		endBB := llvmAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".end"))
 		llvmBuildBr(s.builder, loopBB)
 		llvmPositionBuilderAtEnd(s.builder, loopBB)
-		indexValue := llvmBuildLoad2(s.builder, usizeLLVMType, indexPtr, cStringFree(name+".index.load"))
+		indexValue := llvmBuildPhi(s.builder, usizeLLVMType, cStringFree(name+".index"))
 		more := llvmBuildICmp(s.builder, llvmIRIntPredicate(llvmIntULT), indexValue, countValue, cStringFree(name+".cond"))
 		llvmBuildCondBr(s.builder, more, bodyBB, endBB)
 
@@ -199,8 +198,11 @@ func (s *functionState) emitCloneDArrayValue(sourceValue llvmIRValueRef, sourceT
 		destPtr := llvmBuildGEP2(s.builder, elemLLVMType, allocPtr, llvmValueSlicePtr([]llvmIRValueRef{indexValue}), 1, cStringFree(name+".dst.ptr"))
 		llvmBuildStore(s.builder, clonedElem, destPtr)
 		next := llvmBuildAdd(s.builder, indexValue, one, cStringFree(name+".next"))
-		llvmBuildStore(s.builder, next, indexPtr)
+		// A nested element clone may append blocks. The back edge comes
+		// from the block where that clone leaves the builder.
+		backEdge := llvmGetInsertBlock(s.builder)
 		llvmBuildBr(s.builder, loopBB)
+		llvmAddIncoming(indexValue, llvmValueSlicePtr([]llvmIRValueRef{zeroCount, next}), llvmBlockSlicePtr([]llvmIRBlockRef{loopEntry, backEdge}), 2)
 
 		llvmPositionBuilderAtEnd(s.builder, endBB)
 		materialized := llvmGetUndef(llvmResultType)

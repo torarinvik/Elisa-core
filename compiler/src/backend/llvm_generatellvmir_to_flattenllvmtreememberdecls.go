@@ -59,6 +59,12 @@ func GenerateLLVMIRWithWarnings(result *semantic.Result, optLevel OptimizationLe
 }
 
 func generateLLVMIRWithWarnings(result *semantic.Result, optLevel OptimizationLevel, profile PackedLoweringProfile, targetTriple string, debugInfo bool, traceInfo bool) (string, []string, error) {
+	if result != nil {
+		// Keep canonical syntax membership and specialization products for this
+		// lowering, as the partitioned object path does.
+		result.BeginSharedCodegen()
+		defer result.EndSharedCodegen()
+	}
 	g, err := compileLLVMModuleWithTargetDebugTrace(result, optLevel, profile, targetTriple, debugInfo, traceInfo)
 	if err != nil {
 		return "", nil, err
