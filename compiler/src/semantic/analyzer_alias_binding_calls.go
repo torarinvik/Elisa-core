@@ -203,7 +203,7 @@ func (a *Analyzer) validateCallArgAliasAccess(call *ast.CallExpr, paramTypes []T
 		return
 	}
 	a.recordCallAlignedAliasArgs(call, args)
-	seen := map[string]aliasAccessState{}
+	var seen map[string]aliasAccessState
 	limit := len(args)
 	if len(paramTypes) < limit {
 		limit = len(paramTypes)
@@ -253,6 +253,9 @@ func (a *Analyzer) validateCallArgAliasAccess(call *ast.CallExpr, paramTypes []T
 		}
 		// Roots of one arg are alternatives (the ref is one of them), not mutual conflicts,
 		// so add them to `seen` only after checking this arg against earlier args.
+		if len(roots) > 0 && seen == nil {
+			seen = make(map[string]aliasAccessState)
+		}
 		for _, root := range roots {
 			seen[root] = aliasAccessStateWith(seen[root], mode)
 		}
