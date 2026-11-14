@@ -21,16 +21,23 @@ func (a *Analyzer) returnBorrowRefDeclTarget(n *ast.VarDeclStmt) (*ast.AddrOfExp
 // returnBorrowRefDeclLinks maps each reference local declared from `&place` to the locals its
 // place is rooted at. Name-based, like the untrusted census: an extra link only forwards more.
 func (a *Analyzer) returnBorrowRefDeclLinks(fn *ast.FuncDecl) map[string][]string {
-	links := map[string][]string{}
+	var links map[string][]string
 	var walk func(v reflect.Value)
 	walk = func(v reflect.Value) {
 		switch v.Kind() {
-		case reflect.Pointer, reflect.Interface:
+		case reflect.Interface:
+			if !v.IsNil() {
+				walk(v.Elem())
+			}
+		case reflect.Pointer:
 			if v.IsNil() {
 				return
 			}
-			if decl, ok := v.Interface().(*ast.VarDeclStmt); ok && decl != nil && decl.Name != "" && v.Kind() == reflect.Pointer {
+			if decl, ok := v.Interface().(*ast.VarDeclStmt); ok && decl.Name != "" {
 				if _, root := a.returnBorrowRefDeclTarget(decl); root != "" && root != decl.Name {
+					if links == nil {
+						links = make(map[string][]string)
+					}
 					links[decl.Name] = append(links[decl.Name], root)
 				}
 			}
