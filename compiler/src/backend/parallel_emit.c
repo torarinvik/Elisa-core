@@ -254,16 +254,19 @@ void elisacoreEnsureO3UnrollThreshold(int threshold) {
 	// Configure it in the shared O3 initializer so serial and partition workers
 	// use the same machine-code layout. Linux retains LLVM's default layout.
 #if defined(__aarch64__)
-	const char *argv[4] = {"elisac", flag, "-enable-ext-tsp-block-placement=true", "-aarch64-enable-early-ifcvt=false"};
-	LLVMParseCommandLineOptions(4, argv, NULL);
+	// Keep copies for loop-exit PHIs off the continuing edge.
+	const char *argv[] = {"elisac", flag, "-enable-ext-tsp-block-placement=true",
+	                      "-aarch64-enable-early-ifcvt=false", "-no-phi-elim-live-out-early-exit"};
+	LLVMParseCommandLineOptions(5, argv, NULL);
 #else
 	const char *argv[3] = {"elisac", flag, "-enable-ext-tsp-block-placement=true"};
 	LLVMParseCommandLineOptions(3, argv, NULL);
 #endif
 #else
 #if defined(__aarch64__)
-	const char *argv[3] = {"elisac", flag, "-aarch64-enable-early-ifcvt=false"};
-	LLVMParseCommandLineOptions(3, argv, NULL);
+	const char *argv[] = {"elisac", flag, "-aarch64-enable-early-ifcvt=false",
+	                      "-no-phi-elim-live-out-early-exit"};
+	LLVMParseCommandLineOptions(4, argv, NULL);
 #else
 	const char *argv[2] = {"elisac", flag};
 	LLVMParseCommandLineOptions(2, argv, NULL);
