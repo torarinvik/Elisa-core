@@ -52,7 +52,8 @@ bool poolFunctionConstants(Function &function) {
   SmallVector<PoolUse, 8> uses;
   for (BasicBlock &block : function) {
     for (Instruction &instruction : block) {
-      if (!isa<FCmpInst>(instruction) &&
+      const bool tinySelect = instructionCount <= 12 && isa<SelectInst>(instruction);
+      if (!isa<FCmpInst>(instruction) && !tinySelect &&
           instruction.getOpcode() != Instruction::FMul)
         continue;
       for (unsigned operand = 0; operand < instruction.getNumOperands(); ++operand) {
