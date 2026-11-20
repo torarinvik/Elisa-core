@@ -107,3 +107,7 @@ def example() -> i64:
 ## Work on the compiler
 
 Read the [compiler guide](compiler/README.md) for the source layout and test commands. The default contributor check is `make -C compiler test`. The [formal model](formal/easm-tal/) and [benchmarks](Code/benchmarks/) live alongside the compiler.
+
+## License
+
+Elisa Core is available under the [Zero-Clause BSD license (0BSD)](LICENSE).
