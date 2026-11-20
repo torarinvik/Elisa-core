@@ -10,6 +10,7 @@
 #include <llvm/MC/TargetRegistry.h>
 #include <llvm/Support/CBindingWrapping.h>
 #include <llvm/Target/TargetMachine.h>
+#include <llvm/Transforms/Utils/BasicBlockUtils.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -52,14 +53,25 @@ bool poolFunctionConstants(Function &function) {
   SmallVector<PoolUse, 8> uses;
   for (BasicBlock &block : function) {
     for (Instruction &instruction : block) {
-      const bool tinySelect = instructionCount <= 12 && isa<SelectInst>(instruction);
-      if (!isa<FCmpInst>(instruction) && !tinySelect &&
+      const bool tinyResult = instructionCount <= 12 && (isa<SelectInst>(instruction) || isa<ReturnInst>(instruction));
+      const auto *phi = dyn_cast<PHINode>(&instruction);
+      const bool returnPhi = instructionCount <= 12 && phi &&
+          phi->getNumIncomingValues() == 2 && phi->hasOneUse() &&
+          isa<ReturnInst>(*phi->user_begin()) &&
+          phi->getIncomingBlock(0) != phi->getIncomingBlock(1);
+
+      if (!returnPhi && !isa<FCmpInst>(instruction) && !tinyResult &&
           instruction.getOpcode() != Instruction::FMul)
         continue;
       for (unsigned operand = 0; operand < instruction.getNumOperands(); ++operand) {
         auto *constant = dyn_cast<ConstantFP>(instruction.getOperand(operand));
         if (!constant || !needsMultipleImmediateInstructions(*constant))
           continue;
+        if (returnPhi) {
+          const auto *branch = dyn_cast<BranchInst>(phi->getIncomingBlock(operand)->getTerminator());
+          if (!branch)
+            return false;
+        }
         auto existing = std::find(constants.begin(), constants.end(), constant);
         unsigned slot = static_cast<unsigned>(existing - constants.begin());
         if (existing == constants.end()) {
@@ -95,7 +107,16 @@ bool poolFunctionConstants(Function &function) {
   table->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
   table->setAlignment(Align(8));
   for (const PoolUse &use : uses) {
-    IRBuilder<> builder(use.instruction);
+    Instruction *insertionPoint = use.instruction;
+    if (auto *phi = dyn_cast<PHINode>(use.instruction)) {
+      BasicBlock *predecessor = phi->getIncomingBlock(use.operand);
+      // The literal must stay on its incoming path so a cold return adds
+      // no work to the path computing the normal result.
+      if (predecessor->getTerminator()->getNumSuccessors() > 1)
+        predecessor = SplitEdge(predecessor, phi->getParent());
+      insertionPoint = predecessor->getTerminator();
+    }
+    IRBuilder<> builder(insertionPoint);
     Value *address = builder.CreateInBoundsGEP(type, table,
                                                {builder.getInt32(0), builder.getInt32(use.slot)});
     Value *value = builder.CreateAlignedLoad(element, address, Align(8));
