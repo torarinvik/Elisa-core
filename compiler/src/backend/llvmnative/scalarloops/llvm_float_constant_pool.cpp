@@ -46,7 +46,7 @@ bool poolFunctionConstants(Function &function) {
       function.hasFnAttribute("target-features"))
     return false;
   const unsigned instructionCount = function.getInstructionCount();
-  if (instructionCount > 100)
+  if (instructionCount > 160)
     return false;
 
   SmallVector<Constant *, 8> constants;
@@ -81,11 +81,11 @@ bool poolFunctionConstants(Function &function) {
         auto existing = std::find(constants.begin(), constants.end(), constant);
         unsigned slot = static_cast<unsigned>(existing - constants.begin());
         if (existing == constants.end()) {
-          if (constants.size() == 8)
+          if (constants.size() == 24)
             return false;
           constants.push_back(constant);
         }
-        if (uses.size() == 12)
+        if (uses.size() == 24)
           return false;
         uses.push_back({&instruction, operand, slot});
         allReturnEdges &= returnPhi;
@@ -98,9 +98,16 @@ bool poolFunctionConstants(Function &function) {
   // when only one operand uses it. Larger functions need more opportunities.
   // Three operands can share the table address in short straight-line code.
   const bool shortTable = instructionCount <= 20 && constants.size() >= 3;
-  const bool profitableInline = distinct
-      ? small && (constants.size() >= 4 || instructionCount <= 12 || shortTable)
-      : constants.size() >= 3 && uses.size() >= 6;
+  // A dense block can amortize the table address even across calls.
+  const bool dense = constants.size() >= 12 && distinct &&
+      std::all_of(uses.begin(), uses.end(), [&](const PoolUse &use) {
+        return use.instruction->getParent() == uses.front().instruction->getParent();
+      });
+  const bool profitableInline = dense || (distinct
+      ? small && constants.size() <= 8 &&
+          (constants.size() >= 4 || instructionCount <= 12 || shortTable)
+      : instructionCount <= 100 && constants.size() <= 8 &&
+          uses.size() >= 6 && uses.size() <= 12 && constants.size() >= 3);
   // Return-edge loads are reached only if that result is selected.
   if (constants.empty() || (!allReturnEdges && !profitableInline))
     return false;
