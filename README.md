@@ -106,6 +106,8 @@ def example() -> i64:
 
 ## Work on the compiler
 
+Anyone can contribute. See the [contribution guide](CONTRIBUTING.md) to get started.
+
 Read the [compiler guide](compiler/README.md) for the source layout and test commands. The default contributor check is `make -C compiler test`. The [formal model](formal/easm-tal/) and [benchmarks](Code/benchmarks/) live alongside the compiler.
 
 ## License
