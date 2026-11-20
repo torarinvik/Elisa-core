@@ -3,7 +3,10 @@
 
 #include <llvm-c/Core.h>
 #include <llvm-c/TargetMachine.h>
+#include <llvm-c/Transforms/PassBuilder.h>
 #include <stddef.h>
+
+LLVMErrorRef elisacoreRunEarlyDivisionPipeline(LLVMModuleRef module, LLVMTargetMachineRef target, LLVMPassBuilderOptionsRef options);
 
 #define ELISACORE_SCAN_CLEANUP "function(early-cse,instcombine<max-iterations=8>,loop-simplify,lcssa,loop(indvars),gvn,instcombine<max-iterations=8>,simplifycfg)"
 

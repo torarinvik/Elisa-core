@@ -51,8 +51,7 @@ static char *elisacoreRunOptimizationPipeline(
 	LLVMErrorRef Err = NULL;
 	if (strncmp(PassPipeline, prefix, strlen(prefix)) == 0 &&
 	    strstr(PassPipeline, "default<O3>") != NULL) {
-		const char *mem2regPipeline = "function(mem2reg,div-rem-pairs)";
-		Err = LLVMRunPasses(Module, mem2regPipeline, TargetMachine, Options);
+		Err = elisacoreRunEarlyDivisionPipeline(Module, TargetMachine, Options);
 		if (Err == NULL) elisacoreAggregateCopiesToMemcpy(Module);
 		if (Err == NULL) elisacoreFoldMaskedSplitMultiplies(Module);
 		if (Err == NULL) elisacoreElideArrayRoundTrips(Module);

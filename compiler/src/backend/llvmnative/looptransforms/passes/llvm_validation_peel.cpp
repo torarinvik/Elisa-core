@@ -2,11 +2,14 @@
 #include <llvm/Config/llvm-config.h>
 #include <llvm-c/Core.h>
 #include <llvm-c/TargetMachine.h>
+#include <llvm-c/Transforms/PassBuilder.h>
 #if LLVM_VERSION_MAJOR == 23
 #include <llvm/ADT/APInt.h>
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/IR/Dominators.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/IR/InstIterator.h>
+#include <llvm/Transforms/Scalar/DivRemPairs.h>
 #include <llvm/IR/Intrinsics.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Module.h>
@@ -33,6 +36,34 @@
 #include <llvm/Transforms/Utils/LoopUtils.h>
 #include <llvm/Transforms/Utils/UnrollLoop.h>
 using namespace llvm;
+
+static void pairEarlyDivisions(Module &module, TargetMachine *target) {
+  PassBuilder builder(target);
+  FunctionAnalysisManager analyses;
+  builder.registerFunctionAnalyses(analyses);
+  FunctionPassManager passes;
+  passes.addPass(DivRemPairsPass());
+  for (Function &function : module) {
+    if (function.isDeclaration() || function.hasOptNone()) continue;
+    bool runtimeUnsignedRemainder = false;
+    bool otherRemainder = false;
+    for (const Instruction &instruction : instructions(function)) {
+      if (instruction.getOpcode() == Instruction::URem &&
+          instruction.getType()->isIntegerTy() &&
+          !isa<ConstantInt>(instruction.getOperand(1))) {
+        runtimeUnsignedRemainder = true;
+      } else if (instruction.getOpcode() == Instruction::URem ||
+                 instruction.getOpcode() == Instruction::SRem) {
+        otherRemainder = true;
+      }
+    }
+    // The default pipeline can retain a remainder test until AArch64
+    // instruction selection, where it can become MSUB and CBZ/CBNZ.
+    if (runtimeUnsignedRemainder && !otherRemainder) continue;
+    if (runtimeUnsignedRemainder || otherRemainder) passes.run(function, analyses);
+  }
+}
+
 extern "C" unsigned elisacorePeelSmallValidationLoops(LLVMModuleRef moduleRef) {
   if (!moduleRef) return 0;
   Module &module = *unwrap(moduleRef);
@@ -546,3 +577,15 @@ extern "C" unsigned elisacoreUnrollNestedScans(LLVMModuleRef) { return 0; }
 extern "C" unsigned elisacorePeelSmallValidationLoops(LLVMModuleRef) { return 0; }
 extern "C" unsigned elisacoreCsscAbsoluteRangeChecks(LLVMModuleRef, LLVMTargetMachineRef) { return 0; }
 #endif
+
+extern "C" LLVMErrorRef elisacoreRunEarlyDivisionPipeline(LLVMModuleRef module, LLVMTargetMachineRef target, LLVMPassBuilderOptionsRef options) {
+#if LLVM_VERSION_MAJOR == 23
+  if (unwrap(module)->getTargetTriple().isAArch64()) {
+    if (auto error = LLVMRunPasses(module, "function(mem2reg)", target, options))
+      return error;
+    pairEarlyDivisions(*unwrap(module), reinterpret_cast<TargetMachine *>(target));
+    return nullptr;
+  }
+#endif
+  return LLVMRunPasses(module, "function(mem2reg,div-rem-pairs)", target, options);
+}

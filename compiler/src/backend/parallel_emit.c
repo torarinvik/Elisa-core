@@ -419,7 +419,7 @@ static int part_optimize(LLVMModuleRef m, LLVMTargetMachineRef tm, const char *p
 	const char *prefix = "function(mem2reg,div-rem-pairs),";
 	LLVMErrorRef err = NULL;
 	if (strncmp(pipeline, prefix, strlen(prefix)) == 0 && strstr(pipeline, "default<O3>") != NULL) {
-		err = LLVMRunPasses(m, "function(mem2reg,div-rem-pairs)", tm, options);
+		err = elisacoreRunEarlyDivisionPipeline(m, tm, options);
 		if (err == NULL) elisacoreAggregateCopiesToMemcpy(m);
 		if (err == NULL) elisacoreFoldMaskedSplitMultiplies(m);
 		if (err == NULL) elisacoreElideArrayRoundTrips(m);

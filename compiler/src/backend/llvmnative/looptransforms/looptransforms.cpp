@@ -8,6 +8,7 @@
 #include <llvm/Config/llvm-config.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/IR/InstIterator.h>
 #include <llvm/Support/CBindingWrapping.h>
 #include <optional>
 #include <llvm/ADT/SmallPtrSet.h>
@@ -29,6 +30,7 @@
 #include <llvm/Transforms/Utils/UnrollLoop.h>
 #include <llvm/Transforms/InstCombine/InstCombine.h>
 #include <llvm/Transforms/Scalar/SimplifyCFG.h>
+#include <llvm/Transforms/Scalar/DivRemPairs.h>
 #include <llvm/Transforms/Utils/BasicBlockUtils.h>
 #include <llvm/Transforms/Utils/LCSSA.h>
 #include <llvm/Transforms/Utils/LoopSimplify.h>
