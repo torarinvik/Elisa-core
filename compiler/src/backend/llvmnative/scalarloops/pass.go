@@ -14,6 +14,8 @@ package scalarloops
 #cgo windows CXXFLAGS: -std=c++17 -IC:/msys64/mingw64/include
 #cgo windows LDFLAGS: -LC:/msys64/mingw64/lib -lLLVM-22
 struct LLVMOpaqueModule;
+struct LLVMOpaqueTargetMachine;
+unsigned elisacorePoolFloatingConstants(struct LLVMOpaqueModule *, struct LLVMOpaqueTargetMachine *);
 unsigned elisacoreFoldConditionalDoubling(struct LLVMOpaqueModule *);
 unsigned elisacoreFoldSignedRangeMasks(struct LLVMOpaqueModule *);
 */
@@ -29,4 +31,9 @@ func FoldConditionalDoubling(module unsafe.Pointer) {
 // FoldSignedRangeMasks simplifies checked signed normalization in loops.
 func FoldSignedRangeMasks(module unsafe.Pointer) {
 	C.elisacoreFoldSignedRangeMasks((*C.struct_LLVMOpaqueModule)(module))
+}
+
+// PoolFloatingConstants shares a constant table address across scalar FP uses.
+func PoolFloatingConstants(module, machine unsafe.Pointer) {
+	C.elisacorePoolFloatingConstants((*C.struct_LLVMOpaqueModule)(module), (*C.struct_LLVMOpaqueTargetMachine)(machine))
 }
