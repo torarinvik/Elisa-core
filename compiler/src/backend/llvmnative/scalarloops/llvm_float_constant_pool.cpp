@@ -39,8 +39,8 @@ bool needsMultipleImmediateInstructions(const ConstantFP &constant) {
 }
 
 bool poolFunctionConstants(Function &function) {
-  if (function.isDeclaration() || function.size() > 12 ||
-      function.getInstructionCount() > 64 || function.hasOptNone() ||
+  if (function.isDeclaration() || function.size() > 16 ||
+      function.getInstructionCount() > 100 || function.hasOptNone() ||
       function.hasFnAttribute("target-cpu") ||
       function.hasFnAttribute("target-features"))
     return false;
@@ -56,18 +56,26 @@ bool poolFunctionConstants(Function &function) {
         auto *constant = dyn_cast<ConstantFP>(instruction.getOperand(operand));
         if (!constant || !needsMultipleImmediateInstructions(*constant))
           continue;
-        // Restrict the transformation to one use per constant so that it does
-        // not trade a shared register value for repeated loads.
-        if (std::find(constants.begin(), constants.end(), constant) != constants.end())
+        auto existing = std::find(constants.begin(), constants.end(), constant);
+        unsigned slot = static_cast<unsigned>(existing - constants.begin());
+        if (existing == constants.end()) {
+          if (constants.size() == 8)
+            return false;
+          constants.push_back(constant);
+        }
+        if (uses.size() == 12)
           return false;
-        if (constants.size() == 8)
-          return false;
-        uses.push_back({&instruction, operand, static_cast<unsigned>(constants.size())});
-        constants.push_back(constant);
+        uses.push_back({&instruction, operand, slot});
+
       }
     }
   }
-  if (constants.size() < 4)
+  const bool small = function.size() <= 12 && function.getInstructionCount() <= 64;
+  const bool distinct = constants.size() == uses.size();
+  // Keep the original gate for one-shot constants. Larger functions need
+  // repeated expensive operands to justify the shared table address.
+  if (distinct ? (!small || constants.size() < 4)
+               : (constants.size() < 3 || uses.size() < 6))
     return false;
 
   for (auto component = scc_begin(&function); !component.isAtEnd(); ++component)
