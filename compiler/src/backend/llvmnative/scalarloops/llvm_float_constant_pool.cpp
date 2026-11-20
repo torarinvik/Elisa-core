@@ -51,14 +51,15 @@ bool poolFunctionConstants(Function &function) {
 
   SmallVector<Constant *, 8> constants;
   SmallVector<PoolUse, 8> uses;
+  bool allReturnEdges = true;
   for (BasicBlock &block : function) {
     for (Instruction &instruction : block) {
-      const bool tinyResult = instructionCount <= 12 && (isa<SelectInst>(instruction) || isa<ReturnInst>(instruction));
+      const bool tinyResult = instructionCount <= 12 &&
+          (isa<SelectInst>(instruction) || isa<ReturnInst>(instruction));
       const auto *phi = dyn_cast<PHINode>(&instruction);
-      const bool returnPhi = instructionCount <= 12 && phi &&
-          phi->getNumIncomingValues() == 2 && phi->hasOneUse() &&
-          isa<ReturnInst>(*phi->user_begin()) &&
-          phi->getIncomingBlock(0) != phi->getIncomingBlock(1);
+      const bool returnPhi = instructionCount <= 16 && phi &&
+          phi->getNumIncomingValues() <= 4 && phi->hasOneUse() &&
+          isa<ReturnInst>(*phi->user_begin());
 
       if (!returnPhi && !isa<FCmpInst>(instruction) && !tinyResult &&
           instruction.getOpcode() != Instruction::FMul)
@@ -68,9 +69,12 @@ bool poolFunctionConstants(Function &function) {
         if (!constant || !needsMultipleImmediateInstructions(*constant))
           continue;
         if (returnPhi) {
-          const auto *branch = dyn_cast<BranchInst>(phi->getIncomingBlock(operand)->getTerminator());
-          if (!branch)
+          BasicBlock *predecessor = phi->getIncomingBlock(operand);
+          if (!isa<BranchInst>(predecessor->getTerminator()))
             return false;
+          for (unsigned other = 0; other < phi->getNumIncomingValues(); ++other)
+            if (other != operand && phi->getIncomingBlock(other) == predecessor)
+              return false;
         }
         auto existing = std::find(constants.begin(), constants.end(), constant);
         unsigned slot = static_cast<unsigned>(existing - constants.begin());
@@ -82,7 +86,7 @@ bool poolFunctionConstants(Function &function) {
         if (uses.size() == 12)
           return false;
         uses.push_back({&instruction, operand, slot});
-
+        allReturnEdges &= returnPhi;
       }
     }
   }
@@ -90,9 +94,11 @@ bool poolFunctionConstants(Function &function) {
   const bool distinct = constants.size() == uses.size();
   // In tiny functions the load sequence can replace a long immediate even
   // when only one operand uses it. Larger functions need more opportunities.
-  if (constants.empty() ||
-      (distinct ? (!small || (constants.size() < 4 && instructionCount > 12))
-               : (constants.size() < 3 || uses.size() < 6)))
+  const bool profitableInline = distinct
+      ? small && (constants.size() >= 4 || instructionCount <= 12)
+      : constants.size() >= 3 && uses.size() >= 6;
+  // Return-edge loads are reached only if that result is selected.
+  if (constants.empty() || (!allReturnEdges && !profitableInline))
     return false;
 
   for (auto component = scc_begin(&function); !component.isAtEnd(); ++component)
