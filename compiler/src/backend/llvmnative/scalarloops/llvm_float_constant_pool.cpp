@@ -61,7 +61,9 @@ bool poolFunctionConstants(Function &function) {
           phi->getNumIncomingValues() <= 4 && phi->hasOneUse() &&
           isa<ReturnInst>(*phi->user_begin());
 
-      if (!returnPhi && !isa<FCmpInst>(instruction) && !tinyResult &&
+      const bool shortSubtraction = instructionCount <= 20 &&
+          instruction.getOpcode() == Instruction::FSub;
+      if (!shortSubtraction && !returnPhi && !isa<FCmpInst>(instruction) && !tinyResult &&
           instruction.getOpcode() != Instruction::FMul)
         continue;
       for (unsigned operand = 0; operand < instruction.getNumOperands(); ++operand) {
@@ -94,8 +96,10 @@ bool poolFunctionConstants(Function &function) {
   const bool distinct = constants.size() == uses.size();
   // In tiny functions the load sequence can replace a long immediate even
   // when only one operand uses it. Larger functions need more opportunities.
+  // Three operands can share the table address in short straight-line code.
+  const bool shortTable = instructionCount <= 20 && constants.size() >= 3;
   const bool profitableInline = distinct
-      ? small && (constants.size() >= 4 || instructionCount <= 12)
+      ? small && (constants.size() >= 4 || instructionCount <= 12 || shortTable)
       : constants.size() >= 3 && uses.size() >= 6;
   // Return-edge loads are reached only if that result is selected.
   if (constants.empty() || (!allReturnEdges && !profitableInline))
