@@ -40,9 +40,12 @@ bool needsMultipleImmediateInstructions(const ConstantFP &constant) {
 
 bool poolFunctionConstants(Function &function) {
   if (function.isDeclaration() || function.size() > 16 ||
-      function.getInstructionCount() > 100 || function.hasOptNone() ||
+      function.hasOptNone() ||
       function.hasFnAttribute("target-cpu") ||
       function.hasFnAttribute("target-features"))
+    return false;
+  const unsigned instructionCount = function.getInstructionCount();
+  if (instructionCount > 100)
     return false;
 
   SmallVector<Constant *, 8> constants;
@@ -70,12 +73,13 @@ bool poolFunctionConstants(Function &function) {
       }
     }
   }
-  const bool small = function.size() <= 12 && function.getInstructionCount() <= 64;
+  const bool small = function.size() <= 12 && instructionCount <= 64;
   const bool distinct = constants.size() == uses.size();
-  // Keep the original gate for one-shot constants. Larger functions need
-  // repeated expensive operands to justify the shared table address.
-  if (distinct ? (!small || constants.size() < 4)
-               : (constants.size() < 3 || uses.size() < 6))
+  // In tiny functions the load sequence can replace a long immediate even
+  // when only one operand uses it. Larger functions need more opportunities.
+  if (constants.empty() ||
+      (distinct ? (!small || (constants.size() < 4 && instructionCount > 12))
+               : (constants.size() < 3 || uses.size() < 6)))
     return false;
 
   for (auto component = scc_begin(&function); !component.isAtEnd(); ++component)
