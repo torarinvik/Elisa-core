@@ -113,10 +113,10 @@ func TestNumberLiterals(t *testing.T) {
 		lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF,
 	}
 	assertKinds(t, tokens, expect)
-	if tokens[2].Suffix != "u64" {
+	if tokens[2].Suffix != lexer.NumericSuffixU64 {
 		t.Errorf("expected suffix 'u64', got %q", tokens[2].Suffix)
 	}
-	if tokens[3].Suffix != "i32" {
+	if tokens[3].Suffix != lexer.NumericSuffixI32 {
 		t.Errorf("expected suffix 'i32', got %q", tokens[3].Suffix)
 	}
 }
@@ -137,10 +137,10 @@ func TestFloatLiteralsAndDotCastBoundary(t *testing.T) {
 	if tokens[1].Text != "2e3" {
 		t.Fatalf("expected exponent float text %q, got %q", "2e3", tokens[1].Text)
 	}
-	if tokens[2].Suffix != "f32" {
+	if tokens[2].Suffix != lexer.NumericSuffixF32 {
 		t.Fatalf("expected suffix %q, got %q", "f32", tokens[2].Suffix)
 	}
-	if tokens[3].Suffix != "f64" {
+	if tokens[3].Suffix != lexer.NumericSuffixF64 {
 		t.Fatalf("expected suffix %q, got %q", "f64", tokens[3].Suffix)
 	}
 	if tokens[4].Text != "1." {
@@ -152,7 +152,7 @@ func TestFloatLiteralsAndDotCastBoundary(t *testing.T) {
 	if tokens[6].Text != "1.e3" {
 		t.Fatalf("expected exponent-after-decimal float text %q, got %q", "1.e3", tokens[6].Text)
 	}
-	if tokens[7].Suffix != "f32" || tokens[7].Text != "1." {
+	if tokens[7].Suffix != lexer.NumericSuffixF32 || tokens[7].Text != "1." {
 		t.Fatalf("expected float with suffix text/suffix %q/%q, got %q/%q", "1.", "f32", tokens[7].Text, tokens[7].Suffix)
 	}
 }

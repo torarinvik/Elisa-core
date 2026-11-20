@@ -1,0 +1,471 @@
+# Elisa language and CLI notes
+
+For setup and a first program, start with the [repository README](../README.md).
+
+## Current syntax reference
+
+- [Current syntax](../docs/18-current-surface-ergonomics.md)
+- [Protocols and receiver-style dispatch](../docs/19-static-interfaces-extension-methods-and-ufcs.md)
+- [Tree capabilities and bundle design](../docs/20-tree-capabilities-and-interface-cleanup.md)
+- [Region checkpoints](../docs/08-region-checkpoints.md)
+- [Annotations and compile-time hints](../docs/20-annotations-and-compile-time-hints.md)
+
+These guides cover:
+
+- default and named arguments, including `..` forwarding
+- effect declarations, `signal`, local `can` grants, and `effectalias` bundles
+- named bundles via `bundle Name implicit:` and `bundle Name explicit:`
+- local explicit bundles for block-scoped call-shaping packs
+- brace destructuring, field punning, record updates, and filtered iterable loops
+- `do:` blocks, `defer`, index fallback, store/dict sugar, char literals, and explicit `parallel for`
+- lambda literals and explicit cast/conversion surfaces
+- protocols, associated types, extension methods, UFCS rewriting, safe call chaining, and the preferred generic specialization surface
+
+## Syntax cheat sheet
+
+The current commonly used surface fits into a few recurring patterns:
+
+```text
+return consume(value:, ..)
+effect FooEffect: pass
+return puts(text) can Console.Write
+can ConsoleEffect.Write:
+  signal ConsoleEffect.Write
+effectalias FrontendEffects = error[ParseErr] can[Abort.Panic]
+bundle ParseCtx implicit:
+with ParseCtx(.., alloc = scratch_alloc):
+  return parse_root()
+```
+
+```text
+let {left: first, right} = row
+built: Row = Row{left: first, right, flag}
+next: Row = built{flag, right = first}
+for {left, right: value} in items if left != 0:
+```
+
+Loop style is iterable-first: use `for item in source:` for ordinary traversal,
+`for index, item in source.enumerate():` when the index is part of the logic,
+and numeric ranges such as `0..<n` for numeric algorithms, explicit
+bounds/strides, fixed-count work, or temporary places where no iterable source
+exists yet.
+
+```text
+return lambda (value: i64) -> i64:
+  return value + 1
+```
+
+```text
+value = do:
+  base = 40
+  base + 2
+defer block:
+  cleanup()
+pool workers(2):
+  parallel for node in frozen:
+    pass
+```
+
+```text
+impl Tok:
+  def score(self: Tok) -> i64:
+    return 7
+
+protocol Builder:
+  type Node
+  def make(value: int) -> Node
+```
+
+See the syntax references above for the full rules.
+
+## Test annotations and runner emits
+
+The source surface includes lightweight test and benchmark annotations:
+
+```text
+@test
+def alpha_case() -> void:
+  pass
+
+@fixture
+def shared_seed() -> int:
+  return 7
+
+@bench
+def bench_hot_loop() -> void:
+  pass
+
+@skip(todo)
+@test
+def beta_case() -> void:
+  pass
+```
+
+Current rules:
+
+- `@test` marks a test case
+- `@fixture` marks a helper fixture surface
+- `@bench` marks a benchmark case
+- `@skip(reason)` and `@ignore(reason)` skip an annotated test case while preserving it in listing and runner output
+- `@test` functions may declare and infer ordinary `effects[...]` signature effects, and the generated test runner carries the selected tests' required permissions into its wrapper surface
+
+Current test-oriented emit modes:
+
+- `-emit tests`, `-emit benches`, and `-emit fixtures` list matching annotated functions
+- `-emit test-runner` emits generated `.elisa` runner source rather than executing it directly
+- `-emit test` compiles and runs the selected tests through the native harness path
+- `-filter` is only supported for `tests`, `benches`, `fixtures`, `test-runner`, and `test`
+- filters are case-insensitive and accept substring matches, glob patterns such as `*beta*`, and comma-separated OR combinations
+
+## Emit mode quick reference
+
+In addition to the core `llvm`, `header`, `iface`, and project commands, the CLI also exposes several smaller helper emit modes:
+
+- `-emit ast` prints the parsed AST
+- `-emit fmt` prints canonical formatted source and normalizes local grants into surface `can Name` / `can Name.Member` form, conservatively inlining simple one-statement `can ...:` blocks when safe
+- `-emit doc` emits reference docs for the current file
+- `-emit deps` prints the expanded source dependency list
+- `-emit deps-json` emits the same dependency information as JSON with `root` and `files` fields
+- `-emit ir` emits the frontend IR bundle form
+- `-emit packed` emits packed-lowering inspection output
+- `-emit serve` starts the compile server on `-addr`, which defaults to `127.0.0.1:8080`
+
+Optimization defaults:
+
+- `-emit bc` and `-emit obj` default to `-O3` unless an explicit `-O0`, `-O2`, or `-O3` flag is supplied
+- the other emit modes default to `-O0`
+
+## Error handling syntax
+
+The frontend now supports lightweight typed error handling with compile-time error sets and explicit propagation/recovery syntax:
+
+```text
+error MemoryError:
+  OutOfMemory
+
+extern malloc(size: usize) -> heap void&?
+
+def alloc_or_fail(size: usize) -> heap void& error[MemoryError]:
+  ptr: heap void& = malloc(size) else raise MemoryError.OutOfMemory
+  return ptr
+
+def alloc_or_null(size: usize) -> heap void&?
+  ptr: heap void&? = try alloc_or_fail(size) else null
+  return ptr
+```
+
+When propagating fallible results, a function may return a broader error set than its callees as long as it can map every source tag into a destination tag. Exact family/tag matches win; otherwise the compiler falls back to matching by short tag name when that is unique in the destination. The surface syntax is `-> T error[SomeSet]` for a full declared set, `-> T error[SomeSet.SomeTag]` for an exact inline subset, and `-> T error[FileError, NetworkError]` for a composed multi-family set. To widen a tag up to its whole family, name the family directly (`error[FileError]` rather than the listed tags). Equivalent spellings are normalized for diagnostics and LLVM naming, so full-family subsets collapse back to the declared family name and multi-family compositions use a stable canonical family ordering. The old `-> T | ErrorSet` spelling is rejected with a parser migration diagnostic; the `error[SomeSet.*]` wildcard shorthand and the `error[..., ...]` row-ellipsis suffix have both been retired in favor of naming the declared set (`error[SomeSet]`).
+
+Current lowering in the backend uses integer error codes at runtime; `void | ErrorSet` lowers directly to an error code, while value-carrying fallible functions now return that code plus a hidden payload out-parameter. Inside expressions and locals, the backend still materializes compact `{err, value}` LLVM structs when it needs a first-class error-union value.
+
+## C FFI surface
+
+Elisa can call host C ABI symbols directly with `extern` declarations:
+
+```text
+extern strlen(s: u8&) -> usize
+extern snprintf(buf: mutable u8&?, bufsize: usize, fmt: u8&, ...) -> int effects[Console.Format]
+```
+
+Supported FFI features:
+
+- C functions, globals, and opaque external types via `extern`
+- symbol remapping with `@link_name(name)`
+- explicit calling convention annotations with `@callconv(...)`, including `winapi`/`stdcall` paths for Windows APIs
+- C variadic declarations using `...`; variadic tail arguments use C default argument promotions before LLVM lowering, so `bool`, `u8`, `i8`, `u16`, and `i16` are passed as C `int`, and `f32` is passed as C `double`
+- project and target `foreign` source lists for compiling and linking C support files into `build`, `run`, `test`, and `bench` targets
+- project and target `link-flags` plus CLI `-link`, `-L`, and `-l` flags for external libraries
+- C ABI layout verification with `-emit c-bind-check`
+- C header/static archive emission with `-emit header` and `-emit c-archive`
+- opaque C allocation helpers in the standard runtime for SDK-sized structs that Elisa should own by pointer rather than inline layout
+
+## Regular enums
+
+Regular `enum` values are inline tagged values. Constructors like `Expr.Int(1)` produce an `Expr` directly, so locals, returns, arrays, and optionals can store them without `new[...]`.
+
+```text
+enum Small:
+  Int(value: i64)
+  Pair(left: i64, right: i64)
+  Done
+
+def make_node(value: i64) -> Small:
+  return Small.Int(value)
+
+def score(node: Small) -> i64:
+  match node:
+    Small.Int(value):
+      return value
+    Small.Pair(left, right):
+      return left + right
+    Small.Done:
+      return 0
+
+def total(seed: i64) -> i64:
+  items: array[Small, 3] = [Small.Int(1), make_node(seed), Small.Done]
+  maybe: Small? = Small.Pair(2, 3)
+  total: i64 = score(items[0]) + score(items[1]) + score(items[2])
+  if let node = maybe:
+    total = total + score(node)
+  return total
+```
+
+Use `new[region]` only when you need a reference to a regular enum value, such as a recursive structure whose payloads store `Expr&` handles. For compile-checked examples, see `../Code/test_programs/regular_enum_values.elisa` for by-value usage and `../Code/test_programs/recursive_enum.elisa` for recursive references.
+
+## Packed enums
+
+The frontend also supports explicit-store packed enums for arena-backed ADTs:
+
+```text
+packed enum Expr:
+  common:
+    span: int
+  Int(value: int)
+  Add(left: Expr, right: Expr)
+
+def build(owner: Arena) -> Expr:
+  store: Expr.Store = Expr.Store(owner)
+  left: Expr = new[store] Expr.Int(span: 1, value: 3)
+  right: Expr = new[store] Expr.Int(span: 2, value: 4)
+  return new[store] Expr.Add(span: 3, left: left, right: right)
+
+def eval(node: Expr, store: Expr.Store) -> int:
+  match node in store:
+    Expr.Int(value: value):
+      return value + node.span
+    Expr.Add(left: left, right: right):
+      return node.span + eval(left, store) + eval(right, store)
+```
+
+Current packed-enum rules:
+
+- packed values are handle-backed and must be created with `new[store] Enum.Variant(...)`
+- `Enum.Store` is the explicit per-enum store constructor surface
+- packed control-flow and projection forms (`match`, `if ... as`, `move-as`, and ownerless `new`) can infer the active store when a matching `Enum.Store[...]` is already in scope
+- first-class `packedview[Enum.Variant]` carriers also provide the omitted-store context for packed `if ... as` / `move-as`, so those forms do not need a separate `in store` clause when operating on the view itself
+- packed values loaded from an exact `Enum.Store[...]` index root (including immutable whole-value aliases of those loads, and store-bearing field projections such as `box.store[index]`) also carry enough provenance for omitted-store `match` / `if ... as` / `move-as`
+- packed `common:` fields are readable on the packed handle (`node.span`)
+- packed `common:` fields can be initialized by name during allocation; omitted common fields remain zero-initialized
+- packed variants may include one tail payload, which lowers as a `dview[...]` regardless of where that payload appears in the variant field list
+- packed enums may carry affine common fields and affine payloads; when they do, the packed handle becomes affine and packed destructuring forms consume that handle after a successful `match` or `if ... as`
+- inside a successful `if ... as` branch or `match` arm, identifier scrutinees are refined to `packedview[Enum.Variant]`, so variant fields can be read from the refined value directly
+- structural test expectations can use `expect value as Pattern` or `expect value as Pattern: ...`, which are contextual sugar for a `match value` with the requested pattern and a wildcard `panic("expect pattern failed")`; this keeps reusable test DSLs project-neutral while still lowering to the ordinary match representation
+- match patterns can pin existing values with `^value`, for example `expect expr as Expr.Infix(^expected_op, _, _)`; bare identifiers still bind payloads
+
+For a compile-checked end-to-end example, see `../Code/test_programs/packed_enum_common.elisa`.
+
+The frontend also now supports `in store:` block sugar over that explicit core:
+
+```text
+def build(owner: Arena) -> Expr:
+  store: Expr.Store = Expr.Store(owner)
+  in store:
+    left: Expr = new Expr.Int(span: 1, value: 3)
+    right: Expr = new Expr.Int(span: 2, value: 4)
+    return new Expr.Add(span: 3, left: left, right: right)
+```
+
+Inside an active store context — whether introduced by `in store:` or by an in-scope `Enum.Store[...]` local/parameter — packed allocations can omit `[store]`, packed matches can omit `in store`, and `if ... as` / `move-as` can omit their store clause; the same omitted-store forms also work when the packed value itself is proven to come from an exact store-index root. All forms still lower to the same explicit-store representation.
+
+## Frozen packed projections
+
+The frozen packed-projection lane is now covered end to end across the current semantic and backend matrix.
+
+- Semantic optimization facts preserve frozen packed-store provenance through the wrapper forms exercised so far, including `try`, `unwrap else`, ternary expressions, and direct constant indexing.
+- Projected frozen packed reads in the word-handle ABI now reuse decoded rows for repeated common-field access instead of re-decoding on every read.
+- That decode-row reuse is validated not just for direct values, but also for helper-wrapped, helper-indexed, nested rebased helper-indexed, and nested wildcard rebased helper-indexed carriers.
+- Projected field reassignment correctly invalidates cached decoded rows so post-mutation reads re-decode instead of reusing stale data.
+- Frozen `match` lowering over projected packed values keeps repeated matched-child common-field reads on the eager-decode path, avoiding tag/word helper fallback in the validated cases.
+
+In short: the current frozen-store projection surface is no longer just “works in the happy path”; it has explicit regression coverage for the carrier shapes and decode-cache coherence rules the compiler relies on. Tiny compiler dragon, now with a seatbelt.
+
+The same frozen-store lane now also exposes dense node-key helpers for fixed-size side tables over packed enums:
+
+```text
+def annotate(owner: Arena) -> i32:
+  store: Expr.Store[Local] = Expr.Store(owner)
+  in store:
+    left: Expr = new Expr.Lit(span: 1, value: 3)
+    right: Expr = new Expr.Lit(span: 2, value: 4)
+    _ = new Expr.Add(span: 5, left: left, right: right)
+
+  frozen: Expr.Store[Frozen] = freeze(move store)
+  node: Expr = frozen[2]
+  key: NodeKey[Expr] = dense_key(node, frozen)
+  depths: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, frozen, -1)
+  depths[key] <- 0
+  again: Expr = frozen[key]
+  all_depths: dview[i32] = depths.values
+  return again.span
+```
+
+Current dense frozen-node-table rules:
+
+- `dense_key(node, frozen)` is only valid for packed-enum values or packed views proven to come from the exact same frozen store root.
+- That frozen root can come from an exact hidden store-field projection such as `box.store`, not just a bare frozen local or parameter.
+- `NodeKey[Enum]` is a compact carrier for the dense frozen index; `frozen[key]` rehydrates the packed handle from that key.
+- `node_table_fill.specialize[Enum, T]()(arena, frozen, init)` allocates a fixed-size `NodeTable[Enum, T]` with one slot per frozen packed-store row and initializes it eagerly.
+- `table[key]` is writable, while `table.values` is a dense `dview[T]` with frozen packed-store provenance and exact extent tracking.
+- Canonical packed lowering keeps the key path zero-cost under `index-soa`, while legacy row/word-handle overrides lower through the existing dense-index encode/decode helpers.
+
+Frozen tree stores also expose category row views for column-oriented scans:
+
+```text
+frozen: Expr.Store[Frozen] = freeze(move store)
+lit_count: usize = count node in frozen.Expr where node.kind == .Lit
+fast_lit_count: usize = count node in frozen.Expr.where_kind(.Lit)
+tags: dview[u32] = frozen.Expr.column("kind")
+spans: dview[i64] = frozen.Expr.column("span")
+```
+
+Iterating `frozen.Expr` yields category-local handles and uses the row view's store as the implicit tree context, so ordinary field reads like `node.kind` and `node.span` work without a manual `in frozen:` wrapper. Use `where_kind` for hot kind filters; it lowers to a direct tag compare instead of calling a predicate function. `column("kind")` requires `@layout(soa)` or `@index(kind)` on the category. Common-field columns require `@layout(soa)` so the frozen store can publish a contiguous scalar column. The older `tree_tags(frozen, "Expr")` and `tree_column(frozen, "Expr", "span")` helpers still exist for compatibility, but `frozen.Expr` queries and `frozen.Expr.column(...)` are the canonical query-style surface.
+
+## Benchmark scaffolding
+
+There is now a synthetic JSON benchmark scaffold under `test/benchmarks/json_bench_test.go`.
+
+- it generates deterministic nested JSON corpora of several sizes
+- it validates the generated corpora with a normal `go test` unit test
+- it benchmarks Go's `encoding/json` as a baseline for future parser comparisons
+
+Run it with:
+
+```text
+go test ./test/benchmarks -run '^TestSyntheticJSONCorpusIsValid$'
+go test ./test/benchmarks -run '^$' -bench '^BenchmarkEncodingJSONParseSyntheticCorpus$' -benchmem
+```
+
+There is also now a self-hosted parser fixture at `../Code/test_programs/json_parser.elisa` plus benchmark helpers:
+
+- `../Code/test_programs/json_parser.elisa` exports `json_parser_checksum(...)`, `json_parser_ast_checksum(...)`, `json_parser_ast_cached_checksum(...)`, `json_parser_parallel_checksum(...)`, `json_parser_parallel_ast_checksum(...)`, `json_parser_parallel_ast_cached_checksum(...)`, and `json_parser_parity_suite()`
+- `../Code/benchmarks/json_parser_bench.c` is a standalone checksum-parser benchmark executable for file-backed corpora
+- `../Code/benchmarks/json_parser_ast_bench.c` is the AST-building benchmark executable for the same corpora
+- `../Code/benchmarks/json_parser_parallel_bench.c` is a pool-driven parallel batch benchmark over the same parser exports
+- `test/benchmarks/cmd/gen_synthetic_json` writes the same deterministic corpus family to disk for external benchmarking
+- `scripts/ensure_json_parser_bench_input.sh` creates the default large synthetic corpus on demand and prints the path, which keeps ignored local task runners usable without hand-creating `/tmp/zimdjson-dom-large.json`
+
+After building the compiler with `make build`, compare both self-hosted paths against the Go baseline:
+
+```text
+bash ./scripts/ensure_json_parser_bench_input.sh /tmp/elisacore-large.json
+./bin/elisac -O3 -emit header -o /tmp/json_parser.h ../Code/test_programs/json_parser.elisa
+./bin/elisac -O3 -emit obj -o /tmp/json_parser.o ../Code/test_programs/json_parser.elisa
+clang -O3 -Wl,-undefined,dynamic_lookup -I /tmp ../Code/benchmarks/json_parser_bench.c ../Code/benchmarks/json_parser_runtime_shims.c /tmp/json_parser.o -o /tmp/json_parser_bench
+clang -O3 -Wl,-undefined,dynamic_lookup -I /tmp ../Code/benchmarks/json_parser_ast_bench.c ../Code/benchmarks/json_parser_runtime_shims.c /tmp/json_parser.o -o /tmp/json_parser_ast_bench
+clang -O3 -pthread -Wl,-undefined,dynamic_lookup -I /tmp ../Code/benchmarks/json_parser_parallel_bench.c ../Code/benchmarks/json_parser_runtime_shims.c /tmp/json_parser.o -o /tmp/json_parser_parallel_bench
+/tmp/json_parser_bench /tmp/elisacore-large.json 20
+/tmp/json_parser_ast_bench /tmp/elisacore-large.json 20 full
+/tmp/json_parser_parallel_bench /tmp/elisacore-large.json 20 4 checksum
+/tmp/json_parser_parallel_bench /tmp/elisacore-large.json 20 4 ast-cached
+go test ./test/benchmarks -run '^$' -bench '^BenchmarkEncodingJSONParseSyntheticCorpus/large$' -benchmem -benchtime=20x
+```
+
+There is also now an ML-style packed AST benchmark ladder under `../Code/benchmarks/` for exercising packed/frozen tree matching and the produced native runtime:
+
+- `packed_lowering_ml_ast_medium_{core,bench,parallel_bench}.elisa` is the default everyday perf tier
+- `packed_lowering_ml_ast_mega_{core,bench,parallel_bench}.elisa` is the explicit slow validation tier
+- generic ML AST benchmark names now target the medium fixture, while explicit `Mega` benchmark names keep the long-running workload available
+- `ELISACORE_SLOW_NATIVE=1` gates the full mega native smoke in the CLI integration tests
+- `scripts/run_ml_ast_perf_loop.sh` runs the normal repro -> medium loop, and `--mega` adds the explicit slow-path validation lane
+
+Recommended workflow:
+
+- `repro`: use `TestRunCLIPackedMLExprReproSmoke` for bug fixing and tiny correctness checks
+- `medium`: use the generic `PackedMLAST...` benchmarks for normal compiler/runtime perf iteration
+- `mega`: use the explicit `PackedMLASTMega...` benches/tests before landing changes that touch packed lowering, semantic provenance, or native benchmark wiring
+
+One way to run the default loop is:
+
+```text
+./scripts/run_ml_ast_perf_loop.sh --benchtime 1x
+```
+
+And one way to run the milestone validation pass is:
+
+```text
+./scripts/run_ml_ast_perf_loop.sh --benchtime 1x --mega
+```
+
+## Module interfaces and project manifests
+
+The compiler now has a small project and library workflow around `.elisa`, `.elisai`, `project.json`, and `manifest.json`.
+
+Module interface emission:
+
+```text
+elisacore -emit iface -o mathcore.elisai mathcore.elisa
+```
+
+Current interface-emission behavior:
+
+- emitted `.elisai` files stay valid Elisa core source
+- type declarations are preserved
+- globals become `extern` declarations rather than exported initialized definitions
+- function bodies are stripped and replaced by `extern` signatures
+- namespaces are preserved, so nested exported surface stays structured
+
+Current project scaffold commands:
+
+```text
+elisacore init demo --path /tmp
+elisacore init-lib mathcore --path /tmp/demo/lib
+elisacore build app --project /tmp/demo
+elisacore run app --project /tmp/demo
+elisacore test tests --project /tmp/demo
+elisacore bench benches --project /tmp/demo
+elisacore project view app --project /tmp/demo
+elisacore project deps app --project /tmp/demo --json
+```
+
+Project file shape:
+
+```json
+{
+  "version": "0.1.0",
+  "dependency-search-paths": ["lib"],
+  "dependencies": ["mathcore"],
+  "include-dirs": ["shared"],
+  "foreign": ["native/app_runtime.c"],
+  "exec": [],
+  "targets": {
+    "app": {
+      "entry": "src/main.elisa",
+      "emit": "llvm",
+      "run-emit": "interpret",
+      "output": "build/app.ll",
+      "dependencies": [],
+      "include-dirs": [],
+      "foreign": [],
+      "exec": [],
+      "opt": "O0",
+      "packed-abi": ""
+    }
+  }
+}
+```
+
+Library manifest shape:
+
+```json
+{
+  "provides": "mathcore",
+  "entry": "src/mathcore.elisa",
+  "interface": "src/mathcore.elisai",
+  "dependencies": [],
+  "include-dirs": ["shared"],
+  "foreign": ["native/mathcore_runtime.c"],
+  "exec": []
+}
+```
+
+Current rules:
+
+- `project.json` is the top-level project file
+- `.elisalib/manifest.json` is the dependency manifest format
+- dependency search paths default to `lib` when the project does not override them
+- project targets currently require an `entry` that is a `.elisa` or `.elisai` source file
+- manifests may provide an `entry`, an `interface`, or both; dependency loading prefers `entry` when present and falls back to `interface` otherwise
+- project-wide and target-specific `include-dirs`, `foreign`, and `dependencies` merge with dependency-provided include dirs and foreign files
+- `project view` reports resolved targets and the selected target configuration
+- `project deps` reports the combined source set, dependency interfaces or entries, include dirs, and foreign sources
+- `exec` hooks exist at the project, target, and dependency-manifest level, but current execution requires `--trust=full`
