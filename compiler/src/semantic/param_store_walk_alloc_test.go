@@ -23,15 +23,27 @@ func BenchmarkWalkParamStoresScopes(b *testing.B) {
 
 func TestParamStoreWalkFastPathsCoverSyntaxChildren(t *testing.T) {
 	for _, item := range []struct {
-		node  any
-		child string
+		node     any
+		children []string
 	}{
-		{ast.ExprStmt{}, "Expr"},
-		{ast.FieldExpr{}, "Object"},
+		{ast.ExprStmt{}, []string{"Expr"}},
+		{ast.FieldExpr{}, []string{"Object"}},
+		{ast.BinaryExpr{}, []string{"Left", "Right", "LoweredCall"}},
+		{ast.UnaryExpr{}, []string{"Operand", "LoweredCall"}},
+		{ast.ReturnStmt{}, []string{"Value"}},
+		{ast.VarDeclStmt{}, []string{"Type", "Value", "Owner"}},
+		{ast.IfStmt{}, []string{"Cond", "Then", "Elifs", "Else"}},
+		{ast.ElifClause{}, []string{"Cond", "Body"}},
+		{ast.WhileStmt{}, []string{"Cond", "Body"}},
+		{ast.AssignStmt{}, []string{"Target", "Value", "AsOverlayCall"}},
 	} {
 		typ := reflect.TypeOf(item.node)
 		fields := syntaxWalkFields(typ)
-		if len(fields) != 1 || typ.Field(fields[0]).Name != item.child {
+		names := make([]string, len(fields))
+		for index, field := range fields {
+			names[index] = typ.Field(field).Name
+		}
+		if !reflect.DeepEqual(names, item.children) {
 			t.Errorf("%s syntax children changed; update the parameter store walk", typ)
 		}
 	}

@@ -236,6 +236,36 @@ func (a *Analyzer) walkParamStores(body []ast.Stmt, pidx map[string]int, out map
 			case *ast.FieldExpr:
 				walk(reflect.ValueOf(n.Object))
 				return
+			case *ast.BinaryExpr:
+				walk(reflect.ValueOf(n.Left))
+				walk(reflect.ValueOf(n.Right))
+				walk(reflect.ValueOf(n.LoweredCall))
+				return
+			case *ast.UnaryExpr:
+				walk(reflect.ValueOf(n.Operand))
+				walk(reflect.ValueOf(n.LoweredCall))
+				return
+			case *ast.ReturnStmt:
+				walk(reflect.ValueOf(n.Value))
+				return
+			case *ast.VarDeclStmt:
+				walk(reflect.ValueOf(n.Type))
+				walk(reflect.ValueOf(n.Value))
+				walk(reflect.ValueOf(n.Owner))
+				return
+			case *ast.IfStmt:
+				walk(reflect.ValueOf(n.Cond))
+				list(n.Then, nil)
+				for _, clause := range n.Elifs {
+					walk(reflect.ValueOf(clause.Cond))
+					list(clause.Body, nil)
+				}
+				list(n.Else, nil)
+				return
+			case *ast.WhileStmt:
+				walk(reflect.ValueOf(n.Cond))
+				list(n.Body, nil)
+				return
 			case *ast.IterForStmt:
 				walk(reflect.ValueOf(n.Source))
 				names := parallelForMoveBindNames(n.Pattern)
@@ -287,6 +317,10 @@ func (a *Analyzer) walkParamStores(body []ast.Stmt, pidx map[string]int, out map
 						add(src, tgt)
 					}
 				}
+				walk(reflect.ValueOf(n.Target))
+				walk(reflect.ValueOf(n.Value))
+				walk(reflect.ValueOf(n.AsOverlayCall))
+				return
 			}
 			walk(v.Elem())
 		case reflect.Struct:
