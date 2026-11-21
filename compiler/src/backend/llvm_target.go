@@ -479,6 +479,7 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 		scalarloops.FoldConditionalDoubling(unsafe.Pointer(g.module))
 		scalarloops.FoldSignedRangeMasks(unsafe.Pointer(g.module))
 		boundedremainder.FoldBoundedRemainders(unsafe.Pointer(g.module))
+		scalarloops.FoldOddTrailingZeroSelects(unsafe.Pointer(g.module))
 		scalarloops.PoolFloatingConstants(unsafe.Pointer(g.module), unsafe.Pointer(g.targetMachine))
 	}
 	if err := g.verify(); err != nil {

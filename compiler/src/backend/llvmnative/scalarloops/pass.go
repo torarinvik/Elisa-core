@@ -18,6 +18,7 @@ struct LLVMOpaqueTargetMachine;
 unsigned elisacorePoolFloatingConstants(struct LLVMOpaqueModule *, struct LLVMOpaqueTargetMachine *);
 unsigned elisacoreFoldConditionalDoubling(struct LLVMOpaqueModule *);
 unsigned elisacoreFoldSignedRangeMasks(struct LLVMOpaqueModule *);
+unsigned elisacoreFoldOddTrailingZeroSelects(struct LLVMOpaqueModule *);
 */
 import "C"
 
@@ -31,6 +32,11 @@ func FoldConditionalDoubling(module unsafe.Pointer) {
 // FoldSignedRangeMasks simplifies checked signed normalization in loops.
 func FoldSignedRangeMasks(module unsafe.Pointer) {
 	C.elisacoreFoldSignedRangeMasks((*C.struct_LLVMOpaqueModule)(module))
+}
+
+// FoldOddTrailingZeroSelects removes an odd-input zero select around cttz.
+func FoldOddTrailingZeroSelects(module unsafe.Pointer) {
+	C.elisacoreFoldOddTrailingZeroSelects((*C.struct_LLVMOpaqueModule)(module))
 }
 
 // PoolFloatingConstants shares a constant table address across scalar FP uses.
