@@ -458,7 +458,7 @@ extern "C" unsigned elisacoreSinkPrivateInitializations(LLVMModuleRef ref) {
       ++changed;
     }
   }
-  return changed;
+  return changed + ElisaCopiedScratch::eliminate(M);
 }
 
 // Unroll short nested scans with conditional stores. LLVM retains all exits and

@@ -63,6 +63,10 @@
 #include <llvm/MC/TargetRegistry.h>
 #include <llvm/Transforms/Utils/LoopPeel.h>
 
+#if LLVM_VERSION_MAJOR == 23
+#include "passes/llvm_copied_scratch.h"
+#endif
+
 namespace wrap_llvm_bounded_unswitch {
 #include "passes/llvm_bounded_unswitch.cpp"
 }  // namespace wrap_llvm_bounded_unswitch
