@@ -64,6 +64,8 @@ static void pairEarlyDivisions(Module &module, TargetMachine *target) {
   }
 }
 
+#include "llvm_validation_search.h"
+
 extern "C" unsigned elisacorePeelSmallValidationLoops(LLVMModuleRef moduleRef) {
   if (!moduleRef) return 0;
   Module &module = *unwrap(moduleRef);
@@ -83,10 +85,11 @@ extern "C" unsigned elisacorePeelSmallValidationLoops(LLVMModuleRef moduleRef) {
     for (Loop *L : LI) {
       if (!L->getSubLoops().empty() || L->getNumBlocks() != 2 || L->getLoopID()) continue;
       unsigned loads = 0, instructions = 0, exits = 0, cmps = 0;
+      LoadInst *validated = nullptr;
       bool safe = true;
       for (BasicBlock *BB : L->blocks()) for (Instruction &I : *BB) {
         ++instructions;
-        if (auto *load = dyn_cast<LoadInst>(&I)) { if (!load->isSimple()) safe = false; ++loads; }
+        if (auto *load = dyn_cast<LoadInst>(&I)) { if (!load->isSimple()) safe = false; validated = load; ++loads; }
         else if (I.mayHaveSideEffects() && !isa<BranchInst>(I)) safe = false;
         if (isa<ICmpInst>(I)) ++cmps;
         if (auto *branch = dyn_cast<CondBrInst>(&I))
@@ -95,6 +98,8 @@ extern "C" unsigned elisacorePeelSmallValidationLoops(LLVMModuleRef moduleRef) {
       if (!safe || loads != 1 || instructions > 16 || exits != 2 || cmps != 2) continue;
       // Keep short and unbounded scans compact; widen bounded long scans.
       unsigned MaxTrips = SE.getSmallConstantMaxTripCount(L);
+      if (module.getTargetTriple().isAArch64() && MaxTrips >= 64 && MaxTrips <= 4096 &&
+          precedesNestedInputSearch(*L, LI, DT, *validated)) continue;
       unsigned UnrollCount = MaxTrips >= 64 && MaxTrips <= 4096 ? 8 : 4;
       if (module.getTargetTriple().isAArch64() && module.getTargetTriple().isOSDarwin() && MaxTrips >= 64 && MaxTrips <= 4096) UnrollCount = 16;
 #if defined(__linux__) && defined(__aarch64__)
