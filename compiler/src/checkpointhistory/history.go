@@ -126,11 +126,19 @@ func Restore(data []byte, limit uint64) ([]string, error) {
 			return nil, fmt.Errorf("invalid checkpoint SMT history suffix")
 		}
 		data = data[width:]
-		var query strings.Builder
-		query.Grow(int(prefix + suffix))
-		query.WriteString(previous[:int(prefix)])
-		query.Write(data[:int(suffix)])
-		previous = query.String()
+		// A prefix-only entry can share the previous immutable string.
+		switch {
+		case suffix == 0:
+			previous = previous[:int(prefix)]
+		case prefix == 0:
+			previous = string(data[:int(suffix)])
+		default:
+			var query strings.Builder
+			query.Grow(int(prefix + suffix))
+			query.WriteString(previous[:int(prefix)])
+			query.Write(data[:int(suffix)])
+			previous = query.String()
+		}
 		history = append(history, previous)
 		remaining -= prefix + suffix
 		data = data[int(suffix):]

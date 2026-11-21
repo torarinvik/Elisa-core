@@ -11,7 +11,7 @@ import (
 
 func TestRoundTripAndIntegrity(t *testing.T) {
 	common := strings.Repeat("shared expression ", 6000)
-	want := []string{common + "one", common + "two", "other"}
+	want := []string{common + "one", common + "two", common + "two", common, "other"}
 	prefixes, capacity := Plan(want, 4096)
 	if prefixes == nil {
 		t.Fatal("expected compact history")
