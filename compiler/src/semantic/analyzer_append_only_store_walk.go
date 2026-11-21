@@ -143,6 +143,14 @@ func (a *Analyzer) aoExpr(f *aoFacts, env *aoEnv, e ast.Expr, slot int) {
 		return
 	}
 	switch ee := e.(type) {
+	case *ast.Ident, *ast.IntLit, *ast.FloatLit, *ast.StringLit, *ast.CharLit,
+		*ast.BoolLit, *ast.NullLit, *ast.ZeroedLit:
+		return
+	case *ast.BinaryExpr:
+		a.aoExpr(f, env, ee.Left, 0)
+		a.aoExpr(f, env, ee.Right, 0)
+	case *ast.UnaryExpr:
+		a.aoExpr(f, env, ee.Operand, 0)
 	case *ast.FieldExpr:
 		if f.isBuffer(env, ee.Field) {
 			detail := "buffer fields may only be read for .count/.capacity, pushed by append, or retired by make_room"
