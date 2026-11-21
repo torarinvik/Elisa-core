@@ -133,6 +133,11 @@ func (a *Analyzer) typeContainsWithSeen(t Type, leaf func(Type) bool, what strin
 	if leaf(t) {
 		return true
 	}
+	// Scalar leaves have no children or cycles to track.
+	switch t.(type) {
+	case *BuiltinType, *BitIntType:
+		return false
+	}
 	if seen[t] {
 		return false
 	}
