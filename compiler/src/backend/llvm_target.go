@@ -83,6 +83,7 @@ unsigned elisacoreElideArrayRoundTrips(LLVMModuleRef Module);
 unsigned elisacoreAggregateCopiesToMemcpy(LLVMModuleRef Module);
 unsigned elisacoreInlineSmallRecursiveFunctions(LLVMModuleRef Module, LLVMTargetMachineRef Target);
 unsigned elisacoreInlineRelatedAggregateCalls(LLVMModuleRef, LLVMTargetMachineRef);
+unsigned elisacoreConnectTrapExits(LLVMModuleRef);
 unsigned elisacoreFoldRecursiveArgumentBounds(LLVMModuleRef, LLVMTargetMachineRef);
 unsigned elisacoreUnrollNestedScans(LLVMModuleRef Module);
 unsigned elisacoreInlineSmallRecursion(LLVMModuleRef Module);
@@ -497,6 +498,8 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 		if C.elisacoreInlineRelatedAggregateCalls(g.module, g.targetMachine) == 2 {
 			return fmt.Errorf("related aggregate call cleanup failed")
 		}
+		// Last: shrink-wrapping needs trap blocks to reach the return block.
+		C.elisacoreConnectTrapExits(g.module)
 	}
 	if err := g.verify(); err != nil {
 		return fmt.Errorf("optimized LLVM module failed verification: %w", err)

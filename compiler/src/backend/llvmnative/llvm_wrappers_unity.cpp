@@ -62,6 +62,8 @@
 #include <llvm/Transforms/Utils/ValueMapper.h>
 #include <llvm/IR/DebugProgramInstruction.h>
 #include <llvm/Support/KnownFPClass.h>
+#include <llvm-c/Target.h>
+#include <llvm/IR/InlineAsm.h>
 namespace wrap_incremental_clone {
 #include "llvm_wrappers/incremental_clone.cpp"
 }  // namespace wrap_incremental_clone
@@ -87,6 +89,9 @@ namespace wrap_llvm_masked_split_multiply {
 namespace wrap_llvm_sqrt_proof {
 #include "llvm_wrappers/llvm_sqrt_proof.cpp"
 }  // namespace wrap_llvm_sqrt_proof
+namespace wrap_llvm_trap_exit_edges {
+#include "llvm_wrappers/llvm_trap_exit_edges.cpp"
+}  // namespace wrap_llvm_trap_exit_edges
 namespace wrap_llvm_validation_layout {
 #include "llvm_wrappers/llvm_validation_layout.cpp"
 }  // namespace wrap_llvm_validation_layout

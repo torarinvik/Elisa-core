@@ -17,6 +17,7 @@
 using namespace llvm;
 
 #include "llvm_word_pattern_fill.h"
+#include "llvm_little_endian_word_stores.h"
 
 // A low byte followed by seven zero bytes is one little-endian word store.
 static unsigned mergeZeroExtendedByteStores(Module &M) {
@@ -76,6 +77,7 @@ extern "C" unsigned elisacoreExpandSmallZeroFills(LLVMModuleRef ref) {
   // Inline medium, aligned fixed-size fills on Apple AArch64. LLVM otherwise
   // lowers these to a library call. Keep the size bounded to control code growth.
   unsigned fixedChanged = inlineStackWordPatternFills(M) + mergeZeroExtendedByteStores(M);
+  fixedChanged += ElisaWordStores::mergeLittleEndianWordStores(M);
   if (M.getTargetTriple().isMacOSX()) {
     SmallVector<MemSetInst *, 8> fixed;
     for (Function &F : M) {
