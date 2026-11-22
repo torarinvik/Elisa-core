@@ -26,6 +26,10 @@
 #include <llvm/Analysis/Utils/Local.h>
 #include <functional>
 #include <llvm/Analysis/LoopInfo.h>
+#include <llvm/Analysis/InlineCost.h>
+#include <llvm/Analysis/TargetTransformInfo.h>
+#include <llvm/Transforms/Utils/Cloning.h>
+#include <llvm/Target/TargetMachine.h>
 #include <llvm/Analysis/ScalarEvolution.h>
 #include <llvm/Analysis/AssumptionCache.h>
 #include <llvm/Analysis/OptimizationRemarkEmitter.h>
@@ -93,3 +97,6 @@ namespace wrap_llvm_vector_or_accumulators {
 using namespace llvm;
 #include "passes/llvm_vector_or_accumulators.cpp"
 }  // namespace wrap_llvm_vector_or_accumulators
+namespace wrap_llvm_related_aggregate_calls {
+#include "passes/llvm_related_aggregate_calls.cpp"
+}  // namespace wrap_llvm_related_aggregate_calls
