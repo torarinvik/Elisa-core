@@ -238,6 +238,7 @@ static bool coversReads(AllocaInst &Buffer, MemSetInst &Init, Type *Element,
 }
 } // namespace ElisaCountedPrefix
 #include "llvm_linked_prefix.h"
+#include "llvm_bucket_prefix.h"
 
 static Type *countedPrefixElement(MemSetInst &Init, const DataLayout &Layout) {
   auto *Buffer = dyn_cast<AllocaInst>(Init.getRawDest());
@@ -360,6 +361,7 @@ static unsigned removeCountedPrefixInitializers(Module &Module,
       ++Removed;
     }
     Removed += ElisaLinkedPrefix::removeLinkedPrefixInitializers(Function, Loops, Tree, Layout);
+    Removed += ElisaBucketPrefix::removeBucketInitializers(Function, Loops, Tree, Layout);
   }
   return Removed;
 }
