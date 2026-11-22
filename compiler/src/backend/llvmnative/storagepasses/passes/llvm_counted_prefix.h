@@ -1,5 +1,6 @@
 // Elide a private array's initializer when a complete counted write loop
 // covers every subsequent scalar read, including reads of shorter prefixes.
+#include "llvm_counted_prefix_view.h"
 namespace ElisaCountedPrefix {
 using ElisaCoveredArray::Induction;
 using ElisaCoveredArray::induction;
@@ -124,11 +125,26 @@ static bool stabilizeIfNeeded(Value *ValueToCheck,
   return true;
 }
 
+// Every path from the fill body to the latch stores the induction index.
+static bool writersCoverIteration(ArrayRef<StoreInst *> Writers, Induction &Fill,
+                                  DominatorTree &Tree) {
+  BasicBlock *Latch = Fill.loop->getLoopLatch();
+  SmallPtrSet<BasicBlock *, 4> Blocks;
+  for (StoreInst *Writer : Writers) {
+    if (Tree.dominates(Writer->getParent(), Latch)) return true;
+    Blocks.insert(Writer->getParent());
+  }
+  return !Blocks.count(Fill.body) && !Blocks.count(Latch) &&
+         !isPotentiallyReachable(Fill.body, Latch, &Blocks, nullptr, nullptr);
+}
+
 static bool coversReads(AllocaInst &Buffer, MemSetInst &Init, Type *Element,
                         LoopInfo &Loops, DominatorTree &Tree,
-                        const DataLayout &Layout, SmallVectorImpl<Instruction *> &Stabilize) {
+                        const DataLayout &Layout, SmallVectorImpl<Instruction *> &Stabilize,
+                        FunctionAnalysisManager &Analyses, PassBuilder &Builder) {
   SmallVector<std::pair<LoadInst *, Value *>, 4> Reads;
-  StoreInst *Writer = nullptr;
+  SmallVector<StoreInst *, 2> Writers;
+  SmallVector<InsertValueInst *, 2> Views;
   Value *WriteIndex = nullptr;
   if (Loops.getLoopFor(Init.getParent()) || Buffer.isUsedByMetadata()) return false;
   for (User *Use : Buffer.users()) {
@@ -146,35 +162,53 @@ static bool coversReads(AllocaInst &Buffer, MemSetInst &Init, Type *Element,
         Reads.emplace_back(Read, Index);
         continue;
       }
+      auto *Data = dyn_cast<InsertValueInst>(Access);
+      if (Data && Element->isIntegerTy(32) && isZeroStart(Index) &&
+          Data->getInsertedValueOperand() == Address && Views.size() < 2) {
+        Views.push_back(Data);
+        continue;
+      }
       auto *Write = dyn_cast<StoreInst>(Access);
-      if (Writer || !Write || !Write->isSimple() ||
+      if (!Write || !Write->isSimple() || Writers.size() == 2 ||
+          (WriteIndex && WriteIndex != Index) ||
           Write->getPointerOperand() != Address ||
           Write->getValueOperand()->getType() != Element)
         return false;
-      Writer = Write;
+      Writers.push_back(Write);
       WriteIndex = Index;
     }
   }
 
   Induction Fill;
-  if (Reads.empty() || !Writer || !induction(WriteIndex, Loops, Fill) ||
+  if (Reads.empty() || Writers.empty() || !induction(WriteIndex, Loops, Fill) ||
       Fill.loop->getParentLoop() || !Fill.loop->getSubLoops().empty() ||
-      !Tree.dominates(&Init, Writer) ||
-      !Tree.dominates(Writer->getParent(), Fill.loop->getLoopLatch()) ||
-      !Tree.dominates(BasicBlockEdge(Fill.loop->getHeader(), Fill.body),
-                      Writer->getParent()))
+      !writersCoverIteration(Writers, Fill, Tree))
     return false;
+  for (StoreInst *Writer : Writers)
+    if (!Tree.dominates(&Init, Writer) ||
+        !Tree.dominates(BasicBlockEdge(Fill.loop->getHeader(), Fill.body),
+                        Writer->getParent()))
+      return false;
   BasicBlock *Exit = normalExit(Fill.loop);
   if (!Exit || canRecompute(Fill.bound, Exit, Tree, Loops) ||
       isPotentiallyReachable(Exit, Init.getParent(), nullptr, &Tree, &Loops))
     return false;
 
   BasicBlockEdge Completion(Fill.loop->getHeader(), Exit);
-  return llvm::all_of(Reads, [&](auto Entry) {
+  for (InsertValueInst *Data : Views)
+    if (!viewEscapeCovered(*Data, Fill.bound, Completion,
+                           Layout.getTypeAllocSize(Element), Tree, Analyses, Builder))
+      return false;
+  SmallVector<LoadInst *, 2> Clamped;
+  bool Covered = llvm::all_of(Reads, [&](auto Entry) {
     auto [Read, Index] = Entry;
     if (Fill.loop->contains(Read->getParent()) ||
         !Tree.dominates(Completion, Read->getParent()))
       return false;
+    if (Element->isIntegerTy(32) && isa<ConstantInt>(Index)) {
+      Clamped.push_back(Read);
+      return stabilizeIfNeeded(Fill.bound, Stabilize);
+    }
     if (Element->isIntegerTy(32))
       return guardedPrefixIndex(Index, Fill.bound, *Read) &&
              stabilizeIfNeeded(Index, Stabilize) &&
@@ -185,6 +219,22 @@ static bool coversReads(AllocaInst &Buffer, MemSetInst &Init, Type *Element,
                           Read->getParent()) &&
            boundIsCovered(Scan.bound, Fill.bound, *Read, Tree, Loops);
   });
+  if (!Covered) return false;
+  // A fixed-position read beyond the count observed the zero initializer.
+  for (LoadInst *Read : Clamped) {
+    IRBuilder<> Insert(Read->getNextNode());
+    auto *Position = cast<ConstantInt>(
+        elementIndex(*cast<GetElementPtrInst>(Read->getPointerOperand()), Layout, Element));
+    Value *Inside = Insert.CreateICmpULT(
+        ConstantInt::get(Fill.bound->getType(), Position->getZExtValue()), Fill.bound,
+        "prefix.fixed.inside");
+    Value *Result = Insert.CreateSelect(Inside, Read, Constant::getNullValue(Element),
+                                         "prefix.fixed.read");
+    Read->replaceUsesWithIf(Result, [&](Use &Use) {
+      return Use.getUser() != Inside && Use.getUser() != Result;
+    });
+  }
+  return true;
 }
 } // namespace ElisaCountedPrefix
 
@@ -283,7 +333,8 @@ static unsigned removeCountedPrefixInitializers(Module &Module,
       Type *Element = Init ? countedPrefixElement(*Init, Layout) : nullptr;
       SmallVector<llvm::Instruction *, 4> Stabilize;
       if (!Element || !ElisaCountedPrefix::coversReads(
-              *cast<AllocaInst>(Init->getRawDest()), *Init, Element, Loops, Tree, Layout, Stabilize))
+              *cast<AllocaInst>(Init->getRawDest()), *Init, Element, Loops, Tree,
+              Layout, Stabilize, Analyses, Builder))
         continue;
       if (!Stabilize.empty()) {
         SmallVector<llvm::Instruction *, 4> InOrder;
