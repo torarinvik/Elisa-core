@@ -5,7 +5,9 @@
 // traps. Links are constants, n - c, values guarded below n, phis and casts
 // of links, and loads from arrays whose every stored value is a link.
 // Arrays whose reads all use links lose their initializer.
+#include <llvm/IR/PatternMatch.h>
 namespace ElisaLinkedPrefix {
+using namespace llvm::PatternMatch;
 using ElisaCoveredArray::Induction;
 using ElisaCoveredArray::induction;
 using ElisaCoveredArray::normalExit;
@@ -64,6 +66,7 @@ private:
   DominatorTree &tree;
   SmallVectorImpl<Candidate> &arrays;
   SmallPtrSet<AllocaInst *, 8> clean;
+  DenseMap<LoadInst *, bool> reloads;
   unsigned budget = 1u << 16;
 
   static bool same(Value *Left, Value *Right, unsigned Depth = 0) {
@@ -76,18 +79,64 @@ private:
   }
 
   // Visit the conditions of branch edges that dominate Context.
-  template <typename Visit> bool anyFact(BasicBlock *Context, Visit Fact) {
+  // Comparisons known to have a given truth when Condition has value Truth,
+  // looking through and/or, selects and short-circuit phis of i1 values.
+  // Via collects the single possible predecessor of each short-circuit phi:
+  // facts holding at the end of that block also hold on the edge.
+  static void factsOf(Value *Condition, bool Truth,
+                      SmallVectorImpl<std::pair<ICmpInst *, bool>> &Facts,
+                      SmallVectorImpl<BasicBlock *> &Via, unsigned Depth = 0) {
+    if (Depth == 8) return;
+    if (auto *Compare = dyn_cast<ICmpInst>(Condition)) {
+      Facts.push_back({Compare, Truth});
+      return;
+    }
+    Value *Left = nullptr, *Right = nullptr;
+    if ((Truth && match(Condition, m_LogicalAnd(m_Value(Left), m_Value(Right)))) ||
+        (!Truth && match(Condition, m_LogicalOr(m_Value(Left), m_Value(Right))))) {
+      factsOf(Left, Truth, Facts, Via, Depth + 1);
+      factsOf(Right, Truth, Facts, Via, Depth + 1);
+      return;
+    }
+    auto *Phi = dyn_cast<PHINode>(Condition);
+    if (!Phi || !Phi->getType()->isIntegerTy(1)) return;
+    Value *Possible = nullptr;
+    BasicBlock *From = nullptr;
+    for (unsigned Index = 0; Index < Phi->getNumIncomingValues(); ++Index) {
+      Value *Incoming = Phi->getIncomingValue(Index);
+      if (auto *Constant = dyn_cast<ConstantInt>(Incoming)) {
+        if (Constant->isOne() == Truth) return; // a path that proves nothing
+        continue;                              // a path that cannot take this edge
+      }
+      if (Possible) return;
+      Possible = Incoming;
+      From = Phi->getIncomingBlock(Index);
+    }
+    if (!Possible) return;
+    Via.push_back(From);
+    factsOf(Possible, Truth, Facts, Via, Depth + 1);
+  }
+
+  // Visit the comparisons decided by branch edges that dominate Context.
+  template <typename Visit>
+  bool anyFact(BasicBlock *Context, Visit Fact, unsigned Depth = 0) {
+    if (Depth == 4) return false;
     for (DomTreeNode *Node = tree.getNode(Context); Node; Node = Node->getIDom()) {
       BasicBlock *Dominator = Node->getBlock();
       for (BasicBlock *Predecessor : predecessors(Dominator)) {
         auto *Branch = dyn_cast<CondBrInst>(Predecessor->getTerminator());
-        auto *Compare = Branch ? dyn_cast<ICmpInst>(Branch->getCondition()) : nullptr;
-        if (!Compare || Branch->getSuccessor(0) == Branch->getSuccessor(1)) continue;
-        for (unsigned Edge = 0; Edge < 2; ++Edge)
-          if (Branch->getSuccessor(Edge) == Dominator &&
-              tree.dominates(BasicBlockEdge(Predecessor, Dominator), Context)) {
-            auto Predicate = Edge == 0 ? Compare->getPredicate()
-                                       : Compare->getInversePredicate();
+        if (!Branch || Branch->getSuccessor(0) == Branch->getSuccessor(1)) continue;
+        for (unsigned Edge = 0; Edge < 2; ++Edge) {
+          if (Branch->getSuccessor(Edge) != Dominator ||
+              !tree.dominates(BasicBlockEdge(Predecessor, Dominator), Context))
+            continue;
+          SmallVector<std::pair<ICmpInst *, bool>, 4> Facts;
+          SmallVector<BasicBlock *, 2> Via;
+          factsOf(Branch->getCondition(), Edge == 0, Facts, Via);
+          for (BasicBlock *Before : Via)
+            if (anyFact(Before, Fact, Depth + 1)) return true;
+          for (auto [Compare, Truth] : Facts) {
+            auto Predicate = Truth ? Compare->getPredicate() : Compare->getInversePredicate();
             Value *Left = Compare->getOperand(0), *Right = Compare->getOperand(1);
             if (ICmpInst::isGT(Predicate) || ICmpInst::isGE(Predicate)) {
               std::swap(Left, Right);
@@ -95,32 +144,103 @@ private:
             }
             if (Fact(Predicate, Left, Right)) return true;
           }
+        }
       }
     }
     return false;
   }
 
+  static bool sameAddress(Value *Left, Value *Right) {
+    if (Left == Right) return true;
+    auto *A = dyn_cast<GetElementPtrInst>(Left);
+    auto *B = dyn_cast<GetElementPtrInst>(Right);
+    return A && B && A->getSourceElementType() == B->getSourceElementType() &&
+           A->getPointerOperand() == B->getPointerOperand() &&
+           A->getNumIndices() == B->getNumIndices() &&
+           std::equal(A->idx_begin(), A->idx_end(), B->idx_begin());
+  }
+
+  // A reload of the bound's address with no possible write between them.
+  bool isBound(Value *Candidate) {
+    if (Candidate == bound) return true;
+    auto *Reload = dyn_cast<LoadInst>(Candidate);
+    auto *Original = dyn_cast<LoadInst>(bound);
+    if (!Reload || !Original || !Reload->isSimple() || !Original->isSimple() ||
+        Reload->getType() != Original->getType() ||
+        !sameAddress(Reload->getPointerOperand(), Original->getPointerOperand()))
+      return false;
+    auto Cached = reloads.find(Reload);
+    if (Cached != reloads.end()) return Cached->second;
+    LoadInst *First = Reload, *Last = Original;
+    if (tree.dominates(Original, Reload)) std::swap(First, Last);
+    bool Same = tree.dominates(First, Last) && !writeBetween(*First, *Last);
+    reloads[Reload] = Same;
+    return Same;
+  }
+
+  // Whether a memory write may execute after First and before Last, using
+  // exact block reachability (no exploration limit).
+  static bool writeBetween(Instruction &First, Instruction &Last) {
+    auto Reach = [](BasicBlock *Start, bool Forward) {
+      SmallPtrSet<BasicBlock *, 32> Seen;
+      SmallVector<BasicBlock *, 32> Work;
+      auto Push = [&](BasicBlock *Block) {
+        if (Seen.insert(Block).second) Work.push_back(Block);
+      };
+      if (Forward) for (BasicBlock *Next : successors(Start)) Push(Next);
+      else for (BasicBlock *Previous : predecessors(Start)) Push(Previous);
+      while (!Work.empty()) {
+        BasicBlock *Block = Work.pop_back_val();
+        if (Forward) for (BasicBlock *Next : successors(Block)) Push(Next);
+        else for (BasicBlock *Previous : predecessors(Block)) Push(Previous);
+      }
+      return Seen;
+    };
+    auto Writes = [](Instruction &Instruction) {
+      return Instruction.mayWriteToMemory() && !isa<LifetimeIntrinsic>(Instruction);
+    };
+    auto After = Reach(First.getParent(), true);
+    auto Before = Reach(Last.getParent(), false);
+    for (BasicBlock *Block : After)
+      if (Before.count(Block) && llvm::any_of(*Block, Writes)) return true;
+    // Straight-line parts of the endpoint blocks.
+    bool SameBlock = First.getParent() == Last.getParent();
+    for (Instruction *Step = First.getNextNode(); Step && Step != &Last; Step = Step->getNextNode())
+      if (Writes(*Step)) return true;
+    if (!SameBlock)
+      for (Instruction &Step : *Last.getParent()) {
+        if (&Step == &Last) break;
+        if (Writes(Step)) return true;
+      }
+    return false;
+  }
+
+  // n > Value holds at Context.
   // n > Value holds at Context.
   bool boundExceeds(uint64_t Value, BasicBlock *Context) {
     return anyFact(Context, [&](ICmpInst::Predicate Predicate, llvm::Value *Left,
                                 llvm::Value *Right) {
       auto *Constant = dyn_cast<ConstantInt>(Left);
-      if (Right != bound) {
+      if (!isBound(Right)) {
         auto *Zero = dyn_cast<ConstantInt>(Right);
-        return Value == 0 && Left == bound && Zero && Zero->isZero() &&
+        return Value == 0 && isBound(Left) && Zero && Zero->isZero() &&
                Predicate == ICmpInst::ICMP_NE;
       }
+      bool Nonnegative = Constant && !Constant->isNegative();
       if (Predicate == ICmpInst::ICMP_ULT)
         return Value == 0 || (Constant && Constant->getZExtValue() >= Value);
-      return Predicate == ICmpInst::ICMP_ULE && Constant &&
-             Constant->getZExtValue() > Value;
+      if (Predicate == ICmpInst::ICMP_SLT)
+        return Nonnegative && Constant->getZExtValue() >= Value;
+      return (Predicate == ICmpInst::ICMP_ULE ||
+              (Predicate == ICmpInst::ICMP_SLE && Nonnegative)) &&
+             Constant && Constant->getZExtValue() > Value;
     });
   }
 
   bool guardedBelowBound(Value *Candidate, BasicBlock *Context) {
     return anyFact(Context, [&](ICmpInst::Predicate Predicate, Value *Left,
                                 Value *Right) {
-      return Predicate == ICmpInst::ICMP_ULT && Right == bound && same(Left, Candidate);
+      return Predicate == ICmpInst::ICMP_ULT && isBound(Right) && same(Left, Candidate);
     });
   }
 
@@ -140,14 +260,18 @@ private:
              boundExceeds(Constant->getZExtValue(), Context);
     if (auto *Frozen = dyn_cast<FreezeInst>(Candidate))
       return isLink(Frozen->getOperand(0), Context, Survivors, Visiting);
-    if (isa<SExtInst, ZExtInst>(Candidate) &&
-        isa<LoadInst>(cast<Instruction>(Candidate)->getOperand(0)))
+    // Truncating a value below n keeps it below n (x mod 2^k <= x); a
+    // narrow result sign extended past 2^(k-1) becomes an out-of-range index.
+    if (auto *Narrow = dyn_cast<TruncInst>(Candidate))
+      return guardedBelowBound(Narrow->getOperand(0), Context);
+    // A narrow link stays a link when sign or zero extended.
+    if (isa<SExtInst, ZExtInst>(Candidate))
       return isLink(cast<Instruction>(Candidate)->getOperand(0), Context, Survivors,
                     Visiting);
     if (auto *Difference = dyn_cast<BinaryOperator>(Candidate)) {
       auto *Step = dyn_cast<ConstantInt>(Difference->getOperand(1));
       // n - c is below n when n >= c and wraps past the length otherwise.
-      if (Difference->getOpcode() == Instruction::Sub && Difference->getOperand(0) == bound &&
+      if (Difference->getOpcode() == Instruction::Sub && isBound(Difference->getOperand(0)) &&
           Step && !Step->isZero() && Step->getValue().ule(length))
         return true;
     }
