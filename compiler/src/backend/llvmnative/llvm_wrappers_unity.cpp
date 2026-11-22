@@ -69,6 +69,7 @@ namespace wrap_llvm_optimized_cache_writer {
 #include "llvm_wrappers/llvm_optimized_cache_writer.cpp"
 }  // namespace wrap_llvm_optimized_cache_writer
 namespace wrap_llvm_recursive_inline {
+#include "llvm_wrappers/llvm_implied_exit_thread.cpp"
 #include "llvm_wrappers/llvm_recursive_inline.cpp"
 }  // namespace wrap_llvm_recursive_inline
 namespace wrap_llvm_selective_scheduler {
