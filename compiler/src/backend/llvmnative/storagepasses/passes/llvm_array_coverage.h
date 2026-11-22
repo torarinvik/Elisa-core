@@ -7,7 +7,7 @@ struct Induction {
   Value *bound;
   BasicBlock *body;
 };
-static bool induction(Value *V, LoopInfo &LI, Induction &out) {
+static bool induction(Value *V, LoopInfo &LI, Induction &out, bool requireZeroStart = true) {
   auto *P = dyn_cast<PHINode>(V);
   if (!P || !P->getType()->isIntegerTy(64))
     return false;
@@ -22,7 +22,8 @@ static bool induction(Value *V, LoopInfo &LI, Induction &out) {
   auto *Z = dyn_cast_or_null<ConstantInt>(P->getIncomingValueForBlock(Pre));
   auto *A =
       dyn_cast_or_null<BinaryOperator>(P->getIncomingValueForBlock(Latch));
-  if (!Z || !Z->isZero() || !A || A->getOpcode() != Instruction::Add)
+  if ((requireZeroStart && (!Z || !Z->isZero())) || !A ||
+      A->getOpcode() != Instruction::Add)
     return false;
   auto *One = dyn_cast<ConstantInt>(A->getOperand(1));
   if (A->getOperand(0) != P || !One || !One->isOne())

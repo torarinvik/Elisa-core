@@ -163,6 +163,7 @@ static bool canonicalizeTrustedMemset(CallInst *CI, AllocaInst *A,
 
 // Array coverage screens trusted external memset before LLVM canonicalizes it.
 #include "llvm_array_coverage.h"
+#include "llvm_counted_prefix.h"
 #include "llvm_covered_prefix.cpp"
 #include "llvm_stack_prefix.h"
 
@@ -181,6 +182,7 @@ extern "C" unsigned elisacoreElideScratchPrefixInitializers(LLVMModuleRef Ref) {
   PB.registerLoopAnalyses(LAM);
   PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
   unsigned Removed = prepareCoveredArrayInitializers(M, FAM, PB);
+  Removed += removeCountedPrefixInitializers(M, FAM, PB);
   Removed += prepareCoveredPrefixZeros(M, FAM, PB);
   unsigned Analyses = 0;
   if ((M.getTargetTriple().isMacOSX() || M.getTargetTriple().isOSLinux()) &&
