@@ -4,6 +4,7 @@
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Module.h>
+#include <llvm/IR/ConstantRange.h>
 #include <llvm/IR/PatternMatch.h>
 #include <algorithm>
 #include <vector>
@@ -100,3 +101,8 @@ using namespace llvm;
 namespace wrap_llvm_related_aggregate_calls {
 #include "passes/llvm_related_aggregate_calls.cpp"
 }  // namespace wrap_llvm_related_aggregate_calls
+namespace wrap_llvm_recursive_argument_bounds {
+using namespace llvm;
+#include "passes/llvm_dominating_integer_bounds.h"
+#include "passes/llvm_recursive_argument_bounds.cpp"
+}  // namespace wrap_llvm_recursive_argument_bounds

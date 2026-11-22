@@ -83,6 +83,7 @@ unsigned elisacoreElideArrayRoundTrips(LLVMModuleRef Module);
 unsigned elisacoreAggregateCopiesToMemcpy(LLVMModuleRef Module);
 unsigned elisacoreInlineSmallRecursiveFunctions(LLVMModuleRef Module, LLVMTargetMachineRef Target);
 unsigned elisacoreInlineRelatedAggregateCalls(LLVMModuleRef, LLVMTargetMachineRef);
+unsigned elisacoreFoldRecursiveArgumentBounds(LLVMModuleRef, LLVMTargetMachineRef);
 unsigned elisacoreUnrollNestedScans(LLVMModuleRef Module);
 unsigned elisacoreInlineSmallRecursion(LLVMModuleRef Module);
 unsigned elisacorePredicatePrivateBitUpdates(LLVMModuleRef Module);
@@ -492,6 +493,9 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 		C.elisacoreFoldWideVectorOrAccumulators(g.module)
 		if C.elisacoreInlineRelatedAggregateCalls(g.module, g.targetMachine) == 2 {
 			return fmt.Errorf("related aggregate call cleanup failed")
+		}
+		if C.elisacoreFoldRecursiveArgumentBounds(g.module, g.targetMachine) == 2 {
+			return fmt.Errorf("recursive argument bounds cleanup failed")
 		}
 	}
 	if err := g.verify(); err != nil {
