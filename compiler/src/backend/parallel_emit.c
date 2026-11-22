@@ -455,6 +455,7 @@ static int part_optimize(LLVMModuleRef m, LLVMTargetMachineRef tm, const char *p
 	}
 	if (err == NULL && strstr(pipeline, "O3") != NULL) elisacoreElideArrayRoundTrips(m);
 	if (err == NULL && strstr(pipeline, "O3") != NULL) elisacoreExpandSmallZeroFills(m);
+	if (err == NULL && strstr(pipeline, "O3") != NULL) elisacoreElideFullArrayInitializers(m);
 	if (err == NULL && strstr(pipeline, "O3") != NULL && elisacorePackPrivateBoolArrays(m, tm) == 2) {
 		LLVMDisposePassBuilderOptions(options);
 		*error = strdup("private Boolean array packing cleanup failed");

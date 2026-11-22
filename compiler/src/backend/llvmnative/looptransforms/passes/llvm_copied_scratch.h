@@ -298,4 +298,125 @@ static unsigned eliminate(Module &module) {
   }
   return removed;
 }
+// Match a zero-based unit-stride fill whose latch stores before testing the
+// final index. Early exits are safe only if they cannot reach a reader.
+static std::optional<BasicBlockEdge> fullFillEdge(StoreInst &Store, Value *Index,
+                                                 uint64_t Count, LoopInfo &LI) {
+  auto *Cursor = dyn_cast<PHINode>(Index);
+  BasicBlock *Latch = Store.getParent();
+  Loop *L = LI.getLoopFor(Latch);
+  if (!Cursor || !L || L->getParentLoop() || L->getLoopLatch() != Latch ||
+      Cursor->getParent() != L->getHeader() || Cursor->getNumIncomingValues() != 2 ||
+      !L->getLoopPreheader())
+    return std::nullopt;
+  auto *Start = dyn_cast<ConstantInt>(Cursor->getIncomingValueForBlock(L->getLoopPreheader()));
+  auto *Next = dyn_cast<BinaryOperator>(Cursor->getIncomingValueForBlock(Latch));
+  auto *Branch = dyn_cast<CondBrInst>(Latch->getTerminator());
+  auto *Compare = Branch ? dyn_cast<ICmpInst>(Branch->getCondition()) : nullptr;
+  if (!Start || !Start->isZero() || !Next || Next->getOpcode() != Instruction::Add ||
+      Next->getOperand(0) != Cursor || !Compare || Compare->getOperand(0) != Next)
+    return std::nullopt;
+  auto *One = dyn_cast<ConstantInt>(Next->getOperand(1));
+  auto *Limit = dyn_cast<ConstantInt>(Compare->getOperand(1));
+  if (!One || !One->isOne() || !Limit || !Limit->equalsInt(Count) ||
+      !Compare->isEquality() || Compare->hasSameSign())
+    return std::nullopt;
+  unsigned ExitIndex = Compare->getPredicate() == ICmpInst::ICMP_EQ ? 0 : 1;
+  BasicBlock *Exit = Branch->getSuccessor(ExitIndex);
+  if (L->contains(Exit) || Branch->getSuccessor(1 - ExitIndex) != L->getHeader())
+    return std::nullopt;
+  return BasicBlockEdge(Latch, Exit);
+}
+
+static bool fullyOverwritten(AllocaInst &Buffer, MemSetInst &Init, ArrayType &Array,
+                             const DataLayout &DL, LoopInfo &LI, DominatorTree &DT) {
+  if (LI.getLoopFor(Init.getParent()) || Buffer.isUsedByMetadata())
+    return false;
+  SmallVector<LoadInst *, 16> Reads;
+  SmallVector<BasicBlockEdge, 4> Completions;
+  for (User *Use : Buffer.users()) {
+    if (Use == &Init) continue;
+    if (auto *Marker = dyn_cast<IntrinsicInst>(Use)) {
+      if (Marker->getIntrinsicID() == Intrinsic::lifetime_end ||
+          (Marker->getIntrinsicID() == Intrinsic::lifetime_start &&
+           Marker->getParent() == &Buffer.getFunction()->getEntryBlock() &&
+           DT.dominates(Marker, &Init)))
+        continue;
+      if (auto *Copy = dyn_cast<MemCpyInst>(Marker);
+          Copy && Copy->getRawDest() == &Buffer && Copy->getRawSource() != &Buffer &&
+          !Copy->isVolatile() && !Copy->hasOperandBundles())
+        continue;
+    }
+    auto *Address = dyn_cast<GetElementPtrInst>(Use);
+    if (!Address || Address->getPointerOperand() != &Buffer ||
+        Address->getNumIndices() != 1 || Address->isUsedByMetadata() ||
+        DL.getTypeAllocSize(Address->getSourceElementType()) !=
+            DL.getTypeAllocSize(Array.getElementType()))
+      return false;
+    Value *Index = Address->idx_begin()->get();
+    if (!Index->getType()->isIntegerTy(64)) return false;
+    for (User *Access : Address->users()) {
+      if (auto *Load = dyn_cast<LoadInst>(Access); Load && Load->isSimple() &&
+          Load->getPointerOperand() == Address) {
+        Reads.push_back(Load);
+      } else if (auto *Store = dyn_cast<StoreInst>(Access); Store && Store->isSimple() &&
+                 Store->getPointerOperand() == Address && Store->getValueOperand() != Address) {
+        if (Store->getValueOperand()->getType() == Array.getElementType() &&
+            DT.dominates(&Init, Store))
+          if (auto Edge = fullFillEdge(*Store, Index, Array.getNumElements(), LI))
+            Completions.push_back(*Edge);
+      } else {
+        return false;
+      }
+    }
+  }
+  return !Reads.empty() && llvm::any_of(Completions, [&](const BasicBlockEdge &Edge) {
+    return llvm::all_of(Reads, [&](LoadInst *Read) { return DT.dominates(Edge, Read->getParent()); });
+  });
+}
+
+static unsigned eliminateFullArrayInitializers(Module &M) {
+  const DataLayout &DL = M.getDataLayout();
+  if (!M.getTargetTriple().isAArch64() || M.getNamedMetadata("llvm.dbg.cu") ||
+      DL.getIndexSizeInBits(0) != 64)
+    return 0;
+  unsigned Removed = 0;
+  for (Function &F : M) {
+    if (F.isDeclaration() || F.hasOptNone() || F.hasOptSize() || F.hasMinSize() ||
+        F.getSubprogram() || F.getInstructionCount() > 2000 ||
+        F.hasFnAttribute(Attribute::SanitizeAddress) ||
+        F.hasFnAttribute(Attribute::SanitizeHWAddress) ||
+        F.hasFnAttribute(Attribute::SanitizeMemory) ||
+        F.hasFnAttribute(Attribute::SanitizeThread))
+      continue;
+    SmallVector<MemSetInst *, 4> Initializers;
+    for (Instruction &I : instructions(F)) {
+      auto *Init = dyn_cast<MemSetInst>(&I);
+      if (!Init || Init->isVolatile() || Init->hasOperandBundles() ||
+          Init->hasMetadataOtherThanDebugLoc())
+        continue;
+      auto *Buffer = dyn_cast<AllocaInst>(Init->getRawDest());
+      auto *Array = Buffer ? dyn_cast<ArrayType>(Buffer->getAllocatedType()) : nullptr;
+      auto *Length = dyn_cast<ConstantInt>(Init->getLength());
+      if (Array && Array->getElementType()->isIntegerTy(64) &&
+          Array->getNumElements() >= 16 && Array->getNumElements() <= 4096 &&
+          Buffer->isStaticAlloca() && !Buffer->isArrayAllocation() &&
+          Buffer->getAddressSpace() == 0 && Length &&
+          Length->equalsInt(DL.getTypeAllocSize(Array).getFixedValue()))
+        Initializers.push_back(Init);
+    }
+    if (Initializers.empty()) continue;
+    DominatorTree DT(F);
+    LoopInfo LI(DT);
+    for (MemSetInst *Init : Initializers) {
+      auto *Buffer = cast<AllocaInst>(Init->getRawDest());
+      if (!fullyOverwritten(*Buffer, *Init, *cast<ArrayType>(Buffer->getAllocatedType()),
+                            DL, LI, DT))
+        continue;
+      Init->eraseFromParent();
+      ++Removed;
+    }
+  }
+  return Removed;
+}
 } // namespace ElisaCopiedScratch

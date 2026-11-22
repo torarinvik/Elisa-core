@@ -35,6 +35,7 @@ unsigned elisacoreOptimizeOrderedConversions(LLVMModuleRef, LLVMTargetMachineRef
 unsigned elisacoreSpecializeValidationEpilogues(LLVMModuleRef);
 unsigned elisacoreCompactEvenRanges(LLVMModuleRef);
 unsigned elisacoreBoundedLoopUnswitch(LLVMModuleRef);
+unsigned elisacoreElideFullArrayInitializers(LLVMModuleRef);
 unsigned elisacoreFastCheckedMul(LLVMModuleRef, LLVMTargetMachineRef);
 unsigned elisacoreSpecializeShortTrips(LLVMModuleRef, LLVMTargetMachineRef);
 unsigned elisacoreExpandSmallZeroFills(LLVMModuleRef module);

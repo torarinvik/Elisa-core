@@ -83,6 +83,7 @@ unsigned elisacoreUnrollNestedScans(LLVMModuleRef Module);
 unsigned elisacoreInlineSmallRecursion(LLVMModuleRef Module);
 unsigned elisacorePredicatePrivateBitUpdates(LLVMModuleRef Module);
 unsigned elisacoreSinkPrivateInitializations(LLVMModuleRef Module);
+unsigned elisacoreElideFullArrayInitializers(LLVMModuleRef Module);
 int elisacoreUnrollConstantTableLoops(LLVMModuleRef Module, LLVMTargetMachineRef Target);
 
 
@@ -448,6 +449,7 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 		}
 		boundedLoopUnswitch(g)
 		C.elisacoreSinkPrivateInitializations(g.module)
+		C.elisacoreElideFullArrayInitializers(g.module)
 		if optimizeIndexBounds(g) == 2 {
 			return fmt.Errorf("index bounds cleanup failed")
 		}
