@@ -39,6 +39,11 @@
 #include <llvm-c/Transforms/PassBuilder.h>
 #include <llvm/IR/ConstantRange.h>
 #include <llvm/Analysis/LazyValueInfo.h>
+#include <llvm/Analysis/ScalarEvolution.h>
+#include <llvm/Analysis/ScalarEvolutionExpressions.h>
+#include <llvm/IR/GetElementPtrTypeIterator.h>
+#include <llvm/Transforms/InstCombine/InstCombine.h>
+#include <llvm/Transforms/Scalar/SimplifyCFG.h>
 #include <llvm/Analysis/LoopInfo.h>
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Transforms/Utils/BasicBlockUtils.h>
@@ -92,6 +97,12 @@ namespace wrap_llvm_sqrt_proof {
 namespace wrap_llvm_trap_exit_edges {
 #include "llvm_wrappers/llvm_trap_exit_edges.cpp"
 }  // namespace wrap_llvm_trap_exit_edges
+namespace wrap_llvm_bit_test_operands {
+#include "llvm_wrappers/llvm_bit_test_operands.cpp"
+}  // namespace wrap_llvm_bit_test_operands
+namespace wrap_llvm_array_facts {
+#include "llvm_wrappers/llvm_array_facts.cpp"
+}  // namespace wrap_llvm_array_facts
 namespace wrap_llvm_validation_layout {
 #include "llvm_wrappers/llvm_validation_layout.cpp"
 }  // namespace wrap_llvm_validation_layout

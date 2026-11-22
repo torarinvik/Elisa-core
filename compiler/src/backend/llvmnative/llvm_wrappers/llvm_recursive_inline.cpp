@@ -21,6 +21,7 @@
 #include <llvm/Transforms/Utils/Cloning.h>
 #include <llvm/Transforms/Utils/BasicBlockUtils.h>
 using namespace llvm;
+#include "llvm_checked_accumulator_recursion.h"
 static bool hasGuardedLinearEntry(CondBrInst &Entry, ICmpInst &Compare) {
   if (Compare.getPredicate() != ICmpInst::ICMP_ULT) return false;
   Value *Index = Compare.getOperand(0);
@@ -75,6 +76,15 @@ static bool recursiveInlineCandidate(Function &F) {
   }
   return (Binary && Calls == 2) || (Linear && Calls == 1);
 }
+// Uses of an argument, looking through a lone freeze (loop unswitching
+// freezes the arguments of the conditions it hoists).
+static unsigned argumentUses(Argument &Arg) {
+  if (Arg.hasOneUse())
+    if (auto *Frozen = dyn_cast<FreezeInst>(*Arg.user_begin()))
+      return Frozen->getNumUses();
+  return Arg.getNumUses();
+}
+
 // Specialize one literal integer argument of a private recursive function.
 // Recursive calls whose argument changes continue to use the original body.
 static unsigned specializeRecursiveLiteralCalls(Module &M) {
@@ -122,7 +132,7 @@ static unsigned specializeRecursiveLiteralCalls(Module &M) {
     if (Growth + F->getInstructionCount() > 2048) continue;
     for (unsigned Index = 0; Index < F->arg_size(); ++Index) {
       Argument *Arg = F->getArg(Index);
-      if (!Arg->getType()->isIntegerTy() || Arg->getNumUses() < 2) continue;
+      if (!Arg->getType()->isIntegerTy() || argumentUses(*Arg) < 2) continue;
       SmallVector<CallInst *, 4> Roots;
       ConstantInt *Literal = nullptr;
       bool Multiple = false;
@@ -331,12 +341,13 @@ static unsigned inlineSmallRecursiveFunctions(Module &M, TargetMachine *TM) {
       M.getTargetTriple().getArch() != Triple::aarch64 ||
       M.getNamedMetadata("llvm.dbg.cu"))
     return 0;
+  unsigned Looped = ElisaCheckedRecursion::loopCheckedAccumulatorRecursion(M);
   SmallVector<Function *, 8> Candidates;
   for (Function &F : M)
     if (recursiveInlineCandidate(F))
       Candidates.push_back(&F);
-  if (Candidates.size() > 16) return 0;
-  unsigned Changed = specializeRecursiveLiteralCalls(M), Growth = 0;
+  if (Candidates.size() > 16) return Looped;
+  unsigned Changed = specializeRecursiveLiteralCalls(M) + Looped, Growth = 0;
   if (Candidates.empty() && !Changed) return 0;
   for (Function *F : Candidates) {
     for (unsigned Depth = 0; Depth < 2; ++Depth) {
@@ -392,6 +403,7 @@ static unsigned inlineSmallRecursiveFunctions(Module &M, TargetMachine *TM) {
     ModulePassManager SecondCleanup = PB.buildPerModuleDefaultPipeline(OptimizationLevel::O3);
     SecondCleanup.run(M, MAM);
   }
+  if (Looped) ElisaCheckedRecursion::proveBoundedAccumulators(M, FAM);
   (void)biasGuardedRecursiveCalls(M);
   return 1;
 }

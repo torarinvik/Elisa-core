@@ -7,6 +7,7 @@
 // AArch64 instruction without that attribute, and the edge it keeps is never
 // taken at run time.
 #include <llvm-c/Target.h>
+#include <llvm/IR/Dominators.h>
 #include <llvm/IR/InlineAsm.h>
 #include <llvm/IR/IntrinsicInst.h>
 #include <llvm/IR/MDBuilder.h>
@@ -50,6 +51,23 @@ static unsigned connectFunction(Function &Function) {
     }
   }
   if (!Exit || Exit == &Function.getEntryBlock() || Traps.empty()) return 0;
+  // A new edge keeps the exit dominated only by definitions that also
+  // dominate the trap, so the exit's own non-phi uses decide which traps
+  // may be connected.
+  DominatorTree Tree(Function);
+  SmallVector<Instruction *, 8> Outside;
+  for (Instruction &Step : *Exit)
+    if (!isa<PHINode>(Step))
+      for (Value *Operand : Step.operands())
+        if (auto *Definition = dyn_cast<Instruction>(Operand);
+            Definition && Definition->getParent() != Exit)
+          Outside.push_back(Definition);
+  llvm::erase_if(Traps, [&](BasicBlock *Trap) {
+    return llvm::any_of(Outside, [&](Instruction *Definition) {
+      return !Tree.dominates(Definition->getParent(), Trap);
+    });
+  });
+  if (Traps.empty()) return 0;
   auto *Type = FunctionType::get(Type::getVoidTy(Function.getContext()), false);
   auto *Brk = InlineAsm::get(Type, "brk #0x1", "", /*hasSideEffects=*/true);
   for (BasicBlock *Trap : Traps) {

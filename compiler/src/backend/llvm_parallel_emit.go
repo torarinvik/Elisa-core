@@ -8,12 +8,13 @@ package backend
 #include "parallel_emit.h"
 
 static LLVMBool elisacorePartInitNativeTarget(void) { return LLVMInitializeNativeTarget(); }
-static LLVMBool elisacorePartInitNativeAsmPrinter(void) { return LLVMInitializeNativeAsmPrinter(); }
+static LLVMBool elisacorePartInitNativeAsmPrinter(void) { return LLVMInitializeNativeAsmPrinter() || LLVMInitializeNativeAsmParser(); }
 static void elisacorePartInitAllTargets(void) {
 	LLVMInitializeAllTargetInfos();
 	LLVMInitializeAllTargets();
 	LLVMInitializeAllTargetMCs();
 	LLVMInitializeAllAsmPrinters();
+	LLVMInitializeAllAsmParsers();
 }
 */
 import "C"

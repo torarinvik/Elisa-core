@@ -10,7 +10,6 @@ unsigned elisacoreFoldInterleavedByteStores(LLVMModuleRef);
 unsigned elisacoreFoldSplitSignedGuards(LLVMModuleRef);
 void elisacoreFoldWideVectorOrAccumulators(LLVMModuleRef);
 #include <llvm-c/Error.h>
-#include <llvm-c/IRReader.h>
 #include <llvm-c/Target.h>
 #include <llvm-c/TargetMachine.h>
 #include <llvm-c/Transforms/PassBuilder.h>
@@ -21,8 +20,10 @@ static LLVMBool elisacoreInitializeNativeTarget(void) {
 	return LLVMInitializeNativeTarget();
 }
 
+// The asm parser is needed by inline asm (trap exit edges), including in
+// modules restored from the optimized-module cache.
 static LLVMBool elisacoreInitializeNativeAsmPrinter(void) {
-	return LLVMInitializeNativeAsmPrinter();
+	return LLVMInitializeNativeAsmPrinter() || LLVMInitializeNativeAsmParser();
 }
 
 static void elisacoreInitializeAllTargetsForCrossEmission(void) {
@@ -30,6 +31,7 @@ static void elisacoreInitializeAllTargetsForCrossEmission(void) {
 	LLVMInitializeAllTargets();
 	LLVMInitializeAllTargetMCs();
 	LLVMInitializeAllAsmPrinters();
+	LLVMInitializeAllAsmParsers();
 }
 
 static char *elisacoreRunOptimizationPipeline(
@@ -70,10 +72,6 @@ static char *elisacoreRunOptimizationPipeline(
 	return LLVMGetErrorMessage(Err);
 }
 
-unsigned elisacoreCanonicalizeSplitHalfUnsignedAdds(LLVMModuleRef Module);
-unsigned elisacoreForwardZeroedLoads(LLVMModuleRef Module);
-unsigned elisacoreInferConstantTableRanges(LLVMModuleRef Module);
-int elisacoreTableUnrollSupported(void);
 unsigned elisacorePeelSmallValidationLoops(LLVMModuleRef Module);
 unsigned elisacoreUnrollGuardedReductions(LLVMModuleRef Module);
 unsigned elisacoreCsscAbsoluteRangeChecks(LLVMModuleRef Module, LLVMTargetMachineRef Target);
@@ -84,13 +82,16 @@ unsigned elisacoreAggregateCopiesToMemcpy(LLVMModuleRef Module);
 unsigned elisacoreInlineSmallRecursiveFunctions(LLVMModuleRef Module, LLVMTargetMachineRef Target);
 unsigned elisacoreInlineRelatedAggregateCalls(LLVMModuleRef, LLVMTargetMachineRef);
 unsigned elisacoreConnectTrapExits(LLVMModuleRef);
+unsigned elisacoreOrderBitTestOperands(LLVMModuleRef);
+unsigned elisacoreAnnotateArrayValueRanges(LLVMModuleRef);
+unsigned elisacoreRemoveDeadTrapExits(LLVMModuleRef);
+unsigned elisacoreRemoveIndexedPrefixFills(LLVMModuleRef);
 unsigned elisacoreFoldRecursiveArgumentBounds(LLVMModuleRef, LLVMTargetMachineRef);
 unsigned elisacoreUnrollNestedScans(LLVMModuleRef Module);
 unsigned elisacoreInlineSmallRecursion(LLVMModuleRef Module);
 unsigned elisacorePredicatePrivateBitUpdates(LLVMModuleRef Module);
 unsigned elisacoreSinkPrivateInitializations(LLVMModuleRef Module);
 unsigned elisacoreElideFullArrayInitializers(LLVMModuleRef Module);
-int elisacoreUnrollConstantTableLoops(LLVMModuleRef Module, LLVMTargetMachineRef Target);
 
 
 // Stamp "target-cpu"/"target-features" on every defined function that lacks them, the
@@ -472,6 +473,13 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 		if C.elisacoreOptimizeOrderedConversions(g.module, g.targetMachine) == 2 {
 			return fmt.Errorf("ordered conversion cleanup failed")
 		}
+		if C.elisacoreAnnotateArrayValueRanges(g.module)+C.elisacoreRemoveDeadTrapExits(g.module)+C.elisacoreRemoveIndexedPrefixFills(g.module) != 0 {
+			cleanup := cString("function(sccp,instcombine<no-verify-fixpoint>,simplifycfg)")
+			defer C.free(unsafe.Pointer(cleanup))
+			if message := C.elisacoreRunOptimizationPipeline(g.module, g.targetMachine, cleanup, aaPipeline, C.int(optimizationInlinerThreshold(optLevel)), debugLogging); message != nil {
+				return fmt.Errorf("late array fact cleanup failed: %s", disposeLLVMErrorMessage(message, "unknown LLVM pass pipeline error"))
+			}
+		}
 		if C.elisacoreSpecializeValidationEpilogues(g.module) != 0 {
 			cleanup := cString("function(instcombine<no-verify-fixpoint>,simplifycfg)")
 			defer C.free(unsafe.Pointer(cleanup))
@@ -500,6 +508,7 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 		}
 		// Last: shrink-wrapping needs trap blocks to reach the return block.
 		C.elisacoreConnectTrapExits(g.module)
+		C.elisacoreOrderBitTestOperands(g.module)
 	}
 	if err := g.verify(); err != nil {
 		return fmt.Errorf("optimized LLVM module failed verification: %w", err)
@@ -519,88 +528,6 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 		}
 	}
 	g.optimizedForCodegen = true
-	return nil
-}
-
-func tableUnrollSupported() bool { return C.elisacoreTableUnrollSupported() != 0 }
-
-func unrollConstantTableLoops(module C.LLVMModuleRef, target C.LLVMTargetMachineRef) int {
-	if module == nil {
-		return 0
-	}
-	return int(C.elisacoreUnrollConstantTableLoops(module, target))
-}
-
-func inferConstantTableRanges(module C.LLVMModuleRef) int {
-	if module == nil {
-		return 0
-	}
-	return int(C.elisacoreInferConstantTableRanges(module))
-}
-
-func forwardZeroedLoads(module C.LLVMModuleRef) int {
-	if module == nil {
-		return 0
-	}
-	return int(C.elisacoreForwardZeroedLoads(module))
-}
-
-func canonicalizeSplitHalfUnsignedAdds(module C.LLVMModuleRef) int {
-	if module == nil {
-		return 0
-	}
-	return int(C.elisacoreCanonicalizeSplitHalfUnsignedAdds(module))
-}
-
-func parseLLVMIRForSplitHalfTest(ir string) (*llvmGenerator, error) {
-	context := C.LLVMContextCreate()
-	if context == nil {
-		return nil, fmt.Errorf("failed to create LLVM context for split-half test IR")
-	}
-	text := C.CString(ir)
-	name := C.CString("split-half-add-test")
-	buffer := C.LLVMCreateMemoryBufferWithMemoryRangeCopy(text, C.size_t(len(ir)), name)
-	C.free(unsafe.Pointer(text))
-	C.free(unsafe.Pointer(name))
-	if buffer == nil {
-		C.LLVMContextDispose(context)
-		return nil, fmt.Errorf("failed to create LLVM buffer for split-half test IR")
-	}
-	var module C.LLVMModuleRef
-	var message *C.char
-	// Use the buffer-consuming API for compatibility with LLVM 21, which is
-	// still supported by this project. LLVMParseIRInContext consumes buffer on
-	// both success and parse failure.
-	status := C.LLVMParseIRInContext(context, buffer, &module, &message)
-	if status != 0 || module == nil {
-		detail := "unknown LLVM IR parse error"
-		if message != nil {
-			detail = C.GoString(message)
-			C.LLVMDisposeMessage(message)
-		}
-		if module != nil {
-			C.LLVMDisposeModule(module)
-		}
-		C.LLVMContextDispose(context)
-		return nil, fmt.Errorf("parse split-half test IR: %s", detail)
-	}
-	if message != nil {
-		C.LLVMDisposeMessage(message)
-	}
-	return &llvmGenerator{context: context, module: module}, nil
-}
-
-// Late loop rewrites expose new branch facts after LLVM's default pipeline.
-// Keep policy here so adjusting cleanup does not rebuild the native pass library.
-func simplifyLateLoopFacts(g *llvmGenerator) error {
-	options := C.LLVMCreatePassBuilderOptions()
-	defer C.LLVMDisposePassBuilderOptions(options)
-	pipeline := cString("function(sccp,instcombine<no-verify-fixpoint>,simplifycfg)")
-	defer C.free(unsafe.Pointer(pipeline))
-	if failure := C.LLVMRunPasses(g.module, pipeline, g.targetMachine, options); failure != nil {
-		message := C.LLVMGetErrorMessage(failure)
-		return fmt.Errorf("late loop fact cleanup failed: %s", disposeLLVMErrorMessage(message, "unknown LLVM pass pipeline error"))
-	}
 	return nil
 }
 
