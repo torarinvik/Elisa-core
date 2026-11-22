@@ -6,7 +6,8 @@
 // nothing. A loop's back edges are skipped for values defined before the
 // loop: the value is unchanged since an entry edge narrowed it. Lazy value
 // info computes the same lattice but gives up on values reaching a block
-// through an earlier loop, the common shape after a sort.
+// through an earlier loop, the common shape after a sort. An edge taken
+// only when `trunc V to i1` is false leaves V's even values.
 #include <llvm/Analysis/LoopInfo.h>
 #include <llvm/Analysis/ScalarEvolution.h>
 #include <llvm/IR/Dominators.h>
@@ -35,6 +36,7 @@ private:
   ConstantRange walk(Value *V, BasicBlock *Block, unsigned Depth) {
     unsigned Width = V->getType()->getIntegerBitWidth();
     ConstantRange Range = ConstantRange::getFull(Width);
+    bool Even = false;
     auto *Definition = dyn_cast<Instruction>(V);
     for (DomTreeNode *Node = tree.getNode(Block); Node; Node = Node->getIDom()) {
       BasicBlock *Dominator = Node->getBlock();
@@ -47,6 +49,7 @@ private:
           Entries.push_back(Predecessor);
       if (Entries.size() == 1) {
         Range = Range.intersectWith(onEdge(V, Entries[0], Dominator), ConstantRange::Unsigned);
+        Even = Even || evenOnEdge(V, Entries[0], Dominator);
         continue;
       }
       if (Entries.empty() || Depth >= 12) continue;
@@ -55,9 +58,40 @@ private:
         Merged = Merged.unionWith(
             onEdge(V, Entry, Dominator).intersectWith(at(V, Entry, Depth + 1), ConstantRange::Unsigned),
             ConstantRange::Unsigned);
-      return Range.intersectWith(Merged, ConstantRange::Unsigned);
+      return evenOnly(Range.intersectWith(Merged, ConstantRange::Unsigned), Even);
     }
-    return Range;
+    return evenOnly(Range, Even);
+  }
+
+  // The even values of Range, for a value whose low bit an edge cleared.
+  static ConstantRange evenOnly(const ConstantRange &Range, bool Even) {
+    if (!Even || Range.isEmptySet()) return Range;
+    APInt Low = Range.getUnsignedMin(), High = Range.getUnsignedMax();
+    if (Low[0]) {
+      if (Low.isMaxValue()) return ConstantRange::getEmpty(Low.getBitWidth());
+      ++Low;
+    }
+    High.clearBit(0);
+    if (Low.ugt(High)) return ConstantRange::getEmpty(Low.getBitWidth());
+    return Range.intersectWith(ConstantRange::getNonEmpty(Low, High + 1), ConstantRange::Unsigned);
+  }
+
+  // Whether From -> To is taken only when `trunc V to i1` is false.
+  bool evenOnEdge(Value *V, BasicBlock *From, BasicBlock *To) {
+    auto *Branch = dyn_cast<CondBrInst>(From->getTerminator());
+    return Branch && Branch->getSuccessor(0) != Branch->getSuccessor(1) &&
+           lowBitClear(Branch->getCondition(), Branch->getSuccessor(0) == To, V, 0);
+  }
+
+  static bool lowBitClear(Value *Condition, bool Truth, Value *V, unsigned Depth) {
+    using namespace PatternMatch;
+    Value *Left = nullptr, *Right = nullptr;
+    if (!Truth && Condition->getType()->isIntegerTy(1) && match(Condition, m_Trunc(m_Specific(V))))
+      return true;
+    if (Depth < 6 && ((Truth && match(Condition, m_LogicalAnd(m_Value(Left), m_Value(Right)))) ||
+                      (!Truth && match(Condition, m_LogicalOr(m_Value(Left), m_Value(Right))))))
+      return lowBitClear(Left, Truth, V, Depth + 1) || lowBitClear(Right, Truth, V, Depth + 1);
+    return false;
   }
 
   // The values the comparisons decided on From -> To leave V.
@@ -89,19 +123,29 @@ private:
     // V == Other: V lies in Other's range.
     if (Left == V && Predicate == ICmpInst::ICMP_EQ && evolution.isSCEVable(Right->getType()))
       return evolution.getUnsignedRange(evolution.getSCEV(Right));
-    const APInt *Bound = nullptr, *Offset = nullptr, *Shift = nullptr;
+    const APInt *Bound = nullptr;
     if (!match(Right, m_APInt(Bound))) return ConstantRange::getFull(Width);
-    ConstantRange Holds = ConstantRange::makeExactICmpRegion(Predicate, *Bound);
-    if (Left == V) return Holds;
-    if (match(Left, m_Add(m_Specific(V), m_APInt(Offset))))
-      return Holds.sub(ConstantRange(*Offset));
-    // V >> k in [a, b] puts V in [a << k, (b << k) + 2^k - 1].
-    if (match(Left, m_LShr(m_Specific(V), m_APInt(Shift))) && Shift->ult(Width) && !Holds.isEmptySet()) {
+    return preimage(V, Left, ConstantRange::makeExactICmpRegion(Predicate, *Bound), 0);
+  }
+
+  // The values of V for which Image, a chain of constant additions and
+  // right shifts of V, lies in Holds.
+  static ConstantRange preimage(Value *V, Value *Image, ConstantRange Holds, unsigned Depth) {
+    using namespace PatternMatch;
+    unsigned Width = V->getType()->getIntegerBitWidth();
+    const APInt *Offset = nullptr, *Shift = nullptr;
+    Value *Inner = nullptr;
+    if (Image == V) return Holds;
+    if (Depth >= 4 || Holds.isEmptySet()) return ConstantRange::getFull(Width);
+    if (match(Image, m_Add(m_Value(Inner), m_APInt(Offset))))
+      return preimage(V, Inner, Holds.sub(ConstantRange(*Offset)), Depth + 1);
+    // Inner >> k in [a, b] puts Inner in [a << k, (b << k) + 2^k - 1].
+    if (match(Image, m_LShr(m_Value(Inner), m_APInt(Shift))) && Shift->ult(Width)) {
       unsigned K = Shift->getZExtValue();
       APInt Top = APInt::getMaxValue(Width).lshr(K);
       APInt Low = APIntOps::umin(Holds.getUnsignedMin(), Top).shl(K);
       APInt High = APIntOps::umin(Holds.getUnsignedMax(), Top).shl(K) | APInt::getLowBitsSet(Width, K);
-      return ConstantRange::getNonEmpty(Low, High + 1);
+      return preimage(V, Inner, ConstantRange::getNonEmpty(Low, High + 1), Depth + 1);
     }
     return ConstantRange::getFull(Width);
   }

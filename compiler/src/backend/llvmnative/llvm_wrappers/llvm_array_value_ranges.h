@@ -8,6 +8,7 @@
 // (permutation and order arrays indexing a second array are the common case).
 #include <llvm/Analysis/LazyValueInfo.h>
 #include <llvm/Analysis/ScalarEvolution.h>
+#include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/GetElementPtrTypeIterator.h>
 #include <llvm/IR/MDBuilder.h>
 namespace ElisaArrayRanges {
@@ -15,23 +16,32 @@ using namespace llvm;
 
 struct Accesses {
   SmallVector<LoadInst *, 16> Loads;
+  // Loads of several consecutive elements, as the vectorizer emits.
+  SmallVector<LoadInst *, 4> VectorLoads;
   SmallVector<StoreInst *, 16> Stores;
   SmallVector<MemTransferInst *, 2> Copies;
+  // Copies and pattern fills into the array from its first element.
+  SmallVector<MemIntrinsic *, 1> Writes;
   SmallVector<Instruction *, 1> Fills;
   bool Filled = false;
 };
 
-// Every index of Address steps by whole elements of ElementSize bytes.
+// Every index of Address steps by whole elements of ElementSize bytes: its
+// stride is a multiple, or the index is a constant or has enough known low
+// zero bits to make the product one (a byte offset `i << 4` into i64s).
 static bool elementAligned(GetElementPtrInst &Address, uint64_t ElementSize,
                            const DataLayout &Layout) {
   for (gep_type_iterator Step = gep_type_begin(Address), End = gep_type_end(Address);
        Step != End; ++Step) {
     if (Step.isStruct()) return false;
     uint64_t Stride = Step.getSequentialElementStride(Layout).getFixedValue();
-    auto *Constant = dyn_cast<ConstantInt>(Step.getOperand());
-    if (Stride % ElementSize != 0 &&
-        !(Constant && (Constant->getSExtValue() * int64_t(Stride)) % int64_t(ElementSize) == 0))
-      return false;
+    if (Stride % ElementSize == 0) continue;
+    if (auto *Constant = dyn_cast<ConstantInt>(Step.getOperand())) {
+      if ((Constant->getSExtValue() * int64_t(Stride)) % int64_t(ElementSize) != 0) return false;
+      continue;
+    }
+    unsigned Zeros = computeKnownBits(Step.getOperand(), Layout).countMinTrailingZeros();
+    if (Zeros >= 64 || (Stride << Zeros) % ElementSize != 0) return false;
   }
   return true;
 }
@@ -43,8 +53,11 @@ static bool collect(Value *Pointer, Type *Element, uint64_t ElementSize,
   if (Depth > 4) return false;
   for (User *Use : Pointer->users()) {
     if (auto *Load = dyn_cast<LoadInst>(Use)) {
-      if (!Load->isSimple() || Load->getType() != Element) return false;
-      Out.Loads.push_back(Load);
+      auto *Vector = dyn_cast<FixedVectorType>(Load->getType());
+      if (!Load->isSimple()) return false;
+      if (Load->getType() == Element) Out.Loads.push_back(Load);
+      else if (Vector && Vector->getElementType() == Element) Out.VectorLoads.push_back(Load);
+      else return false;
     } else if (auto *Store = dyn_cast<StoreInst>(Use)) {
       if (!Store->isSimple() || Store->getPointerOperand() != Pointer) return false;
       Type *Stored = Store->getValueOperand()->getType();
@@ -62,14 +75,22 @@ static bool collect(Value *Pointer, Type *Element, uint64_t ElementSize,
         return false;
     } else if (auto *Fill = dyn_cast<MemSetInst>(Use)) {
       auto *Byte = dyn_cast<ConstantInt>(Fill->getValue());
-      if (Fill->getRawDest() != Pointer || Fill->isVolatile() || !Byte || !Byte->isZero())
+      if (Fill->getRawDest() != Pointer || Fill->isVolatile()) return false;
+      if (Byte && Byte->isZero()) {
+        Out.Filled = true;
+        Out.Fills.push_back(Fill);
+      } else if (Depth == 0) {
+        // A fill of another byte (`a[i] <- -1` over a prefix) writes it.
+        Out.Writes.push_back(Fill);
+      } else {
         return false;
-      Out.Filled = true;
-      Out.Fills.push_back(Fill);
+      }
     } else if (auto *Copy = dyn_cast<MemTransferInst>(Use)) {
+      if (Copy->isVolatile() || (Copy->getRawDest() == Pointer && (Depth > 0 || Copy->getRawSource() == Pointer)))
+        return false;
       // Copies out of the array read it; they cannot change it.
-      if (Copy->getRawDest() == Pointer || Copy->isVolatile()) return false;
-      Out.Copies.push_back(Copy);
+      if (Copy->getRawDest() == Pointer) Out.Writes.push_back(Copy);
+      else Out.Copies.push_back(Copy);
     } else if (!isa<LifetimeIntrinsic>(Use)) {
       return false;
     }
@@ -160,7 +181,7 @@ static unsigned annotateArrayValueRanges(Module &Module) {
       if (!collect(Array, Type->getElementType(),
                    Layout.getTypeAllocSize(Type->getElementType()).getFixedValue(), Layout,
                    Uses) ||
-          !Uses.Filled || Uses.Loads.empty())
+          !Uses.Filled || Uses.Loads.empty() || !Uses.Writes.empty())
         continue;
       if (!Evolution) {
         Evolution = &Analyses.getResult<ScalarEvolutionAnalysis>(F);
