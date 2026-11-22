@@ -288,6 +288,44 @@ static unsigned biasGuardedRecursiveCalls(Module &M) {
   }
   return Changed;
 }
+// Inline an expanded linear recursion at its outside calls (at most two,
+// as earlier versioning may duplicate one). The first levels then run in the
+// caller's frame; deeper levels still call F.
+static unsigned inlineLinearEntries(Function &F) {
+  SmallVector<CallInst *, 2> Entries;
+  unsigned Recursive = 0;
+  for (User *U : F.users()) {
+    auto *Call = dyn_cast<CallInst>(U);
+    if (!Call || Call->getCalledFunction() != &F) return 0;
+    if (Call->getFunction() == &F) { ++Recursive; continue; }
+    Function *Caller = Call->getFunction();
+    if (Entries.size() == 2 || Call->isMustTailCall() || Caller->hasOptNone() ||
+        Caller->hasOptSize() || Caller->hasMinSize() ||
+        Caller->getInstructionCount() > 2048)
+      return 0;
+    Entries.push_back(Call);
+  }
+  if (Entries.empty() || Recursive != 1 ||
+      F.getInstructionCount() * Entries.size() > 512)
+    return 0;
+  ValueToValueMapTy Map;
+  Function *Snapshot = CloneFunction(&F, Map);
+  Snapshot->setName(F.getName() + ".entry_snapshot");
+  for (Instruction &I : instructions(Snapshot))
+    if (auto *C = dyn_cast<CallBase>(&I); C && C->getCalledFunction() == Snapshot)
+      C->setCalledFunction(&F);
+  unsigned Inlined = 0;
+  if (isInlineViable(*Snapshot).isSuccess())
+    for (CallInst *Entry : Entries) {
+      Entry->setCalledFunction(Snapshot);
+      InlineFunctionInfo IFI;
+      if (InlineFunction(*Entry, IFI).isSuccess()) ++Inlined;
+      else Entry->setCalledFunction(&F);
+    }
+  Snapshot->eraseFromParent();
+  return Inlined;
+}
+
 extern "C" unsigned
 elisacoreInlineSmallRecursiveFunctions(LLVMModuleRef Ref,
                                        LLVMTargetMachineRef TMRef) {
@@ -340,6 +378,7 @@ elisacoreInlineSmallRecursiveFunctions(LLVMModuleRef Ref,
         Snapshot->eraseFromParent();
     }
     F->addFnAttr("elisa.recursive-expanded");
+    Changed += inlineLinearEntries(*F);
   }
   if (!Changed)
     return 0;
