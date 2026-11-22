@@ -86,6 +86,7 @@ unsigned elisacoreOrderBitTestOperands(LLVMModuleRef);
 unsigned elisacoreAnnotateArrayValueRanges(LLVMModuleRef);
 unsigned elisacoreRemoveDeadTrapExits(LLVMModuleRef);
 unsigned elisacoreRemoveIndexedPrefixFills(LLVMModuleRef);
+unsigned elisacoreRemoveProvenChecks(LLVMModuleRef);
 unsigned elisacoreFoldRecursiveArgumentBounds(LLVMModuleRef, LLVMTargetMachineRef);
 unsigned elisacoreUnrollNestedScans(LLVMModuleRef Module);
 unsigned elisacoreInlineSmallRecursion(LLVMModuleRef Module);
@@ -473,7 +474,7 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 		if C.elisacoreOptimizeOrderedConversions(g.module, g.targetMachine) == 2 {
 			return fmt.Errorf("ordered conversion cleanup failed")
 		}
-		if C.elisacoreAnnotateArrayValueRanges(g.module)+C.elisacoreRemoveDeadTrapExits(g.module)+C.elisacoreRemoveIndexedPrefixFills(g.module) != 0 {
+		if C.elisacoreAnnotateArrayValueRanges(g.module)+C.elisacoreRemoveDeadTrapExits(g.module)+C.elisacoreRemoveIndexedPrefixFills(g.module)+C.elisacoreRemoveProvenChecks(g.module) != 0 {
 			cleanup := cString("function(sccp,instcombine<no-verify-fixpoint>,simplifycfg)")
 			defer C.free(unsafe.Pointer(cleanup))
 			if message := C.elisacoreRunOptimizationPipeline(g.module, g.targetMachine, cleanup, aaPipeline, C.int(optimizationInlinerThreshold(optLevel)), debugLogging); message != nil {

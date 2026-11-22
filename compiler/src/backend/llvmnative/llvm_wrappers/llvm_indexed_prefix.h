@@ -5,7 +5,8 @@
 // observes the fill. Indices are proved below n from scalar evolution: a
 // direct comparison, the extreme of an affine recurrence, or a load from
 // another such array whose every stored value is below n (an order or
-// permutation array indexing a value array is the common case).
+// permutation array indexing a value array is the common case). The bound
+// proofs themselves are ElisaIndexBounds'.
 #include <llvm/Analysis/ScalarEvolutionExpressions.h>
 namespace ElisaIndexedPrefix {
 using namespace llvm;
@@ -21,11 +22,11 @@ struct Array {
   const SCEV *Length = nullptr;
 };
 
-class Prover {
+class Prover : public ElisaIndexBounds::Prover {
 public:
   Prover(ScalarEvolution &Evolution, DominatorTree &Tree, LoopInfo &Loops,
          SmallVectorImpl<Array> &Arrays)
-      : evolution(Evolution), tree(Tree), loops(Loops), arrays(Arrays) {}
+      : ElisaIndexBounds::Prover(Evolution, Tree, Loops), arrays(Arrays) {}
 
   // Whether every read of Target lies in a completely written prefix.
   bool prefixRead(Array &Target) {
@@ -37,9 +38,6 @@ public:
   }
 
 private:
-  ScalarEvolution &evolution;
-  DominatorTree &tree;
-  LoopInfo &loops;
   SmallVectorImpl<Array> &arrays;
   SmallPtrSet<AllocaInst *, 4> visiting;
 
@@ -113,7 +111,8 @@ private:
   bool readsInside(Array &Target) {
     for (LoadInst *Load : Target.Uses.Loads) {
       const SCEV *Index = indexOf(Load->getPointerOperand(), Target);
-      if (!completed(Target, *Load) || !Index || !below(Index, Target.Length, Load)) return false;
+      if (!completed(Target, *Load) || !Index || !proveBelow(Index, Target.Length, Load))
+        return false;
     }
     for (MemTransferInst *Copy : Target.Uses.Copies) {
       const SCEV *Bytes = evolution.getSCEV(Copy->getLength());
@@ -131,137 +130,9 @@ private:
     return tree.dominates(BasicBlockEdge(Target.From, Target.To), Read.getParent());
   }
 
-  // Index <u Length wherever At executes.
-  bool below(const SCEV *Index, const SCEV *Length, Instruction *At, unsigned Depth = 0) {
-    if (Depth > 6 || Index->getType() != Length->getType()) return false;
-    if (evolution.isKnownPredicateAt(ICmpInst::ICMP_ULT, Index, Length, At) ||
-        evolution.getUnsignedRange(Index).getUnsignedMax().ult(lowest(Length, At)))
-      return true;
-    // An unsigned minimum is at most each of its operands.
-    if (auto *Minimum = dyn_cast<SCEVUMinExpr>(Index))
-      return llvm::any_of(Minimum->operands(), [&](const SCEV *Operand) {
-        return below(Operand, Length, At, Depth + 1);
-      });
-    // Index = Length - c is below Length exactly when Length >= c.
-    if (auto *Gap = dyn_cast<SCEVConstant>(evolution.getMinusSCEV(Length, Index));
-        Gap && !Gap->isZero() && atMost(Index, Length, At, Depth + 1))
-      return true;
-    if (guarded(Index, Length, At, Depth, true)) return true;
-    if (auto *Recurrence = dyn_cast<SCEVAddRecExpr>(Index)) {
-      const SCEV *Count = evolution.getSymbolicMaxBackedgeTakenCount(Recurrence->getLoop());
-      const SCEV *Start = Recurrence->getStart();
-      const SCEV *Step = Recurrence->isAffine() ? Recurrence->getStepRecurrence(evolution) : nullptr;
-      if (isa<SCEVCouldNotCompute>(Count) || !Step || Count->getType() != Start->getType())
-        return false;
-      Instruction *Entry = &*Recurrence->getLoop()->getHeader()->getFirstInsertionPt();
-      if (Step->isOne()) {
-        // Values Start + k for k <= Count, none wrapping past Start + Count.
-        const SCEV *Last = evolution.getAddExpr(Start, Count);
-        return evolution.isKnownPredicateAt(ICmpInst::ICMP_ULE, Start, Last, Entry) &&
-               below(Last, Length, Entry, Depth + 1);
-      }
-      if (Step->isAllOnesValue())
-        // Values Start - k for k <= Count <= Start never wrap below zero.
-        return atMost(Count, Start, Entry, Depth + 1) &&
-               below(Start, Length, Entry, Depth + 1);
-      return false;
-    }
-    if (auto *Unknown = dyn_cast<SCEVUnknown>(Index))
-      if (auto *Load = dyn_cast<LoadInst>(Unknown->getValue()))
-        return valuesBelow(*Load, Length, Depth + 1);
-    return false;
-  }
-
-  // A branch edge dominating At decided Index <u Bound or Index <=u Bound,
-  // and Bound is in turn at most or below Length: Index <u Length when
-  // Strict, else Index <=u Length.
-  bool guarded(const SCEV *Index, const SCEV *Length, Instruction *At, unsigned Depth,
-               bool Strict) {
-    if (Depth > 6) return false;
-    BasicBlock *Block = At->getParent();
-    for (DomTreeNode *Node = tree.getNode(Block); Node; Node = Node->getIDom())
-      for (BasicBlock *Predecessor : predecessors(Node->getBlock())) {
-        auto *Branch = dyn_cast<CondBrInst>(Predecessor->getTerminator());
-        if (!Branch || Branch->getSuccessor(0) == Branch->getSuccessor(1)) continue;
-        for (unsigned Edge = 0; Edge < 2; ++Edge) {
-          if (Branch->getSuccessor(Edge) != Node->getBlock() ||
-              !tree.dominates(BasicBlockEdge(Predecessor, Node->getBlock()), Block))
-            continue;
-          SmallVector<std::pair<ICmpInst *, bool>, 4> Facts;
-          ElisaDeadTrapExits::decided(Branch->getCondition(), Edge == 0, Facts);
-          for (auto [Compare, Truth] : Facts)
-            if (boundedBy(*Compare, Truth, Index, Length, At, Depth, Strict)) return true;
-        }
-      }
-    return false;
-  }
-
-  bool boundedBy(ICmpInst &Compare, bool Truth, const SCEV *Index, const SCEV *Length,
-                 Instruction *At, unsigned Depth, bool Strict) {
-    auto Predicate = Truth ? Compare.getPredicate() : Compare.getInversePredicate();
-    Value *Left = Compare.getOperand(0), *Right = Compare.getOperand(1);
-    if (Predicate == ICmpInst::ICMP_UGT || Predicate == ICmpInst::ICMP_UGE) {
-      std::swap(Left, Right);
-      Predicate = ICmpInst::getSwappedPredicate(Predicate);
-    }
-    if ((Predicate != ICmpInst::ICMP_ULT && Predicate != ICmpInst::ICMP_ULE) ||
-        !evolution.isSCEVable(Left->getType()))
-      return false;
-    // The guarded value may be Index plus a constant that does not wrap.
-    const SCEV *Guarded = evolution.getSCEV(Left);
-    if (Guarded != Index && (Guarded->getType() != Index->getType() ||
-                             !isa<SCEVConstant>(evolution.getMinusSCEV(Guarded, Index)) ||
-                             !gapFits(evolution.getMinusSCEV(Guarded, Index), Guarded, At)))
-      return false;
-    const SCEV *Bound = evolution.getSCEV(Right);
-    return Predicate == ICmpInst::ICMP_ULT || !Strict ? atMost(Bound, Length, At, Depth + 1)
-                                                      : below(Bound, Length, At, Depth + 1);
-  }
-
-  // Low <=u High wherever At executes: known outright, or Low = High - Gap
-  // for a Gap that never exceeds High, so the subtraction does not wrap.
-  bool atMost(const SCEV *Low, const SCEV *High, Instruction *At, unsigned Depth = 0) {
-    return Low == High || evolution.isKnownPredicateAt(ICmpInst::ICMP_ULE, Low, High, At) ||
-           gapFits(evolution.getMinusSCEV(High, Low), High, At) ||
-           guarded(Low, High, At, Depth, false);
-  }
-
-  // Gap <=u High: a constant High is known to reach, or an unsigned minimum
-  // one of whose operands is High itself or such a gap.
-  bool gapFits(const SCEV *Gap, const SCEV *High, Instruction *At, unsigned Depth = 0) {
-    if (Gap == High) return true;
-    if (auto *Constant = dyn_cast<SCEVConstant>(Gap))
-      return !Constant->getAPInt().isNegative() && lowest(High, At).uge(Constant->getAPInt());
-    if (auto *Minimum = dyn_cast<SCEVUMinExpr>(Gap); Minimum && Depth < 4)
-      return llvm::any_of(Minimum->operands(), [&](const SCEV *Operand) {
-        return gapFits(Operand, High, At, Depth + 1);
-      });
-    return false;
-  }
-
-  // The smallest value Value can have where At executes, from its range and
-  // from comparisons on the branch edges that dominate At, for a value or a
-  // value plus a constant.
-  APInt lowest(const SCEV *Value, Instruction *At) {
-    ConstantRange Range = evolution.getUnsignedRange(Value);
-    const SCEV *Base = Value;
-    APInt Shift(Range.getBitWidth(), 0);
-    if (auto *Sum = dyn_cast<SCEVAddExpr>(Value); Sum && Sum->getNumOperands() == 2)
-      if (auto *Constant = dyn_cast<SCEVConstant>(Sum->getOperand(0))) {
-        Shift = Constant->getAPInt();
-        Base = Sum->getOperand(1);
-      }
-    if (auto *Unknown = dyn_cast<SCEVUnknown>(Base))
-      Range = Range.intersectWith(
-          ElisaDeadTrapExits::guardRange(Unknown->getValue(), At->getParent(), tree)
-              .add(ConstantRange(Shift)),
-          ConstantRange::Unsigned);
-    return Range.getUnsignedMin();
-  }
-
   // Load reads an array whose reads stay in its written prefix and whose
   // every stored value is below Length or copied from the array itself.
-  bool valuesBelow(LoadInst &Load, const SCEV *Length, unsigned Depth) {
+  bool loadBelow(LoadInst &Load, const SCEV *Length, unsigned Depth) override {
     Array *Source = nullptr;
     for (Array &Candidate : arrays)
       if (llvm::is_contained(Candidate.Uses.Loads, &Load)) Source = &Candidate;
