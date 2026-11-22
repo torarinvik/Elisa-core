@@ -4,6 +4,7 @@
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Module.h>
+#include <llvm/IR/PatternMatch.h>
 #include <algorithm>
 #include <vector>
 #include <llvm/Transforms/Utils/Local.h>
@@ -82,3 +83,6 @@ namespace wrap_llvm_scratch_prefix {
 namespace wrap_llvm_zero_forward {
 #include "passes/llvm_zero_forward.cpp"
 }  // namespace wrap_llvm_zero_forward
+namespace wrap_llvm_interleaved_byte_stores {
+#include "passes/llvm_interleaved_byte_stores.cpp"
+}  // namespace wrap_llvm_interleaved_byte_stores

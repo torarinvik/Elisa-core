@@ -6,6 +6,7 @@ package backend
 #include <stdlib.h>
 #include <llvm-c/BitWriter.h>
 #include <llvm-c/Core.h>
+unsigned elisacoreFoldInterleavedByteStores(LLVMModuleRef);
 #include <llvm-c/Error.h>
 #include <llvm-c/IRReader.h>
 #include <llvm-c/Target.h>
@@ -483,6 +484,7 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 		boundedremainder.FoldBoundedRemainders(unsafe.Pointer(g.module))
 		scalarloops.FoldOddTrailingZeroSelects(unsafe.Pointer(g.module))
 		scalarloops.PoolFloatingConstants(unsafe.Pointer(g.module), unsafe.Pointer(g.targetMachine))
+		C.elisacoreFoldInterleavedByteStores(g.module)
 	}
 	if err := g.verify(); err != nil {
 		return fmt.Errorf("optimized LLVM module failed verification: %w", err)
