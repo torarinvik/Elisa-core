@@ -134,7 +134,7 @@ static bool candidateByteArray(AllocaInst *A) {
 }
 
 static bool canonicalizeTrustedMemset(CallInst *CI, AllocaInst *A,
-                                     TargetLibraryInfo &TLI,
+                                     const DataLayout &Layout, TargetLibraryInfo &TLI,
                                      LibCallSimplifier &LCS) {
   if (!CI || !A || CI->arg_size() != 3 || CI->isNoBuiltin() ||
       CI->getCallingConv() != CallingConv::C || CI->hasOperandBundles() ||
@@ -150,7 +150,7 @@ static bool canonicalizeTrustedMemset(CallInst *CI, AllocaInst *A,
   auto *Fill = dyn_cast<ConstantInt>(CI->getArgOperand(1));
   auto *Length = dyn_cast<ConstantInt>(CI->getArgOperand(2));
   if (!AT || Dest != A || !Fill || !Fill->isZero() || !Length ||
-      Length->getValue() != APInt(Length->getBitWidth(), AT->getNumElements()))
+      !Length->equalsInt(Layout.getTypeAllocSize(AT).getFixedValue()))
     return false;
   WeakTrackingVH Handle(CI);
   IRBuilder<> B(CI);
@@ -217,7 +217,7 @@ extern "C" unsigned elisacoreElideScratchPrefixInitializers(LLVMModuleRef Ref) {
       for (User *U : A->users())
         if (auto *CI = dyn_cast<CallInst>(U)) ExternalInitializers.push_back(CI);
       for (CallInst *CI : ExternalInitializers)
-        canonicalizeTrustedMemset(CI, A, TLI, LCS);
+        canonicalizeTrustedMemset(CI, A, M.getDataLayout(), TLI, LCS);
       CallBase *Init = nullptr;
       unsigned InitCount = 0;
       for (User *U : A->users())
