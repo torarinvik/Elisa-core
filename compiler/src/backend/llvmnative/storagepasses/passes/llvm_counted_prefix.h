@@ -237,6 +237,7 @@ static bool coversReads(AllocaInst &Buffer, MemSetInst &Init, Type *Element,
   return true;
 }
 } // namespace ElisaCountedPrefix
+#include "llvm_linked_prefix.h"
 
 static Type *countedPrefixElement(MemSetInst &Init, const DataLayout &Layout) {
   auto *Buffer = dyn_cast<AllocaInst>(Init.getRawDest());
@@ -260,8 +261,10 @@ static Type *countedPrefixElement(MemSetInst &Init, const DataLayout &Layout) {
 // its builtin semantics before the proof considers deleting the fill.
 static Type *countedPrefixCandidate(Instruction &Instruction,
                                     const DataLayout &Layout) {
-  if (auto *Init = dyn_cast<MemSetInst>(&Instruction))
-    return countedPrefixElement(*Init, Layout);
+  if (auto *Init = dyn_cast<MemSetInst>(&Instruction)) {
+    Type *Element = countedPrefixElement(*Init, Layout);
+    return Element ? Element : ElisaLinkedPrefix::linkedElement(*Init, Layout);
+  }
   auto *Call = dyn_cast<CallInst>(&Instruction);
   auto *Callee = Call ? Call->getCalledFunction() : nullptr;
   if (!Callee || !Callee->isDeclaration() || Callee->getName() != "memset" ||
@@ -272,7 +275,8 @@ static Type *countedPrefixCandidate(Instruction &Instruction,
   auto *Length = dyn_cast<ConstantInt>(Call->getArgOperand(2));
   auto *Fill = dyn_cast<ConstantInt>(Call->getArgOperand(1));
   return Array && (Array->getElementType()->isIntegerTy(16) ||
-                   Array->getElementType()->isIntegerTy(32)) &&
+                   Array->getElementType()->isIntegerTy(32) ||
+                   Array->getElementType()->isIntegerTy(64)) &&
          Array->getNumElements() >= 16 && Array->getNumElements() <= 4096 &&
          Fill && Fill->isZero() && Length &&
          Length->equalsInt(Layout.getTypeAllocSize(Array).getFixedValue())
@@ -355,6 +359,7 @@ static unsigned removeCountedPrefixInitializers(Module &Module,
       Init->eraseFromParent();
       ++Removed;
     }
+    Removed += ElisaLinkedPrefix::removeLinkedPrefixInitializers(Function, Loops, Tree, Layout);
   }
   return Removed;
 }
