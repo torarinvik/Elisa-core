@@ -86,3 +86,6 @@ namespace wrap_llvm_zero_forward {
 namespace wrap_llvm_interleaved_byte_stores {
 #include "passes/llvm_interleaved_byte_stores.cpp"
 }  // namespace wrap_llvm_interleaved_byte_stores
+namespace wrap_llvm_split_signed_guards {
+#include "passes/llvm_split_signed_guards.cpp"
+}  // namespace wrap_llvm_split_signed_guards
