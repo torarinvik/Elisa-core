@@ -1,5 +1,5 @@
 // go:build cgo
-//  Expand small private binary recursion from stable snapshots, with fixed
+//  Expand small private recursion from stable snapshots, with fixed
 //  budgets.
 #include <llvm-c/Core.h>
 #include <llvm-c/TargetMachine.h>
@@ -21,6 +21,22 @@
 #include <llvm/Transforms/Utils/Cloning.h>
 #include <llvm/Transforms/Utils/BasicBlockUtils.h>
 using namespace llvm;
+static bool hasGuardedLinearEntry(CondBrInst &Entry, ICmpInst &Compare) {
+  if (Compare.getPredicate() != ICmpInst::ICMP_ULT) return false;
+  Value *Index = Compare.getOperand(0);
+  if (auto *Frozen = dyn_cast<FreezeInst>(Index)) Index = Frozen->getOperand(0);
+  auto *Length = dyn_cast<ExtractValueInst>(Compare.getOperand(1));
+  if (!isa<Argument>(Index) || !Length ||
+      !isa<Argument>(Length->getAggregateOperand()))
+    return false;
+  BasicBlock *Failure = Entry.getSuccessor(1);
+  if (!isa<UnreachableInst>(Failure->getTerminator())) return false;
+  return llvm::any_of(*Failure, [](Instruction &Instruction) {
+    auto *Call = dyn_cast<IntrinsicInst>(&Instruction);
+    return Call && Call->getIntrinsicID() == Intrinsic::trap;
+  });
+}
+
 static bool recursiveInlineCandidate(Function &F) {
   if (!F.hasLocalLinkage() || F.isDeclaration() || F.isVarArg() ||
       F.hasAddressTaken() || F.hasPersonalityFn() || F.hasOptNone() ||
@@ -37,16 +53,19 @@ static bool recursiveInlineCandidate(Function &F) {
     return false;
   auto *Entry = dyn_cast<CondBrInst>(F.getEntryBlock().getTerminator());
   auto *Cmp = Entry ? dyn_cast<ICmpInst>(Entry->getCondition()) : nullptr;
-  if (!Cmp || !Cmp->isEquality() || !isa<Argument>(Cmp->getOperand(0)) ||
-      !isa<ConstantInt>(Cmp->getOperand(1)))
-    return false;
+  if (!Cmp) return false;
+  bool Binary = Cmp->isEquality() && isa<Argument>(Cmp->getOperand(0)) &&
+                isa<ConstantInt>(Cmp->getOperand(1));
+  bool Linear = hasGuardedLinearEntry(*Entry, *Cmp) && F.getInstructionCount() <= 64;
+  if (!Binary && !Linear) return false;
   unsigned Calls = 0;
   for (Instruction &I : instructions(F)) {
     if (isa<AllocaInst>(I) || isa<InvokeInst>(I) || isa<CallBrInst>(I) ||
         isa<IndirectBrInst>(I))
       return false;
     if (auto *C = dyn_cast<CallBase>(&I)) {
-      if (C->isConvergent() || C->hasOperandBundles() || C->isMustTailCall())
+      if (C->isConvergent() || C->cannotDuplicate() || C->hasOperandBundles() ||
+          C->isMustTailCall() || C->hasFnAttr(Attribute::ReturnsTwice))
         return false;
       if (C->getCalledFunction() == &F)
         ++Calls;
@@ -54,7 +73,7 @@ static bool recursiveInlineCandidate(Function &F) {
         return false;
     }
   }
-  return Calls == 2;
+  return (Binary && Calls == 2) || (Linear && Calls == 1);
 }
 // Specialize one literal integer argument of a private recursive function.
 // Recursive calls whose argument changes continue to use the original body.

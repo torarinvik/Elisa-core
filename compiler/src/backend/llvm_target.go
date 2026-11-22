@@ -481,6 +481,9 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 		C.elisacoreCompactEvenRanges(g.module)
 		llvmnative.BiasValidationReturns(unsafe.Pointer(g.module))
 		C.elisacoreCsscAbsoluteRangeChecks(g.module, g.targetMachine)
+		if C.elisacoreFoldRecursiveArgumentBounds(g.module, g.targetMachine) == 2 {
+			return fmt.Errorf("recursive argument bounds cleanup failed")
+		}
 		C.elisacoreInlineSmallRecursiveFunctions(g.module, g.targetMachine)
 		C.elisacoreUnrollGuardedReductions(g.module)
 		scalarloops.FoldConditionalDoubling(unsafe.Pointer(g.module))
@@ -493,9 +496,6 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 		C.elisacoreFoldWideVectorOrAccumulators(g.module)
 		if C.elisacoreInlineRelatedAggregateCalls(g.module, g.targetMachine) == 2 {
 			return fmt.Errorf("related aggregate call cleanup failed")
-		}
-		if C.elisacoreFoldRecursiveArgumentBounds(g.module, g.targetMachine) == 2 {
-			return fmt.Errorf("recursive argument bounds cleanup failed")
 		}
 	}
 	if err := g.verify(); err != nil {

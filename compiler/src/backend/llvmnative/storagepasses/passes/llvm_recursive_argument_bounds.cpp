@@ -33,15 +33,28 @@ static bool isTrapBlock(BasicBlock &Block) {
 }
 
 static bool initialIndexIsBounded(CallBase &Call, BoundsCheck Check,
-                                  Argument &View) {
+                                  Argument &View, ArrayRef<BoundsCheck> Checks) {
   auto *Index = dyn_cast<ConstantInt>(Call.getArgOperand(Check.index->getArgNo()));
   Value *Length = FindInsertedValue(Call.getArgOperand(View.getArgNo()),
                                     Check.length->getIndices());
   if (!Index || !Length || Length->getType() != Index->getType() ||
       Call.getFunction()->getInstructionCount() > 1500)
     return false;
-  if (auto *Constant = dyn_cast<ConstantInt>(Length))
-    return Index->getValue().ult(Constant->getValue());
+  if (auto *Constant = dyn_cast<ConstantInt>(Length)) {
+    if (Index->getValue().ult(Constant->getValue())) return true;
+    // A retained entry guard on a different argument can reject this call
+    // before it reaches any candidate check (for example, an empty view).
+    return llvm::any_of(Checks, [&](BoundsCheck Guard) {
+      if (Guard.index == Check.index ||
+          Guard.branch->getParent() != &Check.branch->getFunction()->getEntryBlock() ||
+          Guard.length->getAggregateOperand() != &View ||
+          Guard.length->getIndices() != Check.length->getIndices() ||
+          !isTrapBlock(*Guard.branch->getSuccessor(1)))
+        return false;
+      auto *Actual = dyn_cast<ConstantInt>(Call.getArgOperand(Guard.index->getArgNo()));
+      return Actual && Actual->getValue().uge(Constant->getValue());
+    });
+  }
 
   DominatorTree Tree(*Call.getFunction());
   AssumptionCache Assumptions(*Call.getFunction());
@@ -96,7 +109,7 @@ static unsigned fold(Function &Function) {
     if (!isTrapBlock(*Candidate.branch->getSuccessor(1))) continue;
     auto &View = *cast<Argument>(Candidate.length->getAggregateOperand());
     if (!llvm::all_of(Initial, [&](CallBase *Call) {
-          return initialIndexIsBounded(*Call, Candidate, View);
+          return initialIndexIsBounded(*Call, Candidate, View, Checks);
         }))
       continue;
 
