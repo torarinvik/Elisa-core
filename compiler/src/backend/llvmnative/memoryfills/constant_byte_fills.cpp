@@ -4,6 +4,7 @@
 #include <llvm-c/Core.h>
 #include <llvm/Config/llvm-config.h>
 #include <llvm/ADT/SmallVector.h>
+#include <llvm/Analysis/ValueTracking.h>
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/IntrinsicInst.h>
@@ -17,13 +18,64 @@ using namespace llvm;
 
 #include "llvm_word_pattern_fill.h"
 
+// A low byte followed by seven zero bytes is one little-endian word store.
+static unsigned mergeZeroExtendedByteStores(Module &M) {
+  if (M.getNamedMetadata("llvm.dbg.cu")) return 0;
+  const DataLayout &DL = M.getDataLayout();
+  unsigned Changed = 0;
+  for (Function &F : M) {
+    if (F.hasOptNone() || F.hasOptSize() || F.hasMinSize() ||
+        F.hasFnAttribute(Attribute::SanitizeAddress) ||
+        F.hasFnAttribute(Attribute::SanitizeHWAddress) ||
+        F.hasFnAttribute(Attribute::SanitizeMemory) ||
+        F.hasFnAttribute(Attribute::SanitizeThread))
+      continue;
+    for (BasicBlock &B : F) {
+      for (Instruction &I : llvm::make_early_inc_range(B)) {
+        auto *Fill = dyn_cast<MemSetInst>(&I);
+        if (!Fill || Fill->isVolatile() || Fill->hasOperandBundles() ||
+            Fill->hasMetadataOtherThanDebugLoc() || Fill->getDestAddressSpace() != 0)
+          continue;
+        auto *Length = dyn_cast<ConstantInt>(Fill->getLength());
+        auto *Byte = dyn_cast<ConstantInt>(Fill->getValue());
+        if (!Length || !Length->equalsInt(7) || !Byte || !Byte->isZero())
+          continue;
+        Instruction *Previous = Fill->getPrevNode();
+        for (unsigned Steps = 0; Previous && Steps < 8; ++Steps) {
+          if (Previous->mayReadOrWriteMemory() || Previous->mayHaveSideEffects() ||
+              isa<CallBase>(Previous))
+            break;
+          Previous = Previous->getPrevNode();
+        }
+        auto *Store = dyn_cast_or_null<StoreInst>(Previous);
+        if (!Store || !Store->isSimple() || Store->hasMetadataOtherThanDebugLoc() ||
+            Store->getPointerAddressSpace() != 0 ||
+            !Store->getValueOperand()->getType()->isIntegerTy(8))
+          continue;
+        int64_t StoreOffset, FillOffset;
+        Value *Base = GetPointerBaseWithConstantOffset(Store->getPointerOperand(), StoreOffset, DL);
+        if (Base != GetPointerBaseWithConstantOffset(Fill->getRawDest(), FillOffset, DL) ||
+            StoreOffset > INT64_MAX - 7 || FillOffset != StoreOffset + 1)
+          continue;
+        IRBuilder<> Builder(Fill);
+        Value *Word = Builder.CreateZExt(Store->getValueOperand(), Builder.getInt64Ty());
+        Builder.CreateAlignedStore(Word, Store->getPointerOperand(), Store->getAlign());
+        Fill->eraseFromParent();
+        Store->eraseFromParent();
+        ++Changed;
+      }
+    }
+  }
+  return Changed;
+}
+
 extern "C" unsigned elisacoreExpandSmallZeroFills(LLVMModuleRef ref) {
   if (!ref) return 0;
   Module &M = *unwrap(ref);
   if (M.getTargetTriple().getArch() != Triple::aarch64 || !M.getDataLayout().isLittleEndian() || M.getNamedValue("__elisacore_smallzero_fill")) return 0;
   // Inline medium, aligned fixed-size fills on Apple AArch64. LLVM otherwise
   // lowers these to a library call. Keep the size bounded to control code growth.
-  unsigned fixedChanged = inlineStackWordPatternFills(M);
+  unsigned fixedChanged = inlineStackWordPatternFills(M) + mergeZeroExtendedByteStores(M);
   if (M.getTargetTriple().isMacOSX()) {
     SmallVector<MemSetInst *, 8> fixed;
     for (Function &F : M) {
