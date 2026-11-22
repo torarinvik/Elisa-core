@@ -174,68 +174,6 @@ static bool matchSymmetricRangeCheck(ICmpInst &Cmp, BinaryOperator *&Add,
 
 #include "llvm_cssc_extrema.h"
 
-// Tune CSSC lowering and map the unsigned range-check idiom for [-B, B] to llvm.abs plus an
-// unsigned comparison when the selected AArch64 CPU has CSSC. INT_MIN remains
-// the same wrapped bit pattern and is still rejected by the unsigned compare.
-extern "C" unsigned elisacoreCsscAbsoluteRangeChecks(
-    LLVMModuleRef moduleRef, LLVMTargetMachineRef targetRef) {
-  if (!moduleRef || !targetRef) return 0;
-  auto &TM = *reinterpret_cast<TargetMachine *>(targetRef);
-  if (!hasCSSC(TM)) return 0;
-  Module &M = *unwrap(moduleRef);
-  unsigned Changed = 0;
-  for (Function &F : M) {
-    if (F.isDeclaration() || F.hasOptNone() || F.hasOptSize() || F.hasMinSize() ||
-        F.hasFnAttribute("target-cpu") || F.hasFnAttribute("target-features")) continue;
-    DominatorTree DT(F); LoopInfo LI(DT);
-    if (preferCompareSelectExtrema(F, LI, TM)) {
-      useCompareSelectExtrema(F, TM);
-      ++Changed;
-      continue;
-    }
-    DenseMap<Loop *, unsigned> ScanCounts;
-    SmallVector<ICmpInst *, 8> Candidates;
-    for (BasicBlock &BB : F)
-      for (Instruction &I : BB)
-        if (auto *Cmp = dyn_cast<ICmpInst>(&I)) Candidates.push_back(Cmp);
-    for (ICmpInst *Cmp : Candidates) {
-      // Wide unrolled validation scans favor the original range arithmetic on
-      // measured AArch64 targets. Keep the absolute-value fold for other loops.
-      if (Loop *L = LI.getLoopFor(Cmp->getParent())) {
-        auto It = ScanCounts.find(L);
-        if (It == ScanCounts.end()) {
-          unsigned RangeChecks = 0;
-          for (BasicBlock *B : L->blocks()) for (Instruction &I : *B)
-            if (auto *C = dyn_cast<ICmpInst>(&I)) {
-              BinaryOperator *Add = nullptr; Value *Input = nullptr; APInt Bound(64, 0);
-              if (matchSymmetricRangeCheck(*C, Add, Input, Bound)) ++RangeChecks;
-            }
-          It = ScanCounts.try_emplace(L, RangeChecks).first;
-        }
-        if (It->second >= 4) continue;
-      }
-      BinaryOperator *Add = nullptr;
-      Value *Input = nullptr;
-      APInt Bound(64, 0);
-      if (!matchSymmetricRangeCheck(*Cmp, Add, Input, Bound)) continue;
-      IRBuilder<> Builder(Cmp);
-      Builder.SetCurrentDebugLocation(Cmp->getDebugLoc());
-      auto *AbsFn = Intrinsic::getOrInsertDeclaration(&M, Intrinsic::abs,
-                                                      {Input->getType()});
-      Value *Abs = Builder.CreateCall(AbsFn,
-          {Input, ConstantInt::getFalse(M.getContext())}, "range.abs");
-      Value *Invalid = Builder.CreateICmpUGT(Abs,
-          ConstantInt::get(cast<IntegerType>(Input->getType()), Bound), "range.invalid");
-      Cmp->replaceAllUsesWith(Invalid);
-      Cmp->eraseFromParent();
-      if (Add->use_empty()) Add->eraseFromParent();
-      ++Changed;
-    }
-  }
-  return Changed;
-}
-
-
 // Expand one level of a small, directly recursive local traversal. LLVM's
 // inliner preserves checks and memory effects; the budget bounds code growth.
 extern "C" unsigned elisacoreInlineSmallRecursion(LLVMModuleRef ref) {
