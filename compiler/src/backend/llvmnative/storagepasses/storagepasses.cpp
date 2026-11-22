@@ -89,3 +89,7 @@ namespace wrap_llvm_interleaved_byte_stores {
 namespace wrap_llvm_split_signed_guards {
 #include "passes/llvm_split_signed_guards.cpp"
 }  // namespace wrap_llvm_split_signed_guards
+namespace wrap_llvm_vector_or_accumulators {
+using namespace llvm;
+#include "passes/llvm_vector_or_accumulators.cpp"
+}  // namespace wrap_llvm_vector_or_accumulators
