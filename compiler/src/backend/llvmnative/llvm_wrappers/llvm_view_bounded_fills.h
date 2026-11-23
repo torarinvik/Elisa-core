@@ -185,8 +185,17 @@ private:
     const SCEV *Elements = Evolution.getSCEV(&Length), *Base = Evolution.getSCEV(&Data);
     const DataLayout &Layout = F.getDataLayout();
     auto Inside = [&](Value *Pointer, const SCEV *Bytes, Instruction *At) {
-      const SCEV *Offset = divide(Evolution, Evolution.getMinusSCEV(Evolution.getSCEV(Pointer), Base));
+      const SCEV *Raw = Evolution.getMinusSCEV(Evolution.getSCEV(Pointer), Base);
+      const SCEV *Offset = divide(Evolution, Raw);
       const SCEV *Count = divide(Evolution, Bytes);
+      // A field access (`items[i].count`: element i's offset plus a residue
+      // that leaves room for the field) touches element i alone.
+      if (auto *Size = dyn_cast<SCEVConstant>(Bytes); !Count && Size && Size->getAPInt().ult(elementSize)) {
+        Offset = nullptr;
+        for (uint64_t Residue = 0; !Offset && Residue + Size->getAPInt().getZExtValue() <= elementSize; ++Residue)
+          if ((Offset = divide(Evolution, Evolution.getMinusSCEV(Raw, Evolution.getConstant(Raw->getType(), Residue)))))
+            Count = Evolution.getOne(Raw->getType());
+      }
       if (!Offset || !Count || Offset->getType() != Elements->getType() || Count->getType() != Offset->getType())
         return false;
       return Proof.proveAtMost(Evolution.getAddExpr(Offset, Count), Elements, At) &&
