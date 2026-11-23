@@ -102,7 +102,7 @@ protected:
            gapFits(evolution.getMinusSCEV(High, Low), High, At) ||
            guarded(Low, High, At, Depth, false) || successorAtMost(Low, High, At, Depth) ||
            recurrenceAtMost(Low, High, Depth) || roundedAtMost(Low, High, At, Depth) ||
-           phiAtMost(Low, High, Depth);
+           phiAtMost(Low, High, Depth) || partAtMost(Low, High, At, Depth);
   }
 
 private:
@@ -114,6 +114,18 @@ private:
   SmallPtrSet<BasicBlock *, 4> ordering;
   DenseMap<std::pair<const SCEV *, BasicBlock *>, ConstantRange> decidedRanges;
   DenseSet<std::pair<const SCEV *, BasicBlock *>> deciding;
+
+  // An unsigned minimum is at most each operand, and a quotient (a slice of
+  // half of a prefix) at most its dividend.
+  bool partAtMost(const SCEV *Low, const SCEV *High, Instruction *At, unsigned Depth) {
+    if (Depth > 6 || budget == 0) return false;
+    --budget;
+    if (auto *Minimum = dyn_cast<SCEVUMinExpr>(Low))
+      return llvm::any_of(Minimum->operands(), [&](const SCEV *Part) { return atMost(Part, High, At, Depth + 1); });
+    auto *Quotient = dyn_cast<SCEVUDivExpr>(Low);
+    return Quotient && evolution.isKnownNonZero(Quotient->getRHS()) &&
+           atMost(Quotient->getLHS(), High, At, Depth + 1);
+  }
 
   bool valueBelow(Value *V, const SCEV *Length, Instruction *At, unsigned Depth) {
     return evolution.isSCEVable(V->getType()) && below(evolution.getSCEV(V), Length, At, Depth + 1);

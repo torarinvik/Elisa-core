@@ -14,6 +14,7 @@
 // compare its address; any other use of the pointer (a cast back to a
 // pointer, a store of it, a call with the bare pointer) keeps the fill.
 #include <llvm/IR/Argument.h>
+#include "llvm_element_offsets.h"
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/IntrinsicInst.h>
 #include <llvm/Transforms/InstCombine/InstCombine.h>
@@ -175,7 +176,7 @@ private:
   }
 
   const SCEV *divide(ScalarEvolution &Evolution, const SCEV *Bytes) {
-    return isa<SCEVCouldNotCompute>(Bytes) ? nullptr : ElisaIndexedPrefix::divide(Evolution, Bytes, elementSize);
+    return isa<SCEVCouldNotCompute>(Bytes) ? nullptr : ElisaElementOffsets::divide(Evolution, Bytes, elementSize);
   }
 };
 

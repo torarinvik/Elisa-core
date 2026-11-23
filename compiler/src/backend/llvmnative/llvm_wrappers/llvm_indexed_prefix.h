@@ -12,44 +12,14 @@
 // structs and fills a loop repeats. The bound
 // proofs themselves are ElisaIndexBounds'.
 #include <llvm/Analysis/ScalarEvolutionExpressions.h>
+#include "llvm_element_offsets.h"
 #include "llvm_stack_watermark.h"
 namespace ElisaIndexedPrefix {
 using namespace llvm;
 using ElisaArrayRanges::Accesses;
 
-// Offset / Size where Offset is known to be a multiple of Size: through
-// affine recurrences, whose start and step must both divide.
-static const SCEV *divide(ScalarEvolution &Evolution, const SCEV *Offset, uint64_t Size) {
-  if (auto *Constant = dyn_cast<SCEVConstant>(Offset)) {
-    const APInt &Value = Constant->getAPInt();
-    APInt Divisor(Value.getBitWidth(), Size);
-    return Value.srem(Divisor).isZero() ? Evolution.getConstant(Value.sdiv(Divisor)) : nullptr;
-  }
-  if (auto *Recurrence = dyn_cast<SCEVAddRecExpr>(Offset)) {
-    if (!Recurrence->isAffine()) return nullptr;
-    const SCEV *Start = divide(Evolution, Recurrence->getStart(), Size);
-    const SCEV *Step = divide(Evolution, Recurrence->getStepRecurrence(Evolution), Size);
-    return Start && Step ? Evolution.getAddRecExpr(Start, Step, Recurrence->getLoop(),
-                                                   SCEV::FlagAnyWrap)
-                         : nullptr;
-  }
-  if (auto *Sum = dyn_cast<SCEVAddExpr>(Offset)) {
-    SmallVector<SCEVUse, 4> Terms;
-    for (const SCEV *Term : Sum->operands())
-      if (const SCEV *Part = divide(Evolution, Term, Size)) Terms.push_back(Part);
-      else return nullptr;
-    return Evolution.getAddExpr(Terms);
-  }
-  if (auto *Product = dyn_cast<SCEVMulExpr>(Offset))
-    if (const SCEV *Factor = divide(Evolution, Product->getOperand(0), Size)) {
-      SmallVector<SCEVUse, 4> Factors(Product->operands());
-      Factors[0] = Factor;
-      return Evolution.getMulExpr(Factors);
-    }
-  const SCEV *Quotient =
-      Evolution.getUDivExactExpr(Offset, Evolution.getConstant(Offset->getType(), Size));
-  return isa<SCEVUDivExpr>(Quotient) ? nullptr : Quotient;
-}
+using ElisaElementOffsets::divide;
+
 
 
 struct Array {
@@ -71,9 +41,12 @@ struct Array {
 
 class Prover : public ElisaIndexBounds::Prover {
 public:
+  // Whether every access a view's callees make stays inside the view.
+  using ViewCheck = std::function<bool(InsertValueInst &, uint64_t)>;
+
   Prover(ScalarEvolution &Evolution, DominatorTree &Tree, LoopInfo &Loops,
-         SmallVectorImpl<Array> &Arrays)
-      : ElisaIndexBounds::Prover(Evolution, Tree, Loops), arrays(Arrays) {}
+         SmallVectorImpl<Array> &Arrays, ViewCheck Views = nullptr)
+      : ElisaIndexBounds::Prover(Evolution, Tree, Loops), arrays(Arrays), views(std::move(Views)) {}
 
   // Whether every read of Target lies in a completely written prefix.
   bool prefixRead(Array &Target) {
@@ -91,6 +64,7 @@ public:
 
 private:
   SmallVectorImpl<Array> &arrays;
+  ViewCheck views;
   SmallPtrSet<AllocaInst *, 4> visiting;
 
   // The element a load or store accesses, at a field of it for a struct.
@@ -191,6 +165,18 @@ private:
                       Target.Length, Load))
         return false;
     }
+    // A callee reaches the elements below a view's length and no others.
+    for (InsertValueInst *View : Target.Uses.Views) {
+      Value *Length = View->getInsertedValueOperand();
+      if (!views || !evolution.isSCEVable(Length->getType()) ||
+          evolution.getTypeSizeInBits(Length->getType()) != evolution.getTypeSizeInBits(Target.Length->getType()) ||
+          !views(*View, Target.ElementSize))
+        return false;
+      for (User *Call : View->users())
+        if (!completed(Target, *cast<Instruction>(Call)) ||
+            !proveAtMost(evolution.getSCEV(Length), Target.Length, cast<Instruction>(Call)))
+          return false;
+    }
     for (MemTransferInst *Copy : Target.Uses.Copies) {
       const SCEV *Bytes = evolution.getSCEV(Copy->getLength());
       const SCEV *Limit = evolution.getMulExpr(
@@ -205,7 +191,7 @@ private:
 
   // An array used as a stack: every read is below a watermark of pushes.
   bool stackRead(Array &Target, bool FillRepeats = false) {
-    if (!Target.Uses.Writes.empty() || !Target.Uses.VectorLoads.empty() ||
+    if (!Target.Uses.Writes.empty() || !Target.Uses.VectorLoads.empty() || !Target.Uses.Views.empty() ||
         (Target.Uses.Loads.empty() && Target.Uses.Copies.empty()))
       return false;
     ElisaStackWatermark::Watermark Marks(tree, *this, evolution, *Target.Buffer, Target.ElementSize,
@@ -284,8 +270,10 @@ private:
              (evolution.isSCEVable(Stored->getType()) &&
               below(evolution.getSCEV(Stored), Length, Store, Depth));
     };
-    // Copied values are unknown, and so are zeros a kept fill provides.
+    // Copied values are unknown, and so are zeros a kept fill provides and
+    // values a view's callees store.
     bool Bounded = Source->Uses.Writes.empty() && Source->Uses.VectorStores.empty() &&
+                   Source->Uses.Views.empty() &&
                    prefixRead(*Source) && !Source->KeptElements &&
                    llvm::all_of(Source->Uses.Stores, StoredBelow);
     visiting.erase(Source->Buffer);
@@ -341,6 +329,8 @@ static SmallVector<StoreInst *, 16> wholeElementStores(Array &Target, ScalarEvol
 // constant offset inside it, so the struct proof applies to the records.
 static std::optional<Array> regrouped(Array &Target, unsigned Group, ScalarEvolution &Evolution,
                                       DominatorTree &Tree) {
+  // A view's callees are checked against the plain element size.
+  if (!Target.Uses.Views.empty()) return std::nullopt;
   const DataLayout &Layout = Target.Buffer->getDataLayout();
   Array Records;
   Records.Buffer = Target.Buffer;
@@ -407,8 +397,13 @@ static unsigned removeIndexedPrefixFills(Function &F, FunctionAnalysisManager &A
   for (Array &Target : Arrays)
     if (Target.Composite) Target.Uses.Stores = wholeElementStores(Target, Evolution, Tree);
   SmallVector<std::tuple<Instruction *, uint64_t, AllocaInst *>, 4> Dead;
+  // Callees are checked on cleaned copies that the checker deletes.
+  auto Views = [&](InsertValueInst &View, uint64_t ElementSize) {
+    ElisaViewBounds::Checker Callees(Analyses, ElementSize);
+    return Callees.bounded(View, F);
+  };
   for (Array &Target : Arrays) {
-    Prover Proof(Evolution, Tree, Loops, Arrays);
+    Prover Proof(Evolution, Tree, Loops, Arrays, Views);
     Array *Proved = Proof.prefixRead(Target) ? &Target : nullptr;
     std::optional<Array> Records;
     for (unsigned Group = 2; !Proved && !Target.Composite && !Target.Uses.Stores.empty() &&
@@ -434,9 +429,18 @@ static unsigned removeIndexedPrefixFills(Function &F, FunctionAnalysisManager &A
 }
 
 static unsigned removeIndexedPrefixFills(Module &Module) {
+  // A view's callees are cleaned by function passes that consult module
+  // analyses (ElisaViewBounds), so every manager is registered and linked.
   PassBuilder Builder;
+  LoopAnalysisManager LoopAnalyses;
   FunctionAnalysisManager Analyses;
+  CGSCCAnalysisManager CallGraphAnalyses;
+  ModuleAnalysisManager ModuleAnalyses;
+  Builder.registerModuleAnalyses(ModuleAnalyses);
+  Builder.registerCGSCCAnalyses(CallGraphAnalyses);
   Builder.registerFunctionAnalyses(Analyses);
+  Builder.registerLoopAnalyses(LoopAnalyses);
+  Builder.crossRegisterProxies(LoopAnalyses, Analyses, CallGraphAnalyses, ModuleAnalyses);
   unsigned Removed = 0;
   for (Function &F : Module)
     if (!F.isDeclaration() && !F.hasOptNone()) Removed += removeIndexedPrefixFills(F, Analyses);
