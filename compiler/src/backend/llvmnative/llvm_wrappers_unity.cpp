@@ -74,6 +74,7 @@
 #include <llvm/Support/KnownFPClass.h>
 #include <llvm-c/Target.h>
 #include <llvm/IR/InlineAsm.h>
+#include <llvm/Analysis/AssumptionCache.h>
 namespace wrap_incremental_clone {
 #include "llvm_wrappers/incremental_clone.cpp"
 }  // namespace wrap_incremental_clone
@@ -99,6 +100,9 @@ namespace wrap_llvm_masked_split_multiply {
 namespace wrap_llvm_sqrt_proof {
 #include "llvm_wrappers/llvm_sqrt_proof.cpp"
 }  // namespace wrap_llvm_sqrt_proof
+namespace wrap_llvm_bounded_copies {
+#include "llvm_wrappers/llvm_bounded_copies.cpp"
+}  // namespace wrap_llvm_bounded_copies
 namespace wrap_llvm_trap_exit_edges {
 #include "llvm_wrappers/llvm_trap_exit_edges.cpp"
 }  // namespace wrap_llvm_trap_exit_edges
