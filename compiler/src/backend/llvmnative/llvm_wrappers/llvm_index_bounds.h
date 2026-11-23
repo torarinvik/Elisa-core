@@ -133,9 +133,13 @@ private:
     --budget;
     if (auto *Minimum = dyn_cast<SCEVUMinExpr>(Low))
       return llvm::any_of(Minimum->operands(), [&](const SCEV *Part) { return atMost(Part, High, At, Depth + 1); });
-    if (SelectInst *Choice = ElisaIndexShapes::choice(Low))
-      return atMost(evolution.getSCEV(Choice->getTrueValue()), High, At, Depth + 1) &&
-             atMost(evolution.getSCEV(Choice->getFalseValue()), High, At, Depth + 1);
+    if (SelectInst *Choice = ElisaIndexShapes::choice(Low)) {
+      // A minimum is at most either value; any other choice needs both.
+      bool Minimum = ElisaIndexShapes::chooseMinimum(*Choice);
+      bool True = atMost(evolution.getSCEV(Choice->getTrueValue()), High, At, Depth + 1);
+      if (True == Minimum) return True;
+      return atMost(evolution.getSCEV(Choice->getFalseValue()), High, At, Depth + 1);
+    }
     if (const SCEV *Start = nullptr, *End = ElisaIndexShapes::midpoint(evolution, Low, Start); End)
       return atMost(Start, End, At, Depth + 1) && atMost(End, High, At, Depth + 1);
     auto *Quotient = dyn_cast<SCEVUDivExpr>(Low);

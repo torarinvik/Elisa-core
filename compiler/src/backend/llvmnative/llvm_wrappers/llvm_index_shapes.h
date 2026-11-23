@@ -201,4 +201,18 @@ inline PHINode *risingCount(LoopInfo &Loops, Value *V, unsigned &Extra) {
   Extra = Merge == Header ? 0 : 1;
   return Header;
 }
+// Whether Choice is an unsigned minimum of its two values: it picks the
+// smaller one by an unsigned comparison of the two (`x > 64 ? 64 : x`).
+inline bool chooseMinimum(SelectInst &Choice) {
+  auto *Test = dyn_cast<ICmpInst>(Choice.getCondition());
+  if (!Test) return false;
+  Value *True = Choice.getTrueValue(), *False = Choice.getFalseValue();
+  CmpInst::Predicate Predicate = Test->getPredicate();
+  if (Test->getOperand(0) == False && Test->getOperand(1) == True)
+    Predicate = CmpInst::getSwappedPredicate(Predicate);
+  else if (Test->getOperand(0) != True || Test->getOperand(1) != False)
+    return false;
+  // Now the test reads `True Predicate False`, and True must be the smaller.
+  return Predicate == ICmpInst::ICMP_ULT || Predicate == ICmpInst::ICMP_ULE;
+}
 } // namespace ElisaIndexShapes

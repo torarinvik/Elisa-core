@@ -57,9 +57,14 @@ public:
   bool prefixRead(Array &Target) {
     Target.KeptElements = 0;
     if (Target.Uses.Fills.size() != 1) return false;
-    // A fill a loop repeats (a scratch array per query) leaves the stack
-    // proof, which checks each step against the latest fill.
-    if (loops.getLoopFor(Target.Uses.Fills[0]->getParent())) return stackRead(Target, true);
+    // A fill a loop repeats (a scratch array per query) is proved by its
+    // fill loop only for reads in the fill's own trip (completed), else by
+    // the stack proof, which checks each step against the latest fill.
+    if (loops.getLoopFor(Target.Uses.Fills[0]->getParent())) {
+      for (StoreInst *Store : Target.Uses.Stores)
+        if (fillLoop(Target, *Store) && readsInside(cover(Target))) return true;
+      return stackRead(Target, true);
+    }
     for (StoreInst *Store : Target.Uses.Stores)
       if (fillLoop(Target, *Store) && readsInside(cover(Target))) return true;
     for (MemIntrinsic *Copy : Target.Uses.Writes)
@@ -261,6 +266,7 @@ private:
   // an edge. Walking back from Read, a path into the loop's body or the
   // function entry that avoids both fails.
   bool completed(Array &Target, Instruction &Read) {
+    if (loops.getLoopFor(Target.Uses.Fills[0]->getParent())) return !Target.Copied && sameTrip(Target, Read);
     if (Target.Copied) return tree.dominates(Target.Copied, &Read);
     if (tree.dominates(BasicBlockEdge(Target.From, Target.To), Read.getParent())) return true;
     // Length must keep its value from the guard to the read: every value
@@ -282,6 +288,28 @@ private:
       for (BasicBlock *Entry : predecessors(Block))
         if (!(Entry == Target.From && Block == Target.To) && !emptyOn(Target.Length, *Entry, *Block))
           Work.push_back(Entry);
+    }
+    return true;
+  }
+
+  // Every path from the repeated fill to Read leaves the fill loop through
+  // its counted exit in the same trip of every loop around the fill: walking
+  // back from Read, stopping at that exit, reaches neither the fill, nor the
+  // function entry, nor the header of a loop around the fill. Length's values
+  // are then the ones the exit saw.
+  bool sameTrip(Array &Target, Instruction &Read) {
+    BasicBlock *Filling = Target.Uses.Fills[0]->getParent();
+    Loop *Around = loops.getLoopFor(Filling);
+    SmallPtrSet<BasicBlock *, 32> Seen;
+    SmallVector<BasicBlock *, 16> Work{Read.getParent()};
+    while (!Work.empty()) {
+      BasicBlock *Block = Work.pop_back_val();
+      if (!Seen.insert(Block).second) continue;
+      if (Block == Filling || Block->isEntryBlock() || Seen.size() > 4096) return false;
+      for (Loop *Outer = Around; Outer; Outer = Outer->getParentLoop())
+        if (Block == Outer->getHeader()) return false;
+      for (BasicBlock *Entry : predecessors(Block))
+        if (!(Entry == Target.From && Block == Target.To)) Work.push_back(Entry);
     }
     return true;
   }
