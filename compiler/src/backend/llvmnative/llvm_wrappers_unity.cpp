@@ -44,6 +44,9 @@
 #include <llvm/IR/GetElementPtrTypeIterator.h>
 #include <llvm/Transforms/InstCombine/InstCombine.h>
 #include <llvm/Transforms/Scalar/SimplifyCFG.h>
+#include <llvm/Transforms/Scalar/EarlyCSE.h>
+#include <llvm/Transforms/Scalar/SROA.h>
+#include <llvm/IR/Argument.h>
 #include <llvm/Analysis/LoopInfo.h>
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Transforms/Utils/BasicBlockUtils.h>

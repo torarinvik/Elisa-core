@@ -16,6 +16,41 @@ namespace ElisaIndexedPrefix {
 using namespace llvm;
 using ElisaArrayRanges::Accesses;
 
+// Offset / Size where Offset is known to be a multiple of Size: through
+// affine recurrences, whose start and step must both divide.
+static const SCEV *divide(ScalarEvolution &Evolution, const SCEV *Offset, uint64_t Size) {
+  if (auto *Constant = dyn_cast<SCEVConstant>(Offset)) {
+    const APInt &Value = Constant->getAPInt();
+    APInt Divisor(Value.getBitWidth(), Size);
+    return Value.srem(Divisor).isZero() ? Evolution.getConstant(Value.sdiv(Divisor)) : nullptr;
+  }
+  if (auto *Recurrence = dyn_cast<SCEVAddRecExpr>(Offset)) {
+    if (!Recurrence->isAffine()) return nullptr;
+    const SCEV *Start = divide(Evolution, Recurrence->getStart(), Size);
+    const SCEV *Step = divide(Evolution, Recurrence->getStepRecurrence(Evolution), Size);
+    return Start && Step ? Evolution.getAddRecExpr(Start, Step, Recurrence->getLoop(),
+                                                   SCEV::FlagAnyWrap)
+                         : nullptr;
+  }
+  if (auto *Sum = dyn_cast<SCEVAddExpr>(Offset)) {
+    SmallVector<SCEVUse, 4> Terms;
+    for (const SCEV *Term : Sum->operands())
+      if (const SCEV *Part = divide(Evolution, Term, Size)) Terms.push_back(Part);
+      else return nullptr;
+    return Evolution.getAddExpr(Terms);
+  }
+  if (auto *Product = dyn_cast<SCEVMulExpr>(Offset))
+    if (const SCEV *Factor = divide(Evolution, Product->getOperand(0), Size)) {
+      SmallVector<SCEVUse, 4> Factors(Product->operands());
+      Factors[0] = Factor;
+      return Evolution.getMulExpr(Factors);
+    }
+  const SCEV *Quotient =
+      Evolution.getUDivExactExpr(Offset, Evolution.getConstant(Offset->getType(), Size));
+  return isa<SCEVUDivExpr>(Quotient) ? nullptr : Quotient;
+}
+
+
 struct Array {
   AllocaInst *Buffer = nullptr;
   uint64_t ElementSize = 0;
@@ -51,45 +86,11 @@ private:
   SmallVectorImpl<Array> &arrays;
   SmallPtrSet<AllocaInst *, 4> visiting;
 
-  // Offset / Size where Offset is known to be a multiple of Size: through
-  // affine recurrences, whose start and step must both divide.
-  const SCEV *divide(const SCEV *Offset, uint64_t Size) {
-    if (auto *Constant = dyn_cast<SCEVConstant>(Offset)) {
-      const APInt &Value = Constant->getAPInt();
-      APInt Divisor(Value.getBitWidth(), Size);
-      return Value.srem(Divisor).isZero() ? evolution.getConstant(Value.sdiv(Divisor)) : nullptr;
-    }
-    if (auto *Recurrence = dyn_cast<SCEVAddRecExpr>(Offset)) {
-      if (!Recurrence->isAffine()) return nullptr;
-      const SCEV *Start = divide(Recurrence->getStart(), Size);
-      const SCEV *Step = divide(Recurrence->getStepRecurrence(evolution), Size);
-      return Start && Step ? evolution.getAddRecExpr(Start, Step, Recurrence->getLoop(),
-                                                     SCEV::FlagAnyWrap)
-                           : nullptr;
-    }
-    if (auto *Sum = dyn_cast<SCEVAddExpr>(Offset)) {
-      SmallVector<SCEVUse, 4> Terms;
-      for (const SCEV *Term : Sum->operands())
-        if (const SCEV *Part = divide(Term, Size)) Terms.push_back(Part);
-        else return nullptr;
-      return evolution.getAddExpr(Terms);
-    }
-    if (auto *Product = dyn_cast<SCEVMulExpr>(Offset))
-      if (const SCEV *Factor = divide(Product->getOperand(0), Size)) {
-        SmallVector<SCEVUse, 4> Factors(Product->operands());
-        Factors[0] = Factor;
-        return evolution.getMulExpr(Factors);
-      }
-    const SCEV *Quotient =
-        evolution.getUDivExactExpr(Offset, evolution.getConstant(Offset->getType(), Size));
-    return isa<SCEVUDivExpr>(Quotient) ? nullptr : Quotient;
-  }
-
   const SCEV *indexOf(Value *Pointer, Array &Target) {
     const SCEV *Offset = evolution.getMinusSCEV(evolution.getSCEV(Pointer),
                                                 evolution.getSCEV(Target.Buffer));
     if (isa<SCEVCouldNotCompute>(Offset)) return nullptr;
-    return divide(Offset, Target.ElementSize);
+    return divide(evolution, Offset, Target.ElementSize);
   }
 
   // Blocks of L that store element i (Index) in iteration i.
@@ -158,7 +159,7 @@ private:
   // zero fill, writes the elements [0, bytes / element size).
   bool fillCopy(Array &Target, MemIntrinsic &Copy) {
     if (loops.getLoopFor(Copy.getParent()) || !tree.dominates(Target.Uses.Fills[0], &Copy)) return false;
-    const SCEV *Length = divide(evolution.getSCEV(Copy.getLength()), Target.ElementSize);
+    const SCEV *Length = divide(evolution, evolution.getSCEV(Copy.getLength()), Target.ElementSize);
     if (!Length) return false;
     Target.Copied = &Copy;
     Target.Length = Length;
