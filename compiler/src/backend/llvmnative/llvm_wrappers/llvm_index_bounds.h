@@ -7,6 +7,7 @@
 // on the back edges; several such assumptions are discharged together, as
 // one induction over their headers. Comparisons between header phis holding
 // on every incoming edge (`left <u right`) are facts the header dominates.
+#include "llvm_element_bounds.h"
 #include "llvm_index_ranges.h"
 namespace ElisaIndexBounds {
 using namespace llvm;
@@ -99,11 +100,25 @@ protected:
            guarded(Low, High, At, Depth, false) || successorAtMost(Low, High, At, Depth) ||
            recurrenceAtMost(Low, High, Depth) || roundedAtMost(Low, High, At, Depth) ||
            phiAtMost(Low, High, Depth) || partAtMost(Low, High, At, Depth) ||
-           countedAtMost(Low, High, At, Depth);
+           countedAtMost(Low, High, At, Depth) || elementAtMost(Low, High, Depth);
   }
 
 private:
   SmallVector<std::pair<PHINode *, const SCEV *>, 8> assumedAtMost;
+  std::optional<ElisaElementBounds::Checker> elements;
+
+  // A value read from a local array is at most a bound every stored value
+  // is at most or is checked against after its store (ElisaElementBounds).
+  bool elementAtMost(const SCEV *Low, const SCEV *High, unsigned Depth) {
+    auto *Unknown = dyn_cast<SCEVUnknown>(Low);
+    auto *Load = Unknown ? dyn_cast<LoadInst>(Unknown->getValue()) : nullptr;
+    if (!Load || Depth > 6 || budget == 0) return false;
+    --budget;
+    if (!elements) elements.emplace(evolution, tree, loops);
+    return elements->atMost(*Load, High, [&](const SCEV *Stored, const SCEV *Bound, Instruction *Store) {
+      return Stored->getType() == Bound->getType() && atMost(Stored, Bound, Store, Depth + 1);
+    });
+  }
 
   // A count rising by at most one per iteration from zero is at most the
   // iterations run: k (plus one after the increment) in iteration k.
