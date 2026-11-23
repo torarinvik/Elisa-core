@@ -250,13 +250,7 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 						if fnType != nil && i < len(fnType.Params) {
 							ptype = fnType.Params[i]
 						}
-						symType := ptype
-						if ref, ok := ptype.(*RefType); ok && !ref.Mutable && isLegacyOutParamName(param.Name) {
-							cloned := cloneRefType(ref)
-							cloned.Mutable = true
-							symType = cloned
-						}
-						sym := &Symbol{Name: param.Name, Kind: SymbolParam, Type: symType, Node: fn, ParamIndex: i, Mutable: a.paramIsMutable(param)}
+						sym := &Symbol{Name: param.Name, Kind: SymbolParam, Type: ptype, Node: fn, ParamIndex: i, Mutable: a.paramIsMutable(param)}
 						a.defineLocal(sym, param.Position)
 						a.bindActivePackedStoreType(ptype)
 						a.recordValueBinding(sym, nil)
@@ -272,7 +266,7 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 						// (Only the real body pass registers these — the provenance and
 						// borrowed-owner inference passes re-walk the same body and must
 						// not double-enter the drop ledger.)
-						a.noteDropParam(fn, sym, symType)
+						a.noteDropParam(fn, sym, ptype)
 					}
 					if fnType != nil && fnType.RegionPolymorphic {
 						a.defineRegionPolymorphicParamSymbol(fn, fnType)

@@ -18,10 +18,6 @@ func (a *Analyzer) paramIsMutable(param ast.ParamDecl) bool {
 	return !refLike
 }
 
-func isLegacyOutParamName(name string) bool {
-	return name == "out" || strings.HasSuffix(name, "_out")
-}
-
 func (a *Analyzer) withShapeParams(names []string, fn func()) {
 	a.withSourceShapeParams(nil, names, fn)
 }

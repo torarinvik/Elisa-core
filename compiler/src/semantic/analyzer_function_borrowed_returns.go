@@ -129,13 +129,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 						if i < len(fnType.Params) {
 							ptype = fnType.Params[i]
 						}
-						symType := ptype
-						if ref, ok := ptype.(*RefType); ok && !ref.Mutable && isLegacyOutParamName(param.Name) {
-							cloned := cloneRefType(ref)
-							cloned.Mutable = true
-							symType = cloned
-						}
-						sym := &Symbol{Name: param.Name, Kind: SymbolParam, Type: symType, Node: fn, ParamIndex: i, Mutable: a.paramIsMutable(param)}
+						sym := &Symbol{Name: param.Name, Kind: SymbolParam, Type: ptype, Node: fn, ParamIndex: i, Mutable: a.paramIsMutable(param)}
 						a.defineLocal(sym, param.Position)
 						a.bindActivePackedStoreType(ptype)
 						a.recordValueBinding(sym, nil)

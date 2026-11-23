@@ -502,13 +502,7 @@ func (a *Analyzer) usesContractApplicationScope(fn *ast.FuncDecl) *Scope {
 		if i < len(ft.Params) {
 			ptype = ft.Params[i]
 		}
-		symType := ptype
-		if ref, ok := ptype.(*RefType); ok && !ref.Mutable && isLegacyOutParamName(param.Name) {
-			cloned := cloneRefType(ref)
-			cloned.Mutable = true
-			symType = cloned
-		}
-		scope.Define(&Symbol{Name: param.Name, Kind: SymbolParam, Type: symType, Node: fn, ParamIndex: i, Mutable: a.paramIsMutable(param)})
+		scope.Define(&Symbol{Name: param.Name, Kind: SymbolParam, Type: ptype, Node: fn, ParamIndex: i, Mutable: a.paramIsMutable(param)})
 	}
 	return scope
 }
