@@ -34,6 +34,8 @@ static void elisacoreInitializeAllTargetsForCrossEmission(void) {
 	LLVMInitializeAllAsmParsers();
 }
 
+unsigned elisacoreRemoveIndexedPrefixFills(LLVMModuleRef);
+
 static char *elisacoreRunOptimizationPipeline(
 	LLVMModuleRef Module,
 	LLVMTargetMachineRef TargetMachine,
@@ -61,6 +63,8 @@ static char *elisacoreRunOptimizationPipeline(
 		if (Err == NULL) elisacoreFoldMaskedSplitMultiplies(Module);
 		if (Err == NULL) elisacoreElideArrayRoundTrips(Module);
 		if (Err == NULL) elisacoreElideScratchPrefixInitializers(Module);
+		// Prove fills dead before unrolling splits countdown scans.
+		if (Err == NULL) elisacoreRemoveIndexedPrefixFills(Module);
 		if (Err == NULL) Err = LLVMRunPasses(Module, PassPipeline + strlen(prefix), TargetMachine, Options);
 	} else {
 		Err = LLVMRunPasses(Module, PassPipeline, TargetMachine, Options);

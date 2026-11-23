@@ -101,13 +101,15 @@ protected:
            (Low->getType() == High->getType() && highest(Low, At).ule(lowest(High, At))) ||
            gapFits(evolution.getMinusSCEV(High, Low), High, At) ||
            guarded(Low, High, At, Depth, false) || successorAtMost(Low, High, At, Depth) ||
-           recurrenceAtMost(Low, High, Depth) || roundedAtMost(Low, High, At, Depth);
+           recurrenceAtMost(Low, High, Depth) || roundedAtMost(Low, High, At, Depth) ||
+           phiAtMost(Low, High, Depth);
   }
 
 private:
   unsigned budget = 0;
   ElisaPathRanges::PathRanges paths{evolution, tree, loops};
   SmallVector<std::pair<PHINode *, const SCEV *>, 8> assumed;
+  SmallVector<std::pair<PHINode *, const SCEV *>, 8> assumedAtMost;
   DenseMap<BasicBlock *, SmallVector<Order, 2>> headerOrders;
   SmallPtrSet<BasicBlock *, 4> ordering;
   DenseMap<std::pair<const SCEV *, BasicBlock *>, ConstantRange> decidedRanges;
@@ -245,6 +247,30 @@ private:
               }));
     });
     if (Header) assumed.pop_back();
+    return Holds;
+  }
+
+  // A phi is at most a High defined outside it when each incoming value
+  // is at most High at the end of its edge; header phis by induction, as
+  // in phiBelow (a scan count leaving a countdown loop).
+  bool phiAtMost(const SCEV *Low, const SCEV *High, unsigned Depth) {
+    auto *Unknown = dyn_cast<SCEVUnknown>(Low);
+    auto *Merge = Unknown ? dyn_cast<PHINode>(Unknown->getValue()) : nullptr;
+    if (!Merge || Depth > 9 || budget == 0) return false;
+    Loop *L = loops.getLoopFor(Merge->getParent());
+    bool Header = L && L->getHeader() == Merge->getParent();
+    if (Header) {
+      if (llvm::is_contained(assumedAtMost, std::make_pair(Merge, High))) return true;
+      if (!evolution.isLoopInvariant(High, L)) return false;
+    }
+    assumedAtMost.push_back({Merge, High});
+    bool Holds = llvm::all_of(llvm::seq(Merge->getNumIncomingValues()), [&](unsigned Index) {
+      Value *Incoming = Merge->getIncomingValue(Index);
+      return evolution.isSCEVable(Incoming->getType()) &&
+             atMost(evolution.getSCEV(Incoming), High, Merge->getIncomingBlock(Index)->getTerminator(),
+                    Depth + 1);
+    });
+    assumedAtMost.pop_back();
     return Holds;
   }
 

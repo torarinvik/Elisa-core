@@ -92,8 +92,37 @@ private:
     return divide(Offset, Target.ElementSize);
   }
 
-  // Store writes element i of iteration i of its loop, before the loop's
-  // counted exit, and the fill runs before the loop.
+  // Blocks of L that store element i (Index) in iteration i.
+  SmallPtrSet<BasicBlock *, 8> storing(Array &Target, Loop &L, const SCEV *Index) {
+    SmallPtrSet<BasicBlock *, 8> Blocks;
+    for (StoreInst *Store : Target.Uses.Stores)
+      if (loops.getLoopFor(Store->getParent()) == &L && indexOf(Store->getPointerOperand(), Target) == Index)
+        Blocks.insert(Store->getParent());
+    return Blocks;
+  }
+
+  // Whether some path through an iteration of L, from its header to a
+  // block Goal accepts, passes none of the Storing blocks.
+  template <typename Accept>
+  static bool unstoredPath(Loop &L, const SmallPtrSetImpl<BasicBlock *> &Storing, Accept Goal) {
+    SmallPtrSet<BasicBlock *, 16> Seen;
+    SmallVector<BasicBlock *, 8> Work{L.getHeader()};
+    while (!Work.empty()) {
+      BasicBlock *Block = Work.pop_back_val();
+      if (Storing.contains(Block) || !Seen.insert(Block).second) continue;
+      if (Goal(Block)) return true;
+      for (BasicBlock *Next : successors(Block))
+        if (Next != L.getHeader() && L.contains(Next)) Work.push_back(Next);
+    }
+    return false;
+  }
+
+  // Stores write element i of iteration i of their loop and the fill runs
+  // before the loop. When every path from the header to the counted exit
+  // stores (one store dominating it, or one on each branch of an if), the
+  // exit after Count back edges leaves [0, Count + 1) written; a header
+  // exit tested before the body leaves [0, Count) when every path to a
+  // latch stores.
   bool fillLoop(Array &Target, StoreInst &Store) {
     auto *Index = dyn_cast_or_null<SCEVAddRecExpr>(indexOf(Store.getPointerOperand(), Target));
     Loop *L = loops.getLoopFor(Store.getParent());
@@ -101,19 +130,25 @@ private:
         !Index->getStepRecurrence(evolution)->isOne() ||
         !tree.dominates(Target.Uses.Fills[0], L->getHeader()))
       return false;
+    SmallPtrSet<BasicBlock *, 8> Storing = storing(Target, *L, Index);
     SmallVector<BasicBlock *, 4> Exiting;
     L->getExitingBlocks(Exiting);
     for (BasicBlock *Block : Exiting) {
       const SCEV *Count = evolution.getExitCount(L, Block);
       auto *Branch = dyn_cast<CondBrInst>(Block->getTerminator());
-      if (isa<SCEVCouldNotCompute>(Count) || !Branch || !tree.dominates(Store.getParent(), Block) ||
-          (Store.getParent() == Block && !Store.comesBefore(Branch)))
-        continue;
+      if (isa<SCEVCouldNotCompute>(Count) || !Branch) continue;
+      const SCEV *Written = nullptr;
+      if (!unstoredPath(*L, Storing, [&](BasicBlock *Visited) { return Visited == Block; }))
+        Written = evolution.getAddExpr(Count, evolution.getOne(Count->getType()));
+      else if (Block == L->getHeader() &&
+               !unstoredPath(*L, Storing, [&](BasicBlock *Visited) { return L->isLoopLatch(Visited); }))
+        Written = Count;
+      if (!Written) continue;
       BasicBlock *Exit = Branch->getSuccessor(L->contains(Branch->getSuccessor(0)) ? 1 : 0);
       Target.From = Block;
       Target.To = Exit;
       Target.Copied = nullptr;
-      Target.Length = evolution.getAddExpr(Count, evolution.getOne(Count->getType()));
+      Target.Length = Written;
       return true;
     }
     return false;
@@ -169,9 +204,56 @@ private:
     return true;
   }
 
+  // Every path to Read leaves the fill loop through its counted exit, or
+  // takes an edge on which the loop wrote nothing because Length == 0
+  // there (a zero-trip guard): no read proved below Length follows such
+  // an edge. Walking back from Read, a path into the loop's body or the
+  // function entry that avoids both fails.
   bool completed(Array &Target, Instruction &Read) {
     if (Target.Copied) return tree.dominates(Target.Copied, &Read);
-    return tree.dominates(BasicBlockEdge(Target.From, Target.To), Read.getParent());
+    if (tree.dominates(BasicBlockEdge(Target.From, Target.To), Read.getParent())) return true;
+    // Length must keep its value from the guard to the read: every value
+    // in it is defined before the fill, which runs once.
+    Loop *L = loops.getLoopFor(Target.From);
+    Instruction *Fill = Target.Uses.Fills[0];
+    if (!L || SCEVExprContains(Target.Length, [&](const SCEV *Term) {
+          auto *Unknown = dyn_cast<SCEVUnknown>(Term);
+          auto *Definition = Unknown ? dyn_cast<Instruction>(Unknown->getValue()) : nullptr;
+          return isa<SCEVAddRecExpr>(Term) || (Definition && !tree.dominates(Definition, Fill));
+        }))
+      return false;
+    SmallPtrSet<BasicBlock *, 32> Seen;
+    SmallVector<BasicBlock *, 16> Work{Read.getParent()};
+    while (!Work.empty()) {
+      BasicBlock *Block = Work.pop_back_val();
+      if (!Seen.insert(Block).second) continue;
+      if (L->contains(Block) || Block->isEntryBlock() || Seen.size() > 4096) return false;
+      for (BasicBlock *Entry : predecessors(Block))
+        if (!(Entry == Target.From && Block == Target.To) && !emptyOn(Target.Length, *Entry, *Block))
+          Work.push_back(Entry);
+    }
+    return true;
+  }
+
+  // From -> To is taken only when Length is zero.
+  bool emptyOn(const SCEV *Length, BasicBlock &From, BasicBlock &To) {
+    auto *Branch = dyn_cast<CondBrInst>(From.getTerminator());
+    if (!Branch || Branch->getSuccessor(0) == Branch->getSuccessor(1)) return false;
+    SmallVector<std::pair<ICmpInst *, bool>, 4> Facts;
+    ElisaDeadTrapExits::decided(Branch->getCondition(), Branch->getSuccessor(0) == &To, Facts);
+    return llvm::any_of(Facts, [&](auto Fact) {
+      auto [Compare, Truth] = Fact;
+      auto Predicate = Truth ? Compare->getPredicate() : Compare->getInversePredicate();
+      Value *Left = Compare->getOperand(0), *Right = Compare->getOperand(1);
+      if (isa<Constant>(Left)) {
+        std::swap(Left, Right);
+        Predicate = ICmpInst::getSwappedPredicate(Predicate);
+      }
+      auto *Bound = dyn_cast<ConstantInt>(Right);
+      if (!Bound || !evolution.isSCEVable(Left->getType()) || evolution.getSCEV(Left) != Length) return false;
+      ConstantRange Region = ConstantRange::makeExactICmpRegion(Predicate, Bound->getValue());
+      return Region.isSingleElement() && Region.getSingleElement()->isZero();
+    });
   }
 
   // Load reads an array whose reads stay in its written prefix and whose
