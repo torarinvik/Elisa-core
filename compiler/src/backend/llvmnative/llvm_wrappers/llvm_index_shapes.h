@@ -175,7 +175,10 @@ inline PHINode *risingCount(LoopInfo &Loops, Value *V, unsigned &Extra) {
   auto *Merge = dyn_cast<PHINode>(V);
   Loop *L = Merge ? Loops.getLoopFor(Merge->getParent()) : nullptr;
   BasicBlock *Latch = L ? L->getLoopLatch() : nullptr;
-  if (!Latch || !L->getLoopPreheader()) return nullptr;
+  // The loop's one outside predecessor, which need not be a dedicated
+  // preheader (a rotated loop's guard also branches past it).
+  BasicBlock *Entry = L ? L->getLoopPredecessor() : nullptr;
+  if (!Latch || !Entry) return nullptr;
   PHINode *Header = Merge->getParent() == L->getHeader() ? Merge : nullptr;
   auto StepOf = [&](Value *Candidate, PHINode *Phi) {
     Value *Base = nullptr;
@@ -194,7 +197,7 @@ inline PHINode *risingCount(LoopInfo &Loops, Value *V, unsigned &Extra) {
         Header = Phi->getParent() == L->getHeader() ? Phi : Header;
       else if (nuwIncrement(In, Base) && isa<PHINode>(Base) && cast<PHINode>(Base)->getParent() == L->getHeader())
         Header = cast<PHINode>(Base);
-  auto *Start = Header ? dyn_cast<ConstantInt>(Header->getIncomingValueForBlock(L->getLoopPreheader())) : nullptr;
+  auto *Start = Header ? dyn_cast<ConstantInt>(Header->getIncomingValueForBlock(Entry)) : nullptr;
   if (!Start || !Start->isZero() || !Joins(Header->getIncomingValueForBlock(Latch), Header) ||
       (Merge != Header && !Joins(Merge, Header)))
     return nullptr;

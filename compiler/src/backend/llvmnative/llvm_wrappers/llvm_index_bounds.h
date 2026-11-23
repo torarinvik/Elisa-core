@@ -80,7 +80,8 @@ protected:
     if (const SCEV *Low = nullptr, *High = ElisaIndexShapes::midpoint(evolution, Index, Low);
         High && below(Low, High, At, Depth + 1) && atMost(High, Length, At, Depth + 1))
       return true;
-    if (auto *Recurrence = dyn_cast<SCEVAddRecExpr>(Index)) return recurrenceBelow(*Recurrence, Length, Depth);
+    if (auto *Recurrence = dyn_cast<SCEVAddRecExpr>(Index))
+      return recurrenceBelow(*Recurrence, Length, Depth) || exitBoundAt(Index, Length, At, Depth);
     if (auto *Unknown = dyn_cast<SCEVUnknown>(Index)) {
       if (auto *Merge = dyn_cast<PHINode>(Unknown->getValue())) return phiBelow(*Merge, Length, Depth);
       if (auto *Choice = dyn_cast<SelectInst>(Unknown->getValue()))
@@ -148,6 +149,13 @@ private:
     --budget;
     if (auto *Minimum = dyn_cast<SCEVUMinExpr>(Low))
       return llvm::any_of(Minimum->operands(), [&](const SCEV *Part) { return atMost(Part, High, At, Depth + 1); });
+    // Y + 1 is at most a bound Y is below (one past an accessed element).
+    if (auto *Sum = dyn_cast<SCEVAddExpr>(Low); Sum && Sum->getNumOperands() >= 2)
+      if (auto *One = dyn_cast<SCEVConstant>(Sum->getOperand(0)); One && One->getAPInt().isOne() &&
+                                                                  below(evolution.getMinusSCEV(Low, One), High, At, Depth + 1))
+        return true;
+    if (auto *Maximum = dyn_cast<SCEVUMaxExpr>(Low))
+      return llvm::all_of(Maximum->operands(), [&](const SCEV *Part) { return atMost(Part, High, At, Depth + 1); });
     if (SelectInst *Choice = ElisaIndexShapes::choice(Low)) {
       // A minimum is at most either value; any other choice needs both.
       bool Minimum = ElisaIndexShapes::chooseMinimum(*Choice);
@@ -176,6 +184,25 @@ private:
             })) || (Merge && phiBelow(*Merge, Length, Depth + 1));
   }
 
+  // The back edge is taken only when Recurrence's value is above another
+  // (`while left > target: left <- left - 1` tests the decremented value).
+  bool positiveOnBackEdge(const SCEVAddRecExpr &Recurrence, BasicBlock &Latch) {
+    BasicBlock *Header = Recurrence.getLoop()->getHeader();
+    return llvm::any_of(ElisaDeadTrapExits::edgeFacts(&Latch, Header), [&](auto Fact) {
+      auto [Compare, Truth] = Fact;
+      auto Predicate = Truth ? Compare->getPredicate() : Compare->getInversePredicate();
+      Value *Left = Compare->getOperand(0), *Right = Compare->getOperand(1);
+      if (!evolution.isSCEVable(Left->getType())) return false;
+      if (evolution.getSCEV(Right) == &Recurrence) {
+        std::swap(Left, Right);
+        Predicate = ICmpInst::getSwappedPredicate(Predicate);
+      }
+      if (evolution.getSCEV(Left) != &Recurrence) return false;
+      auto *Zero = dyn_cast<ConstantInt>(Right);
+      return Predicate == ICmpInst::ICMP_UGT || (Predicate == ICmpInst::ICMP_NE && Zero && Zero->isZero());
+    });
+  }
+
   // Whether every value of Recurrence's loop is at most its largest, Top,
   // and Top satisfies Within at the loop's entry.
   template <typename Predicate>
@@ -187,7 +214,9 @@ private:
     Instruction *Entry = &*Recurrence.getLoop()->getHeader()->getFirstInsertionPt();
     // A countdown whose back edge runs only while it is nonzero never wraps.
     if (BasicBlock *Latch = Recurrence.getLoop()->getLoopLatch();
-        Step && Step->isAllOnesValue() && Latch && !lowest(&Recurrence, Latch->getTerminator()).isZero())
+        Step && Step->isAllOnesValue() && Latch &&
+        (!lowest(&Recurrence, Latch->getTerminator()).isZero() ||
+         positiveOnBackEdge(Recurrence, *Latch)))
       return Within(Start, Entry);
     if (isa<SCEVCouldNotCompute>(Count) || !Step || Count->getType() != Start->getType())
       return false;
@@ -312,14 +341,12 @@ private:
     return Holds || (Header && exitBoundBelow(Merge, *L, Length, Depth));
   }
 
-  // A header phi below the loop-invariant X one of its loop's exits tests it
-  // (or its increment) against, with X at most Length, is below Length: the
-  // loop over [left[k], right[k]) of a permutation of n values.
-  bool exitBoundBelow(PHINode &Merge, Loop &L, const SCEV *Length, unsigned Depth) {
-    if (Depth > 6 || budget == 0) return false;
+  // The loop-invariant values X one of L's exits tests Merge, or its
+  // increment, against (`i + 1 == right[k]`, `right == max(right, high[k])`).
+  SmallVector<const SCEV *, 4> exitBounds(PHINode &Merge, Loop &L, const SCEV *Length) {
+    SmallVector<const SCEV *, 4> Bounds;
     SmallVector<BasicBlock *, 4> Exiting;
     L.getExitingBlocks(Exiting);
-    Instruction *Entry = &*L.getHeader()->getFirstInsertionPt();
     for (BasicBlock *Block : Exiting) {
       auto *Branch = dyn_cast<CondBrInst>(Block->getTerminator());
       auto *Compare = Branch ? dyn_cast<ICmpInst>(Branch->getCondition()) : nullptr;
@@ -330,12 +357,36 @@ private:
         if (Tested != &Merge && !(Step && Step->getOpcode() == Instruction::Add && Step->getOperand(0) == &Merge))
           continue;
         const SCEV *Bound = evolution.getSCEV(Other);
-        if (Bound == Length || Bound->getType() != Length->getType() || !evolution.isLoopInvariant(Bound, &L))
-          continue;
-        if (atMost(Bound, Length, Entry, Depth + 1) && phiBelow(Merge, Bound, Depth + 1)) return true;
+        if (Bound != Length && Bound->getType() == Length->getType() && evolution.isLoopInvariant(Bound, &L) &&
+            !llvm::is_contained(Bounds, Bound))
+          Bounds.push_back(Bound);
       }
     }
-    return false;
+    return Bounds;
+  }
+
+  // A header phi below the loop-invariant X one of its loop's exits tests
+  // it against, with X at most Length, is below Length: the loop over
+  // [left[k], right[k]) of a permutation of n values.
+  bool exitBoundBelow(PHINode &Merge, Loop &L, const SCEV *Length, unsigned Depth) {
+    if (Depth > 6 || budget == 0) return false;
+    Instruction *Entry = &*L.getHeader()->getFirstInsertionPt();
+    return llvm::any_of(exitBounds(Merge, L, Length), [&](const SCEV *Bound) {
+      return atMost(Bound, Length, Entry, Depth + 1) && phiBelow(Merge, Bound, Depth + 1);
+    });
+  }
+
+  // Index, a recurrence of a loop that leaves when it reaches X, is below
+  // Length where At reads it when it is below X there and X is at most
+  // Length (a pointer stepping up to a query's bound, tested at the header).
+  bool exitBoundAt(const SCEV *Index, const SCEV *Length, Instruction *At, unsigned Depth) {
+    auto *Recurrence = dyn_cast<SCEVAddRecExpr>(Index);
+    PHINode *Merge = Recurrence ? ElisaIndexShapes::headerPhi(evolution, *Recurrence) : nullptr;
+    if (!Merge || Depth > 6 || budget == 0) return false;
+    Loop &L = *const_cast<Loop *>(Recurrence->getLoop());
+    return llvm::any_of(exitBounds(*Merge, L, Length), [&](const SCEV *Bound) {
+      return atMost(Bound, Length, At, Depth + 1) && below(Index, Bound, At, Depth + 1);
+    });
   }
 
   // A phi is at most a High defined outside it when each incoming value

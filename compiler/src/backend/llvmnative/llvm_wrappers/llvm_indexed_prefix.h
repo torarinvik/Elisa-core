@@ -40,6 +40,10 @@ struct Array {
   // that complete one (wholeElementStores), and Uses.Residues each field
   // access's byte offset inside its element.
   bool Composite = false;
+  // An array whose fill an earlier run removed (ElisaArrayRanges::
+  // WrittenPrefix): its reads were proved to stay in its written prefix, so
+  // it serves as a source of loaded values (loadBelow) but has no fill.
+  bool Proved = false;
 };
 
 class Prover : public ElisaIndexBounds::Prover {
@@ -132,6 +136,14 @@ private:
       const SCEV *Count = evolution.getExitCount(L, Block);
       auto *Branch = dyn_cast<CondBrInst>(Block->getTerminator());
       if (isa<SCEVCouldNotCompute>(Count) || !Branch) continue;
+      // An exit into a trap (a capacity check) reaches no read. Only a fill
+      // that calls memset is worth proving past one: a short fill is a few
+      // stores whose zeros later folding still uses (overflow checks over
+      // the array's values come back without them).
+      BasicBlock *Exit = Branch->getSuccessor(L->contains(Branch->getSuccessor(0)) ? 1 : 0);
+      if (isa<UnreachableInst>(Exit->getTerminator()) &&
+          Target.Buffer->getAllocationSize(Target.Buffer->getDataLayout()).value_or(TypeSize::getFixed(0)) > 256)
+        continue;
       const SCEV *Written = nullptr;
       if (!unstoredPath(*L, Storing, [&](BasicBlock *Visited) { return Visited == Block; }))
         Written = evolution.getAddExpr(Count, evolution.getOne(Count->getType()));
@@ -139,7 +151,6 @@ private:
                !unstoredPath(*L, Storing, [&](BasicBlock *Visited) { return L->isLoopLatch(Visited); }))
         Written = Count;
       if (!Written) continue;
-      BasicBlock *Exit = Branch->getSuccessor(L->contains(Branch->getSuccessor(0)) ? 1 : 0);
       Target.From = Block;
       Target.To = Exit;
       Target.Copied = nullptr;
@@ -354,7 +365,7 @@ private:
     // values a view's callees store.
     bool Bounded = Source->Uses.Writes.empty() && Source->Uses.VectorStores.empty() &&
                    Source->Uses.Views.empty() &&
-                   prefixRead(*Source) && !Source->KeptElements &&
+                   (Source->Proved || prefixRead(*Source)) && !Source->KeptElements &&
                    llvm::all_of(Source->Uses.Stores, StoredBelow);
     visiting.erase(Source->Buffer);
     return Bounded;
@@ -465,10 +476,14 @@ static unsigned removeIndexedPrefixFills(Function &F, FunctionAnalysisManager &A
     // Vector stores only ever add written elements to a proof (ElisaStackWatermark).
     if (ElisaArrayRanges::collect(Buffer, Type->getElementType(), Candidate.ElementSize, Layout,
                                   Candidate.Uses, 0, true) &&
-        Candidate.Uses.Fills.size() == 1 &&
+        (Candidate.Uses.Fills.size() == 1 ||
+         (Candidate.Uses.Fills.empty() && !Candidate.Composite &&
+          Buffer->getMetadata(ElisaArrayRanges::WrittenPrefix))) &&
         (!Candidate.Uses.Stores.empty() || !Candidate.Uses.VectorStores.empty() ||
-         !Candidate.Uses.Writes.empty()))
+         !Candidate.Uses.Writes.empty())) {
+      Candidate.Proved = Candidate.Uses.Fills.empty();
       Arrays.push_back(std::move(Candidate));
+    }
   }
   if (Arrays.empty()) return 0;
   auto &Evolution = Analyses.getResult<ScalarEvolutionAnalysis>(F);
@@ -483,6 +498,7 @@ static unsigned removeIndexedPrefixFills(Function &F, FunctionAnalysisManager &A
     return Callees.callBound(Call, Position, F, Accept);
   };
   for (Array &Target : Arrays) {
+    if (Target.Proved) continue;
     Prover Proof(Evolution, Tree, Loops, Arrays, Views);
     Array *Proved = Proof.prefixRead(Target) ? &Target : nullptr;
     std::optional<Array> Records;

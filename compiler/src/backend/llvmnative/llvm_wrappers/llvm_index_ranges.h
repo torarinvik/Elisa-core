@@ -127,6 +127,15 @@ protected:
         APInt High = Above.getUnsignedMax();
         if (Predicate == ICmpInst::ICMP_ULT && High.isZero()) Holds = ConstantRange::getEmpty(Width);
         else Holds = ConstantRange::getNonEmpty(APInt::getZero(Width), Predicate == ICmpInst::ICMP_ULT ? High : High + 1);
+      } else if ((Predicate == ICmpInst::ICMP_UGT || Predicate == ICmpInst::ICMP_UGE) && Depth < 3 &&
+                 !isa<Constant>(Left)) {
+        // Above another value: at least its smallest (`left > target`
+        // makes left nonzero).
+        ConstantRange Below = within(evolution.getSCEV(Right), Block->getTerminator(), Depth + 1);
+        if (Below.isEmptySet()) return;
+        APInt Low = Below.getUnsignedMin();
+        if (Predicate == ICmpInst::ICMP_UGT && Low.isMaxValue()) Holds = ConstantRange::getEmpty(Width);
+        else Holds = ConstantRange::getNonEmpty(Predicate == ICmpInst::ICMP_UGT ? Low + 1 : Low, APInt::getZero(Width));
       }
       Range = Range.intersectWith(Holds.sub(ConstantRange(Offset->getAPInt())), ConstantRange::Unsigned);
     };

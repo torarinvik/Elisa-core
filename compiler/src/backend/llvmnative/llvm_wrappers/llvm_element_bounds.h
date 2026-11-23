@@ -38,6 +38,12 @@ public:
                    Uses.VectorStores.empty() && Uses.VectorLoads.empty() && Uses.Fills.size() == 1 &&
                    !Uses.Stores.empty() &&
                    llvm::all_of(Uses.Stores, [&](StoreInst *Store) {
+                     // A value moved within the array (an insertion sort's
+                     // shift) was already one of its values.
+                     if (auto *Moved = dyn_cast<LoadInst>(Store->getValueOperand());
+                         Moved && getUnderlyingObject(Moved->getPointerOperand()) == Array &&
+                         tree.dominates(Uses.Fills[0], Moved))
+                       return true;
                      return fixedEverywhere(High, *Store) &&
                             (StoredAtMost(evolution.getSCEV(Store->getValueOperand()), High, Store) ||
                              checked(*Store, *Array, High));
@@ -94,6 +100,17 @@ private:
   bool checked(StoreInst &Store, AllocaInst &Array, const SCEV *High) {
     Path Start;
     Start.Reads.push_back({evolution.getSCEV(Store.getPointerOperand()), Store.getValueOperand()});
+    // Tests before the store count as well: the edges of its chain of
+    // single predecessors (`return -1 if r > n` and then the store).
+    BasicBlock *Block = Store.getParent();
+    for (unsigned Step = 0; Step < 8; ++Step) {
+      BasicBlock *Before = Block->getSinglePredecessor();
+      auto *Branch = Before ? dyn_cast<CondBrInst>(Before->getTerminator()) : nullptr;
+      if (!Before) break;
+      if (Branch) ElisaDeadTrapExits::decided(Branch->getCondition(), Branch->getSuccessor(0) == Block, Start.Facts);
+      Block = Before;
+    }
+    if (decides(Start, High)) return true;
     unsigned Budget = 2000;
     return walk(Start, *Store.getParent(), std::next(Store.getIterator()), Store, Array, High, Budget);
   }
@@ -169,13 +186,25 @@ private:
         State.Reads.erase(State.Reads.begin() + Index);
   }
 
-  // The facts on the path hold the stored value at most High.
+  // The facts on the path hold the stored value at most High: a chain of
+  // unsigned bounds up to High, or of signed ones with the value
+  // nonnegative (`0 <=s l <s r <=s n` puts l in [0, n]).
   bool decides(Path &State, const SCEV *High) {
     Value *Stored = State.Reads.front().second;
-    for (auto [Left, Predicate, Right] : relations(State)) {
-      if (Left != Stored || evolution.getSCEV(Right) != High) continue;
-      if (Predicate == ICmpInst::ICMP_ULE || Predicate == ICmpInst::ICMP_ULT) return true;
-      if ((Predicate == ICmpInst::ICMP_SLE || Predicate == ICmpInst::ICMP_SLT) && nonnegative(State, Stored, 0))
+    auto Facts = relations(State);
+    return bounded(Facts, Stored, High, false, 0) ||
+           (bounded(Facts, Stored, High, true, 0) && nonnegative(State, Stored, 0));
+  }
+
+  using Relations = SmallVector<std::tuple<Value *, ICmpInst::Predicate, Value *>, 16>;
+
+  bool bounded(Relations &Facts, Value *Term, const SCEV *High, bool Signed, unsigned Depth) {
+    if (Depth > 3) return false;
+    for (auto [Left, Predicate, Right] : Facts) {
+      if (Left != Term || Right == Term) continue;
+      bool Upper = Signed ? (Predicate == ICmpInst::ICMP_SLE || Predicate == ICmpInst::ICMP_SLT)
+                          : (Predicate == ICmpInst::ICMP_ULE || Predicate == ICmpInst::ICMP_ULT);
+      if (Upper && (evolution.getSCEV(Right) == High || bounded(Facts, Right, High, Signed, Depth + 1)))
         return true;
     }
     return false;
@@ -183,8 +212,8 @@ private:
 
   // Every decided comparison as Left Predicate Right, both ways round,
   // with each read replaced by the value that stands for its address.
-  SmallVector<std::tuple<Value *, ICmpInst::Predicate, Value *>, 16> relations(Path &State) {
-    SmallVector<std::tuple<Value *, ICmpInst::Predicate, Value *>, 16> Out;
+  Relations relations(Path &State) {
+    Relations Out;
     for (auto [Compare, Truth] : State.Facts) {
       auto Predicate = Truth ? Compare->getPredicate() : Compare->getInversePredicate();
       Value *Left = standing(State, Compare->getOperand(0)), *Right = standing(State, Compare->getOperand(1));
