@@ -31,6 +31,9 @@ struct Array {
   BasicBlock *From = nullptr, *To = nullptr;
   MemIntrinsic *Copied = nullptr;
   const SCEV *Length = nullptr;
+  // Length extended by stores that write the next element after the fill,
+  // one after another (a ring's sentinel), before every read.
+  const SCEV *Covered = nullptr;
   // Leading elements the fill must still zero (a stack's folded seeds).
   uint64_t KeptElements = 0;
   // A struct or record element: Uses.Stores holds only the field stores
@@ -56,9 +59,9 @@ public:
     // proof, which checks each step against the latest fill.
     if (loops.getLoopFor(Target.Uses.Fills[0]->getParent())) return stackRead(Target, true);
     for (StoreInst *Store : Target.Uses.Stores)
-      if (fillLoop(Target, *Store) && readsInside(Target)) return true;
+      if (fillLoop(Target, *Store) && readsInside(cover(Target))) return true;
     for (MemIntrinsic *Copy : Target.Uses.Writes)
-      if (fillCopy(Target, *Copy) && readsInside(Target)) return true;
+      if (fillCopy(Target, *Copy) && readsInside(cover(Target))) return true;
     return stackRead(Target);
   }
 
@@ -150,10 +153,34 @@ private:
     return true;
   }
 
+  // Extends the written prefix by stores to its next element that run after
+  // the fill and before every read.
+  Array &cover(Array &Target) {
+    Target.Covered = Target.Length;
+    SmallVector<Instruction *, 16> Reads(Target.Uses.Loads.begin(), Target.Uses.Loads.end());
+    Reads.append(Target.Uses.VectorLoads.begin(), Target.Uses.VectorLoads.end());
+    Reads.append(Target.Uses.Copies.begin(), Target.Uses.Copies.end());
+    for (InsertValueInst *View : Target.Uses.Views)
+      for (User *Call : View->users()) Reads.push_back(cast<Instruction>(Call));
+    auto After = [&](StoreInst &Store) {
+      return Target.Copied ? tree.dominates(Target.Copied, &Store)
+                           : tree.dominates(BasicBlockEdge(Target.From, Target.To), Store.getParent());
+    };
+    for (unsigned Extra = 0; Extra < 4; ++Extra) {
+      auto Next = llvm::find_if(Target.Uses.Stores, [&](StoreInst *Store) {
+        return indexOf(*Store, Target) == Target.Covered && After(*Store) &&
+               llvm::all_of(Reads, [&](Instruction *Read) { return tree.dominates(Store, Read); });
+      });
+      if (Next == Target.Uses.Stores.end()) break;
+      Target.Covered = evolution.getAddExpr(Target.Covered, evolution.getOne(Target.Covered->getType()));
+    }
+    return Target;
+  }
+
   bool readsInside(Array &Target) {
     for (LoadInst *Load : Target.Uses.Loads) {
       const SCEV *Index = indexOf(*Load, Target);
-      if (!completed(Target, *Load) || !Index || !proveBelow(Index, Target.Length, Load))
+      if (!completed(Target, *Load) || !Index || !proveBelow(Index, Target.Covered, Load))
         return false;
     }
     // Every lane of a vector load must lie in the prefix.
@@ -162,25 +189,25 @@ private:
       unsigned Lanes = cast<FixedVectorType>(Load->getType())->getNumElements();
       if (!completed(Target, *Load) || !Index ||
           !proveBelow(evolution.getAddExpr(Index, evolution.getConstant(Index->getType(), Lanes - 1)),
-                      Target.Length, Load))
+                      Target.Covered, Load))
         return false;
     }
     // A callee reaches the elements below a view's length and no others.
     for (InsertValueInst *View : Target.Uses.Views) {
       Value *Length = View->getInsertedValueOperand();
       if (!views || !evolution.isSCEVable(Length->getType()) ||
-          evolution.getTypeSizeInBits(Length->getType()) != evolution.getTypeSizeInBits(Target.Length->getType()) ||
+          evolution.getTypeSizeInBits(Length->getType()) != evolution.getTypeSizeInBits(Target.Covered->getType()) ||
           !views(*View, Target.ElementSize))
         return false;
       for (User *Call : View->users())
         if (!completed(Target, *cast<Instruction>(Call)) ||
-            !proveAtMost(evolution.getSCEV(Length), Target.Length, cast<Instruction>(Call)))
+            !proveAtMost(evolution.getSCEV(Length), Target.Covered, cast<Instruction>(Call)))
           return false;
     }
     for (MemTransferInst *Copy : Target.Uses.Copies) {
       const SCEV *Bytes = evolution.getSCEV(Copy->getLength());
       const SCEV *Limit = evolution.getMulExpr(
-          Target.Length, evolution.getConstant(Target.Length->getType(), Target.ElementSize));
+          Target.Covered, evolution.getConstant(Target.Covered->getType(), Target.ElementSize));
       if (!completed(Target, *Copy) || Copy->getRawSource() != Target.Buffer ||
           Bytes->getType() != Limit->getType() ||
           !evolution.isKnownPredicateAt(ICmpInst::ICMP_ULE, Bytes, Limit, Copy))
