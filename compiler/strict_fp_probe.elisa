@@ -7,6 +7,20 @@ def blend(low: f64, high: f64, r: f64) -> f64:
     can Abort.Panic:
         return low + (high - low) * r
 
+# The same product bound to a local first: contraction is expression-local
+# (clang's -ffp-contract=on), so this add must keep its own rounding.
+def blend_split(low: f64, high: f64, r: f64) -> f64:
+    can Abort.Panic:
+        product: f64 = (high - low) * r
+        return low + product
+
+# A compound assignment is one expression: its product may still fuse.
+def blend_compound(low: f64, high: f64, r: f64) -> f64:
+    can Abort.Panic:
+        total: mutable f64 = low
+        total += (high - low) * r
+        return total
+
 def main() -> i64:
     can Abort.Panic:
-        return blend(-0.35, 0.35, 0.125).i64()
+        return (blend(-0.35, 0.35, 0.125) + blend_split(-0.35, 0.35, 0.125) + blend_compound(-0.35, 0.35, 0.125)).i64()

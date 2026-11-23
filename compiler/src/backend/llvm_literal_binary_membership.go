@@ -168,22 +168,22 @@ func (s *functionState) emitBinaryExpr(expr *ast.BinaryExpr) (llvmIRValueRef, se
 	switch expr.Op {
 	case lexer.TOKEN_PLUS:
 		if isFloatType(operandType) {
-			return s.fpContract(llvmBuildFAdd(s.builder, left, right, cStringFree("addtmp"))), resultType, nil
+			return s.fpAddSub(llvmBuildFAdd(s.builder, left, right, cStringFree("addtmp")), [2]llvmIRValueRef{left, right}, [2]ast.Expr{expr.Left, expr.Right}), resultType, nil
 		}
 		return llvmBuildAdd(s.builder, left, right, cStringFree("addtmp")), resultType, nil
 	case lexer.TOKEN_MINUS:
 		if isFloatType(operandType) {
-			return s.fpContract(llvmBuildFSub(s.builder, left, right, cStringFree("subtmp"))), resultType, nil
+			return s.fpAddSub(llvmBuildFSub(s.builder, left, right, cStringFree("subtmp")), [2]llvmIRValueRef{left, right}, [2]ast.Expr{expr.Left, expr.Right}), resultType, nil
 		}
 		return llvmBuildSub(s.builder, left, right, cStringFree("subtmp")), resultType, nil
 	case lexer.TOKEN_STAR:
 		if isFloatType(operandType) {
-			return s.fpContract(llvmBuildFMul(s.builder, left, right, cStringFree("multmp"))), resultType, nil
+			return s.fpMultiply(llvmBuildFMul(s.builder, left, right, cStringFree("multmp"))), resultType, nil
 		}
 		return llvmBuildMul(s.builder, left, right, cStringFree("multmp")), resultType, nil
 	case lexer.TOKEN_SLASH:
 		if isFloatType(operandType) {
-			return s.fpContractReciprocal(llvmBuildFDiv(s.builder, left, right, cStringFree("divtmp"))), resultType, nil
+			return s.fpDivide(llvmBuildFDiv(s.builder, left, right, cStringFree("divtmp"))), resultType, nil
 		}
 		if isSignedIntegerType(operandType) {
 			return llvmBuildSDiv(s.builder, left, right, cStringFree("divtmp")), resultType, nil

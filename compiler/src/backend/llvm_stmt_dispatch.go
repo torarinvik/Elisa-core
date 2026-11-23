@@ -316,6 +316,9 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 		if err != nil {
 			return err
 		}
+		if isFloatType(targetType) {
+			s.fpAugmented(n.Op, result, current, value, n.Value)
+		}
 		llvmBuildStore(s.builder, result, ptr)
 		s.invalidatePackedCommonFieldValuesExpr(n.Target)
 		s.invalidatePackedReadCaches()

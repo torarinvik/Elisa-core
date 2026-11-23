@@ -38,23 +38,28 @@ static int elisacoreValueIsTriviallyValidPtr(LLVMValueRef v) {
 	return 0;
 }
 
-// Allow FP contraction (a*b+c -> fma) on a floating-point instruction, matching clang's default
-// -ffp-contract=on. Only the AllowContract flag is set; no reassociation / no-nan / no-inf, so this
-// does not change value semantics beyond the single-rounding fused multiply-add the C ABI permits.
+// Allow FP contraction (a*b+c -> fma) on a floating-point instruction. Only the AllowContract flag
+// is set; no reassociation / no-nan / no-inf. The default tier stamps it on a multiply and the
+// add/sub that consumes it directly in the same expression only (see fpAddSub), which is clang's
+// -ffp-contract=on: a product that went through a local is never fused into a later statement.
 static void elisacoreSetFPContract(LLVMValueRef v) {
 	if (v != NULL && LLVMCanValueUseFastMathFlags(v)) {
 		LLVMSetFastMathFlags(v, LLVMFastMathAllowContract);
 	}
 }
 
-// Allow contraction AND reciprocal (a/b -> a * (1/b)) on a floating-point instruction, matching
-// clang's -ffp-contract=fast -freciprocal-math. For a loop-invariant divisor this lets LICM hoist
-// the single reciprocal out of the loop, turning a per-iteration fdiv (slow, poorly pipelined) into
-// a multiply. This relaxes division rounding by up to ~1 ulp, the same relaxed-FP tier as contract.
-static void elisacoreSetFPContractReciprocal(LLVMValueRef v) {
+// Allow reciprocal formation (a/b -> a * (1/b)) on a division, without contraction. This is the
+// default tier for fdiv: LICM can still hoist a loop-invariant divisor's reciprocal, but the
+// resulting multiply cannot fuse into an add from another statement.
+static void elisacoreSetFPReciprocal(LLVMValueRef v) {
 	if (v != NULL && LLVMCanValueUseFastMathFlags(v)) {
-		LLVMSetFastMathFlags(v, LLVMFastMathAllowContract | LLVMFastMathAllowReciprocal);
+		LLVMSetFastMathFlags(v, LLVMFastMathAllowReciprocal);
 	}
+}
+
+// Whether v is an fmul instruction (not a folded constant).
+static int elisacoreIsFMul(LLVMValueRef v) {
+	return v != NULL && LLVMIsAInstruction(v) != NULL && LLVMGetInstructionOpcode(v) == LLVMFMul;
 }
 
 // Allow reassociation + contraction on an FP instruction, WITHOUT nnan/ninf/nsz. This is the
@@ -430,8 +435,12 @@ func llvmSetFPContract(value llvmIRValueRef) {
 	C.elisacoreSetFPContract(value)
 }
 
-func llvmSetFPContractReciprocal(value llvmIRValueRef) {
-	C.elisacoreSetFPContractReciprocal(value)
+func llvmSetFPReciprocal(value llvmIRValueRef) {
+	C.elisacoreSetFPReciprocal(value)
+}
+
+func llvmIsFMul(value llvmIRValueRef) bool {
+	return C.elisacoreIsFMul(value) != 0
 }
 
 func llvmSetFPFast(value llvmIRValueRef) {

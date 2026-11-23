@@ -30,8 +30,8 @@ def run(value: f64) -> f64:
 	if count := strings.Count(output, "fadd fast double"); count != 1 {
 		t.Fatalf("expected exactly the opted specialization to use full fast-math, got %d:\n%s", count, output)
 	}
-	if !strings.Contains(output, "fadd contract double") {
-		t.Fatalf("ordinary floating-point code lost its default policy:\n%s", output)
+	if !strings.Contains(output, "fadd double") {
+		t.Fatalf("ordinary floating-point code lost its default (unflagged) policy:\n%s", output)
 	}
 }
 
