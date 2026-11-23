@@ -196,6 +196,9 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 		if !ok {
 			return nil, fmt.Errorf("unknown type %q", n.Name)
 		}
+		if arrayExpr, ok := genericTypeAsArrayTypeExpr(n, base); ok {
+			return s.resolveTypeExpr(arrayExpr)
+		}
 		if storeType, ok := base.(*semantic.PackedEnumStoreType); ok {
 			args := make([]semantic.Type, 0, len(n.Args))
 			for _, arg := range n.Args {
@@ -348,4 +351,27 @@ func permissionFamiliesFromTypeExprRefs(refs []ast.PermissionRef) []string {
 		out = append(out, ref.Name)
 	}
 	return out
+}
+
+// genericTypeAsArrayTypeExpr reads `T[NAME]` over a non-generic `T` as an array of constant size
+// NAME. The parser spells a bracket as an array only when NAME looks constant-styled (`MAX_N`), so
+// `i64[LIMIT]` arrives as a generic application; the analyzer already resolves it as an array
+// (genericTypeAsArrayType) and the backend must agree, or the declaration fails to lower.
+func genericTypeAsArrayTypeExpr(n *ast.GenericType, base semantic.Type) (*ast.ArrayType, bool) {
+	if len(n.Args) != 1 {
+		return nil, false
+	}
+	switch base.(type) {
+	case *semantic.StructType, *semantic.OpaqueType, *semantic.PackedEnumStoreType:
+		return nil, false
+	}
+	size, ok := n.Args[0].(*ast.NamedType)
+	if !ok {
+		return nil, false
+	}
+	return &ast.ArrayType{
+		Position: n.Position,
+		Elem:     &ast.NamedType{Position: n.Position, Name: n.Name},
+		Size:     &ast.Ident{Position: size.Position, Name: size.Name},
+	}, true
 }
