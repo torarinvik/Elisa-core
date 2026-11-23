@@ -76,6 +76,11 @@ protected:
           (below(Sum->getOperand(1), Length, At, Depth + 1) ||
            atMost(Sum->getOperand(1), Length, At, Depth + 1)))
         return true;
+    // Index + 1, nonzero where At runs, is at most Length (`items[position - 1]`
+    // under `position > 0`, the subtraction folded into a recurrence's start).
+    if (const SCEV *Next = evolution.getAddExpr(Index, evolution.getOne(Index->getType()));
+        !lowest(Next, At).isZero() && atMost(Next, Length, At, Depth + 1))
+      return true;
     // a /u c with c > 1 is below a whenever a is nonzero.
     if (auto *Quotient = dyn_cast<SCEVUDivExpr>(Index))
       if (auto *Divisor = dyn_cast<SCEVConstant>(Quotient->getRHS());
@@ -146,9 +151,13 @@ private:
     const SCEV *Count = evolution.getSymbolicMaxBackedgeTakenCount(Recurrence.getLoop());
     const SCEV *Start = Recurrence.getStart();
     const SCEV *Step = Recurrence.isAffine() ? Recurrence.getStepRecurrence(evolution) : nullptr;
+    Instruction *Entry = &*Recurrence.getLoop()->getHeader()->getFirstInsertionPt();
+    // A countdown whose back edge runs only while it is nonzero never wraps.
+    if (BasicBlock *Latch = Recurrence.getLoop()->getLoopLatch();
+        Step && Step->isAllOnesValue() && Latch && !lowest(&Recurrence, Latch->getTerminator()).isZero())
+      return Within(Start, Entry);
     if (isa<SCEVCouldNotCompute>(Count) || !Step || Count->getType() != Start->getType())
       return false;
-    Instruction *Entry = &*Recurrence.getLoop()->getHeader()->getFirstInsertionPt();
     Count = settle(Count, Entry, Depth);
     if (Step->isOne()) {
       // Values Start + k for k <= Count, none wrapping past Start + Count;

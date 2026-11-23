@@ -38,18 +38,49 @@ public:
 
   // Every access through View's data pointer stays below View's length.
   bool bounded(Value &View, Function &F) {
+    Value *Length = lengthOf(View, F);
+    return Length && bounded(View, *Length, F);
+  }
+
+  // A value, in Call's function, below which the callee accesses the view
+  // passed at Position and that Accept takes: that view's length, else an
+  // integer argument the callee's indices stay below (a count passed beside
+  // a whole buffer, `sort(items[0:capacity], count)`). Null when none is.
+  Value *callBound(CallBase &Call, unsigned Position, Function &Caller, function_ref<bool(Value *)> Accept) {
+    Function *Callee = Call.getCalledFunction();
+    if (!Callee || Callee->isDeclaration() || Callee->getFunctionType() != Call.getFunctionType()) return nullptr;
+    Function &Copy = cleaned(*Callee);
+    if (Value *Length = lengthOf(*Call.getArgOperand(Position), Caller);
+        Length && Accept(Length) && argumentBounded(Copy, Position, Position))
+      return Length;
+    for (unsigned Count = 0; Count < Call.arg_size(); ++Count)
+      if (Value *Bound = Call.getArgOperand(Count);
+          Count != Position && Bound->getType()->isIntegerTy(64) && Accept(Bound) &&
+          argumentBounded(Copy, Position, Count))
+        return Bound;
+    return nullptr;
+  }
+
+private:
+  FunctionAnalysisManager &analyses;
+  uint64_t elementSize;
+  // Claims being checked: a view parameter bounded by a parameter (itself
+  // for its own length).
+  SmallDenseSet<std::pair<Argument *, Argument *>, 8> checking;
+  DenseMap<Function *, Function *> copies;
+  unsigned budget = 64;
+
+  // Every access through View's data pointer stays below Length.
+  bool bounded(Value &View, Value &Length, Function &F) {
     for (User *Use : View.users()) {
       if (auto *Extract = dyn_cast<ExtractValueInst>(Use)) {
         if (Extract->getNumIndices() != 1) return false;
         if (Extract->getIndices()[0] == 1) continue;
-        Value *Length = lengthOf(View, F);
-        if (!Length || !dataBounded(*Extract, *Length, F)) return false;
+        if (!dataBounded(*Extract, Length, F)) return false;
       } else if (auto *Call = dyn_cast<CallBase>(Use)) {
-        Function *Callee = Call->getCalledFunction();
-        if (!Callee || Callee->isDeclaration() || Callee->getFunctionType() != Call->getFunctionType())
-          return false;
         for (unsigned Position = 0; Position < Call->arg_size(); ++Position)
-          if (Call->getArgOperand(Position) == &View && !argumentBounded(cleaned(*Callee), Position))
+          if (Call->getArgOperand(Position) == &View &&
+              !callBound(*Call, Position, F, [&](Value *Bound) { return atMost(*Bound, Length, *Call, F); }))
             return false;
       } else {
         return false;
@@ -58,12 +89,14 @@ public:
     return true;
   }
 
-private:
-  FunctionAnalysisManager &analyses;
-  uint64_t elementSize;
-  SmallPtrSet<Argument *, 8> checking;
-  DenseMap<Function *, Function *> copies;
-  unsigned budget = 64;
+  bool atMost(Value &Bound, Value &Length, Instruction &At, Function &F) {
+    if (&Bound == &Length) return true;
+    auto &Evolution = analyses.getResult<ScalarEvolutionAnalysis>(F);
+    if (!Evolution.isSCEVable(Bound.getType()) || Bound.getType() != Length.getType()) return false;
+    ElisaIndexBounds::Prover Proof(Evolution, analyses.getResult<DominatorTreeAnalysis>(F),
+                                   analyses.getResult<LoopAnalysis>(F));
+    return Proof.proveAtMost(Evolution.getSCEV(&Bound), Evolution.getSCEV(&Length), &At);
+  }
 
   // A copy of F in SSA form, made once.
   Function &cleaned(Function &F) {
@@ -77,18 +110,38 @@ private:
     Cleanup.addPass(InstCombinePass());
     Cleanup.addPass(SimplifyCFGPass());
     Cleanup.run(*Copy, analyses);
+    // Every extraction of a parameter's field is the same value; one at the
+    // entry lets a bounds check inside a loop and the length share it.
+    for (Argument &Parameter : Copy->args()) {
+      SmallDenseMap<unsigned, ExtractValueInst *, 2> Fields;
+      for (User *Use : make_early_inc_range(Parameter.users()))
+        if (auto *Field = dyn_cast<ExtractValueInst>(Use); Field && Field->getNumIndices() == 1) {
+          auto [Kept, First] = Fields.try_emplace(Field->getIndices()[0], Field);
+          if (First) {
+            Field->moveBefore(Copy->getEntryBlock().getFirstInsertionPt());
+          } else {
+            Field->replaceAllUsesWith(Kept->second);
+            Field->eraseFromParent();
+          }
+        }
+    }
+    analyses.invalidate(*Copy, PreservedAnalyses::none());
     copies[&F] = Copy;
     return *Copy;
   }
 
-  bool argumentBounded(Function &Callee, unsigned Index) {
-    Argument *Parameter = Callee.getArg(Index);
-    if (checking.contains(Parameter)) return true;
+  // Callee's view parameter Index stays below parameter Limit (its own
+  // length when Limit is Index); a claim being checked is assumed.
+  bool argumentBounded(Function &Callee, unsigned Index, unsigned Limit) {
+    Argument *Parameter = Callee.getArg(Index), *Bound = Callee.getArg(Limit);
+    if (checking.contains({Parameter, Bound})) return true;
     if (budget == 0) return false;
     --budget;
-    checking.insert(Parameter);
-    bool Holds = bounded(*Parameter, Callee);
-    checking.erase(Parameter);
+    Value *Length = Limit == Index ? lengthOf(*Parameter, Callee) : Bound;
+    if (!Length) return false;
+    checking.insert({Parameter, Bound});
+    bool Holds = bounded(*Parameter, *Length, Callee);
+    checking.erase({Parameter, Bound});
     return Holds;
   }
 
@@ -96,14 +149,30 @@ private:
   // extraction of it (made at the function's entry for a parameter).
   static Value *lengthOf(Value &View, Function &F) {
     if (auto *Insert = dyn_cast<InsertValueInst>(&View))
-      return Insert->getNumIndices() == 1 && Insert->getIndices()[0] == 1 ? Insert->getInsertedValueOperand()
-                                                                           : nullptr;
+      return Insert->getNumIndices() == 1 && Insert->getIndices()[0] == 1
+                 ? plainLength(Insert->getInsertedValueOperand()) : nullptr;
     for (User *Use : View.users())
       if (auto *Extract = dyn_cast<ExtractValueInst>(Use);
           Extract && Extract->getNumIndices() == 1 && Extract->getIndices()[0] == 1)
         if (isa<Argument>(View) && Extract->getParent() == &F.getEntryBlock()) return Extract;
     if (!isa<Argument>(View)) return nullptr;
     return ExtractValueInst::Create(&View, {1}, "view.len", F.getEntryBlock().getFirstInsertionPt());
+  }
+
+  // A slice from zero (`items[0:count]`) builds its length as `hi - 0`,
+  // with hi chosen by a test that always holds (`hi >= 0`): see through both.
+  static Value *plainLength(Value *Length) {
+    using namespace PatternMatch;
+    for (unsigned Step = 0; Step < 4; ++Step) {
+      Value *Whole = nullptr;
+      auto *Choice = dyn_cast<SelectInst>(Length);
+      auto *Test = Choice ? dyn_cast<ICmpInst>(Choice->getCondition()) : nullptr;
+      if (match(Length, m_Sub(m_Value(Whole), m_Zero()))) Length = Whole;
+      else if (Test && Test->getPredicate() == ICmpInst::ICMP_UGE && match(Test->getOperand(1), m_Zero()))
+        Length = Choice->getTrueValue();
+      else break;
+    }
+    return Length;
   }
 
   // Loads, stores and memory intrinsics through Data stay inside the

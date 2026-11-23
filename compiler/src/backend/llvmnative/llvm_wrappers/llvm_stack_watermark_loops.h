@@ -6,6 +6,31 @@
 namespace ElisaWatermarkLoops {
 using namespace llvm;
 
+// V is the unsigned minimum of A and B: the intrinsic, or a select on their
+// comparison (a slice end clamped to the capacity, before instcombine).
+static bool unsignedMinimum(Value *V, Value *&A, Value *&B) {
+  using namespace PatternMatch;
+  if (match(V, m_UMin(m_Value(A), m_Value(B)))) return true;
+  auto *Choice = dyn_cast<SelectInst>(V);
+  auto *Test = Choice ? dyn_cast<ICmpInst>(Choice->getCondition()) : nullptr;
+  if (!Test) return false;
+  A = Choice->getTrueValue();
+  B = Choice->getFalseValue();
+  auto Predicate = Test->getPredicate();
+  return ((Predicate == ICmpInst::ICMP_ULT || Predicate == ICmpInst::ICMP_ULE) && A == Test->getOperand(0) &&
+          B == Test->getOperand(1)) ||
+         ((Predicate == ICmpInst::ICMP_UGT || Predicate == ICmpInst::ICMP_UGE) && A == Test->getOperand(1) &&
+          B == Test->getOperand(0));
+}
+
+// The value V is one less than (a pop: `add X, -1`, or `sub X, 1` before
+// instcombine), or null.
+static Value *popped(Value *V) {
+  using namespace PatternMatch;
+  Value *Mark = nullptr;
+  return match(V, m_CombineOr(m_Add(m_Value(Mark), m_AllOnes()), m_Sub(m_Value(Mark), m_One()))) ? Mark : nullptr;
+}
+
 // The first byte offset of the Step-byte block every iteration of L, a
 // single block Body, stores completely; null when the stores leave a gap.
 static const SCEV *coveredStart(ScalarEvolution &Evolution, AllocaInst &Buffer,

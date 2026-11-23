@@ -55,7 +55,7 @@ public:
       if (!tree.dominates(&fill, Load)) return false;
       Value *Index = element(*Load), *Mark = nullptr;
       auto *Pop = dyn_cast_or_null<Instruction>(Index);
-      if (Pop && match(Pop, m_Add(m_Value(Mark), m_AllOnes())) && nonzero(Mark, Pop, 0) &&
+      if (Pop && (Mark = ElisaWatermarkLoops::popped(Pop)) && nonzero(Mark, Pop, 0) &&
           attempt([&] { return holds(Mark, Load, 0); }))
         continue;
       if (!llvm::any_of(readCandidates(*Load), [&](Value *Candidate) {
@@ -89,6 +89,11 @@ public:
         return false;
     }
     return true;
+  }
+
+  // Elements [0, Bound) were stored after the fill when At executes.
+  bool marks(Value *Bound, Instruction &At) {
+    return tree.dominates(&fill, &At) && attempt([&] { return holds(Bound, &At, 0); });
   }
 
 private:
@@ -353,12 +358,12 @@ private:
     }
     // A count clamped to the capacity is at most the count.
     Value *Other = nullptr;
-    if (match(Mark, m_UMin(m_Value(Inner), m_Value(Other))))
+    if (ElisaWatermarkLoops::unsignedMinimum(Mark, Inner, Other))
       return attempt([&] { return holds(Inner, At, Depth + 1); }) ||
              attempt([&] { return holds(Other, At, Depth + 1); });
     auto *Step = dyn_cast<Instruction>(Mark);
     const APInt *Pushed = nullptr;
-    if (Step && match(Step, m_Add(m_Value(Inner), m_AllOnes())))
+    if (Step && (Inner = ElisaWatermarkLoops::popped(Step)))
       return nonzero(Inner, Step, 0) && holds(Inner, At, Depth + 1);
     if (Step && match(Step, m_Add(m_Value(Inner), m_Value(Other))) && !isa<Constant>(Other))
       return attempt([&] { return branchPushed(Inner, Other, Step, Depth); }) ||

@@ -44,8 +44,10 @@ struct Array {
 
 class Prover : public ElisaIndexBounds::Prover {
 public:
-  // Whether every access a view's callees make stays inside the view.
-  using ViewCheck = std::function<bool(InsertValueInst &, uint64_t)>;
+  // A bound that the predicate accepts and below which a call's callee
+  // accesses the view it is passed at an argument position, or null
+  // (ElisaViewBounds::Checker::callBound).
+  using ViewCheck = std::function<Value *(CallBase &, unsigned, uint64_t, function_ref<bool(Value *)>)>;
 
   Prover(ScalarEvolution &Evolution, DominatorTree &Tree, LoopInfo &Loops,
          SmallVectorImpl<Array> &Arrays, ViewCheck Views = nullptr)
@@ -177,6 +179,19 @@ private:
     return Target;
   }
 
+  // Every call handed a view of Target has a bound below which its callee
+  // reads it and that Accept takes at the call.
+  bool viewBounds(Array &Target, function_ref<bool(Instruction &, Value *)> Accept) {
+    for (InsertValueInst *View : Target.Uses.Views)
+      for (Use &Passed : View->uses()) {
+        auto &Call = *cast<CallBase>(Passed.getUser());
+        if (!views || !views(Call, Call.getArgOperandNo(&Passed), Target.ElementSize,
+                             [&](Value *Bound) { return evolution.isSCEVable(Bound->getType()) && Accept(Call, Bound); }))
+          return false;
+      }
+    return true;
+  }
+
   bool readsInside(Array &Target) {
     for (LoadInst *Load : Target.Uses.Loads) {
       const SCEV *Index = indexOf(*Load, Target);
@@ -192,18 +207,14 @@ private:
                       Target.Covered, Load))
         return false;
     }
-    // A callee reaches the elements below a view's length and no others.
-    for (InsertValueInst *View : Target.Uses.Views) {
-      Value *Length = View->getInsertedValueOperand();
-      if (!views || !evolution.isSCEVable(Length->getType()) ||
-          evolution.getTypeSizeInBits(Length->getType()) != evolution.getTypeSizeInBits(Target.Covered->getType()) ||
-          !views(*View, Target.ElementSize))
-        return false;
-      for (User *Call : View->users())
-        if (!completed(Target, *cast<Instruction>(Call)) ||
-            !proveAtMost(evolution.getSCEV(Length), Target.Covered, cast<Instruction>(Call)))
-          return false;
-    }
+    // A callee reaches the elements below its call's bound and no others.
+    if (!viewBounds(Target, [&](Instruction &Call, Value *Bound) {
+          return completed(Target, Call) &&
+                 evolution.getTypeSizeInBits(Bound->getType()) ==
+                     evolution.getTypeSizeInBits(Target.Covered->getType()) &&
+                 proveAtMost(evolution.getSCEV(Bound), Target.Covered, &Call);
+        }))
+      return false;
     for (MemTransferInst *Copy : Target.Uses.Copies) {
       const SCEV *Bytes = evolution.getSCEV(Copy->getLength());
       const SCEV *Limit = evolution.getMulExpr(
@@ -218,14 +229,16 @@ private:
 
   // An array used as a stack: every read is below a watermark of pushes.
   bool stackRead(Array &Target, bool FillRepeats = false) {
-    if (!Target.Uses.Writes.empty() || !Target.Uses.VectorLoads.empty() || !Target.Uses.Views.empty() ||
-        (Target.Uses.Loads.empty() && Target.Uses.Copies.empty()))
+    if (!Target.Uses.Writes.empty() || !Target.Uses.VectorLoads.empty() ||
+        (Target.Uses.Loads.empty() && Target.Uses.Copies.empty() && Target.Uses.Views.empty()))
       return false;
     ElisaStackWatermark::Watermark Marks(tree, *this, evolution, *Target.Buffer, Target.ElementSize,
                                          *Target.Uses.Fills[0], Target.Uses.Stores,
                                          Target.Uses.VectorStores, Target.Composite,
                                          Target.Uses.Residues, FillRepeats);
-    if (!Marks.readsBelow(Target.Uses.Loads) || !Marks.copiesBelow(Target.Uses.Copies)) return false;
+    if (!Marks.readsBelow(Target.Uses.Loads) || !Marks.copiesBelow(Target.Uses.Copies) ||
+        !viewBounds(Target, [&](Instruction &Call, Value *Bound) { return Marks.marks(Bound, Call); }))
+      return false;
     Target.KeptElements = Marks.kept();
     return true;
   }
@@ -425,9 +438,9 @@ static unsigned removeIndexedPrefixFills(Function &F, FunctionAnalysisManager &A
     if (Target.Composite) Target.Uses.Stores = wholeElementStores(Target, Evolution, Tree);
   SmallVector<std::tuple<Instruction *, uint64_t, AllocaInst *>, 4> Dead;
   // Callees are checked on cleaned copies that the checker deletes.
-  auto Views = [&](InsertValueInst &View, uint64_t ElementSize) {
+  auto Views = [&](CallBase &Call, unsigned Position, uint64_t ElementSize, function_ref<bool(Value *)> Accept) {
     ElisaViewBounds::Checker Callees(Analyses, ElementSize);
-    return Callees.bounded(View, F);
+    return Callees.callBound(Call, Position, F, Accept);
   };
   for (Array &Target : Arrays) {
     Prover Proof(Evolution, Tree, Loops, Arrays, Views);
