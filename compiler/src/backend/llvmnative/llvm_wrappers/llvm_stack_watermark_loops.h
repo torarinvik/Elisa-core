@@ -1,6 +1,8 @@
-// Loops that push a run of elements into a stack buffer
-// (ElisaStackWatermark): the bytes each iteration of a single-block loop
-// stores, and the count at which such a loop leaves.
+// Helpers of the stack proof (ElisaStackWatermark) that need no proof
+// state: the bytes each iteration of a single-block push loop stores and
+// the count at which it leaves, the element an address names, and the
+// shapes of pops, clamps and trip-count bounds.
+#include "llvm_element_offsets.h"
 #include <llvm/Analysis/ScalarEvolutionExpressions.h>
 #include <llvm/IR/PatternMatch.h>
 namespace ElisaWatermarkLoops {
@@ -92,5 +94,56 @@ static const SCEV *counted(ScalarEvolution &Evolution, CondBrInst &Latch, BasicB
   if (!Evolution.isSCEVable(Limit->getType())) return nullptr;
   Stride = Step->getZExtValue();
   return Evolution.getSCEV(Limit);
+}
+// The element index Pointer addresses in Buffer, of elements ElementSize
+// bytes long.
+static Value *element(AllocaInst &Buffer, uint64_t ElementSize, Value *Pointer) {
+  using namespace PatternMatch;
+  Type *Index = Type::getInt64Ty(Buffer.getContext());
+  if (Pointer == &Buffer) return ConstantInt::get(Index, 0);
+  auto *Address = dyn_cast<GetElementPtrInst>(Pointer);
+  if (!Address || Address->getPointerOperand() != &Buffer) return nullptr;
+  const DataLayout &Layout = Address->getDataLayout();
+  APInt Offset(Layout.getIndexTypeSizeInBits(Address->getType()), 0);
+  if (Address->accumulateConstantOffset(Layout, Offset))
+    return Offset.urem(ElementSize) == 0 ? ConstantInt::get(Index, Offset.udiv(ElementSize)) : nullptr;
+  uint64_t Stride = Layout.getTypeAllocSize(Address->getSourceElementType());
+  if (Address->getNumIndices() == 1 && Stride == ElementSize) return Address->getOperand(1);
+  // A byte offset `X << k` or `X * size` of element X, without wrapping.
+  Value *Element = nullptr;
+  const APInt *Factor = nullptr;
+  auto *Scaled = dyn_cast<OverflowingBinaryOperator>(Address->getOperand(1));
+  if (Address->getNumIndices() == 1 && Stride == 1 && Scaled && Scaled->hasNoUnsignedWrap() &&
+      ((match(Scaled, m_Shl(m_Value(Element), m_APInt(Factor))) && Factor->ult(64) &&
+        (uint64_t(1) << Factor->getZExtValue()) == ElementSize) ||
+       (match(Scaled, m_Mul(m_Value(Element), m_APInt(Factor))) && *Factor == ElementSize)))
+    return Element;
+  auto *First = dyn_cast<ConstantInt>(Address->getOperand(1));
+  if (Address->getNumIndices() == 2 && First && First->isZero() &&
+      Address->getSourceElementType() == Buffer.getAllocatedType())
+    return Address->getOperand(2);
+  return nullptr;
+}
+
+// L takes at most Bound back edges: its count is Bound, or a minimum with
+// Bound among its operands (a bounds check's exit at the capacity).
+static bool takenAtMost(ScalarEvolution &Evolution, const Loop &L, const SCEV *Bound) {
+  const SCEV *Taken = Evolution.getSymbolicMaxBackedgeTakenCount(&L);
+  if (isa<SCEVCouldNotCompute>(Taken) || Taken->getType() != Bound->getType()) return false;
+  if (Taken == Bound) return true;
+  auto *Minimum = dyn_cast<SCEVMinMaxExpr>(Taken);
+  auto *Sequential = dyn_cast<SCEVSequentialMinMaxExpr>(Taken);
+  ArrayRef<SCEVUse> Operands = Minimum && Minimum->getSCEVType() == scUMinExpr ? Minimum->operands()
+                               : Sequential ? Sequential->operands()
+                                            : ArrayRef<SCEVUse>();
+  return llvm::any_of(Operands, [&](SCEVUse Operand) { return static_cast<const SCEV *>(Operand) == Bound; });
+}
+
+// The element at byte offset Bytes: SCEV's exact division leaves an
+// unrolled recurrence ({48,+,64} /u 16) undivided where its start and step
+// both divide.
+static const SCEV *quotient(ScalarEvolution &Evolution, const SCEV *Bytes, uint64_t Size) {
+  if (const SCEV *Divided = ElisaElementOffsets::divide(Evolution, Bytes, Size)) return Divided;
+  return Evolution.getUDivExactExpr(Bytes, Evolution.getConstant(Bytes->getType(), Size));
 }
 } // namespace ElisaWatermarkLoops

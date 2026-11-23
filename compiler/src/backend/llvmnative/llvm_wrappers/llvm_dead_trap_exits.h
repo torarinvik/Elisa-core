@@ -29,6 +29,15 @@ static void decided(Value *Condition, bool Truth,
   }
 }
 
+// Comparisons decided on the edge From -> To.
+static SmallVector<std::pair<ICmpInst *, bool>, 4> edgeFacts(BasicBlock *From, BasicBlock *To) {
+  SmallVector<std::pair<ICmpInst *, bool>, 4> Facts;
+  auto *Branch = dyn_cast<CondBrInst>(From->getTerminator());
+  if (Branch && Branch->getSuccessor(0) != Branch->getSuccessor(1))
+    decided(Branch->getCondition(), Branch->getSuccessor(0) == To, Facts);
+  return Facts;
+}
+
 // The range of V implied by `V op constant` decided on branch edges that
 // dominate Block. Lazy value info gives up on values reaching a block
 // through an earlier loop's exit; these dominating edges still hold there.

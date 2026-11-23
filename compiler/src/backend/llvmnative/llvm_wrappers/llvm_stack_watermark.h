@@ -119,7 +119,7 @@ private:
     Value *Index = Peek ? nullptr : element(Load);
     const SCEV *Element = Peek ? nullptr
                           : Index && Index->getType() == Top->getType() ? evolution.getSCEV(Index)
-                                                                      : evolution.getUDivExactExpr(Bytes, Size);
+                                                                      : ElisaWatermarkLoops::quotient(evolution, Bytes, elementSize);
     if (!Peek && (evolution.getMulExpr(Element, Size) != Bytes ||
                   !(countsBelow(Element, Top, Load, Mark) || proof.proveBelow(Element, Top, &Load))))
       return false;
@@ -136,11 +136,11 @@ private:
     const SCEV *Final = evolution.getSCEV(Last);
     Value *Index = element(Load);
     const SCEV *Element = Index && Index->getType() == Final->getType() ? evolution.getSCEV(Index)
-                                                                       : evolution.getUDivExactExpr(Bytes, Size);
+                                                                       : ElisaWatermarkLoops::quotient(evolution, Bytes, elementSize);
     auto *Counter = dyn_cast<SCEVAddRecExpr>(Element);
     bool Counted = Counter && Counter->isAffine() && Counter->getStart()->isZero() &&
                    Counter->getStepRecurrence(evolution)->isOne() && Counter->getLoop()->contains(&Load) &&
-                   takenAtMost(*Counter->getLoop(), Final);
+                   ElisaWatermarkLoops::takenAtMost(evolution, *Counter->getLoop(), Final);
     const SCEV *Past = evolution.getAddExpr(Final, evolution.getOne(Final->getType()));
     return evolution.getMulExpr(Element, Size) == Bytes && (Counted || proof.proveBelow(Element, Past, &Load)) &&
            attempt([&] { return pushed(Last, 0, &Load, 0); });
@@ -155,22 +155,9 @@ private:
         !Counter->getStepRecurrence(evolution)->isOne() || !Counter->getLoop()->contains(&Load))
       return false;
     return Top->getType() == Counter->getType() &&
-           takenAtMost(*Counter->getLoop(), evolution.getMinusSCEV(Top, evolution.getOne(Top->getType()))) &&
+           ElisaWatermarkLoops::takenAtMost(evolution, *Counter->getLoop(),
+                                            evolution.getMinusSCEV(Top, evolution.getOne(Top->getType()))) &&
            nonzero(Mark, &Load, 0);
-  }
-
-  // L takes at most Bound back edges: its count is Bound, or a minimum
-  // with Bound among its operands (a bounds check's exit at the capacity).
-  bool takenAtMost(const Loop &L, const SCEV *Bound) {
-    const SCEV *Taken = evolution.getSymbolicMaxBackedgeTakenCount(&L);
-    if (isa<SCEVCouldNotCompute>(Taken) || Taken->getType() != Bound->getType()) return false;
-    if (Taken == Bound) return true;
-    auto *Minimum = dyn_cast<SCEVMinMaxExpr>(Taken);
-    auto *Sequential = dyn_cast<SCEVSequentialMinMaxExpr>(Taken);
-    ArrayRef<SCEVUse> Operands = Minimum && Minimum->getSCEVType() == scUMinExpr ? Minimum->operands()
-                                 : Sequential ? Sequential->operands()
-                                              : ArrayRef<SCEVUse>();
-    return llvm::any_of(Operands, [&](SCEVUse Operand) { return static_cast<const SCEV *>(Operand) == Bound; });
   }
 
   // Watermarks a read may be below: the indices in its address, the
@@ -206,7 +193,9 @@ private:
       if (Value *Index = element(*Store); Index && !isa<Constant>(Index)) {
         Consider(Index);
         for (User *Use : Index->users())
-          if (auto *Sum = dyn_cast<BinaryOperator>(Use); Sum && Sum->getOpcode() == Instruction::Add &&
+          if (auto *Compare = dyn_cast<ICmpInst>(Use)) // `at == count` before a push
+            Consider(Compare->getOperand(Compare->getOperand(0) == Index ? 1 : 0));
+          else if (auto *Sum = dyn_cast<BinaryOperator>(Use); Sum && Sum->getOpcode() == Instruction::Add &&
                                                        isa<ConstantInt>(Sum->getOperand(1))) {
             Consider(Sum);
             for (User *Exit : Sum->users())
@@ -279,33 +268,7 @@ private:
   }
 
   // The element index Pointer addresses in the buffer.
-  Value *element(Value *Pointer) {
-    using namespace PatternMatch;
-    Type *Index = Type::getInt64Ty(buffer.getContext());
-    if (Pointer == &buffer) return ConstantInt::get(Index, 0);
-    auto *Address = dyn_cast<GetElementPtrInst>(Pointer);
-    if (!Address || Address->getPointerOperand() != &buffer) return nullptr;
-    const DataLayout &Layout = Address->getDataLayout();
-    APInt Offset(Layout.getIndexTypeSizeInBits(Address->getType()), 0);
-    if (Address->accumulateConstantOffset(Layout, Offset))
-      return Offset.urem(elementSize) == 0 ? ConstantInt::get(Index, Offset.udiv(elementSize)) : nullptr;
-    uint64_t Stride = Layout.getTypeAllocSize(Address->getSourceElementType());
-    if (Address->getNumIndices() == 1 && Stride == elementSize) return Address->getOperand(1);
-    // A byte offset `X << k` or `X * size` of element X, without wrapping.
-    Value *Element = nullptr;
-    const APInt *Factor = nullptr;
-    auto *Scaled = dyn_cast<OverflowingBinaryOperator>(Address->getOperand(1));
-    if (Address->getNumIndices() == 1 && Stride == 1 && Scaled && Scaled->hasNoUnsignedWrap() &&
-        ((match(Scaled, m_Shl(m_Value(Element), m_APInt(Factor))) && Factor->ult(64) &&
-          (uint64_t(1) << Factor->getZExtValue()) == elementSize) ||
-         (match(Scaled, m_Mul(m_Value(Element), m_APInt(Factor))) && *Factor == elementSize)))
-      return Element;
-    auto *First = dyn_cast<ConstantInt>(Address->getOperand(1));
-    if (Address->getNumIndices() == 2 && First && First->isZero() &&
-        Address->getSourceElementType() == buffer.getAllocatedType())
-      return Address->getOperand(2);
-    return nullptr;
-  }
+  Value *element(Value *Pointer) { return ElisaWatermarkLoops::element(buffer, elementSize, Pointer); }
 
   // Elements [0, Mark) were stored after the fill whenever At executes.
   bool holds(Value *Mark, Instruction *At, unsigned Depth) {
@@ -366,7 +329,9 @@ private:
     if (Step && (Inner = ElisaWatermarkLoops::popped(Step)))
       return nonzero(Inner, Step, 0) && holds(Inner, At, Depth + 1);
     if (Step && match(Step, m_Add(m_Value(Inner), m_Value(Other))) && !isa<Constant>(Other))
-      return attempt([&] { return branchPushed(Inner, Other, Step, Depth); }) ||
+      return attempt([&] { return equalPushed(Inner, Other, Step, Depth); }) ||
+             attempt([&] { return equalPushed(Other, Inner, Step, Depth); }) ||
+             attempt([&] { return branchPushed(Inner, Other, Step, Depth); }) ||
              attempt([&] { return branchPushed(Other, Inner, Step, Depth); }) ||
              attempt([&] { return loopPushed(Inner, Step, At, Depth); }) ||
              attempt([&] { return loopPushed(Other, Step, At, Depth); });
@@ -400,6 +365,25 @@ private:
         if (!pushed(Inner, Offset, End, Depth)) return false;
     }
     return true;
+  }
+
+  // Mark = Inner + [X == Inner] after a store of element X at a point where
+  // [0, Inner) holds: the store pushed element Inner exactly when X is Inner
+  // (an insertion point that extends the stack only at its top, as in
+  // patience sorting), and otherwise left [0, Inner) written.
+  bool equalPushed(Value *Inner, Value *Flag, Instruction *Mark, unsigned Depth) {
+    using namespace PatternMatch;
+    Value *Index = nullptr;
+    CmpPredicate Predicate;
+    if (!match(Flag, m_ZExt(m_c_ICmp(Predicate, m_Value(Index), m_Specific(Inner)))) ||
+        Predicate != ICmpInst::ICMP_EQ)
+      return false;
+    auto *Definition = dyn_cast<Instruction>(Inner);
+    return llvm::any_of(stores, [&](StoreInst *Store) {
+      return writesElement(*Store, Index, 0) && stored(*Store, Mark) &&
+             (!Definition || tree.dominates(Definition, Store)) &&
+             attempt([&] { return holds(Inner, Store, Depth + 1); });
+    });
   }
 
   // A store of element Inner + Offset, executed after Inner's definition

@@ -229,13 +229,25 @@ private:
 
   // An array used as a stack: every read is below a watermark of pushes.
   bool stackRead(Array &Target, bool FillRepeats = false) {
-    if (!Target.Uses.Writes.empty() || !Target.Uses.VectorLoads.empty() ||
-        (Target.Uses.Loads.empty() && Target.Uses.Copies.empty() && Target.Uses.Views.empty()))
+    if (!Target.Uses.Writes.empty() ||
+        (Target.Uses.Loads.empty() && Target.Uses.VectorLoads.empty() && Target.Uses.Copies.empty() &&
+         Target.Uses.Views.empty()))
       return false;
     ElisaStackWatermark::Watermark Marks(tree, *this, evolution, *Target.Buffer, Target.ElementSize,
                                          *Target.Uses.Fills[0], Target.Uses.Stores,
                                          Target.Uses.VectorStores, Target.Composite,
                                          Target.Uses.Residues, FillRepeats);
+    // A vector load in the vectorizer's main loop reads below the limit its
+    // last lane is below (ElisaIndexShapes), which must be a watermark.
+    for (LoadInst *Load : Target.Uses.VectorLoads) {
+      const SCEV *Index = indexOf(*Load, Target);
+      unsigned Lanes = cast<FixedVectorType>(Load->getType())->getNumElements();
+      auto *Last = Index ? dyn_cast<SCEVAddRecExpr>(evolution.getAddExpr(
+                               Index, evolution.getConstant(Index->getType(), Lanes - 1)))
+                         : nullptr;
+      Value *Limit = Last ? ElisaIndexShapes::roundedLimit(evolution, *Last) : nullptr;
+      if (!Limit || !Marks.marks(Limit, *Load)) return false;
+    }
     if (!Marks.readsBelow(Target.Uses.Loads) || !Marks.copiesBelow(Target.Uses.Copies) ||
         !viewBounds(Target, [&](Instruction &Call, Value *Bound) { return Marks.marks(Bound, Call); }))
       return false;
