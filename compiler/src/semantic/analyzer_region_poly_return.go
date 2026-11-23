@@ -21,6 +21,10 @@ func (a *Analyzer) functionReturnsRegionAllocatedValue(fn *ast.FuncDecl) bool {
 		}
 	}
 	retCarriesRegionStorage := returnType != nil && typeCarriesRegionStorage(returnType)
+	// A fixed array of plain values is returned by value from inline storage, so a list
+	// literal typed by that return type allocates nothing; only its elements could.
+	_, returnsFixedArray := returnType.(*ArrayType)
+	inlineArrayReturn := returnsFixedArray && !retCarriesRegionStorage
 	// Locals fed by region-allocated values (a `result` accumulated across branches from
 	// region-polymorphic calls / bare region-backed constructors): returning one is returning a
 	// region-allocated value — the same local-tracking functionBuildsAndReturnsLocalContainer
@@ -177,7 +181,7 @@ func (a *Analyzer) functionReturnsRegionAllocatedValue(fn *ast.FuncDecl) bool {
 		case *ast.ListLitExpr:
 			// A region-less container literal allocates into the inferred region — even an
 			// empty `[]` seed that gets pushed into (the build-local-return shape).
-			if e.Owner == nil {
+			if e.Owner == nil && !inlineArrayReturn {
 				return true
 			}
 			for _, item := range e.Elems {

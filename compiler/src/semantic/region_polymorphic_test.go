@@ -177,3 +177,19 @@ def scalar() -> i64:
 		t.Fatalf("scalar function acquired implicit params: %+v", scalar.ImplicitParamNames)
 	}
 }
+
+// A list literal returned as a fixed array of plain values lives in the return slot, not in a
+// region, so the function needs no caller region. A darray literal still does.
+func TestRegionPolymorphicSkipsInlineFixedArrayLiteralReturn(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rp_fixed.elisa", `def singles() -> usize[4]:
+    [0, 1, 2, 3]
+def growable() -> darray[usize]:
+    return [0, 1, 2, 3]
+`, AnalyzeOptions{})
+	if regionPolymorphicFuncType(t, result, "singles").RegionPolymorphic {
+		t.Fatalf("a fixed numeric array literal return must not thread a caller region")
+	}
+	if !regionPolymorphicFuncType(t, result, "growable").RegionPolymorphic {
+		t.Fatalf("a darray literal return must stay region-polymorphic")
+	}
+}
