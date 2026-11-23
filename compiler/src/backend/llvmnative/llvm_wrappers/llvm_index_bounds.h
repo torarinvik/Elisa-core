@@ -195,8 +195,14 @@ private:
   bool differsBelow(Value *Left, Value *Right, const SCEV *Index, const SCEV *Length,
                     Instruction *At, unsigned Depth, bool Strict) {
     if (!Strict || Depth > 8) return false;
+    // Adding a constant is a bijection, so `Index + c != Other` is exactly
+    // `Index != Other - c`.
     const SCEV *First = evolution.getSCEV(Left), *Second = evolution.getSCEV(Right);
-    const SCEV *Other = First == Index ? Second : Second == Index ? First : nullptr;
+    const SCEV *Other = nullptr;
+    if (auto *Shift = dyn_cast<SCEVConstant>(evolution.getMinusSCEV(First, Index)))
+      Other = evolution.getMinusSCEV(Second, Shift);
+    else if (auto *Shift = dyn_cast<SCEVConstant>(evolution.getMinusSCEV(Second, Index)))
+      Other = evolution.getMinusSCEV(First, Shift);
     return Other && settle(Other, At, Depth + 1) == Length && atMost(Index, Length, At, Depth + 1);
   }
 
@@ -356,13 +362,16 @@ private:
     const SCEV *Bound = evolution.getSCEV(Right);
     const SCEV *Excess = evolution.getMinusSCEV(Index, Guarded);
     // Index may be the guarded value minus a constant that does not wrap,
-    // or one more than a strictly guarded value: then Index <=u Bound.
+    // so Index <u Guarded <=u Bound, or one more than a strictly guarded
+    // value: then Index <=u Bound.
     if (Index != Guarded) {
       if (Predicate == ICmpInst::ICMP_ULT && Excess->isOne())
         Predicate = ICmpInst::ICMP_ULE;
       else if (!isa<SCEVConstant>(Excess) ||
                !gapFits(evolution.getNegativeSCEV(Excess), Guarded, At))
         return false;
+      else
+        Predicate = ICmpInst::ICMP_ULT;
     }
     if (Predicate == ICmpInst::ICMP_ULE)
       return Strict ? below(Bound, Length, At, Depth + 1) : atMost(Bound, Length, At, Depth + 1);
@@ -373,7 +382,9 @@ private:
   }
 
   bool nonNegative(Value *V, Instruction *At) {
-    return evolution.isSCEVable(V->getType()) && !highest(evolution.getSCEV(V), At).isSignBitSet();
+    if (!evolution.isSCEVable(V->getType())) return false;
+    const SCEV *Value = evolution.getSCEV(V);
+    return evolution.isKnownNonNegative(Value) || !highest(Value, At).isSignBitSet();
   }
 
   // Index = X - K with 1 <=u K <=u X lies in [0, X), below any Length >= X.

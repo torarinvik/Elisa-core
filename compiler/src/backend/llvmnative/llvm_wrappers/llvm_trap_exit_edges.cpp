@@ -12,6 +12,7 @@
 #include <llvm/IR/IntrinsicInst.h>
 #include <llvm/IR/MDBuilder.h>
 #include <llvm/IR/Module.h>
+#include "llvm_exit_dead_stores.h"
 
 namespace ElisaTrapExits {
 using namespace llvm;
@@ -97,6 +98,10 @@ static unsigned connectTrapExits(Module &Module) {
 }
 } // namespace ElisaTrapExits
 
+// The last module step before emission: stores the final cleanups sank
+// into a shared exit block die first (llvm_exit_dead_stores.h).
 extern "C" unsigned elisacoreConnectTrapExits(LLVMModuleRef Module) {
-  return Module ? ElisaTrapExits::connectTrapExits(*llvm::unwrap(Module)) : 0;
+  if (!Module) return 0;
+  unsigned Removed = ElisaExitDeadStores::removeExitDeadStores(*llvm::unwrap(Module));
+  return Removed + ElisaTrapExits::connectTrapExits(*llvm::unwrap(Module));
 }

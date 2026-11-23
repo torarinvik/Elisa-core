@@ -52,6 +52,8 @@
 #include <llvm/Transforms/Utils/BasicBlockUtils.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/InstIterator.h>
+#include <llvm/IR/CFG.h>
+#include <llvm/Transforms/Utils/Local.h>
 #include <llvm/Analysis/TargetLibraryInfo.h>
 #include <mutex>
 #include <llvm/Bitcode/BitcodeWriter.h>
