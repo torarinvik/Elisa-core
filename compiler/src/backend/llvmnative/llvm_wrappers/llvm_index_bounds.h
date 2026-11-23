@@ -309,7 +309,33 @@ private:
               }));
     });
     if (Header) assumed.pop_back();
-    return Holds;
+    return Holds || (Header && exitBoundBelow(Merge, *L, Length, Depth));
+  }
+
+  // A header phi below the loop-invariant X one of its loop's exits tests it
+  // (or its increment) against, with X at most Length, is below Length: the
+  // loop over [left[k], right[k]) of a permutation of n values.
+  bool exitBoundBelow(PHINode &Merge, Loop &L, const SCEV *Length, unsigned Depth) {
+    if (Depth > 6 || budget == 0) return false;
+    SmallVector<BasicBlock *, 4> Exiting;
+    L.getExitingBlocks(Exiting);
+    Instruction *Entry = &*L.getHeader()->getFirstInsertionPt();
+    for (BasicBlock *Block : Exiting) {
+      auto *Branch = dyn_cast<CondBrInst>(Block->getTerminator());
+      auto *Compare = Branch ? dyn_cast<ICmpInst>(Branch->getCondition()) : nullptr;
+      if (!Compare || !evolution.isSCEVable(Compare->getOperand(0)->getType())) continue;
+      for (unsigned Side = 0; Side < 2; ++Side) {
+        Value *Tested = Compare->getOperand(Side), *Other = Compare->getOperand(1 - Side);
+        auto *Step = dyn_cast<BinaryOperator>(Tested);
+        if (Tested != &Merge && !(Step && Step->getOpcode() == Instruction::Add && Step->getOperand(0) == &Merge))
+          continue;
+        const SCEV *Bound = evolution.getSCEV(Other);
+        if (Bound == Length || Bound->getType() != Length->getType() || !evolution.isLoopInvariant(Bound, &L))
+          continue;
+        if (atMost(Bound, Length, Entry, Depth + 1) && phiBelow(Merge, Bound, Depth + 1)) return true;
+      }
+    }
+    return false;
   }
 
   // A phi is at most a High defined outside it when each incoming value
