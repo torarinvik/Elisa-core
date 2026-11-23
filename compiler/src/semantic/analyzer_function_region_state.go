@@ -94,6 +94,9 @@ type analyzerFunctionRegionState struct {
 	// provisionalSummaryFn is the function a quiet on-demand analysis is publishing summaries for.
 	funcAnalysisActive   map[*ast.FuncDecl]bool
 	provisionalSummaryFn *ast.FuncDecl
+	// wrappedBody is the current function's parameter scope and top-level statements when the
+	// body is a synthesized auto-region wrap (analyzer_wrapped_body_duplicates.go).
+	wrappedBody wrappedBodyFrame
 	// summary convergence state (region_summary_convergence.go)
 	convergeDepth       int
 	storeFlowSummaries  map[*ast.FuncDecl]*storeFlowSummary

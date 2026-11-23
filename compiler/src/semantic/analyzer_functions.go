@@ -297,6 +297,9 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 					a.currentFunctionExpectsVectorize = fulfillsVectorizes(fn)
 					a.expandFulfills(fn)
 					a.checkFrameConsistency(fn)
+					if fnType != nil {
+						a.checkLostArrayParamWrites(fn, allParamDecls, fnType.Params)
+					}
 					defer func() {
 						a.currentChangesPaths, a.currentHasChanges = savedChangesPaths, savedHasChanges
 						a.currentPreservesPaths, a.currentHasPreserves = savedPreservesPaths, savedHasPreserves
@@ -305,7 +308,9 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 					a.analyzeRequiresClauses(fn)
 					a.analyzeEnsureClauses(fn, fnType)
 					a.analyzeReturnWhereRefinement(fn, fnType)
+					savedWrappedBody := a.enterWrappedBody(fn)
 					a.analyzeIncrementalFunctionBody(fn, typeArgs)
+					a.wrappedBody = savedWrappedBody
 					a.verifyLemmaEnsures(fn)
 					// docs/126 D1: close the drop ledger while the affine state is still
 					// live — records the fall-through drops and folds each destructor's

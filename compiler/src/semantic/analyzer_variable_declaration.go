@@ -172,6 +172,7 @@ func (a *Analyzer) analyzeVariableDeclaration(n *ast.VarDeclStmt) {
 			a.mutableGlobalBorrowRefs[n] = refs
 		}
 	}
+	a.checkUntypedShadow(n)
 	sym := &Symbol{Name: n.Name, Kind: SymbolLocal, Type: bindingType, Node: n, Mutable: n.Mutable, BindingMutabilityExplicit: n.BindingExplicit, Ghost: n.Ghost}
 	if n.Value != nil {
 		a.noteImplicitIntConversion(n.Value, a.exprType(n.Value), bindingType)

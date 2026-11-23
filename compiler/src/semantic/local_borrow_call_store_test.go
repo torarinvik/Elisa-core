@@ -93,9 +93,9 @@ def walk(first: Stmt, table: lmut Table) -> void:
             match stmt:
                 Stmt.If(c, b, l):
                     table <- visit(b, table)
-                    current = first
+                    current <- first
                 _:
-                    current = first
+                    current <- first
 `,
 		"push_back_into_itself": `struct Param:
     name: sview

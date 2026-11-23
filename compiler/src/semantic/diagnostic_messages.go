@@ -35,6 +35,17 @@ func DuplicateExportNameMessage(name string) string {
 	return fmt.Sprintf("duplicate export name %q", name)
 }
 
+// UntypedShadowMessage is the shared wording for a nested `name = value` that shadows an outer local.
+func UntypedShadowMessage(name string, kind string) string {
+	return fmt.Sprintf("%q = ... declares a new local that shadows the outer %s %q; write `%s <- ...` to update it, or give the new local a type to shadow it on purpose", name, kind, name, name)
+}
+
+// LostArrayParamWritesMessage is the shared wording for a by-value array parameter whose writes
+// never reach anything: the parameter is a copy, so they vanish at return.
+func LostArrayParamWritesMessage(name string) string {
+	return fmt.Sprintf("parameter %q is a by-value array copy that is written but never read back, so the writes are lost when the function returns; take `%s: mutable T[N]&` and pass `&array` to update the caller's array", name, name)
+}
+
 func DuplicateLocalMessage(name string, kind SymbolKind) string {
 	return fmt.Sprintf("duplicate local %q (already defined as %s)", name, kind)
 }

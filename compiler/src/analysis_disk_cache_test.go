@@ -282,7 +282,7 @@ func TestAnalysisDiskCacheRetractsProofAfterContractEdit(t *testing.T) {
     ensure result == x
     r: mutable u8 = x
     for i in 0 ..< 3:
-        r = x
+        r: u8 = x
     return r
 
 def caller(x: u8, y: u8) -> u8:

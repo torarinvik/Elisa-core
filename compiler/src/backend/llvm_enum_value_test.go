@@ -29,9 +29,9 @@ def score(node: Small) -> i64:
 def total(seed: i64) -> i64:
     items: array[Small, 3] = [Small.Int(1), make_node(seed), Small.Done]
     maybe: Small? = Small.Pair(2, 3)
-    total: i64 = score(items[0]) + score(items[1]) + score(items[2])
+    total: mutable i64 = score(items[0]) + score(items[1]) + score(items[2])
     if maybe is node:
-        total = total + score(node)
+        total <- total + score(node)
     return total
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_regular_enum_values.elisa", src)
