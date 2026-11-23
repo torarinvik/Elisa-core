@@ -8,7 +8,8 @@
 // another such array whose every stored value is below n (an order or
 // permutation array indexing a value array is the common case); a vector
 // load needs its last lane below n. A stack needs no fill loop: its reads
-// stay below the pushes (ElisaStackWatermark). The bound
+// stay below the pushes (ElisaStackWatermark), which also covers arrays of
+// structs and fills a loop repeats. The bound
 // proofs themselves are ElisaIndexBounds'.
 #include <llvm/Analysis/ScalarEvolutionExpressions.h>
 #include "llvm_stack_watermark.h"
@@ -62,6 +63,10 @@ struct Array {
   const SCEV *Length = nullptr;
   // Leading elements the fill must still zero (a stack's folded seeds).
   uint64_t KeptElements = 0;
+  // A struct or record element: Uses.Stores holds only the field stores
+  // that complete one (wholeElementStores), and Uses.Residues each field
+  // access's byte offset inside its element.
+  bool Composite = false;
 };
 
 class Prover : public ElisaIndexBounds::Prover {
@@ -73,8 +78,10 @@ public:
   // Whether every read of Target lies in a completely written prefix.
   bool prefixRead(Array &Target) {
     Target.KeptElements = 0;
-    if (Target.Uses.Fills.size() != 1 || loops.getLoopFor(Target.Uses.Fills[0]->getParent()))
-      return false;
+    if (Target.Uses.Fills.size() != 1) return false;
+    // A fill a loop repeats (a scratch array per query) leaves the stack
+    // proof, which checks each step against the latest fill.
+    if (loops.getLoopFor(Target.Uses.Fills[0]->getParent())) return stackRead(Target, true);
     for (StoreInst *Store : Target.Uses.Stores)
       if (fillLoop(Target, *Store) && readsInside(Target)) return true;
     for (MemIntrinsic *Copy : Target.Uses.Writes)
@@ -86,10 +93,13 @@ private:
   SmallVectorImpl<Array> &arrays;
   SmallPtrSet<AllocaInst *, 4> visiting;
 
-  const SCEV *indexOf(Value *Pointer, Array &Target) {
-    const SCEV *Offset = evolution.getMinusSCEV(evolution.getSCEV(Pointer),
+  // The element a load or store accesses, at a field of it for a struct.
+  const SCEV *indexOf(Instruction &Access, Array &Target) {
+    const SCEV *Offset = evolution.getMinusSCEV(evolution.getSCEV(getLoadStorePointerOperand(&Access)),
                                                 evolution.getSCEV(Target.Buffer));
     if (isa<SCEVCouldNotCompute>(Offset)) return nullptr;
+    Offset = evolution.getMinusSCEV(
+        Offset, evolution.getConstant(Offset->getType(), Target.Uses.Residues.lookup(&Access)));
     return divide(evolution, Offset, Target.ElementSize);
   }
 
@@ -97,7 +107,7 @@ private:
   SmallPtrSet<BasicBlock *, 8> storing(Array &Target, Loop &L, const SCEV *Index) {
     SmallPtrSet<BasicBlock *, 8> Blocks;
     for (StoreInst *Store : Target.Uses.Stores)
-      if (loops.getLoopFor(Store->getParent()) == &L && indexOf(Store->getPointerOperand(), Target) == Index)
+      if (loops.getLoopFor(Store->getParent()) == &L && indexOf(*Store, Target) == Index)
         Blocks.insert(Store->getParent());
     return Blocks;
   }
@@ -125,7 +135,7 @@ private:
   // exit tested before the body leaves [0, Count) when every path to a
   // latch stores.
   bool fillLoop(Array &Target, StoreInst &Store) {
-    auto *Index = dyn_cast_or_null<SCEVAddRecExpr>(indexOf(Store.getPointerOperand(), Target));
+    auto *Index = dyn_cast_or_null<SCEVAddRecExpr>(indexOf(Store, Target));
     Loop *L = loops.getLoopFor(Store.getParent());
     if (!Index || !L || Index->getLoop() != L || !Index->isAffine() || !Index->getStart()->isZero() ||
         !Index->getStepRecurrence(evolution)->isOne() ||
@@ -168,13 +178,13 @@ private:
 
   bool readsInside(Array &Target) {
     for (LoadInst *Load : Target.Uses.Loads) {
-      const SCEV *Index = indexOf(Load->getPointerOperand(), Target);
+      const SCEV *Index = indexOf(*Load, Target);
       if (!completed(Target, *Load) || !Index || !proveBelow(Index, Target.Length, Load))
         return false;
     }
     // Every lane of a vector load must lie in the prefix.
     for (LoadInst *Load : Target.Uses.VectorLoads) {
-      const SCEV *Index = indexOf(Load->getPointerOperand(), Target);
+      const SCEV *Index = indexOf(*Load, Target);
       unsigned Lanes = cast<FixedVectorType>(Load->getType())->getNumElements();
       if (!completed(Target, *Load) || !Index ||
           !proveBelow(evolution.getAddExpr(Index, evolution.getConstant(Index->getType(), Lanes - 1)),
@@ -194,13 +204,15 @@ private:
   }
 
   // An array used as a stack: every read is below a watermark of pushes.
-  bool stackRead(Array &Target) {
-    if (!Target.Uses.Writes.empty() || !Target.Uses.Copies.empty() || !Target.Uses.VectorLoads.empty() ||
-        Target.Uses.Loads.empty())
+  bool stackRead(Array &Target, bool FillRepeats = false) {
+    if (!Target.Uses.Writes.empty() || !Target.Uses.VectorLoads.empty() ||
+        (Target.Uses.Loads.empty() && Target.Uses.Copies.empty()))
       return false;
     ElisaStackWatermark::Watermark Marks(tree, *this, evolution, *Target.Buffer, Target.ElementSize,
-                                         *Target.Uses.Fills[0], Target.Uses.Stores);
-    if (!Marks.readsBelow(Target.Uses.Loads)) return false;
+                                         *Target.Uses.Fills[0], Target.Uses.Stores,
+                                         Target.Uses.VectorStores, Target.Composite,
+                                         Target.Uses.Residues, FillRepeats);
+    if (!Marks.readsBelow(Target.Uses.Loads) || !Marks.copiesBelow(Target.Uses.Copies)) return false;
     Target.KeptElements = Marks.kept();
     return true;
   }
@@ -263,7 +275,8 @@ private:
     Array *Source = nullptr;
     for (Array &Candidate : arrays)
       if (llvm::is_contained(Candidate.Uses.Loads, &Load)) Source = &Candidate;
-    if (!Source || visiting.count(Source->Buffer)) return false;
+    // A struct's grouped stores leave out the values its fields hold.
+    if (!Source || Source->Composite || visiting.count(Source->Buffer)) return false;
     visiting.insert(Source->Buffer);
     auto StoredBelow = [&](StoreInst *Store) {
       Value *Stored = Store->getValueOperand();
@@ -272,12 +285,99 @@ private:
               below(evolution.getSCEV(Stored), Length, Store, Depth));
     };
     // Copied values are unknown, and so are zeros a kept fill provides.
-    bool Bounded = Source->Uses.Writes.empty() && prefixRead(*Source) && !Source->KeptElements &&
+    bool Bounded = Source->Uses.Writes.empty() && Source->Uses.VectorStores.empty() &&
+                   prefixRead(*Source) && !Source->KeptElements &&
                    llvm::all_of(Source->Uses.Stores, StoredBelow);
     visiting.erase(Source->Buffer);
     return Bounded;
   }
 };
+
+// A struct of scalar fields with no padding: every byte belongs to a field.
+static bool denseStruct(Type *Element, const DataLayout &Layout) {
+  auto *Struct = dyn_cast<StructType>(Element);
+  if (!Struct || Struct->isOpaque() || Struct->getNumElements() == 0) return false;
+  uint64_t Fields = 0;
+  for (Type *Field : Struct->elements()) {
+    if (!Field->isIntegerTy() && !Field->isFloatingPointTy() && !Field->isPointerTy()) return false;
+    Fields += Layout.getTypeStoreSize(Field).getFixedValue();
+  }
+  uint64_t Size = Layout.getTypeAllocSize(Struct).getFixedValue();
+  return Fields == Size && Size <= 64;
+}
+
+// The stores that complete an element of a struct array: a field store
+// after the fill counts as a store of the whole element when it and the
+// field stores to the same element that dominate it cover every byte. A
+// dominating store ran in the same trip of every loop around both, so equal
+// address expressions name the same element.
+static SmallVector<StoreInst *, 16> wholeElementStores(Array &Target, ScalarEvolution &Evolution,
+                                                       DominatorTree &Tree) {
+  const DataLayout &Layout = Target.Buffer->getDataLayout();
+  uint64_t Full = Target.ElementSize == 64 ? ~uint64_t(0) : (uint64_t(1) << Target.ElementSize) - 1;
+  SmallVector<std::tuple<StoreInst *, const SCEV *, uint64_t>, 16> Fields;
+  for (StoreInst *Store : Target.Uses.Stores) {
+    if (!Tree.dominates(Target.Uses.Fills[0], Store) || Fields.size() >= 256) continue;
+    uint64_t Residue = Target.Uses.Residues.lookup(Store);
+    uint64_t Bytes = Layout.getTypeStoreSize(Store->getValueOperand()->getType()).getFixedValue();
+    const SCEV *Start = Evolution.getMinusSCEV(
+        Evolution.getSCEV(Store->getPointerOperand()),
+        Evolution.getConstant(Type::getInt64Ty(Store->getContext()), Residue));
+    Fields.push_back({Store, Start, (Bytes == 64 ? ~uint64_t(0) : (uint64_t(1) << Bytes) - 1) << Residue});
+  }
+  SmallVector<StoreInst *, 16> Whole;
+  for (auto [Store, Start, Mask] : Fields) {
+    uint64_t Covered = Mask;
+    for (auto [Earlier, EarlierStart, EarlierMask] : Fields)
+      if (EarlierStart == Start && Earlier != Store && Tree.dominates(Earlier, Store)) Covered |= EarlierMask;
+    if (Covered == Full) Whole.push_back(Store);
+  }
+  return Whole;
+}
+
+// An integer array accessed in records of Group elements (`records[3 * i +
+// 1]` and a copy of `3 * n` elements), seen as an array of such records:
+// each access splits, through scalar evolution, into a whole record and a
+// constant offset inside it, so the struct proof applies to the records.
+static std::optional<Array> regrouped(Array &Target, unsigned Group, ScalarEvolution &Evolution,
+                                      DominatorTree &Tree) {
+  const DataLayout &Layout = Target.Buffer->getDataLayout();
+  Array Records;
+  Records.Buffer = Target.Buffer;
+  Records.Composite = true;
+  Records.ElementSize = Target.ElementSize * Group;
+  Accesses &Uses = Records.Uses;
+  Uses.Fills = Target.Uses.Fills;
+  Uses.Copies = Target.Uses.Copies;
+  Uses.Writes = Target.Uses.Writes;
+  auto Place = [&](Instruction &Access, Type *Accessed) {
+    const SCEV *Offset = Evolution.getMinusSCEV(Evolution.getSCEV(getLoadStorePointerOperand(&Access)),
+                                                Evolution.getSCEV(Target.Buffer));
+    uint64_t Bytes = Layout.getTypeStoreSize(Accessed).getFixedValue();
+    if (isa<SCEVCouldNotCompute>(Offset)) return false;
+    for (uint64_t Residue = 0; Residue + Bytes <= Records.ElementSize; Residue += Target.ElementSize)
+      if (divide(Evolution, Evolution.getMinusSCEV(Offset, Evolution.getConstant(Offset->getType(), Residue)),
+                 Records.ElementSize)) {
+        if (Residue) Uses.Residues[&Access] = Residue;
+        return true;
+      }
+    return false;
+  };
+  using LoadList = ArrayRef<LoadInst *>;
+  using StoreList = ArrayRef<StoreInst *>;
+  for (LoadList Loads : {LoadList(Target.Uses.Loads), LoadList(Target.Uses.VectorLoads)})
+    for (LoadInst *Load : Loads) {
+      if (!Place(*Load, Load->getType())) return std::nullopt;
+      Uses.Loads.push_back(Load);
+    }
+  for (StoreList Stores : {StoreList(Target.Uses.Stores), StoreList(Target.Uses.VectorStores)})
+    for (StoreInst *Store : Stores) {
+      if (!Place(*Store, Store->getValueOperand()->getType())) return std::nullopt;
+      Uses.Stores.push_back(Store);
+    }
+  Uses.Stores = wholeElementStores(Records, Evolution, Tree);
+  return Records;
+}
 
 static unsigned removeIndexedPrefixFills(Function &F, FunctionAnalysisManager &Analyses) {
   const DataLayout &Layout = F.getDataLayout();
@@ -285,30 +385,50 @@ static unsigned removeIndexedPrefixFills(Function &F, FunctionAnalysisManager &A
   for (Instruction &Instruction : F.getEntryBlock()) {
     auto *Buffer = dyn_cast<AllocaInst>(&Instruction);
     auto *Type = Buffer ? dyn_cast<ArrayType>(Buffer->getAllocatedType()) : nullptr;
-    if (!Type || !Type->getElementType()->isIntegerTy() || !Buffer->isStaticAlloca()) continue;
+    if (!Type || !Buffer->isStaticAlloca() ||
+        !(Type->getElementType()->isIntegerTy() || denseStruct(Type->getElementType(), Layout)))
+      continue;
     Array Candidate;
     Candidate.Buffer = Buffer;
+    Candidate.Composite = Type->getElementType()->isStructTy();
     Candidate.ElementSize = Layout.getTypeAllocSize(Type->getElementType()).getFixedValue();
+    // Vector stores only ever add written elements to a proof (ElisaStackWatermark).
     if (ElisaArrayRanges::collect(Buffer, Type->getElementType(), Candidate.ElementSize, Layout,
-                                  Candidate.Uses) &&
-        Candidate.Uses.Fills.size() == 1 && (!Candidate.Uses.Stores.empty() || !Candidate.Uses.Writes.empty()))
+                                  Candidate.Uses, 0, true) &&
+        Candidate.Uses.Fills.size() == 1 &&
+        (!Candidate.Uses.Stores.empty() || !Candidate.Uses.VectorStores.empty() ||
+         !Candidate.Uses.Writes.empty()))
       Arrays.push_back(std::move(Candidate));
   }
   if (Arrays.empty()) return 0;
   auto &Evolution = Analyses.getResult<ScalarEvolutionAnalysis>(F);
   auto &Tree = Analyses.getResult<DominatorTreeAnalysis>(F);
   auto &Loops = Analyses.getResult<LoopAnalysis>(F);
-  SmallVector<std::pair<Instruction *, uint64_t>, 4> Dead;
+  for (Array &Target : Arrays)
+    if (Target.Composite) Target.Uses.Stores = wholeElementStores(Target, Evolution, Tree);
+  SmallVector<std::tuple<Instruction *, uint64_t, AllocaInst *>, 4> Dead;
   for (Array &Target : Arrays) {
     Prover Proof(Evolution, Tree, Loops, Arrays);
-    if (Proof.prefixRead(Target))
-      Dead.push_back({Target.Uses.Fills[0], Target.KeptElements * Target.ElementSize});
+    Array *Proved = Proof.prefixRead(Target) ? &Target : nullptr;
+    std::optional<Array> Records;
+    for (unsigned Group = 2; !Proved && !Target.Composite && !Target.Uses.Stores.empty() &&
+                             Target.ElementSize * Group <= 64;
+         ++Group)
+      if ((Records = regrouped(Target, Group, Evolution, Tree)) && Proof.prefixRead(*Records)) Proved = &*Records;
+    if (Proved) Dead.push_back({Target.Uses.Fills[0], Proved->KeptElements * Proved->ElementSize, Target.Buffer});
   }
-  for (auto [Fill, Kept] : Dead)
-    if (auto *Zeros = dyn_cast<MemSetInst>(Fill); Zeros && Kept)
-      Zeros->setLength(ConstantInt::get(Zeros->getLength()->getType(), Kept));
-    else
+  for (auto [Fill, Kept, Buffer] : Dead)
+    if (auto *Zeros = dyn_cast<MemSetInst>(Fill); Zeros && Kept) {
+      // Seeds of a record past a short array's end are not the fill's to keep.
+      auto *Length = dyn_cast<ConstantInt>(Zeros->getLength());
+      if (Length && Length->getZExtValue() > Kept)
+        Zeros->setLength(ConstantInt::get(Zeros->getLength()->getType(), Kept));
+    } else {
+      // Every read still sees a stored element, so the array keeps the
+      // value ranges of its stores (ElisaArrayRanges).
+      Buffer->setMetadata(ElisaArrayRanges::WrittenPrefix, MDNode::get(F.getContext(), {}));
       Fill->eraseFromParent();
+    }
   if (!Dead.empty()) Analyses.invalidate(F, PreservedAnalyses::none());
   return Dead.size();
 }

@@ -14,55 +14,87 @@
 namespace ElisaArrayRanges {
 using namespace llvm;
 
+// Marks an array whose zero fill ElisaIndexedPrefix removed after proving
+// that every load reads an element a store wrote first.
+static constexpr const char *WrittenPrefix = "elisa.written.prefix";
+
 struct Accesses {
   SmallVector<LoadInst *, 16> Loads;
   // Loads of several consecutive elements, as the vectorizer emits.
   SmallVector<LoadInst *, 4> VectorLoads;
   SmallVector<StoreInst *, 16> Stores;
+  // Stores of several consecutive elements; only collected on request.
+  SmallVector<StoreInst *, 4> VectorStores;
   SmallVector<MemTransferInst *, 2> Copies;
   // Copies and pattern fills into the array from its first element.
   SmallVector<MemIntrinsic *, 1> Writes;
   SmallVector<Instruction *, 1> Fills;
+  // Byte offsets inside its element of an access to a field of a struct
+  // element; absent for an access at the element's start.
+  SmallDenseMap<Instruction *, uint64_t, 8> Residues;
   bool Filled = false;
 };
 
-// Every index of Address steps by whole elements of ElementSize bytes: its
-// stride is a multiple, or the index is a constant or has enough known low
-// zero bits to make the product one (a byte offset `i << 4` into i64s).
-static bool elementAligned(GetElementPtrInst &Address, uint64_t ElementSize,
-                           const DataLayout &Layout) {
+// The byte offset inside an element that Address adds: every index steps
+// by whole elements of ElementSize bytes (its stride is a multiple, or the
+// index has enough known low zero bits to make the product one: a byte
+// offset `i << 4` into i64s), except constant ones and struct fields, which
+// a Composite element (a struct) may also step into.
+static std::optional<uint64_t> elementResidue(GetElementPtrInst &Address, uint64_t ElementSize,
+                                              const DataLayout &Layout, bool Composite) {
+  uint64_t Residue = 0;
   for (gep_type_iterator Step = gep_type_begin(Address), End = gep_type_end(Address);
        Step != End; ++Step) {
-    if (Step.isStruct()) return false;
+    if (Step.isStruct()) {
+      auto *Field = cast<ConstantInt>(Step.getOperand());
+      Residue += Layout.getStructLayout(Step.getStructType())->getElementOffset(Field->getZExtValue());
+      continue;
+    }
     uint64_t Stride = Step.getSequentialElementStride(Layout).getFixedValue();
     if (Stride % ElementSize == 0) continue;
     if (auto *Constant = dyn_cast<ConstantInt>(Step.getOperand())) {
-      if ((Constant->getSExtValue() * int64_t(Stride)) % int64_t(ElementSize) != 0) return false;
+      int64_t Bytes = (Constant->getSExtValue() * int64_t(Stride)) % int64_t(ElementSize);
+      Residue += uint64_t(Bytes < 0 ? Bytes + int64_t(ElementSize) : Bytes);
       continue;
     }
     unsigned Zeros = computeKnownBits(Step.getOperand(), Layout).countMinTrailingZeros();
-    if (Zeros >= 64 || (Stride << Zeros) % ElementSize != 0) return false;
+    if (Zeros >= 64 || (Stride << Zeros) % ElementSize != 0) return std::nullopt;
   }
-  return true;
+  Residue %= ElementSize;
+  if (Residue && !Composite) return std::nullopt;
+  return Residue;
 }
 
 // Collect the accesses of Pointer (Array or an element-aligned address in
-// it); false when some use could read or write it in another way.
+// it, Residue bytes into its element); false when some use could read or
+// write it in another way. A struct Element is Composite: its fields are
+// loaded and stored separately, each access inside one element.
 static bool collect(Value *Pointer, Type *Element, uint64_t ElementSize,
-                    const DataLayout &Layout, Accesses &Out, unsigned Depth = 0) {
+                    const DataLayout &Layout, Accesses &Out, unsigned Depth = 0,
+                    bool AllowVectorStores = false, uint64_t Residue = 0) {
   if (Depth > 4) return false;
+  bool Composite = isa<StructType>(Element);
+  auto Inside = [&](Instruction &Access, Type *Accessed) {
+    if (!Composite || Residue + Layout.getTypeStoreSize(Accessed).getFixedValue() > ElementSize)
+      return false;
+    if (Residue) Out.Residues[&Access] = Residue;
+    return true;
+  };
   for (User *Use : Pointer->users()) {
     if (auto *Load = dyn_cast<LoadInst>(Use)) {
       auto *Vector = dyn_cast<FixedVectorType>(Load->getType());
       if (!Load->isSimple()) return false;
-      if (Load->getType() == Element) Out.Loads.push_back(Load);
+      if (Load->getType() == Element || Inside(*Load, Load->getType())) Out.Loads.push_back(Load);
       else if (Vector && Vector->getElementType() == Element) Out.VectorLoads.push_back(Load);
       else return false;
     } else if (auto *Store = dyn_cast<StoreInst>(Use)) {
       if (!Store->isSimple() || Store->getPointerOperand() != Pointer) return false;
       Type *Stored = Store->getValueOperand()->getType();
-      if (Stored == Element) {
+      auto *Lanes = dyn_cast<FixedVectorType>(Stored);
+      if (Stored == Element || Inside(*Store, Stored)) {
         Out.Stores.push_back(Store);
+      } else if (AllowVectorStores && Lanes && Lanes->getElementType() == Element) {
+        Out.VectorStores.push_back(Store);
       } else if (isa<ConstantAggregateZero>(Store->getValueOperand()) && Depth == 0) {
         Out.Filled = true;
         Out.Fills.push_back(Store);
@@ -70,9 +102,13 @@ static bool collect(Value *Pointer, Type *Element, uint64_t ElementSize,
         return false;
       }
     } else if (auto *Address = dyn_cast<GetElementPtrInst>(Use)) {
-      if (!elementAligned(*Address, ElementSize, Layout) ||
-          !collect(Address, Element, ElementSize, Layout, Out, Depth + 1))
+      std::optional<uint64_t> Added = elementResidue(*Address, ElementSize, Layout, Composite);
+      if (!Added || !collect(Address, Element, ElementSize, Layout, Out, Depth + 1, AllowVectorStores,
+                             (Residue + *Added) % ElementSize))
         return false;
+    } else if (Residue) {
+      // Only loads and stores may address a field.
+      if (!isa<LifetimeIntrinsic>(Use) && !isa<ICmpInst>(Use)) return false;
     } else if (auto *Fill = dyn_cast<MemSetInst>(Use)) {
       auto *Byte = dyn_cast<ConstantInt>(Fill->getValue());
       if (Fill->getRawDest() != Pointer || Fill->isVolatile()) return false;
@@ -91,7 +127,8 @@ static bool collect(Value *Pointer, Type *Element, uint64_t ElementSize,
       // Copies out of the array read it; they cannot change it.
       if (Copy->getRawDest() == Pointer) Out.Writes.push_back(Copy);
       else Out.Copies.push_back(Copy);
-    } else if (!isa<LifetimeIntrinsic>(Use)) {
+    } else if (!isa<LifetimeIntrinsic>(Use) && !isa<ICmpInst>(Use)) {
+      // Comparing addresses (a vectorizer's overlap check) touches no element.
       return false;
     }
   }
@@ -181,7 +218,7 @@ static unsigned annotateArrayValueRanges(Module &Module) {
       if (!collect(Array, Type->getElementType(),
                    Layout.getTypeAllocSize(Type->getElementType()).getFixedValue(), Layout,
                    Uses) ||
-          !Uses.Filled || Uses.Loads.empty() || !Uses.Writes.empty())
+          !(Uses.Filled || Array->getMetadata(WrittenPrefix)) || Uses.Loads.empty() || !Uses.Writes.empty())
         continue;
       if (!Evolution) {
         Evolution = &Analyses.getResult<ScalarEvolutionAnalysis>(F);
