@@ -118,7 +118,26 @@ func (a *Analyzer) validCast(src, dst Type) bool {
 	if IsNumericType(src) && isPointerLikeCastType(dst) {
 		return true
 	}
-	return false
+	return isOpaqueHandleCast(src, dst)
+}
+
+// isOpaqueHandleCast reports a reinterpret between a reference and an opaque extern
+// handle (`extern LLVMModuleRef`). The handle is a pointer the program never
+// dereferences, so moving it to and from a raw `void&` is the boundary a C API that
+// returns `void*` needs. It forges authority either way, so castRequiresUnsafePointerCast
+// gates it on Unsafe.PointerCast. Inline C layouts (pthread types) are not handles.
+func isOpaqueHandleCast(src, dst Type) bool {
+	_, srcRef := src.(*RefType)
+	_, dstRef := dst.(*RefType)
+	return (srcRef && isOpaqueHandleType(dst)) || (dstRef && isOpaqueHandleType(src))
+}
+
+func isOpaqueHandleType(t Type) bool {
+	opaque, ok := t.(*OpaqueType)
+	if !ok || opaque == nil {
+		return false
+	}
+	return opaque.CHeader != "pthread.h"
 }
 
 // isValueConversion reports whether a cast changes a value's numeric representation or domain — a
@@ -299,6 +318,9 @@ func castRequiresUnsafePointerCast(src, dst Type) bool {
 	}
 	if _, ok := src.(*TypeParamType); ok {
 		return !IsNumericType(dst)
+	}
+	if isOpaqueHandleCast(src, dst) {
+		return true
 	}
 	if AssignableTo(dst, src) {
 		return false
