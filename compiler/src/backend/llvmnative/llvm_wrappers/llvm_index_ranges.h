@@ -7,8 +7,24 @@
 // header runs (`left <u right` in a two-pointer scan). Header orders are
 // settled on entry by the prover's own proof.
 #include "llvm_index_shapes.h"
+#include <llvm/IR/InstIterator.h>
+#include <llvm/IR/IntrinsicInst.h>
 namespace ElisaIndexBounds {
 using namespace llvm;
+
+// Whether F writes an all-ones value (a -1 meaning "none"): a constant
+// store of at least 16 bits or a 0xFF byte fill. Without one there is no
+// sentinel for ElisaIndexBounds::Prover::sentinelBelow to exclude.
+static bool writesAllOnes(Function &F) {
+  return llvm::any_of(instructions(F), [](Instruction &I) {
+    if (auto *Store = dyn_cast<StoreInst>(&I))
+      if (auto *Constant = dyn_cast<ConstantInt>(Store->getValueOperand()))
+        return Constant->isMinusOne() && Constant->getBitWidth() >= 16;
+    if (auto *Fill = dyn_cast<MemSetInst>(&I))
+      if (auto *Byte = dyn_cast<ConstantInt>(Fill->getValue())) return Byte->isMinusOne();
+    return false;
+  });
+}
 
 struct Order {
   Value *Low, *High; // Low <u High

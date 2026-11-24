@@ -456,6 +456,9 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 			return fmt.Errorf("short-trip specialization cleanup failed")
 		}
 		C.elisacoreElideArrayRoundTrips(g.module)
+		// Prove fills dead while a pattern fill of a prefix is still one
+		// memset, before it is expanded into stores (Stage1's order).
+		C.elisacoreRemoveIndexedPrefixFills(g.module)
 		memoryfills.ExpandConstantByteFills(unsafe.Pointer(g.module))
 		if packPrivateBoolArrays(g) == 2 {
 			return fmt.Errorf("private Boolean array packing cleanup failed")

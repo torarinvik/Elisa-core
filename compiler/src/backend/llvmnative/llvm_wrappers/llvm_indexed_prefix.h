@@ -79,7 +79,7 @@ public:
 private:
   SmallVectorImpl<Array> &arrays;
   ViewCheck views;
-  SmallPtrSet<AllocaInst *, 4> visiting;
+  SmallPtrSet<AllocaInst *, 4> visiting, proving;
 
   // The element a load or store accesses, at a field of it for a struct.
   const SCEV *indexOf(Instruction &Access, Array &Target) {
@@ -208,7 +208,17 @@ private:
     return true;
   }
 
+  // Proves every read of Target below its covered length. A read whose index
+  // was loaded from Target itself may assume the earlier reads were inside:
+  // a load's value is used only after it ran (loadBelowOrFrom).
   bool readsInside(Array &Target) {
+    proving.insert(Target.Buffer);
+    bool Inside = readsInsideCovered(Target);
+    proving.erase(Target.Buffer);
+    return Inside;
+  }
+
+  bool readsInsideCovered(Array &Target) {
     for (LoadInst *Load : Target.Uses.Loads) {
       const SCEV *Index = indexOf(*Load, Target);
       if (!completed(Target, *Load) || !Index || !proveBelow(Index, Target.Covered, Load))
@@ -366,6 +376,39 @@ private:
     bool Bounded = Source->Uses.Writes.empty() && Source->Uses.VectorStores.empty() &&
                    Source->Uses.Views.empty() &&
                    (Source->Proved || prefixRead(*Source)) && !Source->KeptElements &&
+                   llvm::all_of(Source->Uses.Stores, StoredBelow);
+    visiting.erase(Source->Buffer);
+    return Bounded;
+  }
+
+  // Load reads an array whose every stored value is below Length or at
+  // least Floor. Its reads stay in its written prefix, or are being proved
+  // to: by induction over the reads in program order, each one's index came
+  // from an earlier read, which was inside, so it read a stored value.
+  bool loadBelowOrFrom(LoadInst &Load, const SCEV *Length, const APInt &Floor, unsigned Depth) override {
+    Array *Source = nullptr;
+    for (Array &Candidate : arrays)
+      if (llvm::is_contained(Candidate.Uses.Loads, &Load)) Source = &Candidate;
+    if (!Source || Source->Composite || visiting.count(Source->Buffer)) return false;
+    bool Assumed = proving.contains(Source->Buffer);
+    visiting.insert(Source->Buffer);
+    auto StoredBelow = [&](StoreInst *Store) {
+      Value *Stored = Store->getValueOperand();
+      return llvm::is_contained(Source->Uses.Loads, Stored) || belowOrFrom(Stored, Length, Floor, Store, Depth);
+    };
+    // A byte fill of whole elements writes the byte repeated in each one
+    // (all ones: -1).
+    auto FilledBelow = [&](MemIntrinsic *Write) {
+      auto *Fill = dyn_cast<MemSetInst>(Write);
+      auto *Byte = Fill ? dyn_cast<ConstantInt>(Fill->getValue()) : nullptr;
+      if (!Byte || Fill->getRawDest() != Source->Buffer ||
+          !divide(evolution, evolution.getSCEV(Fill->getLength()), Source->ElementSize) || !Load.getType()->isIntegerTy() || Load.getType()->getIntegerBitWidth() % 8) return false;
+      APInt Element = APInt::getSplat(Load.getType()->getIntegerBitWidth(), Byte->getValue());
+      return belowOrFrom(ConstantInt::get(Load.getType(), Element), Length, Floor, Fill, Depth);
+    };
+    bool Bounded = llvm::all_of(Source->Uses.Writes, FilledBelow) && Source->Uses.VectorStores.empty() &&
+                   Source->Uses.Views.empty() &&
+                   (Assumed || Source->Proved || (prefixRead(*Source) && !Source->KeptElements)) &&
                    llvm::all_of(Source->Uses.Stores, StoredBelow);
     visiting.erase(Source->Buffer);
     return Bounded;

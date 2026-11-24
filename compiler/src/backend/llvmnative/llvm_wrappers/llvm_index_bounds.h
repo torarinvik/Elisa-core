@@ -13,18 +13,21 @@ namespace ElisaIndexBounds {
 using namespace llvm;
 
 class Prover : public Ranges {
+  bool insideSentinel = false;
+
 public:
   Prover(ScalarEvolution &Evolution, DominatorTree &Tree, LoopInfo &Loops) : Ranges(Evolution, Tree, Loops) {}
 
   // Index <u Length wherever At executes, within a fixed proof budget.
+  // Queries nested inside a sentinel proof share its budget.
   bool proveBelow(const SCEV *Index, const SCEV *Length, Instruction *At) {
-    budget = 4000;
+    if (!insideSentinel) budget = 4000;
     return below(Index, Length, At);
   }
 
   // Low <=u High wherever At executes, within the same budget.
   bool proveAtMost(const SCEV *Low, const SCEV *High, Instruction *At) {
-    budget = 4000;
+    if (!insideSentinel) budget = 4000;
     return atMost(Low, High, At);
   }
 
@@ -83,15 +86,77 @@ protected:
     if (auto *Recurrence = dyn_cast<SCEVAddRecExpr>(Index))
       return recurrenceBelow(*Recurrence, Length, Depth) || exitBoundAt(Index, Length, At, Depth);
     if (auto *Unknown = dyn_cast<SCEVUnknown>(Index)) {
-      if (auto *Merge = dyn_cast<PHINode>(Unknown->getValue())) return phiBelow(*Merge, Length, Depth);
+      if (auto *Merge = dyn_cast<PHINode>(Unknown->getValue()); Merge && phiBelow(*Merge, Length, Depth))
+        return true;
       if (auto *Choice = dyn_cast<SelectInst>(Unknown->getValue()))
         return valueBelow(Choice->getTrueValue(), Length, At, Depth) &&
                valueBelow(Choice->getFalseValue(), Length, At, Depth);
-      if (auto *Load = dyn_cast<LoadInst>(Unknown->getValue())) return loadBelow(*Load, Length, Depth + 1);
+      if (auto *Load = dyn_cast<LoadInst>(Unknown->getValue()); Load && loadBelow(*Load, Length, Depth + 1))
+        return true;
+      return sentinelBelow(*Unknown, Length, At, Depth);
     }
     return false;
   }
 
+  // Reads whose every value is below Length or at least Floor.
+  virtual bool loadBelowOrFrom(LoadInst &, const SCEV *, const APInt &, unsigned) { return false; }
+
+  // V is below Length or at least Floor wherever it is defined: a constant
+  // at least Floor (a -1 meaning "none"), a value below Length, a read of
+  // such values, or a phi of them (a header phi by induction).
+  bool belowOrFrom(Value *V, const SCEV *Length, const APInt &Floor, Instruction *At, unsigned Depth) {
+    if (Depth > 9 || budget == 0 || !evolution.isSCEVable(V->getType()) || V->getType() != Length->getType())
+      return false;
+    --budget;
+    if (auto *Constant = dyn_cast<ConstantInt>(V)) return Constant->getValue().uge(Floor) || valueBelow(V, Length, At, Depth);
+    if (valueBelow(V, Length, At, Depth)) return true;
+    if (auto *Load = dyn_cast<LoadInst>(V)) return loadBelowOrFrom(*Load, Length, Floor, Depth + 1);
+    auto *Merge = dyn_cast<PHINode>(V);
+    if (!Merge) return false;
+    Loop *L = loops.getLoopFor(Merge->getParent());
+    bool Header = L && L->getHeader() == Merge->getParent();
+    if (Header) {
+      if (llvm::is_contained(assumedFrom, std::make_pair(Merge, Length))) return true;
+      if (!evolution.isLoopInvariant(Length, L)) return false;
+    }
+    assumedFrom.push_back({Merge, Length});
+    bool Holds = llvm::all_of(llvm::seq(Merge->getNumIncomingValues()), [&](unsigned Index) {
+      return belowOrFrom(Merge->getIncomingValue(Index), Length, Floor,
+                         Merge->getIncomingBlock(Index)->getTerminator(), Depth + 1);
+    });
+    assumedFrom.pop_back();
+    return Holds;
+  }
+
+private:
+  SmallVector<std::pair<PHINode *, const SCEV *>, 4> assumedFrom;
+
+  // Index is below Length or at least Floor everywhere, and a fact where At
+  // runs keeps it below Floor (a bounds check of `parent[current]` passing
+  // on a parent array holding -1 or a node below the count): below Length.
+  bool sentinelBelow(const SCEVUnknown &Index, const SCEV *Length, Instruction *At, unsigned Depth) {
+    Value *V = Index.getValue();
+    // One at a time: a nested proof would restart the budget, unbounded.
+    if (insideSentinel || Depth > 6 || budget == 0 || !(isa<PHINode>(V) || isa<LoadInst>(V))) return false;
+    auto [Writes, First] = allOnesWriters.try_emplace(At->getFunction());
+    if (First) Writes->second = writesAllOnes(*At->getFunction());
+    if (!Writes->second) return false;
+    auto [Known, Fresh] = sentinelResults.try_emplace({&Index, Length, At}, false);
+    if (!Fresh) return Known->second;
+    APInt Top = highest(&Index, At);
+    if (Top.isMaxValue()) return false;
+    // A fixed budget and depth, so the result depends on its key alone.
+    unsigned Rest = std::exchange(budget, 256u);
+    insideSentinel = true;
+    bool Holds = belowOrFrom(V, Length, Top + 1, At, 0);
+    insideSentinel = false;
+    budget = Rest;
+    return sentinelResults[{&Index, Length, At}] = Holds;
+  }
+  DenseMap<Function *, bool> allOnesWriters; // writesAllOnes per function
+  DenseMap<std::tuple<const SCEV *, const SCEV *, Instruction *>, bool> sentinelResults;
+
+protected:
   // Low <=u High wherever At executes: known outright, or Low = High - Gap
   // for a Gap that never exceeds High, so the subtraction does not wrap.
   bool atMost(const SCEV *Low, const SCEV *High, Instruction *At, unsigned Depth = 0) {

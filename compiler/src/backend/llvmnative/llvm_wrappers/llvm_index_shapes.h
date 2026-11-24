@@ -6,7 +6,8 @@
 // N = A - R, where R = A & (k - 1), or that remainder with zero replaced by
 // k so a scalar tail always runs, or N = A & M with M's low bits clear. N
 // is a multiple of k at most A, so every iteration has Index - c + k <=u N
-// and Index <u A. The replaced form needs A nonzero: A = 0 would make N
+// and Index <u A. Other exits (an early-exit search) only end the loop
+// sooner. The replaced form needs A nonzero: A = 0 would make N
 // wrap.
 //
 // A binary search's midpoint L + (H - L) /u 2 lies below H when L <u H, and
@@ -39,7 +40,7 @@ inline Value *roundedLimit(ScalarEvolution &Evolution, const SCEVAddRecExpr &Rec
   auto *Step = Recurrence.isAffine() ? dyn_cast<SCEVConstant>(Recurrence.getStepRecurrence(Evolution)) : nullptr;
   BasicBlock *Latch = L->getLoopLatch();
   if (!Start || !Step || !Step->getAPInt().isPowerOf2() || !Start->getAPInt().ult(Step->getAPInt()) ||
-      !Latch || L->getExitingBlock() != Latch)
+      !Latch || !L->isLoopExiting(Latch))
     return nullptr;
   auto *Branch = dyn_cast<CondBrInst>(Latch->getTerminator());
   auto *Compare = Branch ? dyn_cast<ICmpInst>(Branch->getCondition()) : nullptr;
