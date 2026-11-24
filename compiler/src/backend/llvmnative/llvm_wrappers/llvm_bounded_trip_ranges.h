@@ -12,11 +12,22 @@ using namespace llvm;
 static constexpr unsigned MaxTrips = 64;
 static constexpr unsigned MaxInstructions = 256;
 
+static ConstantRange entryRange(Value *V, Loop &L, LazyValueInfo &Values, DominatorTree &Tree, bool);
+
 // The range V, defined before loop L, has on entry: lazy value info's range
 // at the entry, narrowed by the guard edge into each single-predecessor
 // block on the dominator chain above it (`count > 32` returns three blocks up), which
 // lazy value info, asked at the entry alone, does not chain.
 static ConstantRange entryRange(Value *V, Loop &L, LazyValueInfo &Values, DominatorTree &Tree) {
+  // A guard that branched on x proved x is not poison (branching on poison is
+  // undefined), so freeze(x) is x wherever those guards bound it.
+  if (auto *Frozen = dyn_cast<FreezeInst>(V))
+    return entryRange(Frozen->getOperand(0), L, Values, Tree)
+        .intersectWith(entryRange(Frozen, L, Values, Tree, true), ConstantRange::Signed);
+  return entryRange(V, L, Values, Tree, true);
+}
+
+static ConstantRange entryRange(Value *V, Loop &L, LazyValueInfo &Values, DominatorTree &Tree, bool) {
   BasicBlock *Before = L.getLoopPredecessor();
   ConstantRange Range = Values.getConstantRangeOnEdge(V, Before, L.getHeader());
   auto *Defined = dyn_cast<Instruction>(V);
@@ -135,6 +146,11 @@ private:
       ConstantRange Range = ConstantRange::getEmpty(Width);
       for (Value *In : Merge->incoming_values()) Range = Range.unionWith(rangeOf(In));
       set(I, Range);
+    } else if (auto *Frozen = dyn_cast<FreezeInst>(&I)) {
+      // A `!range` load never yields a value outside its range, so freezing
+      // it (checked multiplication freezes its operands) keeps that range.
+      auto *Load = dyn_cast<LoadInst>(Frozen->getOperand(0));
+      set(I, Load && Load->getMetadata(LLVMContext::MD_range) ? rangeOf(Load) : ConstantRange::getFull(Width));
     } else if (auto *Load = dyn_cast<LoadInst>(&I); Load && Load->getMetadata(LLVMContext::MD_range)) {
       set(I, getConstantRangeFromMetadata(*Load->getMetadata(LLVMContext::MD_range)));
     } else {
