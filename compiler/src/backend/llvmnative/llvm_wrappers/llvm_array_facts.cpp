@@ -11,6 +11,7 @@
 #include "llvm_proven_checks.h"
 #include "llvm_validated_reads.h"
 #include "llvm_bounded_trip_ranges.h"
+#include "llvm_bisection_check_versioning.h"
 
 extern "C" unsigned elisacoreAnnotateArrayValueRanges(LLVMModuleRef Module) {
   return Module ? ElisaArrayRanges::annotateArrayValueRanges(*llvm::unwrap(Module)) : 0;
@@ -27,6 +28,7 @@ extern "C" unsigned elisacoreRemoveIndexedPrefixFills(LLVMModuleRef Module) {
   if (!Module) return 0;
   unsigned Removed = ElisaIndexedPrefix::removeIndexedPrefixFills(*llvm::unwrap(Module));
   Removed += ElisaValidatedReads::annotateValidatedReads(*llvm::unwrap(Module));
+  Removed += ElisaBisectionChecks::versionBisectionChecks(*llvm::unwrap(Module));
   return Removed + ElisaViewBounds::shrinkViewFills(*llvm::unwrap(Module));
 }
 
