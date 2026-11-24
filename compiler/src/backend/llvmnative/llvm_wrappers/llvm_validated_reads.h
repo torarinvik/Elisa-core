@@ -12,6 +12,9 @@ namespace ElisaValidatedReads {
 using namespace llvm;
 using namespace llvm::PatternMatch;
 
+// Whether Writer can only write local stack memory (defined below).
+static bool writesOnlyStack(Instruction &Writer, unsigned Depth = 0);
+
 // One validating loop: elements Start + Step * i for i < Bound passed.
 struct Validation {
   const SCEV *Start;
@@ -26,13 +29,24 @@ struct Validation {
 // with constants, joined by a short-circuit `or`, as a select or as an i1
 // phi whose `true` inputs each come from a dominating branch that did not
 // take that edge while staying.
+// Whether Tested reads the element Loaded read: the same value, or a load of
+// the same address (a loop that writes no memory but the stack, so both read
+// the same element on one trip).
+static bool sameElement(Value *Tested, Value *Loaded, ScalarEvolution &Evolution) {
+  if (Tested == Loaded) return true;
+  auto *Again = dyn_cast<LoadInst>(Tested);
+  auto *First = dyn_cast<LoadInst>(Loaded);
+  return Again && First && Again->isSimple() && Again->getType() == First->getType() &&
+         Evolution.getSCEV(Again->getPointerOperand()) == Evolution.getSCEV(First->getPointerOperand());
+}
+
 static void staying(Value *Condition, Value *Loaded, bool Leaves, ConstantRange &Range,
-                    DominatorTree &Tree, unsigned Depth = 0) {
+                    DominatorTree &Tree, ScalarEvolution &Evolution, unsigned Depth = 0) {
   if (Depth > 6) return;
   Value *Left = nullptr, *Right = nullptr;
   if (Leaves && match(Condition, m_LogicalOr(m_Value(Left), m_Value(Right)))) {
-    staying(Left, Loaded, true, Range, Tree, Depth + 1);
-    staying(Right, Loaded, true, Range, Tree, Depth + 1);
+    staying(Left, Loaded, true, Range, Tree, Evolution, Depth + 1);
+    staying(Right, Loaded, true, Range, Tree, Evolution, Depth + 1);
     return;
   }
   if (auto *Merge = dyn_cast<PHINode>(Condition); Merge && Leaves) {
@@ -54,13 +68,13 @@ static void staying(Value *Condition, Value *Loaded, bool Leaves, ConstantRange 
       Skipped.push_back({Branch->getCondition(), Branch->getSuccessor(0) == Merge->getParent()});
     }
     if (!Only) return;
-    for (auto [Taken, WhenTrue] : Skipped) staying(Taken, Loaded, WhenTrue, Range, Tree, Depth + 1);
-    staying(Only, Loaded, true, Range, Tree, Depth + 1);
+    for (auto [Taken, WhenTrue] : Skipped) staying(Taken, Loaded, WhenTrue, Range, Tree, Evolution, Depth + 1);
+    staying(Only, Loaded, true, Range, Tree, Evolution, Depth + 1);
     return;
   }
   auto *Compare = dyn_cast<ICmpInst>(Condition);
   auto *Constant = Compare ? dyn_cast<ConstantInt>(Compare->getOperand(1)) : nullptr;
-  if (!Constant || Compare->getOperand(0) != Loaded) return;
+  if (!Constant || !sameElement(Compare->getOperand(0), Loaded, Evolution)) return;
   auto Predicate = Leaves ? Compare->getInversePredicate() : Compare->getPredicate();
   Range = Range.intersectWith(
       ConstantRange::makeExactICmpRegion(Predicate, Constant->getValue()));
@@ -147,6 +161,11 @@ static std::optional<Validation> validation(Loop &L, ScalarEvolution &Evolution,
       Step->getAPInt() != Size ||
       !outsideStack(Evolution, Address->getStart()))
     return std::nullopt;
+  // A compare may test a second load of the element: nothing between them
+  // may write it.
+  for (BasicBlock *Block : L.blocks())
+    for (Instruction &I : *Block)
+      if (!writesOnlyStack(I)) return std::nullopt;
   unsigned Width = Load.getType()->getIntegerBitWidth();
   ConstantRange Range = ConstantRange::getFull(Width);
   for (BasicBlock *Block : L.blocks()) {
@@ -154,24 +173,88 @@ static std::optional<Validation> validation(Loop &L, ScalarEvolution &Evolution,
     if (!Branch || !Tree.dominates(Block, L.getLoopLatch()) || Block == Loop->Exiting) continue;
     for (unsigned Side = 0; Side < 2; ++Side)
       if (!L.contains(Branch->getSuccessor(Side)) && L.contains(Branch->getSuccessor(1 - Side)))
-        staying(Branch->getCondition(), &Load, Side == 0, Range, Tree);
+        staying(Branch->getCondition(), &Load, Side == 0, Range, Tree, Evolution);
   }
   if (Range.isFullSet() || Range.isEmptySet() || !exitCoversBound(L, *Loop)) return std::nullopt;
   return Validation{Address->getStart(), Size, Loop->Bound, Loop->Exit, Range};
 }
 
-// Whether a write that may reach Base's memory can run before Load after
-// any earlier point: writes to local stack objects cannot.
-static bool unwritten(Function &F, Instruction &Load, DominatorTree &Tree, LoopInfo &Loops) {
-  for (Instruction &Writer : instructions(F)) {
-    if (!Writer.mayWriteToMemory()) continue;
-    Value *Target = nullptr;
-    if (auto *Store = dyn_cast<StoreInst>(&Writer)) Target = Store->getPointerOperand();
-    if (auto *Set = dyn_cast<MemIntrinsic>(&Writer)) Target = Set->getRawDest();
-    if (isa<LifetimeIntrinsic>(&Writer)) continue;
-    if (Target && isa<AllocaInst>(getUnderlyingObject(Target))) continue;
-    if (isPotentiallyReachable(&Writer, &Load, nullptr, &Tree, &Loops)) return false;
+// A pointer into a local stack object, or a view {data, length} whose data is.
+static bool onStack(Value *V, unsigned Depth = 0) {
+  if (Depth > 4) return false;
+  if (V->getType()->isPointerTy()) return isa<AllocaInst>(getUnderlyingObject(V));
+  if (auto *Built = dyn_cast<InsertValueInst>(V))
+    return (isa<UndefValue>(Built->getAggregateOperand()) || onStack(Built->getAggregateOperand(), Depth + 1)) &&
+           (!Built->getInsertedValueOperand()->getType()->isPointerTy() ||
+            onStack(Built->getInsertedValueOperand(), Depth + 1));
+  return !V->getType()->isAggregateType();
+}
+
+// Whether a callee's stack slot only ever holds its arguments (a view
+// argument spilled before its fields are read back).
+static bool holdsArguments(Value *Slot, unsigned Depth = 0) {
+  if (Depth > 3) return false;
+  for (User *Use : Slot->users()) {
+    if (auto *Store = dyn_cast<StoreInst>(Use)) {
+      if (Store->getPointerOperand() != Slot || !isa<Argument>(Store->getValueOperand())) return false;
+    } else if (auto *Address = dyn_cast<GetElementPtrInst>(Use)) {
+      if (!holdsArguments(Address, Depth + 1)) return false;
+    } else if (!isa<LoadInst>(Use) && !isa<LifetimeIntrinsic>(Use)) {
+      return false;
+    }
   }
+  return true;
+}
+
+// A pointer the callee received: an argument, a view argument's data (read
+// directly or from the slot it was spilled to), or its own stack.
+static bool callerOwned(Value *Target) {
+  Value *Base = getUnderlyingObject(Target);
+  if (auto *Field = dyn_cast<ExtractValueInst>(Base)) Base = Field->getAggregateOperand();
+  if (auto *Reload = dyn_cast<LoadInst>(Base))
+    if (auto *Slot = dyn_cast<AllocaInst>(getUnderlyingObject(Reload->getPointerOperand())))
+      return holdsArguments(Slot);
+  return isa<Argument>(Base) || isa<AllocaInst>(Base);
+}
+
+// A call whose callee writes only through what it was passed, and is passed
+// only the caller's stack (a helper storing bytes into a local buffer).
+static bool stackOnlyCall(CallBase &Call, unsigned Depth) {
+  Function *Callee = Call.getCalledFunction();
+  if (!Callee || Callee->isDeclaration() || Callee->isVarArg() || Depth > 1) return false;
+  for (Value *Passed : Call.args())
+    if (!onStack(Passed)) return false;
+  for (Instruction &Inner : instructions(*Callee)) {
+    if (!Inner.mayWriteToMemory() || isa<LifetimeIntrinsic>(&Inner)) continue;
+    // A trap writes only memory no program code reads.
+    if (auto *Inaccessible = dyn_cast<CallBase>(&Inner); Inaccessible && Inaccessible->onlyAccessesInaccessibleMemory())
+      continue;
+    Value *Target = nullptr;
+    if (auto *Store = dyn_cast<StoreInst>(&Inner)) Target = Store->getPointerOperand();
+    if (auto *Set = dyn_cast<MemIntrinsic>(&Inner)) Target = Set->getRawDest();
+    if (!Target || !callerOwned(Target)) return false;
+  }
+  return true;
+}
+
+// Whether Writer can only write local stack memory.
+static bool writesOnlyStack(Instruction &Writer, unsigned Depth) {
+  if (!Writer.mayWriteToMemory() || isa<LifetimeIntrinsic>(&Writer)) return true;
+  if (auto *Inaccessible = dyn_cast<CallBase>(&Writer); Inaccessible && Inaccessible->onlyAccessesInaccessibleMemory())
+    return true;
+  Value *Target = nullptr;
+  if (auto *Store = dyn_cast<StoreInst>(&Writer)) Target = Store->getPointerOperand();
+  if (auto *Set = dyn_cast<MemIntrinsic>(&Writer)) Target = Set->getRawDest();
+  if (Target) return isa<AllocaInst>(getUnderlyingObject(Target));
+  auto *Call = dyn_cast<CallBase>(&Writer);
+  return Call && stackOnlyCall(*Call, Depth);
+}
+
+// Whether a write that may reach the validated memory can run before Load.
+static bool unwritten(Function &F, Instruction &Load, DominatorTree &Tree, LoopInfo &Loops) {
+  for (Instruction &Writer : instructions(F))
+    if (!writesOnlyStack(Writer) && isPotentiallyReachable(&Writer, &Load, nullptr, &Tree, &Loops))
+      return false;
   return true;
 }
 
@@ -216,7 +299,18 @@ static const SCEV *divided(ScalarEvolution &Evolution, const SCEV *Offset, uint6
 // every index below x, and x + d for every d below y: no sum wraps.
 static bool below(const SCEV *Index, Value &Bound, ScalarEvolution &Evolution,
                   LazyValueInfo &Values, ElisaIndexBounds::Prover &Proof, LoadInst &Load) {
-  if (Proof.proveBelow(Index, Evolution.getSCEV(&Bound), &Load)) return true;
+  const SCEV *Limit = Evolution.getSCEV(&Bound);
+  if (Proof.proveBelow(Index, Limit, &Load)) return true;
+  // Index = i - k below Limit = n - k (a loop from k reading element i - k):
+  // i < n with i >= k, so neither side wraps.
+  if (auto *Sum = dyn_cast<SCEVAddExpr>(Limit))
+    if (auto *Offset = dyn_cast<SCEVConstant>(Sum->getOperand(0)); Offset && Offset->getAPInt().isNegative()) {
+      const SCEV *Shifted = Evolution.getMinusSCEV(Index, Offset);
+      const SCEV *Whole = Evolution.getMinusSCEV(Limit, Offset);
+      if (Proof.proveBelow(Shifted, Whole, &Load) &&
+          Proof.proveAtMost(Evolution.getNegativeSCEV(Offset), Shifted, &Load))
+        return true;
+    }
   auto *Sum = dyn_cast<BinaryOperator>(&Bound);
   if (!Sum || Sum->getOpcode() != Instruction::Add) return false;
   if (!Sum->hasNoUnsignedWrap() &&

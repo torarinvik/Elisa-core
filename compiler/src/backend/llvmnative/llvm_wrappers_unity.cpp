@@ -54,6 +54,7 @@
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/CFG.h>
 #include <llvm/Analysis/CFG.h>
+#include <llvm/Analysis/LoopIterator.h>
 #include <llvm/Transforms/Utils/Local.h>
 #include <llvm/Analysis/TargetLibraryInfo.h>
 #include <mutex>

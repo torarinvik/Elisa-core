@@ -10,6 +10,7 @@
 #include "llvm_indexed_prefix.h"
 #include "llvm_proven_checks.h"
 #include "llvm_validated_reads.h"
+#include "llvm_bounded_trip_ranges.h"
 
 extern "C" unsigned elisacoreAnnotateArrayValueRanges(LLVMModuleRef Module) {
   return Module ? ElisaArrayRanges::annotateArrayValueRanges(*llvm::unwrap(Module)) : 0;
@@ -29,6 +30,10 @@ extern "C" unsigned elisacoreRemoveIndexedPrefixFills(LLVMModuleRef Module) {
   return Removed + ElisaViewBounds::shrinkViewFills(*llvm::unwrap(Module));
 }
 
+// Also folds overflow checks that loops of a small known trip count cannot
+// trigger.
 extern "C" unsigned elisacoreRemoveProvenChecks(LLVMModuleRef Module) {
-  return Module ? ElisaProvenChecks::removeProvenChecks(*llvm::unwrap(Module)) : 0;
+  if (!Module) return 0;
+  unsigned Folded = ElisaBoundedTripRanges::foldBoundedTripChecks(*llvm::unwrap(Module));
+  return Folded + ElisaProvenChecks::removeProvenChecks(*llvm::unwrap(Module));
 }
