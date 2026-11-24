@@ -144,6 +144,14 @@ func (p *Parser) parseProofUseStmt() ast.Stmt {
 }
 
 func (p *Parser) looksLikeGuardStmt() bool {
+	// A local named `guard`/`require` (`guard: T = get f() else return`) is a binding:
+	// no guard condition starts with `:`, `=` or `<-`.
+	if p.hasToken(p.pos + 1) {
+		switch p.tokenAt(p.pos + 1).Kind {
+		case lexer.TOKEN_ASSIGN, lexer.TOKEN_COLON, lexer.TOKEN_LARROW:
+			return false
+		}
+	}
 	depth := 0
 	for i := p.pos + 1; p.hasToken(i); i++ {
 		tok := p.tokenAt(i)
