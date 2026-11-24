@@ -9,6 +9,7 @@
 #include "llvm_view_bounded_fills.h"
 #include "llvm_indexed_prefix.h"
 #include "llvm_proven_checks.h"
+#include "llvm_validated_reads.h"
 
 extern "C" unsigned elisacoreAnnotateArrayValueRanges(LLVMModuleRef Module) {
   return Module ? ElisaArrayRanges::annotateArrayValueRanges(*llvm::unwrap(Module)) : 0;
@@ -19,10 +20,12 @@ extern "C" unsigned elisacoreRemoveDeadTrapExits(LLVMModuleRef Module) {
 }
 
 // Also shrinks zero fills of arrays whose only use is a view every callee
-// keeps inside its length.
+// keeps inside its length, and bounds reads of input elements an earlier
+// loop validated.
 extern "C" unsigned elisacoreRemoveIndexedPrefixFills(LLVMModuleRef Module) {
   if (!Module) return 0;
   unsigned Removed = ElisaIndexedPrefix::removeIndexedPrefixFills(*llvm::unwrap(Module));
+  Removed += ElisaValidatedReads::annotateValidatedReads(*llvm::unwrap(Module));
   return Removed + ElisaViewBounds::shrinkViewFills(*llvm::unwrap(Module));
 }
 
