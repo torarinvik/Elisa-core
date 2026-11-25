@@ -9,8 +9,17 @@ import (
 // allocation (a `new[auto]` modulo parentheses) or the result of an already-region-polymorphic call.
 // It deliberately does NOT descend into arguments: `f(new[auto] X())` yields f's result, not the
 // new[auto], so it is not region-allocated unless f itself is region-polymorphic.
+//
+// A value-forwarding expression (`get`/`try`/unwrap-else with their fallback, a value `if`,
+// a match's arm tails, a block's value, `move`) yields one of its operands, so it is
+// region-allocated when any operand it can yield is.
 func (a *Analyzer) exprResultIsRegionAllocated(value ast.Expr) bool {
 	value = unwrapParenForRegionPoly(value)
+	for _, forwarded := range regionPolyForwardedValues(value) {
+		if a.exprResultIsRegionAllocated(forwarded) {
+			return true
+		}
+	}
 	switch e := value.(type) {
 	case *ast.AllocExpr:
 		if e == nil {
@@ -174,4 +183,36 @@ func (a *Analyzer) callIsInlineEnumConstructor(call *ast.CallExpr) bool {
 
 func unwrapParenForRegionPoly(value ast.Expr) ast.Expr {
 	return regionframesyntax.UnwrapRegionValue(value)
+}
+
+// regionPolyForwardedValues lists the operands whose value an expression can yield as its
+// own result: the unwrapped value and fallback of `get`/`try`/unwrap-else, both arms of a
+// value `if`, each match arm's tail, a block's value, and a `move`'s operand.
+func regionPolyForwardedValues(value ast.Expr) []ast.Expr {
+	switch e := value.(type) {
+	case *ast.GetExpr:
+		return []ast.Expr{e.Value, e.Fallback}
+	case *ast.TryExpr:
+		return []ast.Expr{e.Value, e.Fallback}
+	case *ast.UnwrapElseExpr:
+		return []ast.Expr{e.Value, e.Fallback}
+	case *ast.TernaryExpr:
+		return []ast.Expr{e.Value, e.Alt}
+	case *ast.MoveExpr:
+		return []ast.Expr{e.Operand}
+	case *ast.ExprBlock:
+		return []ast.Expr{e.Value}
+	case *ast.MatchExpr:
+		tails := []ast.Expr{}
+		for _, arm := range e.Arms {
+			if len(arm.Body) == 0 {
+				continue
+			}
+			if tail, ok := arm.Body[len(arm.Body)-1].(*ast.ExprStmt); ok && tail != nil {
+				tails = append(tails, tail.Expr)
+			}
+		}
+		return tails
+	}
+	return nil
 }
