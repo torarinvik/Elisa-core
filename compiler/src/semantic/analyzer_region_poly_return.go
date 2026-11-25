@@ -264,6 +264,28 @@ func (a *Analyzer) functionReturnsRegionAllocatedValue(fn *ast.FuncDecl) bool {
 			collectValueStmts(e.Alt)
 		}
 	}
+	// An `if`/`elif`/`while` condition binder (`if make(k) is outer:`, `let outer = …`)
+	// names its value's payload exactly as a declared local does: returning `outer` returns
+	// the region-allocated value. Without this the function kept a per-call arena and freed
+	// it at `ret` while the returned struct's buffers still pointed into it -- a silent
+	// use-after-free in safe code, where the `get … else` spelling already classified.
+	var collectConditionBindings func(cond ast.Expr)
+	collectConditionBindings = func(cond ast.Expr) {
+		switch c := unwrapParenForRegionPoly(cond).(type) {
+		case *ast.OptionalBindExpr:
+			if c.Value != nil && c.Name != "" && c.Name != "_" {
+				collectValueStmts(c.Value)
+				if regiony(c.Value) {
+					regionLocals[c.Name] = true
+				}
+			}
+		case *ast.BinaryExpr:
+			collectConditionBindings(c.Left)
+			collectConditionBindings(c.Right)
+		case *ast.UnaryExpr:
+			collectConditionBindings(c.Operand)
+		}
+	}
 	collect = func(stmts []ast.Stmt) {
 		for _, stmt := range stmts {
 			switch s := stmt.(type) {
@@ -309,12 +331,15 @@ func (a *Analyzer) functionReturnsRegionAllocatedValue(fn *ast.FuncDecl) bool {
 					}
 				}
 			case *ast.IfStmt:
+				collectConditionBindings(s.Cond)
 				collect(s.Then)
 				for _, elif := range s.Elifs {
+					collectConditionBindings(elif.Cond)
 					collect(elif.Body)
 				}
 				collect(s.Else)
 			case *ast.WhileStmt:
+				collectConditionBindings(s.Cond)
 				collect(s.Body)
 			case *ast.ForStmt:
 				collect(s.Body)
