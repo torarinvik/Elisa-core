@@ -201,7 +201,9 @@ protected:
             within(Product->getOperand(1), At, Depth + 1).multiply(ConstantRange(Constant->getAPInt())),
             ConstantRange::Unsigned);
     auto *Unknown = dyn_cast<SCEVUnknown>(Value);
-    if (!Unknown) return Range;
+    // Path comparisons bound integers; a pointer (a null check's operand)
+    // keeps its scalar-evolution range.
+    if (!Unknown || !Unknown->getType()->isIntegerTy()) return Range;
     unsigned Width = Range.getBitWidth();
     // Paths whose comparisons contradict each other never reach At.
     ConstantRange OnPaths = paths.at(Unknown->getValue(), At->getParent());
