@@ -56,6 +56,12 @@ func (s *functionState) emitFieldExpr(expr *ast.FieldExpr) (llvmIRValueRef, sema
 			return s.emitEnumConstructorValue(nil, enumType, variant, nil, nil)
 		}
 	}
+	// A field path that flow typing narrowed to null (`p.x` after `return if p.x != null`)
+	// reads as null, as an identifier in the same state does: a known-null optional has
+	// no payload to address.
+	if semantic.IsNullType(s.exprType(expr)) && isPlainFieldPath(expr) {
+		return s.emitNullLiteral()
+	}
 	if fieldType, ok := cstrSyntheticFieldType(s.exprType(expr.Object), expr.Field); ok {
 		return s.emitRuntimeStringLenExpr(expr.Object, fieldType)
 	}
@@ -482,4 +488,22 @@ func (s *functionState) emitPackedStoreSliceExpr(expr *ast.SliceExpr) (llvmIRVal
 	resultType := s.exprType(expr)
 	value, actualType, err := ops.storeSlice(startValue, endValue, resultType, "packed.store.view")
 	return value, actualType, true, err
+}
+
+// isPlainFieldPath reports whether EXPR is a chain of field reads over an identifier,
+// with nothing that evaluates code along the way.
+func isPlainFieldPath(expr *ast.FieldExpr) bool {
+	var object ast.Expr = expr.Object
+	for {
+		switch node := object.(type) {
+		case *ast.Ident:
+			return true
+		case *ast.FieldExpr:
+			object = node.Object
+		case *ast.ParenExpr:
+			object = node.Inner
+		default:
+			return false
+		}
+	}
 }
