@@ -64,6 +64,7 @@ func ParamFieldContainerIsGrown(stmts []ast.Stmt, name string, isAuto func(*ast.
 }
 
 func ParamContainerIsGrown(stmts []ast.Stmt, name string, growthMethods map[string]bool) bool {
+	names := NarrowedNames(stmts, name)
 	found := false
 	astprunedscan.WalkPruned(stmts, func(node any) bool {
 		if found {
@@ -71,7 +72,7 @@ func ParamContainerIsGrown(stmts []ast.Stmt, name string, growthMethods map[stri
 		}
 		if call, ok := node.(*ast.CallExpr); ok {
 			if field, ok := call.Func.(*ast.FieldExpr); ok && field != nil && growthMethods[field.Field] {
-				if id, ok := field.Object.(*ast.Ident); ok && id != nil && id.Name == name {
+				if id, ok := field.Object.(*ast.Ident); ok && id != nil && names[id.Name] {
 					found = true
 					return false
 				}

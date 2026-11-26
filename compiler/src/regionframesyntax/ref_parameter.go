@@ -24,6 +24,14 @@ func RegionlessRefContainer(typ ast.TypeExpr) (*string, bool) {
 			typ = t.Elem
 		case *ast.OwnedType:
 			typ = t.Elem
+		case *ast.OptionalTypeExpr:
+			// An optional borrow (`mutable darray[T]&?`) threads the caller's region exactly as
+			// the plain borrow does; only the OUTER optional counts (`darray[T]?&` borrows an
+			// optional value, which is not a growable container).
+			if ref != nil {
+				return nil, false
+			}
+			typ = t.Value
 		case *ast.RefType:
 			if t.Region != "" {
 				return nil, false

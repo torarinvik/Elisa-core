@@ -9,6 +9,7 @@ import (
 // assignment needs the parameter's region. Program-lifetime store scopes suppress
 // only growth; assignments inside them still need to be inspected.
 func ParamContainerNeedsRegion(stmts []ast.Stmt, name string, permRoots, growthMethods map[string]bool, rootName func(ast.Expr) string) bool {
+	names := NarrowedNames(stmts, name)
 	found := false
 	visitAssignment := func(node any) bool {
 		if found {
@@ -33,7 +34,7 @@ func ParamContainerNeedsRegion(stmts []ast.Stmt, name string, permRoots, growthM
 		}
 		if call, ok := node.(*ast.CallExpr); ok && call != nil {
 			if field, ok := call.Func.(*ast.FieldExpr); ok && field != nil && growthMethods[field.Field] {
-				if id, ok := field.Object.(*ast.Ident); ok && id != nil && id.Name == name {
+				if id, ok := field.Object.(*ast.Ident); ok && id != nil && names[id.Name] {
 					found = true
 					return false
 				}
@@ -47,6 +48,7 @@ func ParamContainerNeedsRegion(stmts []ast.Stmt, name string, permRoots, growthM
 // ParamContainerGrownNeedingRegion excludes growth under program-lifetime
 // stores. It is also used to fingerprint the retained-analysis fast path.
 func ParamContainerGrownNeedingRegion(stmts []ast.Stmt, name string, permRoots, growthMethods map[string]bool, rootName func(ast.Expr) string) bool {
+	names := NarrowedNames(stmts, name)
 	found := false
 	astprunedscan.WalkPruned(stmts, func(node any) bool {
 		if found {
@@ -57,7 +59,7 @@ func ParamContainerGrownNeedingRegion(stmts []ast.Stmt, name string, permRoots, 
 		}
 		if call, ok := node.(*ast.CallExpr); ok && call != nil {
 			if field, ok := call.Func.(*ast.FieldExpr); ok && field != nil && growthMethods[field.Field] {
-				if id, ok := field.Object.(*ast.Ident); ok && id != nil && id.Name == name {
+				if id, ok := field.Object.(*ast.Ident); ok && id != nil && names[id.Name] {
 					found = true
 					return false
 				}

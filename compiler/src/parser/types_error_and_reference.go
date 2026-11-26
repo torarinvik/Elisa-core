@@ -453,6 +453,13 @@ func (p *Parser) parseBaseType(storage ast.RefStorage, explicit bool, label stri
 	}
 	if p.match(lexer.TOKEN_QUESTION) {
 		typ = &ast.OptionalTypeExpr{Position: pos, Value: typ}
+		if p.peek() == lexer.TOKEN_AMPERSAND {
+			// `T?&` would be a borrow of an optional value; Elisa spells the optional
+			// borrow (a nullable reference) `T&?`. Name the fix instead of failing later
+			// with "expected ), got &".
+			p.errorf("`?&` is not a type suffix: write `&?` for an optional borrow (`T&?`, a reference that may be null)")
+			p.advance()
+		}
 	}
 
 	return typ

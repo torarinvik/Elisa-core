@@ -96,6 +96,21 @@ func concreteBorrowedViewBindingType(declared Type, actual Type) (Type, bool) {
 // the local's ambient auto region, making later reads appear shorter-lived than
 // the actual returned container (or, worse, losing a lifetime constraint).
 func concreteContainerRegionBindingType(declared Type, actual Type) (Type, bool) {
+	// A typed reference local (`e: mutable darray[T]& = edges`, or `= get edges else ...`)
+	// names the same container as its initializer, so it grows in that container's region.
+	if declaredRef, ok := declared.(*RefType); ok && declaredRef != nil {
+		actualRef, ok := actual.(*RefType)
+		if !ok || actualRef == nil {
+			return nil, false
+		}
+		elem, ok := concreteContainerRegionBindingType(declaredRef.Elem, actualRef.Elem)
+		if !ok {
+			return nil, false
+		}
+		specialized := cloneRefType(declaredRef)
+		specialized.Elem = elem
+		return specialized, true
+	}
 	declaredArray, ok := declared.(*DArrayType)
 	if !ok || declaredArray == nil || declaredArray.Region != "" {
 		return nil, false

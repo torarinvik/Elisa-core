@@ -229,6 +229,11 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 			}
 		}
 		if _, ok := regionBindings[name]; !ok {
+			if program, ok := a.nullBorrowRegionArgBinding(ft, orderedArgs, name); ok {
+				regionBindings[name] = program
+			}
+		}
+		if _, ok := regionBindings[name]; !ok {
 			a.errorf(expr.Pos(), "cannot infer region parameter %q for call to %q", name, ft.Name)
 		}
 	}
