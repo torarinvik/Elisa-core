@@ -34,6 +34,43 @@ func TestGuardConditionLists(t *testing.T) {
 	}
 }
 
+// `if not:` negates the ordered AND of its lines: the guarded statement runs unless every
+// line holds.
+func TestNegatedGuardConditionLists(t *testing.T) {
+	for _, head := range []string{"return 7", "7 return", "return", "break", "continue", "work()", "value <- 7", "panic(\"stop\")"} {
+		t.Run(head, func(t *testing.T) {
+			src := "def probe(a: bool, b: bool) -> i64:\n    " + head + " if not:\n        a\n        b\n    return 9\n"
+			file, errs, _ := parseSourceWithNotices(t, src)
+			if len(errs) != 0 {
+				t.Fatalf("parse errors: %v", errs)
+			}
+			fn := file.Decls[0].(*ast.FuncDecl)
+			if len(fn.Body) != 2 {
+				t.Fatalf("lost following statement: %d", len(fn.Body))
+			}
+			guard, ok := fn.Body[0].(*ast.IfStmt)
+			if !ok {
+				t.Fatalf("expected desugared guard, got %T", fn.Body[0])
+			}
+			not, ok := guard.Cond.(*ast.UnaryExpr)
+			if !ok || not.Op != lexer.TOKEN_NOT {
+				t.Fatalf("expected a negated list, got %#v", guard.Cond)
+			}
+			paren, ok := not.Operand.(*ast.ParenExpr)
+			if !ok {
+				t.Fatalf("expected the list in parentheses, got %#v", not.Operand)
+			}
+			and, ok := paren.Inner.(*ast.BinaryExpr)
+			if !ok || and.Op != lexer.TOKEN_AND {
+				t.Fatalf("expected ordered AND, got %#v", paren.Inner)
+			}
+			if and.Left.(*ast.Ident).Name != "a" || and.Right.(*ast.Ident).Name != "b" {
+				t.Fatal("condition order changed")
+			}
+		})
+	}
+}
+
 func TestGuardConditionListRejectsEmptyAndStatements(t *testing.T) {
 	for _, src := range []string{
 		"def probe() -> i64:\n    return 1 if:\n    return 2\n",

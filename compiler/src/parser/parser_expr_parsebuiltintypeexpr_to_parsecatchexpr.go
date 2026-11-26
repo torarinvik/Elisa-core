@@ -138,7 +138,7 @@ func (p *Parser) parseExpr() ast.Expr {
 	if p.allowTernary && p.peek() == lexer.TOKEN_IF && !p.prevTokenIsDedent() {
 		pos := p.cur().Pos
 		p.advance()
-		if p.stmtGuardArmed && p.peek() == lexer.TOKEN_COLON {
+		if p.stmtGuardArmed && p.guardConditionListAhead() {
 			cond := p.parseGuardCondition()
 			p.stmtGuardArmed = false
 			p.stmtGuardCond = cond
@@ -193,7 +193,7 @@ func (p *Parser) parseExpr() ast.Expr {
 		// `can` could attach, so re-check the guard here while the window is still armed.
 		if p.allowTernary && p.peek() == lexer.TOKEN_IF && !p.prevTokenIsDedent() {
 			p.advance()
-			if p.stmtGuardArmed && p.peek() == lexer.TOKEN_COLON {
+			if p.stmtGuardArmed && p.guardConditionListAhead() {
 				cond := p.parseGuardCondition()
 				p.stmtGuardArmed = false
 				p.stmtGuardCond = cond
