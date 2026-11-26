@@ -258,6 +258,7 @@ func (a *Analyzer) bindConditionPatternLocals(scope *Scope, expr ast.Expr, truth
 		if !ok {
 			return
 		}
+		boundType = a.stampConditionBinderRegion(boundType, n.Value, valueType)
 		sym := &Symbol{Name: n.Name, Kind: SymbolLocal, Type: boundType, Node: n, Mutable: false}
 		a.defineLocalInScope(scope, sym, n.Pos())
 		return
