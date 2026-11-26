@@ -110,3 +110,51 @@ def f() -> i64:
 		t.Fatalf("expected a `try? ... default` removal diagnostic, got: %s", joined)
 	}
 }
+
+// `else continue` / `else break` leave the loop iteration from a `get` or `try`: a
+// binding-less block of that one statement, on the statement's own line.
+func TestParseLoopExitElseRecovery(t *testing.T) {
+	file, errs := parseSourceFile(t, `
+def total(values: darray[i64?]) -> i64:
+	sum: mutable i64 = 0
+	for maybe in values |sum|:
+		value: i64 = get maybe else continue
+		sum <- sum + value
+	for maybe in values |sum|:
+		value: i64 = get maybe else break
+		sum <- sum + value
+	return sum
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	fn := file.Decls[0].(*ast.FuncDecl)
+	for index, want := range []string{"continue", "break"} {
+		// A loop with captured state is wrapped in `if true:`.
+		wrapper, ok := fn.Body[1+index].(*ast.IfStmt)
+		if !ok || len(wrapper.Then) != 1 {
+			t.Fatalf("loop %d: expected the captured-loop wrapper, got %#v", index, fn.Body[1+index])
+		}
+		loop, ok := wrapper.Then[0].(*ast.IterForStmt)
+		if !ok || len(loop.Body) != 2 {
+			t.Fatalf("loop %d: expected a two-statement for loop, got %#v", index, wrapper.Then[0])
+		}
+		decl := loop.Body[0].(*ast.VarDeclStmt)
+		get, ok := decl.Value.(*ast.GetExpr)
+		if !ok || get.Recovery == nil || get.Recovery.Kind != ast.RecoveryBlock || get.Recovery.Binding != "" || len(get.Recovery.Body) != 1 {
+			t.Fatalf("%s: expected a binding-less one-statement block recovery, got %#v", want, decl.Value)
+		}
+		switch get.Recovery.Body[0].(type) {
+		case *ast.ContinueStmt:
+			if want != "continue" {
+				t.Fatalf("expected break, got continue")
+			}
+		case *ast.BreakStmt:
+			if want != "break" {
+				t.Fatalf("expected continue, got break")
+			}
+		default:
+			t.Fatalf("%s: unexpected recovery statement %T", want, get.Recovery.Body[0])
+		}
+	}
+}

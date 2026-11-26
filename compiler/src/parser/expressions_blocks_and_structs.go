@@ -361,10 +361,18 @@ func (p *Parser) skipRemovedQuestionExprTail() {
 func exprHasBlockRecovery(expr ast.Expr) bool {
 	switch n := expr.(type) {
 	case *ast.TryExpr:
-		return n.Recovery != nil && n.Recovery.Kind == ast.RecoveryBlock
+		return recoveryEndsInIndentedBlock(n.Recovery)
+	case *ast.GetExpr:
+		return recoveryEndsInIndentedBlock(n.Recovery)
 	case *ast.UnwrapElseExpr:
-		return n.Recovery != nil && n.Recovery.Kind == ast.RecoveryBlock
+		return recoveryEndsInIndentedBlock(n.Recovery)
 	default:
 		return false
 	}
+}
+
+// A written `else binding:` block, which consumes its own line end. The binding-less
+// block of `else continue` / `else break` sits on the statement's line.
+func recoveryEndsInIndentedBlock(recovery *ast.RecoveryClause) bool {
+	return recovery != nil && recovery.Kind == ast.RecoveryBlock && recovery.Binding != ""
 }

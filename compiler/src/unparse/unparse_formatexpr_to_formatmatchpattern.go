@@ -434,6 +434,16 @@ func formatRecoveryClause(recovery *ast.RecoveryClause, fallback ast.Expr) strin
 	case ast.RecoveryVoid:
 		return "void"
 	case ast.RecoveryBlock:
+		// The parser makes `else continue` / `else break` a binding-less one-statement
+		// block; a written block always names a binding.
+		if recovery.Binding == "" && len(recovery.Body) == 1 {
+			switch recovery.Body[0].(type) {
+			case *ast.ContinueStmt:
+				return "continue"
+			case *ast.BreakStmt:
+				return "break"
+			}
+		}
 		if recovery.Binding != "" {
 			return recovery.Binding + ": ..."
 		}

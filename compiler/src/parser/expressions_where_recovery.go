@@ -321,6 +321,17 @@ func (p *Parser) parseRecoveryClause(pos lexer.Pos) *ast.RecoveryClause {
 	case lexer.TOKEN_RAISE:
 		p.advance()
 		return &ast.RecoveryClause{Position: pos, Kind: ast.RecoveryRaise, Value: p.parseOr()}
+	case lexer.TOKEN_CONTINUE, lexer.TOKEN_BREAK:
+		// `else continue` / `else break` leave the enclosing loop iteration. They are the
+		// block recovery whose body is that one statement; a written block always names a
+		// binding, so a binding-less block is exactly this form (see formatRecoveryClause).
+		exit := p.cur()
+		p.advance()
+		var body ast.Stmt = &ast.ContinueStmt{Position: exit.Pos}
+		if exit.Kind == lexer.TOKEN_BREAK {
+			body = &ast.BreakStmt{Position: exit.Pos}
+		}
+		return &ast.RecoveryClause{Position: pos, Kind: ast.RecoveryBlock, Body: []ast.Stmt{body}}
 	case lexer.TOKEN_IDENT:
 		if p.cur().Text == "void" {
 			p.advance()
