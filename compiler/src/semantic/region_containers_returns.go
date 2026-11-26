@@ -408,7 +408,15 @@ func (a *Analyzer) exprIsRegionPolyResultCarryingRegionData(valueExpr ast.Expr, 
 	if a == nil || valueExpr == nil {
 		return false
 	}
-	call, ok := unwrapParenForRegionPoly(valueExpr).(*ast.CallExpr)
+	unwrapped := unwrapParenForRegionPoly(valueExpr)
+	// A value-forwarding expression (`get make() else ...`, `try`, a value `if`, ...) yields
+	// one of its operands, so it carries the ambient region when any operand it yields does.
+	for _, forwarded := range regionPolyForwardedValues(unwrapped) {
+		if a.exprIsRegionPolyResultCarryingRegionData(forwarded, valueType) {
+			return true
+		}
+	}
+	call, ok := unwrapped.(*ast.CallExpr)
 	if !ok || call == nil {
 		return false
 	}

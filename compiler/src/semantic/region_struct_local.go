@@ -97,6 +97,11 @@ func (a *Analyzer) recordStructLocalAllocRegion(sym *Symbol, bindingType Type, v
 	if a == nil || sym == nil || value == nil || a.currentStructLocalAllocRegion == nil {
 		return
 	}
+	// An optional struct local (`bag: Bag? = make_bag()`) holds the same container fields
+	// inline, so its backing region is recorded exactly like the bare struct's.
+	if optional, isOptional := stripRefForBounds(bindingType).(*OptionalType); isOptional && optional != nil {
+		bindingType = optional.Value
+	}
 	st, ok := peelToStructType(bindingType)
 	if !ok || !structHasRegionlessContainerField(st) {
 		return
