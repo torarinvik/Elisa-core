@@ -133,10 +133,12 @@ func (a *Analyzer) analyzeCloneBuiltinCall(expr *ast.CallExpr) (Type, bool) {
 	needsOwner, compatible := a.cloneBuiltinCompatible(targetType, sourceType, map[string]bool{})
 	if !compatible {
 		a.errorf(expr.Pos(), "clone cannot clone %s into %s in v1", sourceType, targetType)
+		a.settleInferredCloneCallee(expr)
 		return invalidType, true
 	}
 	if needsOwner && a.currentAllocExpr == nil && !a.regionAvailableForContainer(targetType) {
 		a.errorf(expr.Pos(), "clone of %q requires an active in <owner>: scope", targetType.String())
+		a.settleInferredCloneCallee(expr)
 		return invalidType, true
 	}
 	a.recordBuiltinHelperFuncType(expr, "clone", targetType)
@@ -246,5 +248,14 @@ func (a *Analyzer) analyzePackedNodeHelperCall(expr *ast.CallExpr) (Type, bool) 
 		return a.analyzeNodeTableFillHelperCall(expr), true
 	default:
 		return nil, false
+	}
+}
+
+// settleInferredCloneCallee gives a rejected `clone(x)` / `x.clone()` callee a type, so later
+// passes do not resolve the bare `clone` identifier and report it as undefined on top of the
+// real error. (`clone[T](x)` keeps its long-standing "undefined generic function" companion.)
+func (a *Analyzer) settleInferredCloneCallee(expr *ast.CallExpr) {
+	if ident, ok := expr.Func.(*ast.Ident); ok && ident != nil {
+		a.exprTypes[ident] = &FuncType{Params: []Type{invalidType}, Return: invalidType}
 	}
 }
