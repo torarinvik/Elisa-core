@@ -121,6 +121,10 @@ func (a *Analyzer) rewriteExtensionMethodCall(expr *ast.CallExpr) extensionMetho
 			if status := a.rewriteConcreteImplMethodCall(expr, fieldExpr, receiverType, callTypeArgs); status != extensionMethodCallRewriteNone {
 				return status
 			}
+			// Nothing user-defined is named clone: `x.clone()` is the builtin deep copy.
+			if len(callTypeArgs) == 0 && a.rewriteCloneMethodCall(expr, fieldExpr) {
+				return extensionMethodCallRewriteApplied
+			}
 			return extensionMethodCallRewriteNone
 		}
 		if ufcsSym.Deprecated != "" {

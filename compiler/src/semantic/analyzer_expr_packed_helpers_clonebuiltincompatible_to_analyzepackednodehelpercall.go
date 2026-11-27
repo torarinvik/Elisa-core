@@ -11,6 +11,14 @@ func (a *Analyzer) cloneBuiltinCompatible(target Type, source Type, seen map[str
 	if IsInvalidType(target) || IsInvalidType(source) {
 		return false, true
 	}
+	// Cloning through a reference copies the referent: `clone(path)` with `path: darray[u8]&`
+	// is an owned darray[u8]. Only the outermost reference is read through; a reference
+	// nested inside the value is still refused below.
+	if ref, ok := source.(*RefType); ok && ref != nil && seen != nil && len(seen) == 0 {
+		if _, targetIsRef := target.(*RefType); !targetIsRef {
+			source = StripAggregateStateType(ref.Elem)
+		}
+	}
 	if a.containsAffineHandleValues(target, nil) || a.containsAffineHandleValues(source, nil) {
 		return false, false
 	}
@@ -100,7 +108,8 @@ func (a *Analyzer) cloneBuiltinCompatible(target Type, source Type, seen map[str
 	}
 }
 func (a *Analyzer) analyzeCloneBuiltinCall(expr *ast.CallExpr) (Type, bool) {
-	if expr == nil || callSpecializedIdentName(expr) != "clone" || !a.callNameIsUnshadowed("clone") {
+	callee, isClone := cloneCallIdent(expr)
+	if expr == nil || !isClone || (!a.cloneMethodCallees[callee] && !a.callNameIsUnshadowed("clone")) {
 		return nil, false
 	}
 	targetType, ok := a.cloneBuiltinTargetType(expr)
@@ -115,6 +124,9 @@ func (a *Analyzer) analyzeCloneBuiltinCall(expr *ast.CallExpr) (Type, bool) {
 		return invalidType, true
 	}
 	sourceType := a.analyzeExpr(expr.Args[0])
+	if targetType == nil && !IsInvalidType(sourceType) {
+		targetType = cloneInferredTargetType(sourceType)
+	}
 	if targetType == nil || IsInvalidType(targetType) || IsInvalidType(sourceType) {
 		return invalidType, true
 	}

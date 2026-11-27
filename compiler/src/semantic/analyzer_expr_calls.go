@@ -335,6 +335,10 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 	case extensionMethodCallRewriteInvalid:
 		return invalidType
 	}
+	// `x.clone()` is rewritten above, after the builtin dispatch it now needs.
+	if resultType, ok := a.analyzeCloneBuiltinCall(expr); ok {
+		return resultType
+	}
 	if storeType, ok := a.packedStoreConstructorCall(expr); ok {
 		return storeType
 	}

@@ -9,8 +9,19 @@ import (
 	"elisacore/src/semantic"
 )
 
+// isCloneCallee matches both clone spellings the analyzer leaves behind: `clone[T](x)` and the
+// inferred `clone(x)` (which `x.clone()` is rewritten into). IsCompilerBuiltinHelperCall then
+// confirms the analyzer resolved it to the builtin rather than a user function named clone.
+func isCloneCallee(expr *ast.CallExpr) bool {
+	if callSpecializedIdentName(expr) == "clone" {
+		return true
+	}
+	ident, ok := expr.Func.(*ast.Ident)
+	return ok && ident != nil && ident.Name == "clone"
+}
+
 func (s *functionState) emitBuiltinCloneCall(expr *ast.CallExpr) (llvmIRValueRef, semantic.Type, bool, error) {
-	if expr == nil || callSpecializedIdentName(expr) != "clone" || s == nil || s.g == nil || s.g.result == nil || !s.g.result.IsCompilerBuiltinHelperCall(expr, "clone") {
+	if expr == nil || !isCloneCallee(expr) || s == nil || s.g == nil || s.g.result == nil || !s.g.result.IsCompilerBuiltinHelperCall(expr, "clone") {
 		return nil, nil, false, nil
 	}
 	if len(expr.Args) != 1 {
@@ -24,6 +35,16 @@ func (s *functionState) emitBuiltinCloneCall(expr *ast.CallExpr) (llvmIRValueRef
 	sourceValue, _, err := s.emitExpr(expr.Args[0], sourceType)
 	if err != nil {
 		return nil, nil, true, err
+	}
+	// A reference source is read through: the clone copies the referent.
+	if ref, ok := semantic.StripAggregateStateType(sourceType).(*semantic.RefType); ok && ref != nil {
+		if _, targetIsRef := semantic.StripAggregateStateType(targetType).(*semantic.RefType); !targetIsRef {
+			sourceType = ref.Elem
+			sourceValue, err = s.loadValue(sourceValue, sourceType, "clone.src")
+			if err != nil {
+				return nil, nil, true, err
+			}
+		}
 	}
 	value, err := s.emitCloneValue(sourceValue, sourceType, targetType, "clone")
 	if err != nil {

@@ -125,13 +125,16 @@ type Analyzer struct {
 	exprTypes                         map[ast.Expr]Type
 	exprTypeOverlay                   *analyzerExprTypeOverlay
 	compilerBuiltinHelperCalls        map[*ast.CallExpr]string
-	permGrowthOps                     map[ast.Expr]bool
-	rewriteDefaults                   map[*ast.Ident]bool
-	optionalBindSourceTypes           map[*ast.OptionalBindExpr]Type
-	interfaceMethodRefs               map[*ast.FieldExpr]*InterfaceMethodRef
-	safeCalls                         map[*ast.CallExpr]*SafeCallInfo
-	exprFacts                         map[ast.Expr]OptimizationFacts
-	exprFactsOverlay                  *analyzerExprFactsOverlay
+	// `x.clone()` calls rewritten to `clone(x)`; their callee is the builtin even where a
+	// user function named clone is in scope.
+	cloneMethodCallees      map[*ast.Ident]bool
+	permGrowthOps           map[ast.Expr]bool
+	rewriteDefaults         map[*ast.Ident]bool
+	optionalBindSourceTypes map[*ast.OptionalBindExpr]Type
+	interfaceMethodRefs     map[*ast.FieldExpr]*InterfaceMethodRef
+	safeCalls               map[*ast.CallExpr]*SafeCallInfo
+	exprFacts               map[ast.Expr]OptimizationFacts
+	exprFactsOverlay        *analyzerExprFactsOverlay
 	// Keep identity owners alive until all invocation-local facts are consumed;
 	// a pointer formatted as a string alone does not prevent address reuse by GC.
 	optimizationSymbolIDs             map[*Symbol]string

@@ -503,8 +503,64 @@ func (a *Analyzer) nodeTableFillTypeArgs(expr *ast.CallExpr) (*EnumType, Type, b
 	}
 	return enumType, elemType, true
 }
+
+// cloneInferredTargetType is the owned type `clone(x)` and `x.clone()` produce without a type
+// argument: the source with any reference stripped, and a view widened to the darray it
+// borrows from.
+func cloneInferredTargetType(source Type) Type {
+	source = StripAggregateStateType(source)
+	if ref, ok := source.(*RefType); ok && ref != nil {
+		source = StripAggregateStateType(ref.Elem)
+	}
+	if view, ok := source.(*ViewType); ok && view != nil {
+		return &DArrayType{Elem: view.Elem}
+	}
+	return source
+}
+
+// cloneCallIdent is the callee of a builtin clone call in any spelling: `clone[T](x)`, or the
+// inferred `clone(x)` that `x.clone()` is rewritten into.
+func cloneCallIdent(expr *ast.CallExpr) (*ast.Ident, bool) {
+	if expr == nil {
+		return nil, false
+	}
+	if ident, _, ok := callSpecializedIdent(expr.Func); ok && ident.Name == "clone" {
+		return ident, true
+	}
+	if ident, ok := expr.Func.(*ast.Ident); ok && ident != nil && ident.Name == "clone" {
+		return ident, true
+	}
+	return nil, false
+}
+
+// rewriteCloneMethodCall turns `x.clone()` into `clone(x)`. rewriteExtensionMethodCall calls it
+// only after every user-defined spelling (a field, an extension method, a UFCS function, a
+// protocol impl) failed to match, so every clonable type has the method: structs clone field
+// by field without opting in, and `affine`/`linear` types stay unclonable.
+func (a *Analyzer) rewriteCloneMethodCall(expr *ast.CallExpr, fieldExpr *ast.FieldExpr) bool {
+	if a == nil || expr == nil || fieldExpr == nil || fieldExpr.Safe || fieldExpr.Field != "clone" || len(expr.Args) != 0 || len(expr.ArgNames) != 0 {
+		return false
+	}
+	callee := &ast.Ident{Position: fieldExpr.Position, Name: "clone"}
+	if a.cloneMethodCallees == nil {
+		a.cloneMethodCallees = make(map[*ast.Ident]bool)
+	}
+	a.cloneMethodCallees[callee] = true
+	expr.Func = callee
+	expr.Args = []ast.Expr{fieldExpr.Object}
+	return true
+}
+
 func (a *Analyzer) cloneBuiltinTargetType(expr *ast.CallExpr) (Type, bool) {
-	if a == nil || expr == nil || callSpecializedIdentName(expr) != "clone" {
+	if a == nil || expr == nil {
+		return nil, false
+	}
+	if ident, ok := expr.Func.(*ast.Ident); ok && ident != nil && ident.Name == "clone" {
+		// `clone(x)`: the target is the source's own owned type, filled in by the caller once
+		// the source is analyzed.
+		return nil, true
+	}
+	if callSpecializedIdentName(expr) != "clone" {
 		return nil, false
 	}
 	_, specialize, ok := callSpecializedIdent(expr.Func)

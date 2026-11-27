@@ -27,8 +27,12 @@ func TestAnalyzeCloneBuiltinUsesRegionParamTarget(t *testing.T) {
 }
 
 func TestAnalyzeCloneBuiltinRejectsAllocatingCloneWithoutOwner(t *testing.T) {
-	result := analyzeTreeTestSourceWithSemanticErrors(t, "clone_builtin_owner_required.elisa", `def clone_items(items: view[u32]) -> darray[u32]:
-	return clone[darray[u32]](items)
+	// A function that threads an Arena is never auto-wrapped, so its clone has no region.
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "clone_builtin_owner_required.elisa", `def count_items(items: darray[u32]) -> i64:
+	return items.count.i64()
+
+def clone_items(items: view[u32], alloc: mutable Arena&) -> i64:
+	return count_items(clone[darray[u32]](items))
 `)
 	all := strings.Join(result.Errors(), "\n")
 	if !strings.Contains(all, `clone of "darray[u32]" requires an active in <owner>: scope`) {
@@ -92,5 +96,56 @@ func TestAnalyzeCloneBuiltinRejectsReferences(t *testing.T) {
 	all := strings.Join(result.Errors(), "\n")
 	if !strings.Contains(all, `clone cannot clone i64& into i64& in v1`) {
 		t.Fatalf("expected clone ref rejection, got:\n%s", all)
+	}
+}
+
+// `x.clone()` and `clone(x)` infer the owned type from the source, read through a reference,
+// and clone structs field by field without any opt-in.
+func TestAnalyzeCloneInferredSpellings(t *testing.T) {
+	analyzeTreeTestSource(t, "clone_inferred_spellings.elisa", `struct Point:
+	x: i64
+	tags: darray[i64]
+
+def method_form(path: darray[u8]&) -> i64:
+	copy: darray[u8] = path.clone()
+	return copy.count.i64()
+
+def function_form(path: darray[u8]&) -> i64:
+	copy = clone(path)
+	return copy.count.i64()
+
+def through_reference(path: darray[u8]&) -> i64:
+	copy: darray[u8] = clone[darray[u8]](path)
+	return copy.count.i64()
+
+def struct_form(point: Point&) -> i64:
+	other = point.clone()
+	return other.tags.count.i64() + other.x
+`)
+}
+
+// A user function named clone keeps the plain spelling; the method spelling stays the builtin.
+func TestAnalyzeCloneShadowedFunction(t *testing.T) {
+	analyzeTreeTestSource(t, "clone_shadowed_function.elisa", `def clone(value: i64) -> i64:
+	return value + 1
+
+def use_both(path: darray[u8]&) -> i64:
+	copy: darray[u8] = path.clone()
+	return clone(copy.count.i64())
+`)
+}
+
+// Affine values stay unclonable in every spelling.
+func TestAnalyzeCloneRejectsAffine(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "clone_rejects_affine.elisa", `affine struct Handle:
+	id: i64
+
+def dup(handle: Handle&) -> i64:
+	other = handle.clone()
+	return other.id
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, "clone cannot clone") {
+		t.Fatalf("expected affine clone rejection, got:\n%s", all)
 	}
 }

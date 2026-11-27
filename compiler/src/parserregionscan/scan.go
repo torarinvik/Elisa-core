@@ -208,10 +208,33 @@ func (scan *Scan) containsAutoRegionAllocation(stmts []ast.Stmt, hasExprBlocks *
 			found = node.AutoRegion || node.Owner == nil
 		case *ast.StructLitExpr:
 			found = scan.structLiteralAllocatesContainerArg(node)
+		case *ast.CallExpr:
+			found = isCloneCallSyntax(node)
 		}
 		return !found
 	})
 	return found
+}
+
+// isCloneCallSyntax reports a clone call in any spelling: `clone[T](x)`, `clone(x)` or
+// `x.clone()`. Clone allocates its copy region-lessly, so like a container literal it needs
+// the function body's synthesized auto region. Wrapping a body whose clone turns out to copy
+// only plain values is a lazy no-op region.
+func isCloneCallSyntax(call *ast.CallExpr) bool {
+	if call == nil {
+		return false
+	}
+	callee := call.Func
+	if specialize, ok := callee.(*ast.SpecializeExpr); ok && specialize != nil {
+		callee = specialize.Operand
+	}
+	switch c := callee.(type) {
+	case *ast.Ident:
+		return c != nil && c.Name == "clone" && len(call.Args) == 1
+	case *ast.FieldExpr:
+		return c != nil && !c.Safe && c.Field == "clone" && len(call.Args) == 0
+	}
+	return false
 }
 
 // exprBlocksNeedAutoRegion reports whether any value-position ExprBlock nested anywhere
